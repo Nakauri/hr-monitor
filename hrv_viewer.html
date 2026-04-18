@@ -277,7 +277,7 @@
   .cal-legend-strip .chart-legend-item { gap: 6px; }
   .cal-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 8px;
   }
   .cal-dow {
@@ -299,7 +299,8 @@
     flex-direction: column;
     justify-content: space-between;
     transition: border-color 0.15s, transform 0.1s, background 0.15s;
-    min-height: 100px;
+    min-width: 0;
+    overflow: hidden;
   }
   .cal-cell.has-sessions { cursor: pointer; }
   .cal-cell.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-strong); }
@@ -1325,11 +1326,13 @@
     .all-grid { grid-template-columns: 1fr; }
     .all-card.wide { grid-column: auto; }
     .cal-grid { gap: 4px; }
-    .cal-cell { min-height: 72px; padding: 6px; }
-    .cal-cell .cal-hr { font-size: 20px; }
+    .cal-cell { padding: 6px; border-radius: 8px; border-width: 1px !important; border-left-width: 3px !important; }
+    .cal-cell .cal-hr { font-size: 18px; }
     .cal-day-num { font-size: 12px; }
     .cal-hr-unit { font-size: 9px; }
+    .cal-session-count { display: none; }
     .cal-badges { display: none; }
+    .cal-dow { font-size: 9px; padding: 4px 0; letter-spacing: 0.08em; }
     .week-grid { grid-template-columns: 1fr 1fr; }
     .tags-inline { width: 100%; margin-left: 0; }
     .chart-legend { font-size: 10px; gap: 10px; }
@@ -1346,6 +1349,28 @@
     .chart-panel { padding: 12px 14px; }
     .week-grid { grid-template-columns: 1fr; }
     .view-nav a { padding: 5px 8px; font-size: 10px; }
+    .cal-cell { padding: 4px; border-radius: 6px; }
+    .cal-cell .cal-hr { font-size: 14px; }
+    .cal-day-num { font-size: 10px; }
+    .cal-hr-unit { display: none; }
+    .cal-dow { font-size: 8px; }
+  }
+
+  /* Narrow desktop / half-window split-screen (900px and below, but above tablet).
+     Calendar cells shrink progressively so the whole grid always fits the viewport. */
+  @media (max-width: 1100px) and (min-width: 769px) {
+    .cal-cell { padding: 8px; }
+    .cal-cell .cal-hr { font-size: 22px; }
+    .cal-cell .cal-hr-unit { font-size: 9px; }
+    .cal-day-num { font-size: 13px; }
+    .cal-session-count { display: none; }
+    .cal-badge { font-size: 9px; padding: 1px 5px; gap: 3px; }
+    .cal-badges { gap: 3px; flex-wrap: wrap; }
+  }
+  @media (max-width: 900px) and (min-width: 769px) {
+    .cal-cell { padding: 6px; }
+    .cal-cell .cal-hr { font-size: 18px; }
+    .cal-badges { display: none; }
   }
 </style>
 </head>
