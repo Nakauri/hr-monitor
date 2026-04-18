@@ -26,7 +26,9 @@
   transition: border-color 0.3s, box-shadow 0.3s;
   display: grid;
   grid-template-columns: auto auto;
-  grid-template-rows: auto 68px 14px;
+  /* Rows auto-size so hidden content collapses to 0 instead of leaving
+     68 px / 14 px reservations behind when live trace or pips are toggled off. */
+  grid-template-rows: auto auto auto;
   gap: 10px 16px;
   align-items: start;
 }
@@ -142,6 +144,7 @@ body.conn-reconnecting .conn-text { display: inline; }
   gap: 14px;
   grid-column: 1;
   grid-row: 2;
+  min-width: 0;
 }
 #hr-widget .big-number {
   font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
@@ -166,10 +169,13 @@ body.conn-reconnecting .conn-text { display: inline; }
   max-height: 68px;
   overflow: hidden;
 }
+/* Absolute position so Chart.js can't write a width attribute that makes the
+   canvas contribute to its parent's max-content and lock the card wide. */
 #hr-widget .inline-live-trace canvas {
-  width: 100% !important;
-  height: 100% !important;
-  max-height: 100% !important;
+  position: absolute !important;
+  inset: 6px 0 10px !important;
+  width: auto !important;
+  height: auto !important;
 }
 
 #hr-widget #hr-pips {
@@ -238,20 +244,25 @@ body.conn-reconnecting .conn-text { display: inline; }
 }
 
 /* Combined HR+RMSSD trend at the bottom of the card. Canvas CSS constraint
-   required so Chart.js responsive mode can't grow past the 64px parent. */
+   required so Chart.js responsive mode can't grow past the 64px parent.
+   min-width: 0 stops the canvas's intrinsic 300×150 default from inflating
+   the grid's content-max and holding the card wide after toggling. */
 #hr-widget > .compact-trend {
   grid-column: 1 / -1;
   grid-row: 4;
   height: 64px;
+  min-width: 0;
   position: relative;
   margin-top: 12px;
   padding: 6px 0 4px;
   border-top: 1px solid #1f1f1f;
+  overflow: hidden;
 }
 #hr-widget > .compact-trend canvas {
-  width: 100% !important;
-  height: 100% !important;
-  max-height: 100% !important;
+  position: absolute !important;
+  inset: 6px 0 4px !important;
+  width: auto !important;
+  height: auto !important;
 }
 
 /* Warning banner. In-card width is fixed so the card size is stable across
@@ -330,7 +341,7 @@ body.conn-reconnecting .conn-text { display: inline; }
 .warning-slot-above { display: none; }
 body.warning-above .warning-slot-above {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   height: 34px;
   padding: 2px 0;
@@ -351,15 +362,37 @@ body.no-warning .warning-banner { display: none !important; }
 body.warning-above.no-warning .warning-slot-above { display: none !important; }
 body.no-conn-dot .conn-indicator { display: none !important; }
 
-/* HR off: hide only the BPM readout chrome. Pips + live trace stay visible. */
+/* HR off hides the BPM readout AND the pips — pips are the HR zone readout,
+   so showing them without a number beside them reads as orphaned. */
 body.no-hr #hr-widget .widget-label,
 body.no-hr #hr-widget .heart-icon,
 body.no-hr #hr-widget .palp-chip,
-body.no-hr #hr-widget .big-number { display: none !important; }
+body.no-hr #hr-widget .big-number,
+body.no-hr #hr-widget #hr-pips { display: none !important; }
 
-/* HRV off: hide HRV column and collapse grid to single content-hugging column. */
+/* HRV off: hide HRV column and collapse grid to a single content-hugging col. */
 body.no-hrv #hr-widget .compact-hrv { display: none !important; }
 body.no-hrv #hr-widget { grid-template-columns: auto !important; }
+
+/* HR off + live trace off = nothing in the HR column. HRV takes the whole
+   card; the column divider + its left-padding aren't meaningful with nothing
+   to the left of them. */
+body.no-hr.no-live-hr #hr-widget { grid-template-columns: auto !important; }
+body.no-hr.no-live-hr #hr-widget .compact-hrv {
+  grid-column: 1 !important;
+  grid-row: 2 / 4 !important;
+  border-left: none !important;
+  padding-left: 0 !important;
+  align-items: flex-start !important;
+}
+
+/* When the compact trend is the only visible element, drop its top margin +
+   divider line — there's nothing above it to separate it from. */
+body.no-hr.no-hrv.no-live-hr #hr-widget > .compact-trend {
+  margin-top: 0 !important;
+  border-top: none !important;
+  padding-top: 0 !important;
+}
 
 /* Hide the widget only when literally nothing is visible inside. Keeping the
    widget when just HR + HRV are off lets a "charts only" layout work:
