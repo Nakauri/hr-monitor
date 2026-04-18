@@ -2645,6 +2645,48 @@
       driveFolderId = cd.id;
     }
     driveUpdateUI();
+    // Pull or seed the shared config so every signed-in device broadcasts to
+    // and subscribes from the same relay room.
+    driveSyncConfig().catch(e => console.warn('config sync:', e));
+  }
+
+  // Read (or create) .hr-monitor-config.json in the Drive folder. Today it
+  // only holds the broadcast key, so phone + desktop signed into the same
+  // Google account end up on the same PartyKit room without any URL copying.
+  async function driveSyncConfig() {
+    if (!driveAccessToken || !driveFolderId) return;
+    const q = encodeURIComponent(`'${driveFolderId}' in parents and name='.hr-monitor-config.json' and trashed=false`);
+    const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
+    const data = await resp.json();
+    if (data.files && data.files.length) {
+      const id = data.files[0].id;
+      const content = await driveFetch('files/' + id + '?alt=media');
+      const cfg = await content.json();
+      if (cfg && typeof cfg.broadcastKey === 'string') {
+        const local = localStorage.getItem('hr_monitor_broadcast_key');
+        if (local !== cfg.broadcastKey) {
+          localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
+          if (typeof reconnectRelay === 'function') reconnectRelay();
+          if (typeof updateStreamingUI === 'function') updateStreamingUI();
+        }
+      }
+    } else {
+      const key = getOrCreateBroadcastKey();
+      const body = JSON.stringify({ broadcastKey: key });
+      const boundary = '-------hrm-config-' + Math.random().toString(36).slice(2);
+      const mpBody =
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+        JSON.stringify({ name: '.hr-monitor-config.json', parents: [driveFolderId], mimeType: 'application/json' }) +
+        `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+      await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + driveAccessToken,
+          'Content-Type': 'multipart/related; boundary=' + boundary,
+        },
+        body: mpBody,
+      });
+    }
   }
 
   // Upload or update the current session's CSV on Drive. Called alongside local
