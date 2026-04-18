@@ -4366,23 +4366,40 @@
       sections.push({ key: 'overview', title: 'Overview', lines });
     }
 
-    // Notable sessions — highlights worth clicking into.
+    // Notable sessions — highlights worth clicking into. Each line carries an
+    // `open` hint (filename) so the render path can turn the timestamp into a
+    // click-through button.
     if (summaries.length > 1) {
       const lines = [];
-      if (longest) lines.push({
-        text: `Longest session: ${formatDuration(longest.duration)}`,
-        sub: `avg ${longest.hrAvg} bpm${longest.rmssdAvg != null ? ` · HRV ${longest.rmssdAvg} ms` : ''}`,
-        at: null,
-      });
+      if (longest) {
+        const meta = parseSessionFilename(longest.filename);
+        lines.push({
+          text: `Longest session: ${formatDuration(longest.duration)}`,
+          sub: `avg ${longest.hrAvg} bpm${longest.rmssdAvg != null ? `, HRV ${longest.rmssdAvg} ms` : ''}${meta ? `, ${meta.isoDate} ${meta.isoTime}` : ''}`,
+          open: longest.filename,
+        });
+      }
       if (widestRange) {
         const r = widestRange.hrMax.v - widestRange.hrMin.v;
-        lines.push({ text: `Widest HR range: Δ ${r} bpm`, sub: `${widestRange.hrMin.v} → ${widestRange.hrMax.v} bpm in one session` });
+        const meta = parseSessionFilename(widestRange.filename);
+        lines.push({
+          text: `Widest HR range: Δ ${r} bpm`,
+          sub: `${widestRange.hrMin.v} → ${widestRange.hrMax.v} bpm${meta ? ` on ${meta.isoDate} ${meta.isoTime}` : ''}`,
+          open: widestRange.filename,
+        });
       }
-      if (mostPalps && mostPalps.palpCount > 0) lines.push({ text: `Most palpitations in a session: ${mostPalps.palpCount}`, sub: `${(mostPalps.palpClusters || []).length} cluster${(mostPalps.palpClusters || []).length === 1 ? '' : 's'}` });
+      if (mostPalps && mostPalps.palpCount > 0) {
+        const meta = parseSessionFilename(mostPalps.filename);
+        lines.push({
+          text: `Most palpitations in a session: ${mostPalps.palpCount}`,
+          sub: `${(mostPalps.palpClusters || []).length} cluster${(mostPalps.palpClusters || []).length === 1 ? '' : 's'}${meta ? ` on ${meta.isoDate} ${meta.isoTime}` : ''}`,
+          open: mostPalps.filename,
+        });
+      }
       if (lines.length) sections.push({
         key: 'notable',
         title: 'Notable sessions',
-        desc: 'Quick callouts across every session in this period. Good places to click in if you\'re hunting for patterns — the longest session gives the most statistical weight, the widest HR range tends to mark orthostatic or activity-heavy sessions, and the heaviest palp day is worth reviewing in detail.',
+        desc: 'Quick callouts across every session in this period. Good places to click in if you\'re hunting for patterns. The longest session gives the most statistical weight; the widest HR range tends to mark orthostatic or activity-heavy sessions; the heaviest palp session is worth reviewing in detail.',
         lines,
       });
     }
@@ -4453,7 +4470,7 @@
       sections.push({
         key: 'connection',
         title: 'Warnings & connection',
-        desc: 'Warnings are the physiological threshold crossings you set in the live monitor (HR high/low, HRV crash, palps elevated). BLE gaps are hardware — strap dropped contact, no data for those stretches.',
+        desc: 'Warnings are the threshold crossings you set in the live monitor (HR high/low, HRV crash, palps elevated). BLE gaps are hardware; the strap dropped contact, so no data got recorded for those stretches.',
         lines,
       });
     }
@@ -4472,6 +4489,7 @@
       const listHtml = sec.lines.map(l => {
         const subParts = [];
         if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
+        if (l.open) subParts.push(`<button class="insight-jump" data-open="${encodeURIComponent(l.open)}" title="Open this session">open session</button>`);
         const subHtml = subParts.length ? `<div class="insight-sub">${subParts.join(' · ')}</div>` : '';
         const whatHtml = (autonomicOn && l.what) ? `<div class="insight-what">${escape(l.what)}</div>` : '';
         return `<li><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
@@ -4491,11 +4509,6 @@
       <div class="insight-body">${bodyHtml}</div>
     </div>`;
   }
-  // Wire the aggregate report's accordion behaviour (master-caret toggle +
-  // per-section carets) for whichever view just rendered it. Scoped to the
-  // passed container so stale reports in hidden views (day left mounted when
-  // the user navigated to week, etc.) don't capture clicks meant for the
-  // currently-visible one.
   function wireAggregateReport(viewEl) {
     const scope = viewEl || document;
     const box = scope.querySelector('.aggregate-report');
@@ -4505,6 +4518,15 @@
     box.querySelectorAll('.insight-section[data-key]').forEach(sec => {
       const title = sec.querySelector('.insight-section-title');
       title.addEventListener('click', () => sec.classList.toggle('collapsed'));
+    });
+    // Notable-session "open session" buttons — jump straight to the session
+    // view for whichever session the aggregate callout was about.
+    box.querySelectorAll('.insight-jump[data-open]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const fn = btn.dataset.open;
+        if (fn) setHash('session/' + fn);
+      });
     });
   }
 
@@ -4615,7 +4637,7 @@
       sections.push({
         key: 'palps',
         title: 'Palpitations',
-        desc: 'An ectopic beat is a heartbeat that fires off-rhythm — the interval between beats is noticeably longer or shorter than expected. A handful per session is routine for most people and rarely reflects anything wrong. Bigger clusters, or beats that keep pace with a specific trigger like standing or breath-holding, tend to be the ones worth paying attention to. What they feel like in the chest varies: some people describe a flutter, a "skipped" beat, or a heavy thump.',
+        desc: 'An ectopic beat is a heartbeat that fires off-rhythm. The interval between beats is noticeably longer or shorter than expected. A handful per session is routine for most people and rarely reflects anything wrong. Bigger clusters, or beats that track a specific trigger like standing or breath-holding, tend to be the ones worth paying attention to. What they feel like in the chest varies. Some people describe a flutter, a "skipped" beat, or a heavy thump.',
         count: s.palpCount,
         lines,
       });
@@ -4655,7 +4677,7 @@
       sections.push({
         key: 'flushes',
         title: 'Sympathetic flushes',
-        desc: 'A quick HR spike paired with a drop in HRV at the same time — the fingerprint of a short burst of fight-or-flight activation. In dysautonomia this often shows up as a cold flush, a sudden wave of warmth, or a prickly-skin sensation; in everyday life the same pattern fires briefly when you stand up fast, hear a sudden noise, take a cold shower, feel a strong emotion, or get an unexpected adrenaline kick. Each callout below is one detected flush with its magnitude and timestamp.',
+        desc: 'A quick HR spike paired with a drop in HRV at the same time. That combination is the fingerprint of a short burst of fight-or-flight activation. In dysautonomia it often shows up as a cold flush, a sudden wave of warmth, or prickly skin. In everyday life the same pattern fires briefly when you stand up fast, hear a sudden noise, take a cold shower, feel a strong emotion, or get an unexpected adrenaline kick. Each callout below is one detected flush with its magnitude and timestamp.',
         count: s.flushes.length,
         lines,
       });
@@ -4672,7 +4694,7 @@
       sections.push({
         key: 'chills',
         title: 'Chills / high volatility',
-        desc: 'A stretch where the beat-to-beat HR jitters much more than the rest of the session — the rolling standard deviation sits at 2.5× or more of baseline. Literal chills are the most common cause (muscle tremor introduces noise into the strap signal), but the same fingerprint shows up during bigger autonomic waves that aren\'t quite full flushes. Each window below has its duration, start time, and how many times above baseline the volatility was running.',
+        desc: 'A stretch where the beat-to-beat HR jitters much more than the rest of the session. The rolling standard deviation sits at 2.5× or more of baseline. Literal chills are the most common cause; muscle tremor introduces noise into the strap signal. The same fingerprint also shows up during bigger autonomic waves that aren\'t quite full flushes. Each window below has its duration, start time, and how many times above baseline the volatility was running.',
         count: s.chillsWindows.length,
         lines: [{ text: `${formatDuration(total)} total across ${s.chillsWindows.length} window${s.chillsWindows.length === 1 ? '' : 's'}` }, ...lines],
       });
@@ -4704,7 +4726,7 @@
         sections.push({
           key: 'posture',
           title: 'Posture & sleep',
-          desc: 'Sleep windows are detected automatically from stretches where your HR drifts toward its lowest values AND your HRV sits above the session median at the same time — the combination that reliably shows up during actual sleep. Posture comes from whatever you tagged with the P button in the live monitor (lying / sitting / standing). Since HR changes dramatically with posture, tagging it meaningfully improves the quality of every other stat in this report.',
+          desc: 'Sleep windows are detected automatically from stretches where your HR drifts toward its lowest values AND your HRV sits above the session median at the same time. That combination reliably shows up during actual sleep. Posture comes from whatever you tagged with the P button in the live monitor (lying, sitting, standing). Since HR changes dramatically with posture, tagging it consistently improves the quality of every other stat in this report.',
           lines,
         });
       }

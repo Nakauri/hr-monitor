@@ -58,8 +58,18 @@
   }
   body.layout-horizontal #overlay-zone .widget-row {
     flex-direction: row;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 12px;
+  }
+  body.layout-horizontal #overlay-zone:not(.style-compact) .widget,
+  body.layout-horizontal #overlay-zone:not(.style-compact) .breath-widget {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  body.layout-horizontal #overlay-zone:not(.style-compact) #rmssd-widget .big-number {
+    font-size: 84px;
   }
   /* Shrink-to-fit: container hugs visible widgets. NOTHING else changes —
      padding, gap, widget sizes all stay identical. When every widget is on,
@@ -130,7 +140,10 @@
   .inline-trend, .inline-live-trace {
     flex: 1 1 0; min-width: 0; position: relative; padding: 6px 0 14px;
   }
-  .inline-live-trace { display: none; padding: 6px 0 10px; }
+  .inline-live-trace { display: none; padding: 6px 0 10px; height: 68px; max-height: 68px; overflow: hidden; position: relative; }
+  .inline-live-trace canvas { width: 100% !important; height: 100% !important; max-height: 100% !important; }
+  .inline-trend { height: 68px; max-height: 68px; overflow: hidden; }
+  .inline-trend canvas { width: 100% !important; height: 100% !important; max-height: 100% !important; }
   .inline-trend canvas, .inline-live-trace canvas {
     width: 100% !important; height: 100% !important;
   }
