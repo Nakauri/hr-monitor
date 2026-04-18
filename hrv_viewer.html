@@ -104,6 +104,14 @@
     margin-left: 8px;
   }
   .watch-live-link:hover { background: rgba(93,202,165,0.08); }
+  .nav-ext-icon {
+    width: 10px;
+    height: 10px;
+    display: inline-block;
+    vertical-align: baseline;
+    margin-left: 2px;
+    opacity: 0.7;
+  }
   .nav-feedback {
     color: var(--text-faint);
     text-decoration: none;
@@ -1859,6 +1867,13 @@
 
   /* ===== MOBILE (≤768px): stacked session layout, taller charts, bigger taps ===== */
   @media (max-width: 768px) {
+    /* Desktop locks body to viewport so panes scroll independently. On mobile
+       the layout stacks and needs the whole page to scroll. */
+    html, body {
+      height: auto;
+      min-height: 100vh;
+      overflow: auto;
+    }
     .app-bar {
       height: auto;
       flex-wrap: wrap;
@@ -1870,7 +1885,7 @@
     .view-nav a { padding: 6px 10px; font-size: 11px; }
     .folder-info { font-size: 10px; gap: 6px; }
     #folder-name { max-width: 100px; }
-    main { height: calc(100vh - 110px); }
+    main { height: auto; min-height: calc(100vh - 110px); }
     .view { padding: 16px 14px; }
     .session-layout {
       grid-template-columns: 1fr !important;
@@ -1948,7 +1963,7 @@
     <a data-view="week" href="#/week">Week</a>
     <a data-view="day" href="#/day">Day</a>
     <a data-view="all" href="#/all">All</a>
-    <a id="watch-live-link" class="watch-live-link" href="#" target="_blank" rel="noopener" hidden title="Open the live widget for whatever device is currently recording">Watch live ↗</a>
+    <a id="watch-live-link" class="watch-live-link" href="#" target="_blank" rel="noopener" hidden title="Open the live widget for whatever device is currently recording">Watch live <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   </nav>
   <div class="folder-info">
     <span class="fsa-only">Folder:</span>

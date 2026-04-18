@@ -80,6 +80,14 @@
   .nav-preview:hover { color: var(--text); background: #141414; }
   .nav-copy { color: var(--accent-rmssd); border: 1px solid var(--accent-rmssd); }
   .nav-copy:hover { color: #0a1a14; background: var(--accent-rmssd); }
+  .nav-ext-icon {
+    width: 10px;
+    height: 10px;
+    display: inline-block;
+    vertical-align: baseline;
+    margin-left: 2px;
+    opacity: 0.7;
+  }
   /* Shown when Web Bluetooth is unavailable (Firefox, Safari). Gives the
      user a clear path to the Viewer instead of the "Connect strap" button
      silently failing. */
@@ -770,6 +778,14 @@
 
   /* ===== MOBILE (≤768px): stack the two-column layout, tighter spacing ===== */
   @media (max-width: 768px) {
+    /* Desktop locks body to viewport height so the two columns scroll
+       independently. On mobile the columns stack so the whole page has to
+       scroll — unlock body overflow. */
+    html, body {
+      height: auto;
+      min-height: 100vh;
+      overflow: auto;
+    }
     .app-nav {
       height: auto;
       flex-wrap: wrap;
@@ -822,7 +838,7 @@
 <nav class="app-nav">
   <a class="app-nav-title" href="./index.html" target="_blank" rel="noopener">HR Monitor <span style="color: var(--accent-hr);">·</span></a>
   <a class="app-nav-link active" href="./hr_monitor.html">Live monitor</a>
-  <a class="app-nav-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer ↗</a>
+  <a class="app-nav-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
   <a class="app-nav-link nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Live%20Monitor&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Live%20Monitor%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
