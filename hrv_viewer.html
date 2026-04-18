@@ -199,6 +199,11 @@
     font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 0.05em;
+    /* Right-align the folder/drive/cog cluster on desktop so the nav
+       controls (view switcher, Live monitor, Watch live) stay left and the
+       settings-ish controls stay right. margin-left: auto on the first
+       right-side element pushes itself + everything after to the end. */
+    margin-left: auto;
   }
   /* fi-group wraps Folder / Drive / Autonomic into atomic units. Flows inline
      on desktop; stacks as separate row-cards when the mobile menu is open
@@ -982,6 +987,8 @@
     position: absolute;
     inset: 0;
     cursor: crosshair;
+    /* Suppress default touch scrolling so brush drags don't pan the page. */
+    touch-action: none;
   }
 
   /* Chart legend - an inline strip at the top of the chart panel. Flat, bordered below. */
@@ -1978,7 +1985,13 @@
       order: 10;
     }
     body.menu-open #watch-live-link[hidden] { display: none; }
-    body.menu-open .view-switcher { flex-basis: 100%; }
+    /* Stack the button + dropdown menu vertically inside the hamburger so
+       the menu opens downward, not beside the button. */
+    body.menu-open .view-switcher {
+      flex-direction: column;
+      align-items: stretch;
+      flex-basis: 100%;
+    }
     body.menu-open .view-switcher-btn { width: 100%; }
     body.menu-open .view-switcher.open .view-nav {
       position: static;
@@ -6181,10 +6194,10 @@
     const tip = getAnnoTip();
     tip.innerHTML = text;
     tip.style.display = 'block';
-    // On the session view (where `currentChart` is live AND the session view
-    // is the one being displayed), anchor to the top of the chart canvas as
-    // a banner so it coexists with Chart.js's own data tooltip at the cursor.
-    // Everywhere else (day strip, calendar, sparkline), anchor at the cursor.
+    // On the session view, anchor ABOVE the chart as a banner so it doesn't
+    // cover the first row of data (which is often where the marker the user
+    // just hovered lives). Fall back to below the chart if there's no space
+    // above (happens mid-scroll on mobile when the chart is pushed to the top).
     const chart = currentChart;
     const canvas = chart && chart.canvas;
     const sessionViewVisible = (() => {
@@ -6194,8 +6207,11 @@
     const isSessionChartContext = !!canvas && document.body.contains(canvas) && sessionViewVisible;
     if (isSessionChartContext) {
       const rect = canvas.getBoundingClientRect();
-      tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8, rect.left + rect.width / 2 - tip.offsetWidth / 2)) + 'px';
-      tip.style.top = Math.max(8, rect.top + 8) + 'px';
+      const tipW = tip.offsetWidth;
+      const tipH = tip.offsetHeight;
+      tip.style.left = Math.max(8, Math.min(window.innerWidth - tipW - 8, rect.left + rect.width / 2 - tipW / 2)) + 'px';
+      const aboveTop = rect.top - tipH - 8;
+      tip.style.top = (aboveTop >= 8 ? aboveTop : Math.min(window.innerHeight - tipH - 8, rect.bottom + 8)) + 'px';
     } else {
       const e = evt && evt.native ? evt.native : evt;
       const cx = (e && e.clientX) || 0;
@@ -6204,6 +6220,17 @@
       tip.style.top = Math.max(8, cy - tip.offsetHeight - 8) + 'px';
     }
   }
+
+  // Touch devices don't fire mouseleave, so a tap on a marker leaves the
+  // tooltip stuck. Hide on any touch outside the chart canvas.
+  document.addEventListener('touchstart', (e) => {
+    const tip = document.getElementById('anno-tip');
+    if (!tip || tip.style.display === 'none') return;
+    const canvas = currentChart && currentChart.canvas;
+    if (canvas && canvas.contains(e.target)) return;
+    hideAnnoTip();
+  }, { passive: true });
+  window.addEventListener('scroll', () => { hideAnnoTip(); }, { passive: true });
   function hideAnnoTip() {
     const tip = document.getElementById('anno-tip');
     if (tip) tip.style.display = 'none';
@@ -6644,25 +6671,31 @@
       ro.observe(overlay);
     }
 
-    overlay.addEventListener('mousedown', (e) => {
+    // Pointer events unify mouse + touch — mouse-only handlers before this
+    // meant the brush slider was unusable on phones. touch-action: none on the
+    // overlay (CSS) suppresses browser scrolling so drags don't pan the page.
+    overlay.addEventListener('pointerdown', (e) => {
       const rect = overlay.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const w = rect.width;
       const loPx = (brushMin / duration) * w;
       const hiPx = (brushMax / duration) * w;
       let mode = 'create';
-      if (Math.abs(x - loPx) < 6) mode = 'left';
-      else if (Math.abs(x - hiPx) < 6) mode = 'right';
+      // Bigger hit target on touch (12 px) than on mouse (6 px).
+      const hit = e.pointerType === 'touch' ? 12 : 6;
+      if (Math.abs(x - loPx) < hit) mode = 'left';
+      else if (Math.abs(x - hiPx) < hit) mode = 'right';
       else if (x > loPx && x < hiPx) mode = 'pan';
-      drag = { mode, startX: x, startMin: brushMin, startMax: brushMax };
+      drag = { mode, startX: x, startMin: brushMin, startMax: brushMax, pointerId: e.pointerId };
+      overlay.setPointerCapture(e.pointerId);
       if (mode === 'create') {
         brushMin = xToMin(x); brushMax = brushMin + 0.01;
         renderBrush();
       }
       e.preventDefault();
     });
-    window.addEventListener('mousemove', (e) => {
-      if (!drag) return;
+    overlay.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.pointerId) return;
       const rect = overlay.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const curMin = xToMin(x);
@@ -6671,7 +6704,6 @@
       } else if (drag.mode === 'right') {
         brushMax = Math.max(curMin, brushMin + 0.05);
       } else if (drag.mode === 'pan') {
-        const span = drag.startMax - drag.startMin;
         const dx = ((x - drag.startX) / rect.width) * duration;
         let newMin = drag.startMin + dx;
         let newMax = drag.startMax + dx;
@@ -6683,14 +6715,17 @@
       }
       renderBrush();
     });
-    window.addEventListener('mouseup', () => {
-      if (drag && drag.mode === 'create' && (brushMax - brushMin) < 0.1) {
-        // Too small -> reset to full
+    const endDrag = (e) => {
+      if (!drag) return;
+      if (e && e.pointerId !== drag.pointerId) return;
+      if (drag.mode === 'create' && (brushMax - brushMin) < 0.1) {
         brushMin = 0; brushMax = duration;
         renderBrush();
       }
       drag = null;
-    });
+    };
+    overlay.addEventListener('pointerup', endDrag);
+    overlay.addEventListener('pointercancel', endDrag);
     // Double-click overlay to reset
     overlay.addEventListener('dblclick', () => {
       brushMin = 0; brushMax = duration;

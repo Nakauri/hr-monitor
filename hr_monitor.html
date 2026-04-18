@@ -1907,7 +1907,12 @@
   // Called when the broadcast toggle flips. Open or close the relay socket to
   // match — saves bandwidth + privacy when user isn't streaming.
   function applyBroadcastPref() {
-    if (widgetPrefs.broadcast) {
+    // Browsers without Web Bluetooth can't possibly produce real tick data,
+    // so don't open the relay as a publisher even if the pref is somehow on.
+    // This prevents Firefox / Safari from showing up as phantom broadcasters
+    // on the overlay's multi-sender warning.
+    const canBroadcast = !!navigator.bluetooth && widgetPrefs.broadcast;
+    if (canBroadcast) {
       if (!relaySocket || relaySocket.readyState === WebSocket.CLOSED) connectRelay();
     } else {
       if (relayReconnectTimer) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
@@ -3164,7 +3169,10 @@
     // above the widget that adds to the OBS source height; transparent when
     // no warning is firing so the widget never reflows.
     warningPlacement: 'inside',
-    broadcast: true,
+    // Broadcast defaults to OFF so a fresh install never shows up as a
+    // phantom device on anyone's relay key. User opts in via the toggle in
+    // Settings; the choice is remembered across reloads via localStorage.
+    broadcast: false,
     // Measured dimensions of #overlay-zone after each render. Auto-populated
     // via ResizeObserver — the widget is always content-sized, and these
     // values are what we tell OBS to use as its source size.
@@ -3337,6 +3345,8 @@
   // an overlay.html iframe so the user sees the live stream from whatever
   // Chrome-capable device is actually recording.
   function setupFirefoxAutoWatch() {
+    // applyBroadcastPref already gates the relay on navigator.bluetooth, so no
+    // persistence needed — Firefox simply won't open the publisher socket.
     const key = localStorage.getItem('hr_monitor_broadcast_key');
     if (!key) return;
     const zone = document.getElementById('overlay-zone');
