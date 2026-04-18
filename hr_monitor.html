@@ -122,6 +122,19 @@
     border-right: 1px solid var(--border);
     overflow: hidden;
   }
+  /* Shrink-to-fit preview — container hugs the visible widgets instead of
+     filling the left column. Gives an accurate sense of how tight the OBS
+     source will be. */
+  body.shrink-to-fit #overlay-zone {
+    width: fit-content;
+    max-width: 100%;
+    padding: 8px;
+    gap: 8px;
+  }
+  body.shrink-to-fit #overlay-zone .widget,
+  body.shrink-to-fit #overlay-zone .breath-widget {
+    padding: 10px 14px;
+  }
   /* Horizontal layout: overlay becomes a top banner. Widgets sit side-by-side. */
   body.layout-horizontal #overlay-zone {
     flex-direction: row;
@@ -287,10 +300,25 @@
   #overlay-zone.no-hr #hr-widget,
   #overlay-zone.no-hrv #rmssd-widget,
   #overlay-zone.no-live-hr #breath-widget { display: none; }
-  /* In Compact the combined widget is a single card — route visibility toggles to
-     the internal sections instead. Grid template adjusts when HRV side is hidden. */
-  #overlay-zone.style-compact.no-hrv .compact-hrv { display: none; }
-  #overlay-zone.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr; }
+  /* Compact-mode overrides. Compact uses a single #hr-widget that contains both
+     HR (left cell) and HRV (right cell). The global `no-hr { display:none }`
+     rule would incorrectly blank the entire widget, so these rules hide just
+     the HR-specific children while keeping HRV visible, and vice versa. When
+     BOTH are hidden the whole widget disappears. High-specificity selectors
+     (two ids + multiple classes) so they beat `.style-compact #hr-widget`. */
+  #overlay-zone.style-compact.no-hrv .compact-hrv,
+  #overlay-zone.style-compact.no-hrv .compact-trend { display: none !important; }
+  #overlay-zone.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
+  #overlay-zone.style-compact.no-hr #hr-widget { display: grid !important; }
+  #overlay-zone.style-compact.no-hr #hr-widget .big-number,
+  #overlay-zone.style-compact.no-hr #hr-widget .widget-label,
+  #overlay-zone.style-compact.no-hr #hr-widget .heart-icon,
+  #overlay-zone.style-compact.no-hr #hr-widget .palp-chip,
+  #overlay-zone.style-compact.no-hr #hr-widget .inline-trend,
+  #overlay-zone.style-compact.no-hr #hr-widget .inline-live-trace,
+  #overlay-zone.style-compact.no-hr #hr-widget #hr-pips { display: none !important; }
+  #overlay-zone.style-compact.no-hr #hr-widget { grid-template-columns: 1fr !important; }
+  #overlay-zone.style-compact.no-hr.no-hrv #hr-widget { display: none !important; }
   #overlay-zone.style-compact.no-live-hr .inline-live-trace { display: none; }
   #overlay-zone.style-compact.no-inline-trends .compact-trend { display: none; }
   /* Pips indicator row at the bottom */
@@ -942,17 +970,20 @@
     font-weight: 700;
     min-width: 96px;
   }
+  /* OBS size fields — two stacked (label-on-top) pairs side by side. Value and
+     Copy button live in an inner flex row so the copy button is always flush
+     to the right edge of each field group. */
   .obs-size-fields {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     flex: 1;
     flex-wrap: wrap;
   }
   .obs-size-field {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 140px;
     min-width: 140px;
   }
   .obs-size-label {
@@ -961,7 +992,11 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     font-weight: 700;
-    min-width: 44px;
+  }
+  .obs-size-row {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
   }
   .obs-size-value {
     font-family: 'Consolas', 'Monaco', monospace;
@@ -974,8 +1009,8 @@
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     text-align: center;
-    width: 72px;
-    flex: 0 0 auto;
+    flex: 1;
+    min-width: 0;
   }
   .obs-size-value:focus { outline: 1px solid var(--accent-rmssd); }
   .obs-size-copy {
@@ -1215,7 +1250,7 @@
   <a class="app-nav-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer ↗</a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
-  <a class="app-nav-link nav-feedback" href="https://github.com/nakauri/hr-monitor/issues/new?title=Feedback%3A+&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A+Live+Monitor%0A" target="_blank" rel="noopener" title="Open a new GitHub issue — requires a free GitHub account">Send feedback</a>
+  <a class="app-nav-link nav-feedback" href="mailto:nakauri@gmail.com?subject=HR%20Monitor%20feedback%20%E2%80%94%20Live%20Monitor" title="Opens your email client — send feedback directly">Send feedback</a>
 </nav>
 <div id="app">
 
@@ -1373,17 +1408,21 @@
             <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
           </div>
           <div class="streaming-row" style="margin-top: 10px; align-items: flex-start;">
-            <span class="streaming-label" style="margin-top: 8px;">Source size:</span>
+            <span class="streaming-label" style="margin-top: 6px;">Source size:</span>
             <div class="obs-size-fields">
               <div class="obs-size-field">
                 <span class="obs-size-label">Width</span>
-                <input type="text" class="obs-size-value" id="obs-size-w" readonly />
-                <button class="obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
+                <div class="obs-size-row">
+                  <input type="text" class="obs-size-value" id="obs-size-w" readonly />
+                  <button class="obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
+                </div>
               </div>
               <div class="obs-size-field">
                 <span class="obs-size-label">Height</span>
-                <input type="text" class="obs-size-value" id="obs-size-h" readonly />
-                <button class="obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
+                <div class="obs-size-row">
+                  <input type="text" class="obs-size-value" id="obs-size-h" readonly />
+                  <button class="obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
+                </div>
               </div>
             </div>
           </div>

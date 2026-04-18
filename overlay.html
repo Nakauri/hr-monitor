@@ -416,6 +416,32 @@
   zone.className = '';
   zone.classList.add('style-' + style);
 
+  // OBS auto-refresh on deploy. OBS's embedded Chromium caches aggressively so
+  // overlay updates normally require a manual "Refresh cache" click. Instead
+  // we poll the overlay's own ETag every 5 minutes; when it changes (i.e. a
+  // new Vercel deploy happened) we hard-reload ourselves. Opt out via ?autoreload=0.
+  if (params.get('autoreload') !== '0') {
+    let lastETag = null;
+    async function checkForOverlayUpdate() {
+      try {
+        const resp = await fetch(location.pathname, { method: 'HEAD', cache: 'no-store' });
+        const et = resp.headers.get('etag') || resp.headers.get('last-modified');
+        if (et && lastETag && et !== lastETag) {
+          // New version deployed — reload. Cache-bust query string forces the
+          // browser to fetch the latest HTML instead of reusing its cache.
+          const url = new URL(location.href);
+          url.searchParams.set('_v', Date.now().toString());
+          location.replace(url.toString());
+          return;
+        }
+        if (et) lastETag = et;
+      } catch (e) { /* network blip — try again next tick */ }
+    }
+    // First check after a short delay so OBS has a chance to settle, then every 5 min.
+    setTimeout(checkForOverlayUpdate, 30 * 1000);
+    setInterval(checkForOverlayUpdate, 5 * 60 * 1000);
+  }
+
   // Stage helpers — kept in sync with hr_monitor.html. If you update stage colors
   // there, update them here too (no shared CSS file yet).
   const STAGE_COLORS = {
