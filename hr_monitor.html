@@ -40,10 +40,44 @@
     height: 100vh;
     -webkit-font-smoothing: antialiased;
   }
+  /* Shared top nav across the apps */
+  .app-nav {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 8px 20px;
+    background: #080808;
+    border-bottom: 1px solid var(--border);
+    height: 42px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    position: relative;
+    z-index: 100;
+  }
+  .app-nav-title {
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+  }
+  .app-nav-link {
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 5px 11px;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .app-nav-link:hover { color: var(--text); background: #141414; }
+  .app-nav-link.active { color: var(--text); background: #141414; }
+  #nav-open-overlay { margin-left: auto; color: var(--accent-rmssd); }
+  #nav-open-overlay:hover { color: var(--accent-rmssd); background: rgba(93,202,165,0.08); }
+
   #app {
     display: grid;
     grid-template-columns: 380px 1fr;
-    height: 100vh;
+    height: calc(100vh - 42px);
     gap: 0;
   }
   body.layout-horizontal #app {
@@ -1027,6 +1061,12 @@
 </style>
 </head>
 <body>
+<nav class="app-nav">
+  <a class="app-nav-title" href="./index.html">HR Monitor <span style="color: var(--accent-hr);">·</span></a>
+  <a class="app-nav-link active" href="./hr_monitor.html">Live monitor</a>
+  <a class="app-nav-link" href="./hrv_viewer.html">Viewer</a>
+  <a class="app-nav-link" id="nav-open-overlay" href="#">Open OBS overlay</a>
+</nav>
 <div id="app">
 
   <!-- LEFT: Overlay zone for OBS cropping -->
@@ -1850,9 +1890,46 @@
       updateStats();
       updateSessionTime();
       checkWarnings();
+      broadcastTick();
     } catch (err) {
       console.error('HR UI update failed:', err);
     }
+  }
+
+  // Broadcast channel — any OBS overlay window opened from this app picks up HR
+  // data live via BroadcastChannel. Same browser, same origin, no server.
+  const overlayChannel = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('hr-monitor-broadcast') : null;
+  if (overlayChannel) {
+    overlayChannel.addEventListener('message', (ev) => {
+      // When an overlay opens it asks for a snapshot — reply with the current tick.
+      if (ev.data && ev.data.type === 'request-snapshot' && state.currentHR != null) broadcastTick();
+    });
+  }
+
+  function broadcastTick() {
+    if (!overlayChannel) return;
+    const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;
+    // Prepare live HR trace points for the overlay's mini chart (45-sec window)
+    let livePoints = [];
+    let liveWindow = [0, 45];
+    if (state.breathBuffer && state.breathBuffer.length) {
+      const nowSec = nowMin * 60;
+      const WINDOW = 45;
+      livePoints = state.breathBuffer.map(r => ({ x: r.t * 60, y: 60000 / r.rr }));
+      liveWindow = [Math.max(0, nowSec - WINDOW), Math.max(WINDOW, nowSec)];
+    }
+    overlayChannel.postMessage({
+      type: 'tick',
+      t: nowMin,
+      hr: state.currentHR,
+      hrStage: getHRStage(state.currentHR),
+      rmssd: state.currentRMSSD,
+      rmssdStage: getRMSSDStage(state.currentRMSSD),
+      palpPerMin: ectopicsPerMinute(nowMin),
+      breathRate: null, // updateBreathing sets the DOM directly; we'll pipe the latest through later if needed
+      livePoints,
+      liveWindow,
+    });
   }
 
   async function connect() {
@@ -2639,6 +2716,17 @@
   document.addEventListener('DOMContentLoaded', () => {
     initCharts();
     populateAudioDropdowns();
+    // Open a popup window OBS can Window-Capture cleanly. The popup receives
+    // live data via BroadcastChannel from this tab — no server needed.
+    const openOverlay = $('nav-open-overlay');
+    if (openOverlay) {
+      openOverlay.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const style = localStorage.getItem('hr_monitor_style') || 'bold';
+        const url = 'overlay.html?style=' + style + '&widgets=hr,hrv,live&layout=col&bg=transparent';
+        window.open(url, 'hrmonitor_overlay', 'width=420,height=640,menubar=no,toolbar=no,location=no,status=no');
+      });
+    }
     $('connect').addEventListener('click', connect);
     $('disconnect').addEventListener('click', disconnect);
     $('autosave-pick').addEventListener('click', pickAutoSaveFolder);
