@@ -172,6 +172,21 @@
     font-size: 10px;
     letter-spacing: 0.05em;
   }
+  /* Autonomic analysis toggle — global pref, shown in the app-bar so it persists
+     across views. Drives whether interpretive overlays (sympathetic flush, chills
+     signature, HR×HRV quadrants) appear. Raw descriptive stats always show. */
+  .autonomic-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+  }
+  .autonomic-toggle input { cursor: pointer; accent-color: var(--accent-rmssd); }
+  .autonomic-toggle:hover { color: var(--text); }
 
   /* Main content area */
   main {
@@ -455,10 +470,21 @@
     border: 1px solid rgba(255,255,255,0.15);
     min-width: 4px;
   }
-  .day-strip-block:hover {
+  .day-strip-block:hover,
+  .day-strip-block.hovered {
     transform: translateY(-2px);
     box-shadow: 0 3px 10px rgba(0,0,0,0.5);
     z-index: 2;
+  }
+  /* Hover driven by the session card below — subtle outline so it's clearly a
+     reflection of another hover, not a direct hover. */
+  .day-strip-block.hovered {
+    outline: 2px solid var(--accent-rmssd);
+    outline-offset: 2px;
+  }
+  .session-card.hovered {
+    border-color: var(--accent-rmssd);
+    box-shadow: 0 0 0 1px var(--accent-rmssd);
   }
   .day-hour-axis {
     position: relative;
@@ -860,6 +886,15 @@
     cursor: not-allowed;
     pointer-events: none;
   }
+  /* Autonomic analysis OFF: completely remove interpretive UI. Users who don't
+     want autonomic framing get a clean descriptive-only view — no flush / chills
+     chips, no HR×HRV quadrant panel. The underlying data (HR shifts, palps, etc)
+     is still visible so patterns can be discovered naturally. */
+  body.no-autonomic .interp-panel,
+  body.no-autonomic .filter-chip[data-type="flush"],
+  body.no-autonomic .filter-chip[data-type="chills"],
+  body.no-autonomic .chart-legend-item[data-type="flush"],
+  body.no-autonomic .chart-legend-item[data-type="chills"] { display: none !important; }
 
   /* Annotation hover tooltip */
   #anno-tip {
@@ -1052,7 +1087,47 @@
     color: var(--text-dim);
     font-size: 12.5px;
     margin-top: 2px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
   }
+  /* Plain-English explanation of what a section is — sits right under the
+     section title, italic muted so it reads as "subtitle" without competing. */
+  .insight-section .insight-desc {
+    color: var(--text-dim);
+    font-size: 12px;
+    font-style: italic;
+    line-height: 1.55;
+    margin: -2px 0 10px;
+    max-width: 68ch;
+  }
+  /* Per-item explanations (what does RMSSD mean, what is tachycardia) — similar
+     tone but indented slightly under the line they explain. */
+  .insight-section .insight-what {
+    color: var(--text-dim);
+    font-size: 12px;
+    font-style: italic;
+    line-height: 1.55;
+    margin-top: 4px;
+    max-width: 66ch;
+    padding-left: 12px;
+    border-left: 2px solid var(--border);
+  }
+  /* Inline "jump to this time" button — shows as a subtle link-like control in
+     the sub-line. Clicking zooms the main chart to that moment. */
+  .insight-section .insight-jump {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--accent-rmssd);
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    font-family: 'Consolas', 'Monaco', monospace;
+  }
+  .insight-section .insight-jump:hover { color: var(--text); border-color: var(--accent-rmssd); }
   .insight-empty {
     padding: 14px 18px;
     color: var(--text-dim);
@@ -1557,8 +1632,13 @@
     <button id="drive-sync" style="display:none" title="Download any sessions on Drive not present locally">Sync</button>
     <span id="drive-sync-progress"></span>
     <button id="drive-signout" style="display:none">Sign out</button>
+    <span class="drive-sep">|</span>
+    <label class="autonomic-toggle" title="When ON: interpret the data in terms of autonomic (sympathetic/parasympathetic) patterns — useful for POTS, dysautonomia, and anyone studying stress response. When OFF: only descriptive stats, no interpretive overlays.">
+      <input type="checkbox" id="autonomic-toggle" checked />
+      <span>Autonomic analysis</span>
+    </label>
     <button class="export-report-btn" id="export-report" title="Print/save this view as a report">Export report</button>
-    <a class="nav-feedback" href="https://github.com/nakauri/hr-monitor/issues/new?title=Feedback%3A+&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A+Viewer%0A" target="_blank" rel="noopener" title="Open a new GitHub issue — requires a free GitHub account">Send feedback</a>
+    <a class="nav-feedback" href="mailto:nakauri@gmail.com?subject=HR%20Monitor%20feedback%20%E2%80%94%20Viewer" title="Opens your email client — send feedback directly">Send feedback</a>
   </div>
 </header>
 
@@ -2034,7 +2114,12 @@
       const pad = n => String(n).padStart(2, '0');
       const localDate = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
       const localTime = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-      return { date, isoDate: localDate, isoTime: localTime, filename: fn, kind: 'session' };
+      // Tooltip-ready diagnostic — so a user who sees what looks like a 1-hour
+      // offset can check whether the file was literally recorded at that time
+      // or whether something went wrong with TZ/DST.
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+      const tooltip = `Recorded: ${date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })} (${tz})\nFilename (UTC): ${m[1]} ${m[2]}:${m[3]}:${m[4]}`;
+      return { date, isoDate: localDate, isoTime: localTime, filename: fn, kind: 'session', tooltip };
     }
     // hrv_daily_2026-04-17.csv — one file per calendar day, starts at local midnight
     const d = fn.match(/^hrv_daily_(\d{4})-(\d{2})-(\d{2})\.csv$/);
@@ -2470,7 +2555,7 @@
       const hrStage = getHRStage(s.hrAvg);
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
-          <div class="session-card-time">${meta ? meta.isoDate + ' · ' + meta.isoTime : fn}</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoDate + ' · ' + meta.isoTime : fn}</div>
           <div class="session-card-date">${dur} session</div>
           <div class="session-card-stats">
             <div class="session-card-stat">
@@ -2797,14 +2882,30 @@
     document.getElementById('day-prev').addEventListener('click', () => setHash('day/' + prevDate));
     document.getElementById('day-next').addEventListener('click', () => setHash('day/' + nextDate));
 
-    // Click handlers: strip blocks + session cards both open the session view
+    // Click + hover handlers: strip blocks and session cards share data-filename
+    // so hovering one highlights the other (bidirectional visual sync).
+    const findByFilename = (sel, fn) => el.querySelector(sel + '[data-filename="' + fn + '"]');
     el.querySelectorAll('.day-strip-block').forEach(b => {
       b.addEventListener('click', () => setHash('session/' + b.dataset.filename));
-      b.addEventListener('mouseenter', (e) => showAnnoTip(b.dataset.tip.replace(/·/g, '<br/>'), e));
-      b.addEventListener('mouseleave', hideAnnoTip);
+      b.addEventListener('mouseenter', (e) => {
+        showAnnoTip(b.dataset.tip.replace(/·/g, '<br/>'), e);
+        const card = findByFilename('.session-card', b.dataset.filename);
+        if (card) card.classList.add('hovered');
+      });
+      b.addEventListener('mouseleave', () => {
+        hideAnnoTip();
+        el.querySelectorAll('.session-card.hovered').forEach(c => c.classList.remove('hovered'));
+      });
     });
     el.querySelectorAll('.session-card').forEach(c => {
       c.addEventListener('click', () => setHash('session/' + c.dataset.filename));
+      c.addEventListener('mouseenter', () => {
+        const block = findByFilename('.day-strip-block', c.dataset.filename);
+        if (block) block.classList.add('hovered');
+      });
+      c.addEventListener('mouseleave', () => {
+        el.querySelectorAll('.day-strip-block.hovered').forEach(b => b.classList.remove('hovered'));
+      });
     });
   }
 
@@ -3216,6 +3317,28 @@
   // renderSession. Chips + legend items for unavailable types get a 'disabled'
   // class (dim, not clickable) since there's nothing to show regardless.
   let filterAvailability = {};
+
+  // Autonomic analysis toggle — global preference. When ON, interpretive layers
+  // show: sympathetic flush + chills signature detection, autonomic interpretation
+  // panel (HR × HRV quadrants), and plain-English explanations of autonomic
+  // terminology. When OFF, raw descriptive stats only (HR/HRV/palps/shifts etc).
+  // Default ON so anyone with autonomic data gets the full picture unless they
+  // opt out. Someone who doesn't know they have dysautonomia can still discover
+  // patterns naturally because the underlying data is always shown.
+  const LS_AUTONOMIC = 'hrv_viewer_autonomic_on';
+  function isAutonomicOn() {
+    const v = localStorage.getItem(LS_AUTONOMIC);
+    if (v === null) return true;
+    return v === '1';
+  }
+  function setAutonomicOn(on) {
+    try { localStorage.setItem(LS_AUTONOMIC, on ? '1' : '0'); } catch (e) {}
+  }
+  function applyAutonomicClass() {
+    document.body.classList.toggle('no-autonomic', !isAutonomicOn());
+    const cb = document.getElementById('autonomic-toggle');
+    if (cb) cb.checked = isAutonomicOn();
+  }
   let activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
 
   // Walk through paired HR + RMSSD samples, classify each point into a quadrant,
@@ -3281,7 +3404,10 @@
     activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
     // Default each filter to ON only when the session has data for it — otherwise
     // a chip / legend item light up with nothing underneath. Computed below so
-    // the chip render path can read filterAvailability to dim empty ones.
+    // the chip render path can read filterAvailability to dim empty ones. When
+    // the Autonomic analysis toggle is OFF, flush + chills are force-unavailable
+    // (hidden from chips/legend, skipped in marker list, omitted from annotations).
+    const autonomicOn = isAutonomicOn();
     const postureAvail = (getEffectivePostureSpans(s) || []).length > 0;
     const sleepAvail = (getEffectiveSleepWindows(s) || []).length > 0;
     filterAvailability = {
@@ -3290,8 +3416,8 @@
       palp: (s.palpClusters || []).length > 0,
       disconnect: (s.connGaps || []).length > 0,
       delta: (s.hrDeltas || []).length > 0,
-      flush: (s.flushes || []).length > 0,
-      chills: (s.chillsWindows || []).length > 0,
+      flush: autonomicOn && (s.flushes || []).length > 0,
+      chills: autonomicOn && (s.chillsWindows || []).length > 0,
       posture: postureAvail,
       sleep: sleepAvail,
     };
@@ -3318,7 +3444,7 @@
         <div class="summary-stat">
           <span class="summary-stat-label">Date</span>
           <span class="summary-stat-value" style="font-size: 18px;">${meta ? meta.isoDate : '—'}</span>
-          <span class="summary-stat-unit">${meta ? meta.isoTime : ''}</span>
+          <span class="summary-stat-unit" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoTime : ''}</span>
         </div>
         <div class="summary-stat">
           <span class="summary-stat-label">Duration</span>
@@ -3645,82 +3771,142 @@
 
   function renderInsight(s) {
     // Build an ordered list of accordion sections. Each entry:
-    //   { key, title, count, lines: [{ text, sub? }] }
-    // Sections with no lines are skipped entirely.
+    //   { key, title, desc?, count?, lines: [{ text, sub?, at? }] }
+    // - desc: one-line plain-English explanation of what the metric is
+    // - lines[].at: optional { t, label } for a clickable timestamp that zooms
+    //   the chart to that moment
+    // Sections with no lines are skipped entirely. Interpretive sections (flush
+    // / chills / quadrant) are only added when autonomic analysis is ON.
     const sections = [];
+    const autonomicOn = isAutonomicOn();
 
-    // 1. Overview — always shown, summarises the session at a glance.
+    // 1. Overview — always shown, plain-English vitals. RMSSD gets an
+    // explanation line so users can tell whether "28 ms" is good or bad.
     {
       const lines = [];
       lines.push({ text: `Duration: ${formatDuration(s.duration)}` });
-      lines.push({ text: `Avg HR ${s.hrAvg} bpm`, sub: `min ${s.hrMin.v} @ ${formatDuration(s.hrMin.t)} · max ${s.hrMax.v} @ ${formatDuration(s.hrMax.t)}` });
+      lines.push({
+        text: `Average HR: ${s.hrAvg} bpm`,
+        sub: `low ${s.hrMin.v} · peak ${s.hrMax.v}`,
+        at: { t: s.hrMax.t, label: `peak @ ${formatDuration(s.hrMax.t)}` },
+      });
       if (s.rmssdAvg != null) {
         const sub = s.rmssdMin ? `lowest ${Math.round(s.rmssdMin.v)} ms @ ${formatDuration(s.rmssdMin.t)}` : '';
-        lines.push({ text: `Avg RMSSD ${s.rmssdAvg} ms`, sub });
+        lines.push({
+          text: `Average HRV (RMSSD): ${s.rmssdAvg} ms`,
+          sub,
+          what: 'HRV measures how much your heartbeat-to-heartbeat timing varies. Higher usually means more relaxed / recovered; lower can mean stressed, tired, or sick. Typical adults sit between 20–90 ms at rest.',
+          at: s.rmssdMin ? { t: s.rmssdMin.t, label: `low @ ${formatDuration(s.rmssdMin.t)}` } : null,
+        });
       }
-      if (s.tachyPct > 20) lines.push({ text: `${s.tachyPct}% of session in tachycardia`, sub: 'HR > 100 bpm' });
+      if (s.tachyPct > 20) {
+        lines.push({
+          text: `${s.tachyPct}% of session above 100 bpm`,
+          sub: 'Tachycardia range',
+          what: 'Tachycardia means a resting HR above 100 bpm. Common during exercise or stress — concerning if it happens when you\'re just sitting still.',
+        });
+      }
       sections.push({ key: 'overview', title: 'Overview', lines });
     }
 
-    // 2. Palpitations
+    // 2. Palpitations — neutral terminology (ectopic beat = a heartbeat that
+    // fires off-rhythm). Always shown when present, no autonomic gating needed.
     if (s.palpCount > 0) {
       const lines = [];
-      const clusterText = s.palpClusters.length === 1
-        ? `1 cluster @ ${formatDuration(s.palpClusters[0].start)}`
-        : `${s.palpClusters.length} clusters`;
-      lines.push({ text: `${s.palpCount} ectopic beat${s.palpCount === 1 ? '' : 's'}`, sub: clusterText });
-      sections.push({ key: 'palps', title: 'Palpitations', count: s.palpCount, lines });
+      if (s.palpClusters.length === 1) {
+        const c = s.palpClusters[0];
+        lines.push({
+          text: `${s.palpCount} ectopic beat${s.palpCount === 1 ? '' : 's'}`,
+          sub: `1 cluster @ ${formatDuration(c.start)}`,
+          at: { t: c.start, label: `jump to @ ${formatDuration(c.start)}` },
+        });
+      } else {
+        lines.push({ text: `${s.palpCount} ectopic beats`, sub: `${s.palpClusters.length} clusters` });
+        for (const c of s.palpClusters.slice(0, 3)) {
+          lines.push({
+            text: `Cluster @ ${formatDuration(c.start)}`,
+            sub: `${c.count} beat${c.count === 1 ? '' : 's'} over ${formatDuration(c.end - c.start)}`,
+            at: { t: c.start, label: `jump to @ ${formatDuration(c.start)}` },
+          });
+        }
+      }
+      sections.push({
+        key: 'palps',
+        title: 'Palpitations',
+        desc: 'An ectopic beat is a heartbeat triggered outside the heart\'s normal rhythm. A few per session is usually harmless; frequent clusters can feel like a flutter or skipped beat in your chest.',
+        count: s.palpCount,
+        lines,
+      });
     }
 
-    // 3. HR shifts (tilt-test style fast rises/drops)
+    // 3. HR shifts — purely descriptive. No autonomic framing here; just the
+    // math (a sudden rise or drop). User can interpret it however they like.
     if (s.hrDeltas && s.hrDeltas.length > 0) {
       const rises = s.hrDeltas.filter(d => d.direction === 'rise');
       const drops = s.hrDeltas.filter(d => d.direction === 'drop');
       const biggest = s.hrDeltas.reduce((a, b) => Math.abs(b.delta) > Math.abs(a.delta) ? b : a);
       const arrow = biggest.direction === 'rise' ? '↑' : '↓';
+      const lines = [
+        { text: `${rises.length} rise · ${drops.length} drop`, sub: '≥20 bpm within 10 minutes' },
+        {
+          text: `Biggest shift: ${arrow}${Math.abs(biggest.delta)} bpm`,
+          sub: `${biggest.startHR} → ${biggest.endHR} bpm in ${formatDuration(biggest.end - biggest.start)}`,
+          at: { t: biggest.start, label: `jump to @ ${formatDuration(biggest.start)}` },
+        },
+      ];
       sections.push({
         key: 'shifts',
         title: 'HR shifts',
+        desc: 'Large HR changes that happen quickly — doesn\'t say why. Could be exercise, standing up, a scare, caffeine, finishing a sprint, or plain old anxiety.',
         count: s.hrDeltas.length,
-        lines: [
-          { text: `${rises.length} rise · ${drops.length} drop`, sub: '≥20 bpm over ≤10 min' },
-          { text: `Biggest: ${arrow}${Math.abs(biggest.delta)} bpm`, sub: `@ ${formatDuration(biggest.start)}` },
-        ],
+        lines,
       });
     }
 
-    // 4. Sympathetic flushes
-    if (s.flushes && s.flushes.length > 0) {
+    // 4. Sympathetic flushes — INTERPRETIVE, only when autonomic on.
+    if (autonomicOn && s.flushes && s.flushes.length > 0) {
+      const lines = s.flushes.slice(0, 4).map(f => ({
+        text: `+${f.hrDelta} bpm HR · ${f.rmssdDropPct}% HRV drop`,
+        sub: `@ ${formatDuration(f.t != null ? f.t : f.start)} (${formatDuration(f.end - f.start)})`,
+        at: { t: (f.t != null ? f.t : f.start), label: `jump @ ${formatDuration(f.t != null ? f.t : f.start)}` },
+      }));
       sections.push({
         key: 'flushes',
         title: 'Sympathetic flushes',
+        desc: 'A short HR spike paired with a simultaneous HRV drop — the signature of a quick "fight-or-flight" burst. Common triggers: standing up, cold, pain, sudden noise, or emotional arousal.',
         count: s.flushes.length,
-        lines: [
-          { text: `${s.flushes.length} fast HR spike${s.flushes.length === 1 ? '' : 's'} with concurrent HRV drop`, sub: 'Classic cold-flush / sympathetic-burst signature' },
-        ],
+        lines,
       });
     }
 
-    // 5. Chills / volatility
-    if (s.chillsWindows && s.chillsWindows.length > 0) {
+    // 5. Chills signatures — INTERPRETIVE, only when autonomic on.
+    if (autonomicOn && s.chillsWindows && s.chillsWindows.length > 0) {
       const total = s.chillsWindows.reduce((x, c) => x + (c.end - c.start), 0);
+      const lines = s.chillsWindows.slice(0, 3).map(c => ({
+        text: `${formatDuration(c.end - c.start)} window`,
+        sub: `@ ${formatDuration(c.start)} · ${c.ratio.toFixed(1)}× baseline volatility`,
+        at: { t: c.start, label: `jump @ ${formatDuration(c.start)}` },
+      }));
       sections.push({
         key: 'chills',
-        title: 'Chills signatures',
+        title: 'Chills / high volatility',
+        desc: 'A stretch where the HR jitters noticeably more than the session\'s baseline. Often corresponds to shivering (muscle EMG bleeds into the HR signal) or to an autonomic storm.',
         count: s.chillsWindows.length,
-        lines: [
-          { text: `${formatDuration(total)} of HR volatility ≥2.5× baseline`, sub: 'Possible shivering EMG artifact or autonomic storm' },
-        ],
+        lines: [{ text: `${formatDuration(total)} total across ${s.chillsWindows.length} window${s.chillsWindows.length === 1 ? '' : 's'}` }, ...lines],
       });
     }
 
-    // 6. Posture & sleep
+    // 6. Posture & sleep — descriptive, shown when data exists.
     {
       const lines = [];
       const sleepForInsight = getEffectiveSleepWindows(s);
       if (sleepForInsight && sleepForInsight.length) {
         const w = sleepForInsight[0];
-        lines.push({ text: `Sleep window · ${formatDuration(w.end - w.start)}`, sub: `starts @ ${formatDuration(w.start)} (low HR + high HRV)` });
+        lines.push({
+          text: `Sleep window · ${formatDuration(w.end - w.start)}`,
+          sub: `starts @ ${formatDuration(w.start)}`,
+          at: { t: w.start, label: `jump @ ${formatDuration(w.start)}` },
+        });
       }
       const postureForInsight = getEffectivePostureSpans(s);
       if (postureForInsight && postureForInsight.length) {
@@ -3730,12 +3916,19 @@
         if (durByPos.lying > 0) parts2.push(`${formatDuration(durByPos.lying)} lying`);
         if (durByPos.sitting > 0) parts2.push(`${formatDuration(durByPos.sitting)} sitting`);
         if (durByPos.standing > 0) parts2.push(`${formatDuration(durByPos.standing)} standing`);
-        if (parts2.length) lines.push({ text: 'Posture', sub: parts2.join(' · ') });
+        if (parts2.length) lines.push({ text: 'Posture time', sub: parts2.join(' · ') });
       }
-      if (lines.length) sections.push({ key: 'posture', title: 'Posture & sleep', lines });
+      if (lines.length) {
+        sections.push({
+          key: 'posture',
+          title: 'Posture & sleep',
+          desc: 'Sleep is auto-detected from extended low-HR + high-HRV stretches. Posture comes from whatever you tagged during the session.',
+          lines,
+        });
+      }
     }
 
-    // 7. Connection & warnings
+    // 7. Connection & warnings — always descriptive.
     {
       const lines = [];
       if (s.warnCount > 0) {
@@ -3744,9 +3937,20 @@
       }
       if (s.connGaps.length > 0) {
         const longest = s.connGaps.reduce((a, b) => (b.end - b.start) > (a.end - a.start) ? b : a);
-        lines.push({ text: `${s.connGaps.length} BLE ${s.connGaps.length === 1 ? 'gap' : 'gaps'}`, sub: `longest ${formatDuration(longest.end - longest.start)}` });
+        lines.push({
+          text: `${s.connGaps.length} BLE ${s.connGaps.length === 1 ? 'gap' : 'gaps'}`,
+          sub: `longest ${formatDuration(longest.end - longest.start)}`,
+          at: { t: longest.start, label: `jump @ ${formatDuration(longest.start)}` },
+        });
       }
-      if (lines.length) sections.push({ key: 'connection', title: 'Connection & warnings', lines });
+      if (lines.length) {
+        sections.push({
+          key: 'connection',
+          title: 'Connection & warnings',
+          desc: 'Warnings fire when HR or HRV crosses the thresholds you set in the live monitor. BLE gaps are moments the strap lost contact — no data collected.',
+          lines,
+        });
+      }
     }
 
     const chevron = `<svg class="insight-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
@@ -3766,11 +3970,21 @@
       ? '<div class="insight-empty">Nothing notable detected in this session.</div>'
       : sections.map(sec => {
           const countHtml = sec.count != null ? `<span class="insight-count">${sec.count}</span>` : '';
-          const listHtml = sec.lines.map(l =>
-            `<li><div>${escape(l.text)}</div>${l.sub ? `<div class="insight-sub">${escape(l.sub)}</div>` : ''}</li>`
-          ).join('');
-          return `<div class="insight-section">
+          const descHtml = sec.desc ? `<div class="insight-desc">${escape(sec.desc)}</div>` : '';
+          const listHtml = sec.lines.map(l => {
+            const atHtml = (l.at && isFinite(l.at.t))
+              ? `<button class="insight-jump" data-t="${l.at.t}" title="Zoom chart to this moment">${escape(l.at.label)}</button>`
+              : '';
+            const subParts = [];
+            if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
+            if (atHtml) subParts.push(atHtml);
+            const subHtml = subParts.length ? `<div class="insight-sub">${subParts.join(' · ')}</div>` : '';
+            const whatHtml = l.what ? `<div class="insight-what">${escape(l.what)}</div>` : '';
+            return `<li><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
+          }).join('');
+          return `<div class="insight-section" data-key="${sec.key}">
             <div class="insight-section-title"><span>${escape(sec.title)}</span>${countHtml}</div>
+            ${descHtml}
             <ul>${listHtml}</ul>
           </div>`;
         }).join('');
@@ -3789,6 +4003,13 @@
     box.querySelector('.insight-master-head').addEventListener('click', () => {
       box.classList.toggle('collapsed');
       setInsightCollapsed(box.classList.contains('collapsed'));
+    });
+    box.querySelectorAll('.insight-jump').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation(); // don't collapse the accordion
+        const t = parseFloat(btn.dataset.t);
+        if (isFinite(t) && typeof zoomTo === 'function') zoomTo(t);
+      });
     });
   }
 
@@ -4679,6 +4900,14 @@
     document.getElementById('drive-signout').addEventListener('click', driveSignOut);
     document.getElementById('drive-sync').addEventListener('click', () => {
       driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
+    });
+    applyAutonomicClass();
+    document.getElementById('autonomic-toggle').addEventListener('change', (e) => {
+      setAutonomicOn(e.target.checked);
+      applyAutonomicClass();
+      // Re-render the current session (or whatever view is active) so the report,
+      // filters, and chart reflect the new setting without a page reload.
+      route();
     });
     document.getElementById('export-report').addEventListener('click', exportReport);
     setupKeyboardNav();
