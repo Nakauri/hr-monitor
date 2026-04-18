@@ -2324,7 +2324,13 @@
     try {
       const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key);
       relaySocket = ws;
-      ws.addEventListener('open', () => setStreamingStatus('live'));
+      ws.addEventListener('open', () => {
+        setStreamingStatus('live');
+        // Catch-up broadcast: push current prefs + HR state as soon as the
+        // relay is ready, so OBS immediately reflects whatever toggle state
+        // the user had set while the socket was connecting/reconnecting.
+        try { broadcastTick(); } catch (e) {}
+      });
       ws.addEventListener('close', () => {
         relaySocket = null;
         // Only auto-reconnect if broadcast is still enabled; otherwise stay closed.
@@ -2347,6 +2353,15 @@
     if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
     try { relaySocket.send(JSON.stringify(payload)); } catch (e) {}
   }
+
+  // Slow heartbeat. HR ticks only fire while the strap is streaming — if the
+  // user toggles widgets while BLE is disconnected, the relay wouldn't see
+  // anything and OBS would drift out of sync. Every 3 s we fire a tick so
+  // OBS stays 1:1 with the monitor's prefs regardless of BLE state.
+  setInterval(() => {
+    if (!widgetPrefs.broadcast) return;
+    try { broadcastTick(); } catch (e) {}
+  }, 3000);
   // Called when the broadcast toggle flips. Open or close the relay socket to
   // match — saves bandwidth + privacy when user isn't streaming.
   function applyBroadcastPref() {
