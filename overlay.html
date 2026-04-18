@@ -262,10 +262,42 @@
   }
   #waiting .hint { font-size: 10px; color: #3a3a3a; }
   body.connected #waiting { display: none; }
+
+  /* Connection indicator — small dot fixed top-right of the overlay area.
+     Green = live data flowing, amber = no tick in 3+ sec (reconnecting),
+     grey = never received any data yet. Works for any style preset. */
+  #conn-dot {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #3a3a3a;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
+    z-index: 50;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  body.conn-live #conn-dot {
+    background: #5DCAA5;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 8px rgba(93,202,165,0.6);
+  }
+  body.conn-reconnecting #conn-dot {
+    background: #F0C75E;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 6px rgba(240,199,94,0.5);
+    animation: conn-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes conn-pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+  /* Hide dot if user explicitly wants a "clean" overlay via ?nodot=1 */
+  body.no-dot #conn-dot { display: none; }
 </style>
 </head>
 <body>
 
+<div id="conn-dot" title="Connection status"></div>
 <div id="waiting">
   <div>◌ Waiting for live app…</div>
   <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
@@ -335,6 +367,7 @@
   if (hideHrv) document.body.classList.add('no-hrv');
   if (hideLiveHr) document.body.classList.add('no-live-hr');
   if (hideInline) document.body.classList.add('no-inline-trends');
+  if (params.get('nodot') === '1') document.body.classList.add('no-dot');
   const zone = $('overlay-zone');
   zone.className = '';
   zone.classList.add('style-' + style);
@@ -399,10 +432,18 @@
   const broadcastKey = params.get('key');
   const RELAY_HOST = 'wss://hr-relay.nakauri.partykit.dev';
 
+  function setConnState(state) {
+    document.body.classList.remove('conn-live', 'conn-reconnecting');
+    if (state === 'live') document.body.classList.add('conn-live');
+    else if (state === 'reconnecting') document.body.classList.add('conn-reconnecting');
+    // default: grey (no class)
+  }
+
   function handleTick(msg) {
     if (!msg || msg.type !== 'tick') return;
     lastTick = Date.now();
     document.body.classList.add('connected');
+    setConnState('live');
 
     $('hr-big').textContent = msg.hr != null ? msg.hr : '—';
     $('rmssd-big').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
@@ -471,10 +512,17 @@
     connect();
   }
 
-  // Fade to disconnected if no ticks for 15 sec
+  // Flip to "reconnecting" after 3 s silence, fall back to disconnected after 15 s.
   setInterval(() => {
-    if (lastTick > 0 && Date.now() - lastTick > 15000) document.body.classList.remove('connected');
-  }, 3000);
+    if (lastTick === 0) return;
+    const silent = Date.now() - lastTick;
+    if (silent > 15000) {
+      document.body.classList.remove('connected');
+      setConnState('reconnecting');
+    } else if (silent > 3000) {
+      setConnState('reconnecting');
+    }
+  }, 1500);
 })();
 </script>
 </body>

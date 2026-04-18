@@ -78,6 +78,19 @@
   .nav-copy { color: var(--accent-rmssd); border: 1px solid var(--accent-rmssd); }
   .nav-copy:hover { color: #0a1a14; background: var(--accent-rmssd); }
   .nav-copy.copied { background: var(--accent-rmssd); color: #0a1a14; }
+  .obs-size-hint {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    padding: 4px 8px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 6px;
+    cursor: help;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    font-weight: 500;
+  }
+  .obs-size-hint:hover { color: var(--text-dim); border-color: var(--text-dim); }
 
   #app {
     display: grid;
@@ -1114,11 +1127,12 @@
 </head>
 <body>
 <nav class="app-nav">
-  <a class="app-nav-title" href="./index.html">HR Monitor <span style="color: var(--accent-hr);">·</span></a>
+  <a class="app-nav-title" href="./index.html" target="_blank" rel="noopener">HR Monitor <span style="color: var(--accent-hr);">·</span></a>
   <a class="app-nav-link active" href="./hr_monitor.html">Live monitor</a>
-  <a class="app-nav-link" href="./hrv_viewer.html">Viewer</a>
+  <a class="app-nav-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer ↗</a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
+  <span class="obs-size-hint" id="obs-size-hint" title="Recommended OBS Browser Source dimensions — size your source to match to avoid empty space">380 × 560</span>
 </nav>
 <div id="app">
 
@@ -1265,9 +1279,14 @@
           <div class="streaming-row" style="margin-top: 8px;">
             <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
           </div>
+          <div class="streaming-row" style="margin-top: 10px;">
+            <span class="streaming-label">Source size:</span>
+            <code class="streaming-key" id="obs-size-panel" style="font-family: 'Consolas', 'Monaco', monospace;">380 × 560</code>
+          </div>
           <div style="font-size: 11px; color: var(--text-faint); margin-top: 8px; line-height: 1.4;">
             Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
-            Works from any device, any browser. Your broadcast key keeps the stream private.
+            Set <b>Width</b> and <b>Height</b> in the dialog to the values above to avoid empty space.
+            Dimensions auto-update as you change style / widgets.
           </div>
         </div>
 
@@ -2051,9 +2070,37 @@
     if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
     return origin + 'overlay.html?' + params.toString();
   }
+  // Compute the recommended OBS Browser Source dimensions from current settings.
+  // Numbers come from the widget's natural layout — if the source is sized smaller,
+  // content clips; if larger, empty space appears (Pulsoid auto-fills height; we don't).
+  function computeObsSize() {
+    const style = localStorage.getItem('hr_monitor_style') || 'bold';
+    const horizontal = widgetPrefs.layout === 'horizontal';
+    // Compact = single combined widget
+    if (style === 'compact') return { w: 380, h: widgetPrefs.showInlineTrends ? 260 : 200 };
+    // Other styles stack (or row) separate widgets
+    let visible = 0;
+    let h = 32; // 16px padding top + bottom
+    if (widgetPrefs.showHr) { h += 180; visible++; }
+    if (widgetPrefs.showHrv) { h += 140; visible++; }
+    if (widgetPrefs.showLiveHr) { h += 130; visible++; }
+    if (visible === 0) return { w: 380, h: 100 };
+    if (visible > 1) h += (visible - 1) * 14;
+    if (horizontal) return { w: 380 * visible + (visible - 1) * 14 + 32, h: 210 };
+    return { w: 380, h };
+  }
+  function updateObsSizeDisplay() {
+    const size = computeObsSize();
+    const text = size.w + ' × ' + size.h;
+    const hint = $('obs-size-hint');
+    const panel = $('obs-size-panel');
+    if (hint) hint.textContent = text;
+    if (panel) panel.textContent = text;
+  }
   function updateStreamingUI() {
     const keyEl = $('broadcast-key-display');
     if (keyEl) keyEl.textContent = getOrCreateBroadcastKey();
+    updateObsSizeDisplay();
   }
 
   function broadcastTick() {
@@ -2731,6 +2778,7 @@
       btn.classList.toggle('active', btn.dataset.style === styleName);
     });
     try { localStorage.setItem('hr_monitor_style', styleName); } catch(e) {}
+    if (typeof updateObsSizeDisplay === 'function') updateObsSizeDisplay();
     resizeAllCharts();
   }
 
@@ -2782,6 +2830,7 @@
       const el = $(id); if (el) el.checked = widgetPrefs[key];
     }
     resizeAllCharts();
+    if (typeof updateObsSizeDisplay === 'function') updateObsSizeDisplay();
   }
 
   function saveWidgetPrefs() {
