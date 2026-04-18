@@ -182,6 +182,9 @@
     text-overflow: ellipsis;
     max-width: 60%;
     min-width: 0;
+    /* Right-align inside the widget-header flex row (mirrors hr_monitor.html)
+       so the banner sits consistently in the same spot across monitor and OBS. */
+    margin-left: auto;
   }
   .warning-banner.active { display: inline-flex; }
   .warning-banner.warn-high   { border-color: #E24B4A; background: rgba(226,75,74,0.14);  color: #E24B4A; }
@@ -305,6 +308,13 @@
   /* "Inline mini trends" only affects the tiny mini-chart next to the big HR
      number. The live HR trace has its own toggle (showLiveHr) — don't lump it in. */
   body.no-inline-trends .inline-trend { display: none; }
+  /* Compact-mode visibility toggles parallel to hr_monitor.html:
+     - live HR trace = `.inline-live-trace` (number-row) in compact, so the
+       showLiveHr toggle must hide THAT element, not just `#breath-widget`.
+     - "Inline mini trends" toggle in compact applies to `.compact-trend`
+       (the wide trend line at the bottom). */
+  body.style-compact.no-live-hr #overlay-zone .inline-live-trace { display: none !important; }
+  body.style-compact.no-inline-trends #overlay-zone .compact-trend { display: none !important; }
   /* User-toggleable extras — palp chip, warning banner, conn dot. Each can
      be hidden independently via a settings toggle in the monitor. */
   body.no-palp-chip .palp-chip,
@@ -651,24 +661,28 @@
     plugins: { legend: { display: false }, tooltip: { enabled: false } },
     scales: { x: { type: 'linear', display: false }, y: { display: false, grace: '8%' } },
   };
+  // Chart configs kept in lockstep with hr_monitor.html: monotone interpolation
+  // prevents the line from overshooting its vertical bounds (which otherwise
+  // makes the trace bleed into the pips row below on responsive resize), and
+  // the thicker 1.75 border visually anchors the stroke so it doesn't smear.
   const hrInline = new Chart($('hr-inline-chart').getContext('2d'), {
     type: 'line',
-    data: { datasets: [{ data: [], borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.1)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    data: { datasets: [{ data: [], borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.1)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
     options: baseOpts,
   });
   const rmssdInline = new Chart($('rmssd-inline-chart').getContext('2d'), {
     type: 'line',
-    data: { datasets: [{ data: [], borderColor: '#5DCAA5', backgroundColor: 'rgba(93,202,165,0.1)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    data: { datasets: [{ data: [], borderColor: '#5DCAA5', backgroundColor: 'rgba(93,202,165,0.1)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
     options: baseOpts,
   });
   const hrLiveTrace = new Chart($('hr-live-trace').getContext('2d'), {
     type: 'line',
-    data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.12)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.12)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
     options: { ...baseOpts, scales: { x: { type: 'linear', display: false, min: 0, max: 45 }, y: { display: false, grace: '12%' } } },
   });
   const rsa = new Chart($('rsa-chart').getContext('2d'), {
     type: 'line',
-    data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.1)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.1)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
     options: { ...baseOpts, scales: { x: { type: 'linear', display: false, min: 0, max: 45 }, y: { display: false, grace: '12%' } } },
   });
   const compactTrend = new Chart($('compact-chart').getContext('2d'), {
