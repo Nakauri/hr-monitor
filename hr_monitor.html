@@ -10,6 +10,7 @@
 <title>HR Monitor</title>
 <link rel="manifest" href='data:application/manifest+json,{"name":"HR Monitor","short_name":"HR Monitor","start_url":"./hr_monitor.html","display":"standalone","background_color":"%230a0a0a","theme_color":"%230f0f11","icons":[{"src":"data:image/svg%2Bxml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 192 192%22%3E%3Crect width=%22192%22 height=%22192%22 fill=%22%23101010%22/%3E%3Cpath d=%22M96 160 c-40 -32 -64 -56 -64 -88 0 -24 16 -40 40 -40 16 0 24 8 24 16 0 -8 8 -16 24 -16 24 0 40 16 40 40 0 32 -24 56 -64 88z%22 fill=%22%23E89858%22/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root {
     --bg: #0f0f11;
@@ -834,11 +835,22 @@
 
   .audio-grid {
     display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 8px 10px;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 8px 8px;
     align-items: center;
     font-size: 12px;
   }
+  .audio-grid .audio-upload {
+    padding: 5px 8px;
+    font-size: 10px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .audio-grid .audio-upload:hover { color: var(--text); border-color: var(--text-dim); border-style: solid; }
+  .audio-grid .audio-upload.has-file { border-style: solid; border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
   .audio-grid label {
     color: var(--text-dim);
   }
@@ -1234,6 +1246,12 @@
           <button id="autosave-test" style="display: none;">Save now</button>
           <button id="autosave-clear" style="display: none;">Clear</button>
         </div>
+        <div class="autosave-row">
+          <span class="autosave-label">Drive backup:</span>
+          <span class="autosave-folder" id="drive-status">not signed in</span>
+          <button id="drive-signin">Sign in with Google</button>
+          <button id="drive-signout" style="display: none;">Sign out</button>
+        </div>
       </div>
     </div>
 
@@ -1252,8 +1270,8 @@
 
         <div class="tab-panel" data-tabpanel="style">
           <div class="style-options">
-            <button class="style-btn active" data-style="bold">Bold</button>
-            <button class="style-btn" data-style="compact">Compact</button>
+            <button class="style-btn active" data-style="compact">Compact</button>
+            <button class="style-btn" data-style="bold">Bold</button>
             <button class="style-btn" data-style="minimal">Minimal</button>
             <button class="style-btn" data-style="neon">Neon</button>
           </div>
@@ -1321,27 +1339,32 @@
           <div class="audio-grid">
             <label>Audio alerts</label>
             <input type="checkbox" id="audio-on" checked style="width: auto; justify-self: start;" />
-            <span></span>
+            <span></span><span></span>
 
             <label>High HR alert</label>
             <select id="audio-high"></select>
             <button class="audio-test" data-type="high">Test</button>
+            <button class="audio-upload" data-type="high" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
 
             <label>Low HR alert</label>
             <select id="audio-low"></select>
             <button class="audio-test" data-type="low">Test</button>
+            <button class="audio-upload" data-type="low" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
 
             <label>HRV crash</label>
             <select id="audio-crash"></select>
             <button class="audio-test" data-type="crash">Test</button>
+            <button class="audio-upload" data-type="crash" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
 
             <label>Palpitations</label>
             <select id="audio-palp"></select>
             <button class="audio-test" data-type="palp">Test</button>
+            <button class="audio-upload" data-type="palp" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
 
             <label>Volume</label>
             <input type="range" id="audio-volume" min="0" max="100" value="15" />
             <span class="unit" id="volume-label">15%</span>
+            <span></span>
           </div>
         </div>
       </div>
@@ -1711,6 +1734,65 @@
     volume: 0.15,
   };
 
+  // Custom audio files uploaded by the user. Stored as data URLs in localStorage
+  // (per-alert-type). Keys: 'high' / 'low' / 'crash' / 'palp'. Each entry is
+  // either null (use preset) or { name, dataUrl }. Warns if file is too big.
+  const CUSTOM_AUDIO_LS_KEY = 'hr_monitor_custom_audio';
+  function loadCustomAudio() {
+    try { return JSON.parse(localStorage.getItem(CUSTOM_AUDIO_LS_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function saveCustomAudio(obj) {
+    try { localStorage.setItem(CUSTOM_AUDIO_LS_KEY, JSON.stringify(obj)); } catch (e) {
+      alert('Could not save custom audio — file is too large for browser storage. Try a smaller clip (<500 KB).');
+    }
+  }
+  function getCustomAudioFor(type) { return loadCustomAudio()[type] || null; }
+  async function setCustomAudioFor(type, file) {
+    const reader = new FileReader();
+    const dataUrl = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const all = loadCustomAudio();
+    all[type] = { name: file.name, dataUrl };
+    saveCustomAudio(all);
+  }
+  function clearCustomAudioFor(type) {
+    const all = loadCustomAudio();
+    delete all[type];
+    saveCustomAudio(all);
+  }
+  function updateUploadButtonUI() {
+    const all = loadCustomAudio();
+    document.querySelectorAll('.audio-upload').forEach(btn => {
+      const t = btn.dataset.type;
+      const entry = all[t];
+      if (entry) {
+        btn.classList.add('has-file');
+        btn.textContent = '✓ ' + (entry.name.length > 14 ? entry.name.slice(0, 12) + '…' : entry.name);
+        btn.title = 'Click to replace. Right-click to remove and revert to preset.';
+      } else {
+        btn.classList.remove('has-file');
+        btn.textContent = 'Upload';
+        btn.title = 'Upload a custom audio file (mp3, wav, ogg)';
+      }
+    });
+  }
+  function playCustomAudio(type, volume) {
+    const entry = getCustomAudioFor(type);
+    if (!entry) return false;
+    try {
+      const audio = new Audio(entry.dataUrl);
+      audio.volume = Math.max(0, Math.min(1, volume));
+      audio.play().catch(e => console.error('Custom audio play failed:', e));
+      return true;
+    } catch (e) {
+      console.error('Custom audio init failed:', e);
+      return false;
+    }
+  }
+
   function playSound(presetKey, volume) {
     const preset = AUDIO_PRESETS[presetKey];
     if (!preset) return;
@@ -1738,6 +1820,8 @@
     const nowMs = Date.now();
     if (nowMs - state.lastAlertTime < 10000) return;
     state.lastAlertTime = nowMs;
+    // Prefer a custom uploaded file if the user has set one for this alert type.
+    if (playCustomAudio(type, audioConfig.volume)) return;
     const presetKey = audioConfig[type] || 'beep-high';
     playSound(presetKey, audioConfig.volume);
   }
@@ -2502,40 +2586,50 @@
   }
 
   async function startSessionAutoSave() {
-    if (!autoSaveDirHandle) return;
-    const ok = await ensureAutoSavePermission();
-    if (!ok) {
-      setAutoSaveStatus('denied', 'denied');
-      return;
+    // New session begins — reset per-session Drive file so a new one is created.
+    driveFileIdForSession = null;
+    // Need either a local folder OR Drive sign-in to do anything useful.
+    if (!autoSaveDirHandle && !driveAccessToken) return;
+    if (autoSaveDirHandle) {
+      const ok = await ensureAutoSavePermission();
+      if (!ok) {
+        setAutoSaveStatus('denied', 'denied');
+        if (!driveAccessToken) return;
+      } else {
+        const filename = 'hrv_session_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.csv';
+        try {
+          autoSaveFileHandle = await autoSaveDirHandle.getFileHandle(filename, { create: true });
+          setAutoSaveStatus('writing', 'writing');
+        } catch (e) {
+          console.error('Auto-save file creation failed:', e);
+          autoSaveFileHandle = null;
+          setAutoSaveStatus('error', 'error');
+        }
+      }
     }
-    const filename = 'hrv_session_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.csv';
-    try {
-      autoSaveFileHandle = await autoSaveDirHandle.getFileHandle(filename, { create: true });
-      if (autoSaveInterval) clearInterval(autoSaveInterval);
-      autoSaveInterval = setInterval(writeAutoSave, 10000);
-      writeAutoSave();
-      setAutoSaveStatus('writing', 'writing');
-    } catch (e) {
-      console.error('Auto-save file creation failed:', e);
-      autoSaveFileHandle = null;
-      setAutoSaveStatus('error', 'error');
-    }
+    if (autoSaveInterval) clearInterval(autoSaveInterval);
+    autoSaveInterval = setInterval(writeAutoSave, 10000);
+    writeAutoSave();
   }
 
   async function writeAutoSave() {
-    if (!autoSaveFileHandle) return;
-    try {
-      const { csv } = buildSessionCSV();
-      const writable = await autoSaveFileHandle.createWritable();
-      await writable.write(csv);
-      await writable.close();
-    } catch (e) {
-      console.error('Auto-save write failed:', e);
-      setAutoSaveStatus('write error', 'error');
-      // Permission may have been revoked mid-session — null the handle so next connect
-      // attempts a fresh permission check rather than silently failing every 10 sec.
-      autoSaveFileHandle = null;
-      if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+    if (!autoSaveFileHandle && !driveAccessToken) return;
+    const { csv, filename } = buildSessionCSV();
+    if (autoSaveFileHandle) {
+      try {
+        const writable = await autoSaveFileHandle.createWritable();
+        await writable.write(csv);
+        await writable.close();
+      } catch (e) {
+        console.error('Auto-save write failed:', e);
+        setAutoSaveStatus('write error', 'error');
+        autoSaveFileHandle = null;
+        if (autoSaveInterval && !driveAccessToken) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+      }
+    }
+    // Dual-save to Drive if signed in. Fires in parallel with the local write.
+    if (driveAccessToken && driveFolderId) {
+      driveUploadSession(filename, csv);
     }
   }
 
@@ -2544,6 +2638,154 @@
     await writeAutoSave();
     autoSaveFileHandle = null;
     if (autoSaveDirHandle) setAutoSaveStatus('idle');
+  }
+
+  // ===== Google Drive dual-save =====
+  // Paste your OAuth Web Client ID here (from Google Cloud Console → Credentials).
+  // The Client ID is PUBLIC by design — it's safe to commit. The OAuth flow
+  // requires the user to confirm access in Google's own dialog; we can't
+  // impersonate anyone.
+  const GOOGLE_CLIENT_ID = '103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com';
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'; // per-app isolated
+  const DRIVE_FOLDER_NAME = 'HR Monitor Sessions';
+
+  let driveTokenClient = null;
+  let driveAccessToken = null;
+  let driveTokenExpiresAt = 0;
+  let driveFolderId = null;
+  let driveUploadInFlight = null;
+  let driveFileIdForSession = null;
+
+  function driveUpdateUI() {
+    const statusEl = $('drive-status');
+    const signIn = $('drive-signin');
+    const signOut = $('drive-signout');
+    if (!statusEl) return;
+    if (driveAccessToken) {
+      statusEl.textContent = driveFolderId ? 'syncing to Drive' : 'signed in';
+      signIn.style.display = 'none';
+      signOut.style.display = '';
+    } else {
+      statusEl.textContent = 'not signed in';
+      signIn.style.display = '';
+      signOut.style.display = 'none';
+    }
+  }
+
+  function initGoogleAuth() {
+    if (!window.google || !google.accounts || !google.accounts.oauth2) {
+      // GSI script still loading — retry shortly.
+      setTimeout(initGoogleAuth, 400);
+      return;
+    }
+    if (GOOGLE_CLIENT_ID === 'PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com') {
+      $('drive-status').textContent = 'setup needed (see README)';
+      $('drive-signin').disabled = true;
+      return;
+    }
+    driveTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: (resp) => {
+        if (resp.error) {
+          console.error('Google OAuth error:', resp);
+          $('drive-status').textContent = 'sign-in failed';
+          return;
+        }
+        driveAccessToken = resp.access_token;
+        driveTokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
+        driveUpdateUI();
+        driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
+      },
+    });
+  }
+
+  function driveSignIn() {
+    if (!driveTokenClient) {
+      alert('Google auth still loading. Try again in a second.');
+      return;
+    }
+    driveTokenClient.requestAccessToken({ prompt: 'consent' });
+  }
+
+  function driveSignOut() {
+    if (driveAccessToken) {
+      try { google.accounts.oauth2.revoke(driveAccessToken, () => {}); } catch (e) {}
+    }
+    driveAccessToken = null;
+    driveTokenExpiresAt = 0;
+    driveFolderId = null;
+    driveFileIdForSession = null;
+    driveUpdateUI();
+  }
+
+  async function driveFetch(path, init = {}) {
+    if (!driveAccessToken || Date.now() > driveTokenExpiresAt) {
+      throw new Error('No Drive token — sign in first');
+    }
+    const url = path.startsWith('http') ? path : 'https://www.googleapis.com/drive/v3/' + path;
+    const headers = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
+    return fetch(url, Object.assign({}, init, { headers }));
+  }
+
+  async function driveEnsureFolder() {
+    // Look for existing folder named DRIVE_FOLDER_NAME owned by this app (drive.file scope)
+    const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
+    const data = await resp.json();
+    if (data.files && data.files.length) {
+      driveFolderId = data.files[0].id;
+    } else {
+      const create = await driveFetch('files?fields=id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+      });
+      const cd = await create.json();
+      driveFolderId = cd.id;
+    }
+    driveUpdateUI();
+  }
+
+  // Upload or update the current session's CSV on Drive. Called alongside local
+  // auto-save. Reuses the same Drive file for the whole session (updates in place)
+  // so Drive doesn't fill up with 600 partial files per session.
+  async function driveUploadSession(filename, csvText) {
+    if (!driveAccessToken || !driveFolderId) return;
+    if (driveUploadInFlight) return; // skip if one is already running
+    driveUploadInFlight = (async () => {
+      try {
+        if (!driveFileIdForSession) {
+          // Create the file once, then PATCH updates to the same fileId
+          const metadata = { name: filename, parents: [driveFolderId], mimeType: 'text/csv' };
+          const boundary = '-------hr-monitor-' + Math.random().toString(36).slice(2);
+          const body =
+            `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+            `--${boundary}\r\nContent-Type: text/csv\r\n\r\n${csvText}\r\n--${boundary}--`;
+          const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + driveAccessToken,
+              'Content-Type': 'multipart/related; boundary=' + boundary,
+            },
+            body,
+          });
+          const data = await resp.json();
+          driveFileIdForSession = data.id;
+        } else {
+          // PATCH the existing file's contents
+          await fetch('https://www.googleapis.com/upload/drive/v3/files/' + driveFileIdForSession + '?uploadType=media', {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + driveAccessToken, 'Content-Type': 'text/csv' },
+            body: csvText,
+          });
+        }
+      } catch (e) {
+        console.error('Drive upload failed:', e);
+      } finally {
+        driveUploadInFlight = null;
+      }
+    })();
   }
 
   function buildSessionCSV() {
@@ -2776,10 +3018,42 @@
     document.querySelectorAll('.audio-test').forEach(btn => {
       btn.addEventListener('click', () => {
         const type = btn.dataset.type;
+        // Custom file wins if uploaded for this type; otherwise use preset.
+        if (playCustomAudio(type, audioConfig.volume)) return;
         const presetKey = audioConfig[type];
         playSound(presetKey, audioConfig.volume);
       });
     });
+    // Upload custom audio per alert. Left-click uploads; right-click clears.
+    document.querySelectorAll('.audio-upload').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const type = btn.dataset.type;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'audio/*';
+        input.addEventListener('change', async () => {
+          if (!input.files || !input.files[0]) return;
+          const file = input.files[0];
+          if (file.size > 800 * 1024) {
+            if (!confirm(`That file is ${Math.round(file.size/1024)} KB — localStorage caps at ~5 MB total across all custom sounds. Continue?`)) return;
+          }
+          try {
+            await setCustomAudioFor(type, file);
+            updateUploadButtonUI();
+          } catch (e) { console.error(e); alert('Failed to load audio: ' + e.message); }
+        });
+        input.click();
+      });
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const type = btn.dataset.type;
+        if (getCustomAudioFor(type) && confirm('Remove custom audio for ' + type + ' and revert to preset?')) {
+          clearCustomAudioFor(type);
+          updateUploadButtonUI();
+        }
+      });
+    });
+    updateUploadButtonUI();
   }
 
   function saveAudioConfig() {
@@ -2828,7 +3102,7 @@
     const params = new URLSearchParams(location.search);
     const urlStyle = params.get('style');
     const valid = ['bold', 'compact', 'minimal', 'neon'];
-    const saved = localStorage.getItem('hr_monitor_style') || 'bold';
+    const saved = localStorage.getItem('hr_monitor_style') || 'compact';
     setWidgetStyle(valid.includes(urlStyle) ? urlStyle : saved);
   }
 
@@ -3014,6 +3288,10 @@
     $('autosave-clear').addEventListener('click', clearAutoSaveFolder);
     $('autosave-test').addEventListener('click', manualAutoSaveTest);
     restoreAutoSaveFolder();
+    // Google Drive sign-in wiring
+    initGoogleAuth();
+    $('drive-signin').addEventListener('click', driveSignIn);
+    $('drive-signout').addEventListener('click', driveSignOut);
     $('reset').addEventListener('click', resetSession);
     $('export').addEventListener('click', exportCSV);
     $('add-marker').addEventListener('click', addMarker);
