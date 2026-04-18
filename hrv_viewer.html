@@ -167,10 +167,35 @@
     color: var(--warn-high);
     background: rgba(226,75,74,0.14);
   }
-  #drive-sync-progress {
+  /* Header icon buttons — compact circular / square buttons for actions like
+     Drive sync / sign-out. Full text button looks out of place in a dense bar. */
+  .folder-info .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
     color: var(--text-dim);
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s, transform 0.3s;
+  }
+  .folder-info .icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .folder-info .icon-btn svg { display: block; }
+  .folder-info .icon-btn.spinning svg { animation: drive-sync-spin 1s linear infinite; }
+  @keyframes drive-sync-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  /* Drive sync-status word is brief now; the sync button's own tooltip
+     carries any verbose progress text. */
+  #drive-status {
     font-size: 10px;
-    letter-spacing: 0.05em;
+    min-width: 30px;
+    text-align: center;
   }
   /* Autonomic analysis toggle — global pref, shown in the app-bar so it persists
      across views. Drives whether interpretive overlays (sympathetic flush, chills
@@ -252,13 +277,15 @@
   }
   .session-card-stats {
     display: flex;
-    gap: 22px;
+    gap: 18px;
     font-size: 12px;
+    flex-wrap: wrap;
   }
   .session-card-stat {
     display: flex;
     flex-direction: column;
     gap: 3px;
+    min-width: 0;
   }
   .session-card-stat-label {
     color: var(--text-faint);
@@ -266,6 +293,9 @@
     text-transform: uppercase;
     font-size: 10px;
     font-weight: 600;
+    /* Keep labels on a single line so the number row below always sits at a
+       consistent y position across the card grid. */
+    white-space: nowrap;
   }
   .session-card-stat-value {
     font-size: 18px;
@@ -1638,8 +1668,8 @@
   <nav class="view-nav">
     <a data-view="index" href="#/index">Sessions</a>
     <a data-view="month" href="#/month">Month</a>
-    <a data-view="day" href="#/day">Day</a>
     <a data-view="week" href="#/week">Week</a>
+    <a data-view="day" href="#/day">Day</a>
     <a data-view="all" href="#/all">All</a>
   </nav>
   <div class="folder-info">
@@ -1648,11 +1678,14 @@
     <button id="folder-pick">Change...</button>
     <span class="drive-sep">|</span>
     <span>Drive:</span>
-    <span id="drive-status" class="drive-idle">not signed in</span>
+    <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
     <button id="drive-signin">Sign in</button>
-    <button id="drive-sync" style="display:none" title="Download any sessions on Drive not present locally">Sync</button>
-    <span id="drive-sync-progress"></span>
-    <button id="drive-signout" style="display:none">Sign out</button>
+    <button class="icon-btn" id="drive-sync" style="display:none" title="Sync sessions from Drive" aria-label="Sync from Drive">
+      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="icon-btn" id="drive-signout" style="display:none" title="Sign out of Drive" aria-label="Sign out">
+      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
     <span class="drive-sep">|</span>
     <label class="autonomic-toggle" title="When ON: interpret the data in terms of autonomic (sympathetic/parasympathetic) patterns — useful for POTS, dysautonomia, and anyone studying stress response. When OFF: only descriptive stats, no interpretive overlays.">
       <input type="checkbox" id="autonomic-toggle" checked />
@@ -1865,17 +1898,20 @@
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
     if (driveAccessToken) {
       if (driveFolderId) {
-        statusEl.textContent = 'ready';
+        statusEl.textContent = 'on';
+        statusEl.title = 'Signed in — Drive sessions sync automatically';
         statusEl.classList.add('drive-syncing');
       } else {
-        statusEl.textContent = 'signed in';
+        statusEl.textContent = '…';
+        statusEl.title = 'Signed in, connecting to folder';
         statusEl.classList.add('drive-signedin');
       }
       signIn.style.display = 'none';
       signOut.style.display = '';
       syncBtn.style.display = driveFolderId ? '' : 'none';
     } else {
-      statusEl.textContent = 'not signed in';
+      statusEl.textContent = 'off';
+      statusEl.title = 'Not signed in — click Sign in to enable Drive sync';
       statusEl.classList.add('drive-idle');
       signIn.style.display = '';
       signOut.style.display = 'none';
@@ -1884,8 +1920,14 @@
   }
 
   function setDriveProgress(text) {
-    const el = document.getElementById('drive-sync-progress');
-    if (el) el.textContent = text || '';
+    // Progress used to display verbose text in the header ("1 new · 0 updated · 0
+    // already cached"). It's surfaced only via the sync button's tooltip + an
+    // in-progress spin animation now — the header stays compact.
+    const btn = document.getElementById('drive-sync');
+    if (!btn) return;
+    btn.title = text ? ('Sync from Drive — ' + text) : 'Sync sessions from Drive';
+    const isBusy = !!text && /\//.test(text); // "3/10" pattern = actively working
+    btn.classList.toggle('spinning', isBusy);
   }
   function setDriveError(text) {
     const statusEl = document.getElementById('drive-status');
@@ -2893,21 +2935,25 @@
       if (h > 0 && h < 24) gridHtml += `<div class="day-hour-gridline" style="left: ${pct}%;"></div>`;
     }
 
+    const autonomicOn = isAutonomicOn();
     const sessionCardsHtml = files.length ? files.map(fn => {
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
       const hrStage = getHRStage(s.hrAvg);
+      // Flush + Chills are interpretive autonomic metrics — hide those columns
+      // when the autonomic toggle is OFF so the card stays descriptive-only.
+      const autonomicCols = autonomicOn ? `
+            <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-faint)'};">${(s.flushes || []).length}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-faint)'};">${(s.chillsWindows || []).length}</span></div>` : '';
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
-          <div class="session-card-time">${meta ? meta.isoTime : fn}</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoTime : fn}</div>
           <div class="session-card-date">${formatDuration(s.duration)} session</div>
           <div class="session-card-stats">
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HR</span><span class="session-card-stat-value ${hrStage}">${s.hrAvg}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Palps</span><span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-faint)'};">${s.palpCount}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#8BB4FF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-faint)'};">${(s.flushes || []).length}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-faint)'};">${(s.chillsWindows || []).length}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#8BB4FF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>${autonomicCols}
           </div>
         </div>`;
     }).join('') : `<div class="stub-panel">No sessions on this date.</div>`;
@@ -4130,17 +4176,16 @@
     try { localStorage.setItem(LS_INSIGHT_SECTIONS, JSON.stringify(map)); } catch (e) {}
   }
 
-  // Persist master-caret open/closed state across sessions. Defaults to closed
-  // (true) the first time the user sees it, per request — keeps the card tiny.
+  // Master-caret state — always defaults closed per session open (does NOT
+  // persist across session navigation so reports always start tiny). User can
+  // still expand/collapse freely while viewing a session; that state just
+  // resets when they move to a different session.
   const LS_INSIGHT_COLLAPSED = 'hrv_viewer_insight_collapsed_v2';
-  function isInsightCollapsed() {
-    const v = localStorage.getItem(LS_INSIGHT_COLLAPSED);
-    if (v === null) return true; // closed by default
-    return v === '1';
-  }
-  function setInsightCollapsed(collapsed) {
-    try { localStorage.setItem(LS_INSIGHT_COLLAPSED, collapsed ? '1' : '0'); } catch (e) {}
-  }
+  function isInsightCollapsed() { return true; }
+  function setInsightCollapsed(_collapsed) { /* no-op — intentionally not persisted */ }
+  // One-time cleanup of the old persisted key so stale 'open' state doesn't
+  // resurface for existing users who had it set.
+  try { localStorage.removeItem(LS_INSIGHT_COLLAPSED); } catch (e) {}
 
   function renderMarkerList(s) {
     const items = [];
@@ -4279,18 +4324,27 @@
   }
 
   // Shared enter/leave for chart annotations — drop the highlight line, show the
-  // tooltip, and light up the corresponding marker-list row. All annotation
-  // `enter:` callbacks route through this so behaviour is identical regardless
-  // of which category the user hovers.
+  // tooltip, light up the corresponding marker-list row, AND temporarily suppress
+  // Chart.js's own tooltip so the user doesn't see two overlapping tooltips
+  // stacked on top of each other when an annotation covers a data point.
   function annoEnter(t, html, evt) {
     showAnnoTip(html, evt);
     highlightAtTime(t);
     highlightMarkerItemByT(t);
+    if (currentChart && currentChart.options.plugins && currentChart.options.plugins.tooltip) {
+      currentChart.options.plugins.tooltip.enabled = false;
+      try { currentChart.tooltip.setActiveElements([], { x: 0, y: 0 }); } catch (e) {}
+      currentChart.update('none');
+    }
   }
   function annoLeave() {
     hideAnnoTip();
     unhighlightAtTime();
     clearMarkerItemHighlight();
+    if (currentChart && currentChart.options.plugins && currentChart.options.plugins.tooltip) {
+      currentChart.options.plugins.tooltip.enabled = true;
+      currentChart.update('none');
+    }
   }
 
   function nearestY(series, t) {
