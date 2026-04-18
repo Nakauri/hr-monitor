@@ -1086,10 +1086,12 @@
     border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 14px 16px;
-    min-width: 280px;
+    width: 320px;
+    max-width: 90vw;
     box-shadow: 0 8px 24px rgba(0,0,0,0.6);
     display: none;
   }
+  #viewer-settings-popover .thresh-blurb { max-width: 100%; }
   #viewer-settings-popover h4 {
     margin: 0 0 6px;
     font-size: 11px;
@@ -3051,6 +3053,14 @@
         <div class="chart-legend-item"><span class="legend-swatch" style="background: #E24B4A;"></span>Critical</div>
       </div>`;
 
+    // Collect every session filename that falls inside this month for the
+    // aggregate report.
+    const monthFiles = [];
+    for (const [dateStr, dateFiles] of Object.entries(sessionsByDate)) {
+      const [yy, mm] = dateStr.split('-').map(Number);
+      if (yy === year && mm - 1 === month) monthFiles.push(...dateFiles);
+    }
+
     el.innerHTML = `
       <div class="cal-header">
         <div class="cal-title">${monthName}</div>
@@ -3062,9 +3072,11 @@
         ${metricSwitchHTML()}
         ${legend}
       </div>
+      ${buildAggregateReport('Monthly', monthFiles)}
       <div class="cal-grid">${cells}</div>
     `;
 
+    wireAggregateReport();
     wireMetricSwitch(el, () => renderMonth(ymArg));
 
     // Nav handlers
@@ -3194,10 +3206,13 @@
         <div class="day-hour-axis">${axisHtml}</div>
       </div>
 
+      ${buildAggregateReport('Daily', files)}
+
       <div class="section-head">Sessions</div>
       <div class="sessions-grid">${sessionCardsHtml}</div>
     `;
 
+    wireAggregateReport();
     // Wire prev/next. If there's only one date with data, just stay.
     document.getElementById('day-prev').addEventListener('click', () => setHash('day/' + prevDate));
     document.getElementById('day-next').addEventListener('click', () => setHash('day/' + nextDate));
@@ -3277,6 +3292,7 @@
     }
 
     const weekTitle = `Week of ${weekStart.toLocaleString(undefined, { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const weekFiles = cols.reduce((acc, c) => acc.concat(c.files), []);
 
     el.innerHTML = `
       <div class="cal-header">
@@ -3295,6 +3311,7 @@
           <div class="chart-legend-item"><span class="legend-swatch" style="background: #E24B4A;"></span>Critical</div>
         </div>
       </div>
+      ${buildAggregateReport('Weekly', weekFiles)}
       <div class="week-grid">
         ${cols.map(c => {
           const hasData = c.files.length > 0;
@@ -3324,6 +3341,7 @@
       </div>
     `;
 
+    wireAggregateReport();
     wireMetricSwitch(el, () => renderWeek(weekArg));
 
     // Wire nav
@@ -4278,6 +4296,206 @@
     });
   }
 
+  // Aggregate report builder shared by Day / Week / Month views. Takes a list
+  // of filenames and a scope label ('Daily', 'Weekly', 'Monthly'), walks the
+  // session summaries, and renders an accordion-style report in the same
+  // visual format as the session-level report. Keeps the viewer's reports
+  // consistent so switching views doesn't change how findings are presented.
+  function buildAggregateReport(scopeLabel, files) {
+    const autonomicOn = isAutonomicOn();
+    if (!files || !files.length) return '';
+    const summaries = files.map(fn => sessionsIndex[fn]).filter(Boolean);
+    if (!summaries.length) return '';
+
+    let totalDur = 0;
+    let weightedHR = 0, weightedRmssd = 0, rmssdDur = 0;
+    let totalPalps = 0, totalShifts = 0, totalFlushes = 0, totalChills = 0;
+    let totalWarnings = 0, totalGaps = 0, totalGapDur = 0;
+    let weightedTachy = 0;
+    let maxHR = 0, minHR = 9999;
+    let longest = null, mostPalps = null, widestRange = null;
+    const postureDur = { lying: 0, sitting: 0, standing: 0 };
+    let sleepMin = 0;
+    for (const s of summaries) {
+      totalDur += s.duration;
+      weightedHR += (s.hrAvg || 0) * s.duration;
+      if (s.rmssdAvg != null) { weightedRmssd += s.rmssdAvg * s.duration; rmssdDur += s.duration; }
+      totalPalps += s.palpCount || 0;
+      totalShifts += (s.hrDeltas || []).length;
+      totalFlushes += (s.flushes || []).length;
+      totalChills += (s.chillsWindows || []).length;
+      totalWarnings += s.warnCount || 0;
+      totalGaps += (s.connGaps || []).length;
+      totalGapDur += (s.connGaps || []).reduce((sum, g) => sum + (g.end - g.start), 0);
+      weightedTachy += (s.tachyPct || 0) * s.duration;
+      if (s.hrMax && s.hrMax.v > maxHR) maxHR = s.hrMax.v;
+      if (s.hrMin && s.hrMin.v < minHR) minHR = s.hrMin.v;
+      if (!longest || s.duration > longest.duration) longest = s;
+      if (!mostPalps || (s.palpCount || 0) > (mostPalps.palpCount || 0)) mostPalps = s;
+      if (s.hrMax && s.hrMin) {
+        const r = s.hrMax.v - s.hrMin.v;
+        if (!widestRange || r > (widestRange.hrMax.v - widestRange.hrMin.v)) widestRange = s;
+      }
+      for (const sp of (getEffectivePostureSpans(s) || [])) {
+        postureDur[sp.posture] = (postureDur[sp.posture] || 0) + (sp.end - sp.start);
+      }
+      for (const w of (getEffectiveSleepWindows(s) || [])) sleepMin += (w.end - w.start);
+    }
+    const avgHR = totalDur > 0 ? Math.round(weightedHR / totalDur) : null;
+    const avgRmssd = rmssdDur > 0 ? Math.round(weightedRmssd / rmssdDur) : null;
+    const avgTachy = totalDur > 0 ? Math.round(weightedTachy / totalDur) : 0;
+
+    const sections = [];
+    // Overview — always present.
+    {
+      const lines = [];
+      lines.push({ text: `${summaries.length} session${summaries.length === 1 ? '' : 's'}`, sub: `${formatDuration(totalDur)} total recorded` });
+      if (avgHR != null) lines.push({ text: `Average HR: ${avgHR} bpm`, sub: `range across all sessions ${minHR}–${maxHR} bpm` });
+      if (avgRmssd != null) lines.push({ text: `Average HRV (RMSSD): ${avgRmssd} ms`,
+        what: 'HRV is how much the gap between heartbeats changes from beat to beat. Higher usually means relaxed or recovered. Lower can mean stressed, tired, or fighting off something. Most adults sit between 20 and 90 ms at rest.' });
+      if (avgTachy > 0) lines.push({ text: `${avgTachy}% of recorded time above 100 bpm`, sub: 'tachycardia range' });
+      sections.push({ key: 'overview', title: 'Overview', lines });
+    }
+
+    // Notable sessions — highlights worth clicking into.
+    if (summaries.length > 1) {
+      const lines = [];
+      if (longest) lines.push({
+        text: `Longest session: ${formatDuration(longest.duration)}`,
+        sub: `avg ${longest.hrAvg} bpm${longest.rmssdAvg != null ? ` · HRV ${longest.rmssdAvg} ms` : ''}`,
+        at: null,
+      });
+      if (widestRange) {
+        const r = widestRange.hrMax.v - widestRange.hrMin.v;
+        lines.push({ text: `Widest HR range: Δ ${r} bpm`, sub: `${widestRange.hrMin.v} → ${widestRange.hrMax.v} bpm in one session` });
+      }
+      if (mostPalps && mostPalps.palpCount > 0) lines.push({ text: `Most palpitations in a session: ${mostPalps.palpCount}`, sub: `${(mostPalps.palpClusters || []).length} cluster${(mostPalps.palpClusters || []).length === 1 ? '' : 's'}` });
+      if (lines.length) sections.push({
+        key: 'notable',
+        title: 'Notable sessions',
+        desc: 'Quick callouts across every session in this period. Good places to click in if you\'re hunting for patterns — the longest session gives the most statistical weight, the widest HR range tends to mark orthostatic or activity-heavy sessions, and the heaviest palp day is worth reviewing in detail.',
+        lines,
+      });
+    }
+
+    // Palpitations aggregate
+    if (totalPalps > 0) {
+      sections.push({
+        key: 'palps',
+        title: 'Palpitations',
+        desc: 'Total ectopic beats across this period. A few per session is routine for most people; frequent clusters or palps that track a specific trigger (standing, breath-holding, post-meal) are the ones worth paying attention to.',
+        count: totalPalps,
+        lines: [{ text: `${totalPalps} ectopic beat${totalPalps === 1 ? '' : 's'} detected`, sub: `across ${summaries.length} session${summaries.length === 1 ? '' : 's'}` }],
+      });
+    }
+
+    // HR shifts aggregate
+    if (totalShifts > 0) {
+      sections.push({
+        key: 'shifts',
+        title: 'HR shifts',
+        desc: 'Count of qualifying HR jumps across this period. Threshold and window are configurable via the gear icon at the top right; default is the clinical POTS criterion (30 bpm within 10 minutes).',
+        count: totalShifts,
+        lines: [{ text: `${totalShifts} shift${totalShifts === 1 ? '' : 's'} detected` }],
+      });
+    }
+
+    if (autonomicOn && totalFlushes > 0) {
+      sections.push({
+        key: 'flushes',
+        title: 'Sympathetic flushes',
+        desc: 'Count of quick HR-spike-plus-HRV-drop patterns across the period. Each one marks a short sympathetic activation burst; trigger-tracking tends to be more useful than raw count.',
+        count: totalFlushes,
+        lines: [{ text: `${totalFlushes} flush${totalFlushes === 1 ? '' : 'es'} across all sessions` }],
+      });
+    }
+    if (autonomicOn && totalChills > 0) {
+      sections.push({
+        key: 'chills',
+        title: 'Chills / high volatility',
+        desc: 'Stretches where the beat-to-beat HR jittered more than baseline across this period. Often literal chills (muscle tremor leaks into the strap signal); can also show up during bigger autonomic waves.',
+        count: totalChills,
+        lines: [{ text: `${totalChills} high-volatility window${totalChills === 1 ? '' : 's'}` }],
+      });
+    }
+
+    // Posture & sleep
+    {
+      const lines = [];
+      if (sleepMin > 0) lines.push({ text: `Sleep windows: ${formatDuration(sleepMin)} total`, sub: 'auto-detected from low HR + high HRV stretches' });
+      const postureParts = [];
+      if (postureDur.lying > 0) postureParts.push(`${formatDuration(postureDur.lying)} lying`);
+      if (postureDur.sitting > 0) postureParts.push(`${formatDuration(postureDur.sitting)} sitting`);
+      if (postureDur.standing > 0) postureParts.push(`${formatDuration(postureDur.standing)} standing`);
+      if (postureParts.length) lines.push({ text: 'Posture time', sub: postureParts.join(' · ') });
+      if (lines.length) sections.push({
+        key: 'posture',
+        title: 'Posture & sleep',
+        desc: 'Sleep comes from the auto-detector; posture from whatever you tagged in the live monitor. Tagging posture consistently improves the accuracy of every other stat here because HR changes dramatically with position.',
+        lines,
+      });
+    }
+
+    // Warnings & connection
+    if (totalWarnings > 0 || totalGaps > 0) {
+      const lines = [];
+      if (totalWarnings > 0) lines.push({ text: `${totalWarnings} warning segment${totalWarnings === 1 ? '' : 's'}`, sub: 'threshold crossings you configured in the live monitor' });
+      if (totalGaps > 0) lines.push({ text: `${totalGaps} BLE gap${totalGaps === 1 ? '' : 's'}`, sub: `${formatDuration(totalGapDur)} of lost-signal time total` });
+      sections.push({
+        key: 'connection',
+        title: 'Warnings & connection',
+        desc: 'Warnings are the physiological threshold crossings you set in the live monitor (HR high/low, HRV crash, palps elevated). BLE gaps are hardware — strap dropped contact, no data for those stretches.',
+        lines,
+      });
+    }
+
+    // Render using the same DOM structure as session-level reports.
+    const chevron = `<svg class="insight-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
+    const childChevron = `<svg class="insight-child-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
+    const summaryBits = [];
+    if (avgHR != null) summaryBits.push(`avg ${avgHR} bpm`);
+    summaryBits.push(`${summaries.length} session${summaries.length === 1 ? '' : 's'}`);
+    if (totalPalps > 0) summaryBits.push(`${totalPalps} palp${totalPalps === 1 ? '' : 's'}`);
+    const summaryText = summaryBits.join(' · ');
+    const bodyHtml = sections.map(sec => {
+      const countHtml = sec.count != null ? `<span class="insight-count">${sec.count}</span>` : '';
+      const descHtml = sec.desc ? `<div class="insight-desc">${escape(sec.desc)}</div>` : '';
+      const listHtml = sec.lines.map(l => {
+        const subParts = [];
+        if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
+        const subHtml = subParts.length ? `<div class="insight-sub">${subParts.join(' · ')}</div>` : '';
+        const whatHtml = (autonomicOn && l.what) ? `<div class="insight-what">${escape(l.what)}</div>` : '';
+        return `<li><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
+      }).join('');
+      const collapsedCls = sec.key === 'overview' ? '' : ' collapsed';
+      return `<div class="insight-section${collapsedCls}" data-key="${sec.key}">
+        <div class="insight-section-title">${childChevron}<span>${escape(sec.title)}</span>${countHtml}</div>
+        <div class="insight-section-body">${descHtml}<ul>${listHtml}</ul></div>
+      </div>`;
+    }).join('');
+    return `<div class="insight-box collapsed" id="aggregate-report">
+      <div class="insight-master-head">
+        ${chevron}
+        <span>${escape(scopeLabel)} report</span>
+        <span class="insight-master-summary">${escape(summaryText)}</span>
+      </div>
+      <div class="insight-body">${bodyHtml}</div>
+    </div>`;
+  }
+  // Wire the aggregate report's accordion behaviour (master-caret toggle +
+  // per-section carets). Called after each D/W/M render has injected the HTML.
+  function wireAggregateReport() {
+    const box = document.getElementById('aggregate-report');
+    if (!box) return;
+    box.querySelector('.insight-master-head').addEventListener('click', () => {
+      box.classList.toggle('collapsed');
+    });
+    box.querySelectorAll('.insight-section[data-key]').forEach(sec => {
+      const title = sec.querySelector('.insight-section-title');
+      title.addEventListener('click', () => sec.classList.toggle('collapsed'));
+    });
+  }
+
   function renderInsight(s) {
     // Build an ordered list of accordion sections. Each entry:
     //   { key, title, desc?, count?, lines: [{ text, sub?, at? }] }
@@ -4355,7 +4573,7 @@
       sections.push({
         key: 'noteworthy',
         title: 'Noteworthy moments',
-        desc: 'Stretches where your HR or HRV behaved differently from the rest of this session. These are pattern callouts only. Context matters, and the app is not a medical tool.',
+        desc: 'Stretches where your HR or HRV behaved noticeably differently from the rest of the session. Each callout is a window where the rolling-window median sat more than 1.5 MAD (a robust standard-deviation substitute) away from the session baseline, with a floor of 10 bpm for HR and 35% for HRV so small drifts don\'t trigger. These are pattern callouts based on your own data; they don\'t diagnose anything.',
         count: s.noteworthy.length,
         lines,
       });
@@ -4385,7 +4603,7 @@
       sections.push({
         key: 'palps',
         title: 'Palpitations',
-        desc: 'An ectopic beat is a heartbeat that fires off-rhythm. A few per session is very common. Bigger clusters tend to feel like a flutter or a skipped beat in your chest.',
+        desc: 'An ectopic beat is a heartbeat that fires off-rhythm — the interval between beats is noticeably longer or shorter than expected. A handful per session is routine for most people and rarely reflects anything wrong. Bigger clusters, or beats that keep pace with a specific trigger like standing or breath-holding, tend to be the ones worth paying attention to. What they feel like in the chest varies: some people describe a flutter, a "skipped" beat, or a heavy thump.',
         count: s.palpCount,
         lines,
       });
@@ -4409,7 +4627,7 @@
       sections.push({
         key: 'shifts',
         title: 'HR shifts',
-        desc: 'Big jumps in heart rate that happened quickly. Could be standing up, a scare, caffeine, exercise, or strong emotion.',
+        desc: 'Big jumps in heart rate that happened quickly, rising or falling beyond the threshold you set in the viewer settings (gear icon, top right). Common triggers include standing up from seated, exercise, caffeine, a loud noise, or strong emotion. Default detection window is 10 minutes with a 30 bpm threshold, which matches the clinical POTS orthostatic criterion; a smaller threshold surfaces more ordinary everyday jumps.',
         count: s.hrDeltas.length,
         lines,
       });
@@ -4425,7 +4643,7 @@
       sections.push({
         key: 'flushes',
         title: 'Sympathetic flushes',
-        desc: 'A quick HR spike paired with an HRV drop at the same time. This pattern shows up during short bursts of fight-or-flight activation. Common triggers include standing up, cold, pain, a sudden noise, or strong emotion.',
+        desc: 'A quick HR spike paired with a drop in HRV at the same time — the fingerprint of a short burst of fight-or-flight activation. In dysautonomia this often shows up as a cold flush, a sudden wave of warmth, or a prickly-skin sensation; in everyday life the same pattern fires briefly when you stand up fast, hear a sudden noise, take a cold shower, feel a strong emotion, or get an unexpected adrenaline kick. Each callout below is one detected flush with its magnitude and timestamp.',
         count: s.flushes.length,
         lines,
       });
@@ -4442,7 +4660,7 @@
       sections.push({
         key: 'chills',
         title: 'Chills / high volatility',
-        desc: 'A stretch where the HR jitters more than the rest of the session. Often lines up with shivering or a bigger autonomic wave.',
+        desc: 'A stretch where the beat-to-beat HR jitters much more than the rest of the session — the rolling standard deviation sits at 2.5× or more of baseline. Literal chills are the most common cause (muscle tremor introduces noise into the strap signal), but the same fingerprint shows up during bigger autonomic waves that aren\'t quite full flushes. Each window below has its duration, start time, and how many times above baseline the volatility was running.',
         count: s.chillsWindows.length,
         lines: [{ text: `${formatDuration(total)} total across ${s.chillsWindows.length} window${s.chillsWindows.length === 1 ? '' : 's'}` }, ...lines],
       });
@@ -4474,7 +4692,7 @@
         sections.push({
           key: 'posture',
           title: 'Posture & sleep',
-          desc: 'Sleep is guessed from long stretches of low HR and high HRV together. Posture is whatever you tagged during the session.',
+          desc: 'Sleep windows are detected automatically from stretches where your HR drifts toward its lowest values AND your HRV sits above the session median at the same time — the combination that reliably shows up during actual sleep. Posture comes from whatever you tagged with the P button in the live monitor (lying / sitting / standing). Since HR changes dramatically with posture, tagging it meaningfully improves the quality of every other stat in this report.',
           lines,
         });
       }
@@ -4493,7 +4711,7 @@
       sections.push({
         key: 'warnings',
         title: 'Warnings',
-        desc: 'Moments when your HR or HRV crossed a threshold you set in the live monitor.',
+        desc: 'Moments when your HR or HRV crossed one of the alert thresholds you configured in the live monitor\'s Thresholds tab. Four kinds get logged: HR high (above your ceiling), HR low (below your floor), HRV crash (below the RMSSD floor), and palpitations elevated (ectopic rate above your per-minute limit). Each warning segment below shows which kind fired and how long it lasted.',
         count: s.warnCount,
         lines,
       });
@@ -4508,7 +4726,7 @@
       sections.push({
         key: 'connection',
         title: 'Connection gaps',
-        desc: 'Short windows where the chest strap lost Bluetooth contact with the app. No HR data got recorded during these stretches.',
+        desc: 'Short windows where the chest strap and the app briefly lost Bluetooth contact. No HR data is recorded during these stretches, so any analysis skips over them; the gaps aren\'t a sign of anything physiological. Usual culprits: the strap drifting out of range, the computer going to sleep briefly, another Bluetooth device hogging the radio, or low strap battery. If gaps cluster near the end of a session, charge the strap.',
         count: s.connGaps.length,
         lines: [
           { text: `${s.connGaps.length} gap${s.connGaps.length === 1 ? '' : 's'} · ${formatDuration(total)} total` },
