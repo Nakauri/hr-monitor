@@ -45,6 +45,19 @@
     align-items: flex-start;
     gap: 12px;
   }
+  /* Shrink-to-fit: when only one widget is showing, or the user wants the
+     container to hug whatever is visible, don't leave empty space. Useful for
+     small OBS sources where you only want e.g. an HRV readout in a corner. */
+  body.shrink-to-fit #overlay-zone {
+    width: fit-content;
+    max-width: 100%;
+    padding: 8px;
+    gap: 8px;
+  }
+  body.shrink-to-fit .widget,
+  body.shrink-to-fit .breath-widget {
+    padding: 10px 14px;
+  }
 
   .widget, .breath-widget {
     background: #0a0a0a;
@@ -245,10 +258,24 @@
   body.no-live-hr #breath-widget { display: none; }
   body.no-inline-trends .inline-trend,
   body.no-inline-trends .inline-live-trace { display: none; }
-  /* Compact overrides from hr_monitor */
-  body.style-compact.no-hrv .compact-hrv,
-  body.style-compact.no-hrv #overlay-zone .compact-hrv { display: none; }
-  body.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
+  /* Compact-mode overrides. Compact uses a single #hr-widget that contains both
+     HR (left cell) and HRV (right cell), so the global `body.no-hr { display:none }`
+     rule would incorrectly blank the entire widget. These rules hide just the
+     HR-specific children while keeping HRV visible, and vice versa. If BOTH are
+     toggled off, the whole widget is hidden. */
+  body.style-compact.no-hrv #overlay-zone .compact-hrv,
+  body.style-compact.no-hrv #overlay-zone .compact-trend { display: none !important; }
+  body.style-compact.no-hrv #overlay-zone #hr-widget { grid-template-columns: 1fr !important; }
+  body.style-compact.no-hr #overlay-zone #hr-widget { display: grid !important; }
+  body.style-compact.no-hr #overlay-zone #hr-widget .big-number,
+  body.style-compact.no-hr #overlay-zone #hr-widget .widget-label,
+  body.style-compact.no-hr #overlay-zone #hr-widget .heart-icon,
+  body.style-compact.no-hr #overlay-zone #hr-widget .palp-chip,
+  body.style-compact.no-hr #overlay-zone #hr-widget .inline-trend,
+  body.style-compact.no-hr #overlay-zone #hr-widget .inline-live-trace,
+  body.style-compact.no-hr #overlay-zone #hr-widget #hr-pips { display: none !important; }
+  body.style-compact.no-hr #overlay-zone #hr-widget { grid-template-columns: 1fr !important; }
+  body.style-compact.no-hr.no-hrv #overlay-zone #hr-widget { display: none !important; }
 
   /* Waiting state when no data has arrived yet */
   #waiting {
@@ -374,6 +401,7 @@
   const hideHrv = params.get('hide_hrv') === '1';
   const hideLiveHr = params.get('hide_live_hr') === '1';
   const hideInline = params.get('hide_inline') === '1';
+  const shrinkToFit = params.get('shrink') === '1';
 
   document.body.classList.add('bg-' + bg);
   document.body.classList.add('style-' + style);
@@ -382,6 +410,7 @@
   if (hideHrv) document.body.classList.add('no-hrv');
   if (hideLiveHr) document.body.classList.add('no-live-hr');
   if (hideInline) document.body.classList.add('no-inline-trends');
+  if (shrinkToFit) document.body.classList.add('shrink-to-fit');
   if (params.get('nodot') === '1') document.body.classList.add('no-dot');
   const zone = $('overlay-zone');
   zone.className = '';
