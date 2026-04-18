@@ -123,8 +123,10 @@
     overflow: hidden;
   }
   /* Shrink-to-fit preview — container hugs the visible widgets instead of
-     filling the left column. Gives an accurate sense of how tight the OBS
-     source will be. */
+     filling the left column. Also shrinks the enclosing app-grid column so
+     the preview reflects the actual OBS source size (otherwise you'd see a
+     narrow widget floating in a 380px black block). */
+  body.shrink-to-fit #app { grid-template-columns: auto 1fr; }
   body.shrink-to-fit #overlay-zone {
     width: fit-content;
     max-width: 100%;
@@ -134,6 +136,17 @@
   body.shrink-to-fit #overlay-zone .widget,
   body.shrink-to-fit #overlay-zone .breath-widget {
     padding: 10px 14px;
+  }
+  /* Compact's grid uses fr units (1.75fr 1fr) which gladly stretch to fill
+     available space. In shrink-to-fit mode we want each column to be content-
+     sized instead, so turning off Live HR trace actually narrows the widget
+     (big-number has its intrinsic width instead of a proportional slice). */
+  body.shrink-to-fit #overlay-zone.style-compact #hr-widget {
+    grid-template-columns: auto auto;
+  }
+  body.shrink-to-fit #overlay-zone.style-compact #hr-widget .inline-live-trace {
+    width: 120px;
+    flex: 0 0 120px;
   }
   /* Horizontal layout: overlay becomes a top banner. Widgets sit side-by-side. */
   body.layout-horizontal #overlay-zone {
@@ -294,8 +307,9 @@
   #overlay-zone.style-compact .inline-trend { display: none; }
   #overlay-zone.style-compact .inline-live-trace { display: block; }
   /* User toggle to hide inline trends in Bold/Minimal/Neon */
-  #overlay-zone.no-inline-trends .inline-trend,
-  #overlay-zone.no-inline-trends .inline-live-trace { display: none; }
+  /* "Inline mini trends" only affects the tiny mini-chart next to the big HR number,
+     NOT the live HR trace (that has its own showLiveHr toggle). */
+  #overlay-zone.no-inline-trends .inline-trend { display: none; }
   /* Widget visibility toggles */
   #overlay-zone.no-hr #hr-widget,
   #overlay-zone.no-hrv #rmssd-widget,
@@ -306,10 +320,14 @@
      the HR-specific children while keeping HRV visible, and vice versa. When
      BOTH are hidden the whole widget disappears. High-specificity selectors
      (two ids + multiple classes) so they beat `.style-compact #hr-widget`. */
-  #overlay-zone.style-compact.no-hrv .compact-hrv,
-  #overlay-zone.style-compact.no-hrv .compact-trend { display: none !important; }
+  /* HRV off: hide just the HRV readout. The .compact-trend at the bottom draws
+     BOTH HR and RMSSD so we keep it visible — still useful as an HR trace. */
+  #overlay-zone.style-compact.no-hrv .compact-hrv { display: none !important; }
   #overlay-zone.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
-  #overlay-zone.style-compact.no-hr #hr-widget { display: grid !important; }
+  /* HR off: hide the HR-specific children (big number, pips, heart icon, etc.)
+     AND promote HRV into the full-width slot so it doesn't stay stranded in
+     the right column of a now-empty grid. */
+  #overlay-zone.style-compact.no-hr #hr-widget { display: grid !important; grid-template-columns: 1fr !important; }
   #overlay-zone.style-compact.no-hr #hr-widget .big-number,
   #overlay-zone.style-compact.no-hr #hr-widget .widget-label,
   #overlay-zone.style-compact.no-hr #hr-widget .heart-icon,
@@ -317,7 +335,13 @@
   #overlay-zone.style-compact.no-hr #hr-widget .inline-trend,
   #overlay-zone.style-compact.no-hr #hr-widget .inline-live-trace,
   #overlay-zone.style-compact.no-hr #hr-widget #hr-pips { display: none !important; }
-  #overlay-zone.style-compact.no-hr #hr-widget { grid-template-columns: 1fr !important; }
+  #overlay-zone.style-compact.no-hr #hr-widget .compact-hrv {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    align-items: flex-start !important;
+    border-left: none !important;
+    padding-left: 0 !important;
+  }
   #overlay-zone.style-compact.no-hr.no-hrv #hr-widget { display: none !important; }
   #overlay-zone.style-compact.no-live-hr .inline-live-trace { display: none; }
   #overlay-zone.style-compact.no-inline-trends .compact-trend { display: none; }

@@ -58,6 +58,15 @@
   body.shrink-to-fit .breath-widget {
     padding: 10px 14px;
   }
+  /* Compact grid normally uses 1.75fr 1fr which stretches. In shrink-to-fit we
+     want columns to size to content so toggles actually narrow the widget. */
+  body.shrink-to-fit.style-compact #overlay-zone #hr-widget {
+    grid-template-columns: auto auto;
+  }
+  body.shrink-to-fit.style-compact #overlay-zone #hr-widget .inline-live-trace {
+    width: 120px;
+    flex: 0 0 120px;
+  }
 
   .widget, .breath-widget {
     background: #0a0a0a;
@@ -256,17 +265,21 @@
   body.no-hr #hr-widget { display: none; }
   body.no-hrv #rmssd-widget { display: none; }
   body.no-live-hr #breath-widget { display: none; }
-  body.no-inline-trends .inline-trend,
-  body.no-inline-trends .inline-live-trace { display: none; }
+  /* "Inline mini trends" only affects the tiny mini-chart next to the big HR
+     number. The live HR trace has its own toggle (showLiveHr) — don't lump it in. */
+  body.no-inline-trends .inline-trend { display: none; }
   /* Compact-mode overrides. Compact uses a single #hr-widget that contains both
      HR (left cell) and HRV (right cell), so the global `body.no-hr { display:none }`
      rule would incorrectly blank the entire widget. These rules hide just the
      HR-specific children while keeping HRV visible, and vice versa. If BOTH are
      toggled off, the whole widget is hidden. */
-  body.style-compact.no-hrv #overlay-zone .compact-hrv,
-  body.style-compact.no-hrv #overlay-zone .compact-trend { display: none !important; }
+  /* HRV off: hide just the HRV readout. Keep .compact-trend visible — it also
+     draws the HR trace, so it's useful even with HRV hidden. */
+  body.style-compact.no-hrv #overlay-zone .compact-hrv { display: none !important; }
   body.style-compact.no-hrv #overlay-zone #hr-widget { grid-template-columns: 1fr !important; }
-  body.style-compact.no-hr #overlay-zone #hr-widget { display: grid !important; }
+  /* HR off: hide HR-specific children AND promote HRV into the full-width slot so
+     it doesn't end up stranded in the (now empty) right column of a 1-col grid. */
+  body.style-compact.no-hr #overlay-zone #hr-widget { display: grid !important; grid-template-columns: 1fr !important; }
   body.style-compact.no-hr #overlay-zone #hr-widget .big-number,
   body.style-compact.no-hr #overlay-zone #hr-widget .widget-label,
   body.style-compact.no-hr #overlay-zone #hr-widget .heart-icon,
@@ -274,7 +287,13 @@
   body.style-compact.no-hr #overlay-zone #hr-widget .inline-trend,
   body.style-compact.no-hr #overlay-zone #hr-widget .inline-live-trace,
   body.style-compact.no-hr #overlay-zone #hr-widget #hr-pips { display: none !important; }
-  body.style-compact.no-hr #overlay-zone #hr-widget { grid-template-columns: 1fr !important; }
+  body.style-compact.no-hr #overlay-zone #hr-widget .compact-hrv {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    align-items: flex-start !important;
+    border-left: none !important;
+    padding-left: 0 !important;
+  }
   body.style-compact.no-hr.no-hrv #overlay-zone #hr-widget { display: none !important; }
 
   /* Waiting state when no data has arrived yet */
@@ -546,6 +565,10 @@
     $('compact-hrv-value').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
     applyStage($('hr-widget'), msg.hrStage);
     applyStage($('rmssd-widget'), msg.rmssdStage);
+    // Compact mode shows the HRV readout inside the HR widget (.compact-hrv-value),
+    // which isn't reached by the stage class on #rmssd-widget — apply it directly
+    // so HRV numbers colorize correctly in compact too.
+    applyStage($('compact-hrv-value'), msg.rmssdStage);
     setPips($('hr-pips'), msg.hrStage);
     setPips($('rmssd-pips'), msg.rmssdStage);
     // Tint charts to match stage — HR-side charts track the HR stage; RMSSD-side
