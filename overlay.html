@@ -5,19 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HR Monitor · Overlay</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<link rel="stylesheet" href="./widget.css">
 <style>
-  /* CSS must stay in sync with hr_monitor.html. */
+  /* Page-specific chrome only. All widget rules live in widget.css. */
   :root {
     --bg: #0a0a0a;
-    --bg-panel: #0a0a0a;
-    --bg-input: #141414;
-    --border: #1f1f1f;
     --text: #d8d8d8;
-    --text-dim: #8a8a8a;
-    --text-faint: #5a5a5a;
-    --accent-hr: #E89858;
-    --accent-rmssd: #5DCAA5;
-    --warn-palp: #D76CBA;
+    --warn-high:  #E89858;
+    --warn-low:   #7DB8E8;
+    --warn-crash: #E24B4A;
+    --warn-palp:  #D76CBA;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -35,228 +32,16 @@
   body.bg-black,
   body.bg-black #overlay-zone { background: #000000; }
 
+  /* Zone padding stays 0 — the monitor pins this element to .widget-row's
+     size, and padding here would eat the width and clip the HRV column. */
   #overlay-zone {
     background: transparent;
-    /* Padding must be 0: the monitor measures .widget-row (no zone padding)
-       and pins #overlay-zone to that size. Zone padding here would clip HRV. */
     padding: 0;
     display: flex;
     flex-direction: column;
     gap: 0;
-    width: fit-content;
-    max-width: 100%;
   }
   body.bg-dark #overlay-zone { background: #000; }
-
-  #overlay-zone .widget-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    width: 100%;
-  }
-
-  .widget {
-    background: #0a0a0a;
-    border: 1px solid #1f1f1f;
-    border-radius: 16px;
-    padding: 14px 18px;
-    position: relative;
-    transition: border-color 0.3s, box-shadow 0.3s;
-  }
-
-  .widget-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 0;
-    /* Anchor for the absolutely-positioned .conn-indicator. */
-    position: relative;
-  }
-  .header-left { display: flex; align-items: center; gap: 10px; }
-  .widget-label {
-    font-size: 14px; font-weight: 600;
-    letter-spacing: 0.1em; color: #8a8a8a;
-    text-transform: uppercase;
-  }
-  .heart-icon {
-    width: 22px; height: 22px;
-    fill: currentColor;
-    animation: heartbeat 1s ease-in-out infinite;
-    transition: color 0.4s;
-  }
-  @keyframes heartbeat {
-    0%, 100% { transform: scale(1); }
-    15% { transform: scale(1.18); }
-    30% { transform: scale(1); }
-    45% { transform: scale(1.12); }
-    60% { transform: scale(1); }
-  }
-
-  .big-number {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-weight: 900;
-    font-size: 64px;
-    line-height: 1;
-    letter-spacing: -0.04em;
-    font-variant-numeric: tabular-nums;
-    transition: color 0.4s;
-    text-align: left;
-    padding: 0;
-  }
-
-  .number-row { display: flex; align-items: stretch; gap: 14px; }
-  .number-row > .big-number { flex: 0 0 auto; }
-  .inline-live-trace {
-    flex: 1 1 0;
-    min-width: 140px;
-    position: relative;
-    padding: 6px 0 10px;
-    height: 68px;
-    max-height: 68px;
-    overflow: hidden;
-  }
-  .inline-live-trace canvas {
-    width: 100% !important;
-    height: 100% !important;
-    max-height: 100% !important;
-  }
-
-  .pips { display: flex; gap: 6px; height: 6px; margin-top: 6px; }
-  .pip { flex: 1; background: #1a1a1a; border-radius: 2px; transition: background 0.4s; }
-
-  .stage-low { color: #7DB8E8; }
-  .stage-low .pip.active { background: #7DB8E8; }
-  .stage-normal { color: #B8D97E; }
-  .stage-normal .pip.active { background: #B8D97E; }
-  .stage-elevated { color: #F0C75E; }
-  .stage-elevated .pip.active { background: #F0C75E; }
-  .stage-high { color: #E89858; }
-  .stage-high .pip.active { background: #E89858; }
-  .stage-critical { color: #E24B4A; }
-  .stage-critical .pip.active { background: #E24B4A; }
-
-  .palp-chip {
-    display: none;
-    align-items: center;
-    gap: 5px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: rgba(215,108,186,0.14);
-    border: 1px solid var(--warn-palp);
-    color: var(--warn-palp);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-  }
-  .palp-chip.active { display: inline-flex; }
-  .palp-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--warn-palp);
-    box-shadow: 0 0 6px var(--warn-palp);
-  }
-
-  /* Fixed width so OBS source size stays stable across warning strings. */
-  .warning-banner {
-    display: none;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 6px;
-    padding: 2px 9px;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    width: 150px;
-    min-width: 150px;
-    margin-left: auto;
-  }
-  .warning-banner.active { display: inline-flex; }
-  .warning-banner.warn-high   { border-color: #E24B4A; background: rgba(226,75,74,0.14);  color: #E24B4A; }
-  .warning-banner.warn-low    { border-color: #7DB8E8; background: rgba(125,184,232,0.12); color: #7DB8E8; }
-  .warning-banner.warn-crash  { border-color: #BA7517; background: rgba(186,117,23,0.18); color: #F0C75E; }
-  .warning-banner.warn-palp   { border-color: #D76CBA; background: rgba(215,108,186,0.18); color: #D76CBA; }
-  .warning-banner.status-reconnecting { border-color: #6a6a6a; background: rgba(100,100,100,0.14); color: #b8b8b8; }
-  .warning-banner.status-reconnecting .warning-banner-icon svg { animation: conn-pulse 1.4s ease-in-out infinite; }
-  .warning-banner-icon { display: inline-flex; flex-shrink: 0; }
-  .warning-banner-icon svg { width: 12px; height: 12px; fill: currentColor; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-  .warning-banner-text { overflow: hidden; text-overflow: ellipsis; }
-
-  #hr-widget {
-    display: grid;
-    /* Columns hug content so disabling widgets shrinks the card. */
-    grid-template-columns: auto auto;
-    grid-template-rows: auto 68px 14px;
-    gap: 10px 16px;
-    align-items: start;
-  }
-  #hr-widget > .widget-header { grid-column: 1 / -1; grid-row: 1; }
-  #hr-widget .number-row { grid-column: 1; grid-row: 2; }
-  #hr-widget #hr-pips { grid-column: 1; grid-row: 3; }
-
-  .compact-hrv {
-    grid-column: 2; grid-row: 2 / 4;
-    display: flex; flex-direction: column;
-    justify-content: center; align-items: flex-end;
-    border-left: 1px solid #1f1f1f; padding-left: 16px;
-  }
-  .compact-hrv-label {
-    font-size: 12px; color: #c8c8c8;
-    text-transform: uppercase; letter-spacing: 0.12em;
-    font-weight: 700; margin-bottom: 3px;
-  }
-  .compact-hrv-value {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-weight: 900; font-size: 36px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.03em;
-    transition: color 0.4s;
-  }
-  .compact-hrv-unit {
-    font-size: 11px; color: #9a9a9a;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    font-weight: 600; margin-top: 4px;
-  }
-  #hr-widget > .compact-trend {
-    grid-column: 1 / -1; grid-row: 4;
-    height: 64px; position: relative;
-    margin-top: 12px; padding: 6px 0 4px;
-    border-top: 1px solid #1f1f1f;
-  }
-
-  /* HR off hides only the BPM readout. Pips + live trace stay. */
-  body.no-hr #hr-widget .widget-label,
-  body.no-hr #hr-widget .heart-icon,
-  body.no-hr #hr-widget .palp-chip,
-  body.no-hr #hr-widget .big-number { display: none !important; }
-
-  body.no-hrv .compact-hrv { display: none !important; }
-  body.no-hrv #hr-widget { grid-template-columns: auto !important; }
-
-  body.no-hr.no-hrv #hr-widget { display: none !important; }
-  body.no-live-hr .inline-live-trace { display: none !important; }
-  body.no-inline-trends .compact-trend { display: none !important; }
-  body.no-palp-chip .palp-chip,
-  body.no-palp-chip #palp-chip { display: none !important; }
-  body.no-warning .warning-banner { display: none !important; }
-  body.no-conn-dot .conn-indicator { display: none !important; }
-
-  /* Above-placement reserves a fixed slot so the widget never reflows. */
-  .warning-slot-above { display: none; }
-  body.warning-above .warning-slot-above {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 34px;
-    padding: 2px 0;
-  }
-  body.warning-above.no-warning .warning-slot-above { display: none !important; }
-  body.warning-above .widget-header > .warning-banner { display: none !important; }
 
   #waiting {
     position: fixed; inset: 0;
@@ -270,45 +55,6 @@
   #waiting .hint { font-size: 10px; color: #3a3a3a; }
   body.connected #waiting { display: none; }
 
-  /* Absolute so the reconnecting label doesn't push the widget wider. */
-  .conn-indicator {
-    position: absolute;
-    top: 0;
-    right: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    pointer-events: none;
-  }
-  .conn-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: #3a3a3a;
-    flex-shrink: 0;
-    transition: background 0.3s, box-shadow 0.3s;
-  }
-  .conn-text {
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    color: #8a8a8a;
-    text-transform: uppercase;
-    font-weight: 600;
-    display: none;
-  }
-  body.conn-live .conn-dot {
-    background: #5DCAA5;
-    box-shadow: 0 0 6px rgba(93,202,165,0.6);
-  }
-  body.conn-reconnecting .conn-dot {
-    background: #6a6a6a;
-    animation: conn-pulse 1.4s ease-in-out infinite;
-  }
-  body.conn-reconnecting .conn-text { display: inline; }
-  @keyframes conn-pulse {
-    0%, 100% { opacity: 0.55; }
-    50% { opacity: 1; }
-  }
   body.no-dot .conn-indicator { display: none; }
 </style>
 </head>
@@ -421,7 +167,7 @@
     'warn-high':  'Heart rate high',
     'warn-low':   'Heart rate low',
     'warn-crash': 'HRV crashed',
-    'warn-palp':  'Palpitations elevated',
+    'warn-palp':  'Ectopics high',
     'status-reconnecting': 'Reconnecting…',
   };
   function applyStatusBanner(warnType, connState) {

@@ -1,0 +1,367 @@
+/* widget.css — shared widget chrome for hr_monitor.html and overlay.html.
+   Single source of truth for everything that MUST render identically in the
+   monitor preview and the OBS overlay. Page-specific chrome (control panel,
+   chroma-key backgrounds, waiting state, crop guide) stays in its own file.
+
+   Colour vars (--warn-high, --warn-low, --warn-crash, --warn-palp) are
+   declared by each page. */
+
+/* Container that holds the widget card. */
+#overlay-zone .widget-row {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  width: fit-content;
+  max-width: 500px;
+}
+
+/* Widget card + grid. auto auto columns so each column hugs content; grid
+   collapses to single column when HRV is hidden (see toggle rules below). */
+#hr-widget {
+  background: #0a0a0a;
+  border: 1px solid #1f1f1f;
+  border-radius: 16px;
+  padding: 14px 18px;
+  position: relative;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto 68px 14px;
+  gap: 10px 16px;
+  align-items: start;
+}
+#hr-widget.warn-crash {
+  border-color: var(--warn-crash);
+  box-shadow: 0 0 0 1px var(--warn-crash), 0 0 24px rgba(186,117,23,0.2);
+}
+
+#hr-widget > .widget-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 0;
+  position: relative;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.widget-label {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #8a8a8a;
+  text-transform: uppercase;
+}
+.heart-icon {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+  animation: heartbeat 1s ease-in-out infinite;
+  transition: color 0.4s;
+}
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  15% { transform: scale(1.18); }
+  30% { transform: scale(1); }
+  45% { transform: scale(1.12); }
+  60% { transform: scale(1); }
+}
+
+.palp-chip {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(215,108,186,0.14);
+  border: 1px solid var(--warn-palp);
+  color: var(--warn-palp);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+.palp-chip.active { display: inline-flex; }
+.palp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn-palp);
+  box-shadow: 0 0 6px var(--warn-palp);
+}
+
+/* Connection indicator. Absolute so the reconnecting label can't push the
+   widget wider when it appears. */
+.conn-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.conn-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #3a3a3a;
+  flex-shrink: 0;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.conn-text {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #8a8a8a;
+  text-transform: uppercase;
+  font-weight: 600;
+  display: none;
+}
+body.conn-live .conn-dot {
+  background: #5DCAA5;
+  box-shadow: 0 0 6px rgba(93,202,165,0.6);
+}
+body.conn-reconnecting .conn-dot {
+  background: #6a6a6a;
+  animation: conn-pulse 1.4s ease-in-out infinite;
+}
+body.conn-reconnecting .conn-text { display: inline; }
+@keyframes conn-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* HR number + live trace. Number-row sits in grid col 1 row 2. */
+#hr-widget .number-row {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  grid-column: 1;
+  grid-row: 2;
+}
+#hr-widget .big-number {
+  font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+  font-weight: 900;
+  font-size: 64px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.4s;
+  text-align: left;
+  padding: 0;
+  flex: 0 0 auto;
+}
+/* min-width 140 so live trace reads as a line when visible; when hidden the
+   whole element drops out of flow and column 1 collapses to big-number. */
+#hr-widget .inline-live-trace {
+  flex: 1 1 0;
+  min-width: 140px;
+  position: relative;
+  padding: 6px 0 10px;
+  height: 68px;
+  max-height: 68px;
+  overflow: hidden;
+}
+#hr-widget .inline-live-trace canvas {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+}
+
+#hr-widget #hr-pips {
+  grid-column: 1;
+  grid-row: 3;
+  margin-top: 6px;
+}
+.pips {
+  display: flex;
+  gap: 6px;
+  height: 6px;
+}
+.pip {
+  flex: 1;
+  background: #1a1a1a;
+  border-radius: 2px;
+  transition: background 0.4s;
+}
+
+.stage-low { color: #7DB8E8; }
+.stage-low .pip.active { background: #7DB8E8; }
+.stage-normal { color: #B8D97E; }
+.stage-normal .pip.active { background: #B8D97E; }
+.stage-elevated { color: #F0C75E; }
+.stage-elevated .pip.active { background: #F0C75E; }
+.stage-high { color: #E89858; }
+.stage-high .pip.active { background: #E89858; }
+.stage-critical { color: #E24B4A; }
+.stage-critical .pip.active { background: #E24B4A; }
+
+/* HRV readout (grid column 2). */
+#hr-widget .compact-hrv {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  border-left: 1px solid #1f1f1f;
+  padding-left: 16px;
+}
+.compact-hrv-label {
+  font-size: 12px;
+  color: #c8c8c8;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.compact-hrv-value {
+  font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+  font-weight: 900;
+  font-size: 36px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  transition: color 0.4s;
+}
+.compact-hrv-unit {
+  font-size: 11px;
+  color: #9a9a9a;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+/* Combined HR+RMSSD trend at the bottom of the card. Canvas CSS constraint
+   required so Chart.js responsive mode can't grow past the 64px parent. */
+#hr-widget > .compact-trend {
+  grid-column: 1 / -1;
+  grid-row: 4;
+  height: 64px;
+  position: relative;
+  margin-top: 12px;
+  padding: 6px 0 4px;
+  border-top: 1px solid #1f1f1f;
+}
+#hr-widget > .compact-trend canvas {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+}
+
+/* Warning banner. In-card width is fixed so the card size is stable across
+   warning strings. Above-slot banner sizes to content (see warning-slot rules). */
+.warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  width: 150px;
+  min-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  margin-left: auto;
+  transition: opacity 0.25s, border-color 0.3s, background 0.3s;
+}
+.warning-banner.active {
+  opacity: 1;
+  animation: warning-flash 1.5s ease-in-out infinite;
+}
+@keyframes warning-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.warning-banner-icon {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.warning-banner-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.warning-banner-text {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.warning-banner.warn-high { border-color: var(--warn-high); background: rgba(232,152,88,0.1); }
+.warning-banner.warn-high .warning-banner-icon,
+.warning-banner.warn-high .warning-banner-text { color: var(--warn-high); }
+.warning-banner.warn-low { border-color: var(--warn-low); background: rgba(125,184,232,0.1); }
+.warning-banner.warn-low .warning-banner-icon,
+.warning-banner.warn-low .warning-banner-text { color: var(--warn-low); }
+.warning-banner.warn-crash { border-color: var(--warn-crash); background: rgba(226,75,74,0.14); }
+.warning-banner.warn-crash .warning-banner-icon,
+.warning-banner.warn-crash .warning-banner-text { color: var(--warn-crash); }
+.warning-banner.warn-palp { border-color: var(--warn-palp); background: rgba(215,108,186,0.14); }
+.warning-banner.warn-palp .warning-banner-icon,
+.warning-banner.warn-palp .warning-banner-text { color: var(--warn-palp); }
+.warning-banner.status-reconnecting { border-color: #6a6a6a; background: rgba(100,100,100,0.14); }
+.warning-banner.status-reconnecting .warning-banner-icon,
+.warning-banner.status-reconnecting .warning-banner-text { color: #b8b8b8; }
+.warning-banner.status-reconnecting .warning-banner-icon svg { animation: conn-pulse 1.4s ease-in-out infinite; }
+
+/* Above-slot banner: reserved space above the widget, banner can grow to
+   fit its text (no 150px cap; longer strings read in full, no truncation). */
+.warning-slot-above { display: none; }
+body.warning-above .warning-slot-above {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 34px;
+  padding: 2px 0;
+}
+body.warning-above .warning-slot-above .warning-banner {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: 0;
+}
+body.warning-above .widget-header > .warning-banner { display: none !important; }
+body:not(.warning-above) .warning-slot-above { display: none !important; }
+
+/* Widget visibility toggles — body classes so both files use the same hooks. */
+body.no-palp-chip .palp-chip,
+body.no-palp-chip #palp-chip { display: none !important; }
+body.no-warning .warning-banner { display: none !important; }
+body.warning-above.no-warning .warning-slot-above { display: none !important; }
+body.no-conn-dot .conn-indicator { display: none !important; }
+
+/* HR off: hide only the BPM readout chrome. Pips + live trace stay visible. */
+body.no-hr #hr-widget .widget-label,
+body.no-hr #hr-widget .heart-icon,
+body.no-hr #hr-widget .palp-chip,
+body.no-hr #hr-widget .big-number { display: none !important; }
+
+/* HRV off: hide HRV column and collapse grid to single content-hugging column. */
+body.no-hrv #hr-widget .compact-hrv { display: none !important; }
+body.no-hrv #hr-widget { grid-template-columns: auto !important; }
+
+body.no-hr.no-hrv #hr-widget { display: none !important; }
+
+body.no-live-hr #hr-widget .inline-live-trace { display: none !important; }
+body.no-inline-trends #hr-widget > .compact-trend { display: none !important; }
