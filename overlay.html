@@ -65,6 +65,27 @@
   body.connected #waiting { display: none; }
 
   body.no-dot .conn-indicator { display: none; }
+
+  /* Visible banner when >1 device is broadcasting to the same relay key. The
+     widget would otherwise just flash as ticks from each sender overwrite
+     each other. */
+  #multi-sender-banner {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    z-index: 1000;
+    background: rgba(226,75,74,0.14);
+    border: 1px solid #E24B4A;
+    color: #E24B4A;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(4px);
+  }
+  #multi-sender-banner b { color: #fff; }
 </style>
 </head>
 <body>
@@ -73,6 +94,8 @@
   <div>◌ Waiting for live app…</div>
   <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
 </div>
+
+<div id="multi-sender-banner" hidden></div>
 
 <div id="overlay-zone">
   <!-- Reserved warning slot for warningPlacement === 'above'. Invisible until
@@ -235,9 +258,43 @@
     else if (state === 'reconnecting') document.body.classList.add('conn-reconnecting');
   }
 
+  // Track which senders have shipped ticks recently. Two tabs broadcasting to
+  // the same relay key will interleave ticks, which reads on-screen as the
+  // widget "flashing". Surfacing the sender list lets the user figure out
+  // which tab to close.
+  const senderSeen = new Map(); // senderId -> { label, lastAt }
+  function noteSender(msg) {
+    if (!msg || !msg.senderId) return;
+    senderSeen.set(msg.senderId, { label: msg.senderLabel || 'Unknown device', lastAt: Date.now() });
+  }
+  function activeSenders(windowMs = 5000) {
+    const cutoff = Date.now() - windowMs;
+    const out = [];
+    for (const [id, s] of senderSeen) {
+      if (s.lastAt >= cutoff) out.push({ id, label: s.label });
+    }
+    return out;
+  }
+  function updateMultiSenderBanner() {
+    const active = activeSenders();
+    const el = $('multi-sender-banner');
+    if (!el) return;
+    if (active.length > 1) {
+      el.innerHTML = 'Multiple devices broadcasting to this key: <b>' +
+        active.map(s => s.label).join('</b>, <b>') +
+        '</b>. Close the extras or the widget will keep flashing.';
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+  setInterval(updateMultiSenderBanner, 1000);
+
   function handleTick(msg) {
     if (!msg || msg.type !== 'tick') return;
     lastTick = Date.now();
+    noteSender(msg);
+    updateMultiSenderBanner();
     document.body.classList.add('connected');
     setConnState('live');
     try { applyRemotePrefs(msg); } catch (e) { console.warn('applyRemotePrefs failed:', e); }
