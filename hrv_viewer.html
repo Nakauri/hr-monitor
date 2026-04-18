@@ -555,52 +555,24 @@
     gap: 12px;
     margin: 28px 0 4px;
   }
-  .day-mode-toggle {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
+  .day-timeline-btn {
+    padding: 7px 14px;
     background: var(--bg-panel);
-  }
-  .day-mode-btn {
-    padding: 6px 14px;
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    cursor: pointer;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: border-color 0.15s, background 0.15s;
   }
-  .day-mode-btn:hover { color: var(--text); }
-  .day-mode-btn.active {
+  .day-timeline-btn:hover:not(:disabled) {
+    border-color: var(--border-strong);
     background: var(--bg-input);
-    color: var(--text);
   }
-  .day-mode-btn + .day-mode-btn { border-left: 1px solid var(--border); }
-  .day-stitched-wrap {
-    position: relative;
-    height: 360px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px 16px;
-    margin-top: 12px;
-  }
-  .day-stitched-loading {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-faint);
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    pointer-events: none;
-  }
+  .day-timeline-btn:disabled { opacity: 0.5; cursor: wait; }
   .day-strip-label {
     font-size: 11px;
     color: var(--text-dim);
@@ -2144,7 +2116,9 @@
       return;
     }
     try {
-      const h = await window.showDirectoryPicker({ mode: 'read', id: 'hr-monitor-sessions' });
+      // Ask for readwrite up front so two-way Drive sync can mirror Drive-only
+      // files back into this folder without re-prompting on every sync.
+      const h = await window.showDirectoryPicker({ mode: 'readwrite', id: 'hr-monitor-sessions' });
       dirHandle = h;
       await idbSet(IDB_KEY_DIR, h);
       updateFolderUI();
@@ -2638,7 +2612,22 @@
     try { localStorage.setItem(LS_INDEX, JSON.stringify(sessionsIndex)); } catch (e) {}
   }
 
+  // Virtual sessions — synthetic "day:YYYY-MM-DD" entries built on demand by
+  // buildDaySession(). Keeps sessionsIndex pure so index/month/week iteration
+  // never sees day aggregates; renderSession + loadFullSession check here too.
+  const virtualSessions = {};
+
   function parseSessionFilename(fn) {
+    // Virtual day-timeline key: 'day:YYYY-MM-DD'. Midnight local time.
+    const dayMatch = fn && fn.match(/^day:(\d{4}-\d{2}-\d{2})$/);
+    if (dayMatch) {
+      const date = new Date(dayMatch[1] + 'T00:00:00');
+      return {
+        date, isoDate: dayMatch[1], isoTime: '00:00:00',
+        filename: fn, kind: 'day',
+        tooltip: `Stitched timeline for ${dayMatch[1]}`,
+      };
+    }
     // hrv_session_2026-04-17T14-32-00.csv — filename timestamps come from
     // toISOString() in the writer, i.e. UTC. Append 'Z' so Date() parses as UTC,
     // then getHours()/getMinutes() give local time for display.
@@ -3004,6 +2993,9 @@
 
   // Full per-beat data (only loaded when rendering session view)
   async function loadFullSession(filename) {
+    // Virtual day sessions are pre-built by buildDaySession() and cached in
+    // virtualSessions; skip the CSV read path entirely for those.
+    if (virtualSessions[filename]) return virtualSessions[filename].data;
     const text = await readSessionText(filename);
     const { rows, header } = parseCSV(text);
     const idx = {};
@@ -3023,6 +3015,145 @@
       if (r[idx.rmssd_ms] !== '') rmssd.push({ x: t, y: parseFloat(r[idx.rmssd_ms]), ep });
     }
     return { hr, rmssd };
+  }
+
+  // Build a virtual "day session" that merges every session on a given date
+  // into one timeline. Events, warnings, palps, flushes, etc. get their t
+  // values shifted from session-relative to day-relative (minutes from local
+  // midnight). Routed through renderSession so the chart, zoom slider, marker
+  // filters, and autonomic panel all reuse their session-view code paths.
+  async function buildDaySession(iso) {
+    const files = (sessionsByDate[iso] || []).slice();
+    if (!files.length) return null;
+    const startOfDay = new Date(iso + 'T00:00:00').getTime();
+
+    const loaded = await Promise.all(files.map(async fn => {
+      try {
+        const d = await loadFullSession(fn);
+        return { fn, hr: d.hr || [], rmssd: d.rmssd || [] };
+      } catch (e) {
+        console.warn('[buildDaySession] load failed', fn, e);
+        return { fn, hr: [], rmssd: [] };
+      }
+    }));
+
+    const hr = [];
+    const rmssd = [];
+    for (const sd of loaded) {
+      for (const p of sd.hr) {
+        if (p.ep == null) continue;
+        const t = (p.ep - startOfDay) / 60000;
+        hr.push({ t, v: p.y, ep: p.ep });
+      }
+      for (const p of sd.rmssd) {
+        if (p.ep == null) continue;
+        const t = (p.ep - startOfDay) / 60000;
+        rmssd.push({ t, v: p.y, ep: p.ep });
+      }
+    }
+    hr.sort((a, b) => a.t - b.t);
+    rmssd.sort((a, b) => a.t - b.t);
+
+    // Walk each session's summary and shift its events into day-minute space.
+    const events = [], warnSegs = [], palpClusters = [], connGaps = [];
+    const hrDeltas = [], flushes = [], chillsWindows = [], postureSpans = [];
+    let palpCount = 0;
+    for (const fn of files) {
+      const s = sessionsIndex[fn];
+      const meta = parseSessionFilename(fn);
+      if (!s || !meta) continue;
+      const offset = (meta.date.getTime() - startOfDay) / 60000;
+      const shiftT = (o) => ({ ...o, t: (o.t || 0) + offset });
+      const shiftSE = (o) => ({ ...o, start: (o.start || 0) + offset, end: (o.end || 0) + offset });
+      for (const e of (s.events || [])) events.push(shiftT(e));
+      for (const w of (s.warnSegs || [])) warnSegs.push(shiftSE(w));
+      for (const p of (s.palpClusters || [])) palpClusters.push(shiftSE(p));
+      for (const g of (s.connGaps || [])) connGaps.push(shiftSE(g));
+      for (const d of (s.hrDeltas || [])) hrDeltas.push(shiftT(d));
+      for (const f of (s.flushes || [])) flushes.push(shiftSE(f));
+      for (const c of (s.chillsWindows || [])) chillsWindows.push(shiftSE(c));
+      for (const ps of (s.postureSpans || [])) postureSpans.push(shiftSE(ps));
+      palpCount += (s.palpCount || 0);
+    }
+
+    // Day boundaries between consecutive sessions count as connection gaps so
+    // the chart line breaks instead of drawing a horizontal bridge across
+    // strap-off time.
+    const sortedFiles = files.slice().sort();
+    for (let i = 0; i + 1 < sortedFiles.length; i++) {
+      const a = sessionsIndex[sortedFiles[i]];
+      const b = sessionsIndex[sortedFiles[i + 1]];
+      const metaA = parseSessionFilename(sortedFiles[i]);
+      const metaB = parseSessionFilename(sortedFiles[i + 1]);
+      if (!a || !b || !metaA || !metaB) continue;
+      const aEnd = (metaA.date.getTime() - startOfDay) / 60000 + a.duration;
+      const bStart = (metaB.date.getTime() - startOfDay) / 60000;
+      if (bStart > aEnd + 0.1) connGaps.push({ start: aEnd, end: bStart });
+    }
+
+    // Aggregate stats across the whole day.
+    const hrVals = hr.map(p => p.v);
+    const rmssdVals = rmssd.map(p => p.v);
+    let hrMax = { t: 0, v: 0 }, hrMin = { t: 0, v: Infinity };
+    for (const p of hr) {
+      if (p.v > hrMax.v) hrMax = { t: p.t, v: p.v };
+      if (p.v < hrMin.v) hrMin = { t: p.t, v: p.v };
+    }
+    if (!isFinite(hrMin.v)) hrMin = { t: 0, v: 0 };
+    let rmssdMax = { t: 0, v: 0 }, rmssdMin = { t: 0, v: Infinity };
+    for (const p of rmssd) {
+      if (p.v > rmssdMax.v) rmssdMax = { t: p.t, v: p.v };
+      if (p.v < rmssdMin.v) rmssdMin = { t: p.t, v: p.v };
+    }
+    if (!isFinite(rmssdMin.v)) rmssdMin = { t: 0, v: 0 };
+
+    const duration = hr.length ? Math.max(...hr.map(p => p.t)) : 0;
+    const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
+    const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
+    const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
+    const tachyPct = hrVals.length ? Math.round(hrVals.filter(v => v > 100).length / hrVals.length * 100) : 0;
+    const warnCount = warnSegs.length;
+
+    // Quadrant percentages across the whole day, matching summarizeCSV's rule.
+    const quadPct = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0 };
+    if (rmssd.length && hr.length) {
+      const t = QUADRANT_THRESH;
+      const quadCounts = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0, 'neutral': 0 };
+      let hrIdx = 0;
+      for (const p of rmssd) {
+        while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].t - p.t) <= Math.abs(hr[hrIdx].t - p.t)) hrIdx++;
+        const hrVal = hr[hrIdx].v;
+        const hrLow = hrVal < t.hrLow, hrHigh = hrVal > t.hrHigh;
+        const rmLow = p.v < t.hrvLow, rmHigh = p.v > t.hrvHigh;
+        let key = 'neutral';
+        if (hrLow && rmHigh) key = 'low-high';
+        else if (hrHigh && rmHigh) key = 'high-high';
+        else if (hrLow && rmLow) key = 'low-low';
+        else if (hrHigh && rmLow) key = 'high-low';
+        quadCounts[key]++;
+      }
+      const total = rmssd.length;
+      for (const k of Object.keys(quadPct)) quadPct[k] = Math.round((quadCounts[k] / total) * 100);
+    }
+
+    const summary = {
+      filename: 'day:' + iso,
+      duration,
+      hrAvg, hrMax, hrMin,
+      rmssdAvg, rmssdMax, rmssdMin,
+      restingHR: null,
+      palpCount, palpClusters,
+      warnCount, warnSegs,
+      events, connGaps, gapTotalMin,
+      tachyPct, hrDeltas,
+      flushes, chillsWindows,
+      quadPct,
+      postureSpans: postureSpans.length ? postureSpans : undefined,
+      __virtualDay: iso,
+      __sourceFiles: files.slice(),
+    };
+    virtualSessions['day:' + iso] = { summary, data: { hr, rmssd } };
+    return summary;
   }
 
   function downsample(series, target) {
@@ -3494,94 +3625,6 @@
   }
 
   // ===== Day view: single date, 24-hr strip + session cards =====
-  // Day view mode: 'list' (per-session cards) or 'timeline' (all sessions of
-  // the day stitched into one continuous chart). Persisted per-user.
-  let dayViewMode = localStorage.getItem('hrv_viewer_day_view_mode') || 'list';
-  let dayStitchedChart = null;
-
-  async function renderDayStitched(iso, files) {
-    const canvas = document.getElementById('day-stitched-chart');
-    const loading = document.getElementById('day-stitched-loading');
-    if (!canvas) return;
-    // Pull per-beat HR + RMSSD for every session in parallel. loadFullSession
-    // reads from the local cache (or lazily parses the CSV on first access).
-    const sessionData = await Promise.all(files.map(async fn => {
-      try {
-        const data = await loadFullSession(fn);
-        return { fn, hr: data.hr || [], rmssd: data.rmssd || [] };
-      } catch (e) {
-        console.warn('[day-stitched] failed to load', fn, e);
-        return { fn, hr: [], rmssd: [] };
-      }
-    }));
-    const startOfDay = new Date(iso + 'T00:00:00').getTime();
-    const hrPoints = [];
-    const rmssdPoints = [];
-    let first = true;
-    for (const sess of sessionData) {
-      if (!sess.hr.length && !sess.rmssd.length) continue;
-      // Null separator between sessions so Chart.js breaks the line at gaps
-      // rather than drawing a long horizontal segment across strap-off time.
-      if (!first) {
-        hrPoints.push({ x: NaN, y: NaN });
-        rmssdPoints.push({ x: NaN, y: NaN });
-      }
-      first = false;
-      const downHR = downsample(sess.hr, 400);
-      const downRM = downsample(sess.rmssd, 200);
-      for (const p of downHR) {
-        if (p.ep != null) hrPoints.push({ x: (p.ep - startOfDay) / 3600000, y: p.y });
-      }
-      for (const p of downRM) {
-        if (p.ep != null) rmssdPoints.push({ x: (p.ep - startOfDay) / 3600000, y: p.y });
-      }
-    }
-    if (loading) loading.remove();
-    if (dayStitchedChart) { try { dayStitchedChart.destroy(); } catch (e) {} dayStitchedChart = null; }
-    if (!hrPoints.length && !rmssdPoints.length) {
-      canvas.insertAdjacentHTML('afterend', '<div class="stub-panel" style="margin-top: 16px;">No HR data for these sessions.</div>');
-      return;
-    }
-    dayStitchedChart = new Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: {
-        datasets: [
-          { label: 'HR', data: hrPoints, borderColor: '#E89858', backgroundColor: 'transparent', yAxisID: 'y', tension: 0.2, pointRadius: 0, borderWidth: 1.3, spanGaps: false },
-          { label: 'RMSSD', data: rmssdPoints, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0.2, pointRadius: 0, borderWidth: 1.2, borderDash: [3, 3], spanGaps: false },
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: {
-          legend: { labels: { color: '#9a9a9f', font: { size: 11 }, boxWidth: 12 } },
-          tooltip: {
-            mode: 'nearest', intersect: false,
-            callbacks: {
-              title: (items) => {
-                const hr = items[0]?.parsed?.x;
-                if (hr == null) return '';
-                const h = Math.floor(hr), m = Math.round((hr - h) * 60);
-                return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-              },
-            },
-          },
-        },
-        scales: {
-          x: {
-            type: 'linear', min: 0, max: 24,
-            ticks: {
-              stepSize: 3, color: '#9a9a9f', font: { size: 10 },
-              callback: v => String(Math.round(v)).padStart(2, '0') + ':00',
-            },
-            grid: { color: 'rgba(255,255,255,0.04)' },
-          },
-          y: { position: 'left', ticks: { color: '#E89858', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
-          y1: { position: 'right', ticks: { color: '#5DCAA5', font: { size: 10 } }, grid: { display: false } },
-        },
-      },
-    });
-  }
-
   function renderDay(dateArg) {
     const el = document.getElementById('view-day');
     let iso = /^\d{4}-\d{2}-\d{2}$/.test(dateArg || '') ? dateArg : null;
@@ -3684,27 +3727,27 @@
 
       <div class="day-sessions-head">
         <div class="section-head" style="margin: 0;">Sessions</div>
-        <div class="day-mode-toggle">
-          <button class="day-mode-btn ${dayViewMode === 'list' ? 'active' : ''}" data-mode="list" title="Show each session as a card">List</button>
-          <button class="day-mode-btn ${dayViewMode === 'timeline' ? 'active' : ''}" data-mode="timeline" title="Stitch every session into one timeline">Timeline</button>
-        </div>
+        ${files.length ? `<button class="day-timeline-btn" id="day-view-timeline" title="Open every session on this day as one continuous chart with zoom, markers, and autonomic interpretation">View as full-day timeline →</button>` : ''}
       </div>
-      ${dayViewMode === 'timeline'
-        ? `<div class="day-stitched-wrap"><canvas id="day-stitched-chart"></canvas><div class="day-stitched-loading" id="day-stitched-loading">Loading sessions…</div></div>`
-        : `<div class="sessions-grid">${sessionCardsHtml}</div>`}
+      <div class="sessions-grid">${sessionCardsHtml}</div>
     `;
 
-    if (dayViewMode === 'timeline' && files.length) {
-      renderDayStitched(iso, files).catch(e => console.error('day stitched render failed', e));
-    }
-    el.querySelectorAll('.day-mode-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (btn.dataset.mode === dayViewMode) return;
-        dayViewMode = btn.dataset.mode;
-        try { localStorage.setItem('hrv_viewer_day_view_mode', dayViewMode); } catch (e) {}
-        renderDay(dateArg);
+    const timelineBtn = document.getElementById('day-view-timeline');
+    if (timelineBtn) {
+      timelineBtn.addEventListener('click', async () => {
+        timelineBtn.disabled = true;
+        timelineBtn.textContent = 'Building timeline…';
+        try {
+          const built = await buildDaySession(iso);
+          if (built) setHash('session/day:' + iso);
+          else { timelineBtn.disabled = false; timelineBtn.textContent = 'No data for timeline'; }
+        } catch (e) {
+          console.error('day timeline build failed', e);
+          timelineBtn.disabled = false;
+          timelineBtn.textContent = 'Timeline failed (see console)';
+        }
       });
-    });
+    }
 
     wireAggregateReport(el);
     // Wire prev/next. If there's only one date with data, just stay.
@@ -4322,7 +4365,18 @@
 
   async function renderSession(filenameEncoded) {
     const filename = decodeURIComponent(filenameEncoded || '');
-    const s = sessionsIndex[filename];
+    // Virtual day sessions: summary is cached in virtualSessions; building
+    // happens when the Day view's Timeline toggle is clicked. If the user
+    // lands here via hash URL without building first, re-build on demand.
+    let s = sessionsIndex[filename];
+    if (!s && virtualSessions[filename]) s = virtualSessions[filename].summary;
+    if (!s) {
+      const dayMatch = filename.match(/^day:(\d{4}-\d{2}-\d{2})$/);
+      if (dayMatch) {
+        const built = await buildDaySession(dayMatch[1]);
+        if (built) s = built;
+      }
+    }
     if (!s) {
       document.getElementById('view-session').innerHTML = `<div class="stub-panel">Session not found: ${filename}</div>`;
       return;
@@ -4375,9 +4429,12 @@
     const minStage = getHRStage(s.hrMin.v);
 
     const el = document.getElementById('view-session');
+    const isVirtualDay = !!s.__virtualDay;
+    const backHref = isVirtualDay ? ('#/day/' + s.__virtualDay) : '#/index';
+    const backLabel = isVirtualDay ? ('← ' + s.__virtualDay) : '← All sessions';
     el.innerHTML = `
       <div class="session-top-row">
-        <a class="back-link" href="#/index">← All sessions</a>
+        <a class="back-link" href="${backHref}">${backLabel}</a>
         <div class="tags-inline">
           <span class="tags-inline-label">Tags:</span>
           <span id="tags-current"></span>
