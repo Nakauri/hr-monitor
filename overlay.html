@@ -255,7 +255,8 @@
       responsive: true, maintainAspectRatio: false, animation: false,
       plugins: { legend: { display: false }, tooltip: { enabled: false } },
       scales: {
-        x: { type: 'linear', display: false },
+        // Default 0–3 min so early data sticks to the left edge.
+        x: { type: 'linear', display: false, min: 0, max: 3 },
         y: { display: false },
         y1: { position: 'right', display: false },
       },
@@ -309,6 +310,13 @@
     if (msg.trendHR && msg.trendRmssd) {
       compactTrend.data.datasets[0].data = msg.trendHR;
       compactTrend.data.datasets[1].data = msg.trendRmssd;
+      // Apply the monitor's sliding window so both surfaces plot the same
+      // 3-min range. Without this the overlay auto-scales to fit the data,
+      // which makes early points bunch near the middle.
+      if (msg.trendWindow) {
+        compactTrend.options.scales.x.min = msg.trendWindow[0];
+        compactTrend.options.scales.x.max = msg.trendWindow[1];
+      }
       try { compactTrend.update('none'); } catch(e) {}
     }
   }

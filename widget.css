@@ -361,7 +361,10 @@ body.no-hr #hr-widget .big-number { display: none !important; }
 body.no-hrv #hr-widget .compact-hrv { display: none !important; }
 body.no-hrv #hr-widget { grid-template-columns: auto !important; }
 
-body.no-hr.no-hrv #hr-widget { display: none !important; }
+/* Hide the widget only when literally nothing is visible inside. Keeping the
+   widget when just HR + HRV are off lets a "charts only" layout work:
+   pips + live trace + compact trend with no numbers. */
+body.no-hr.no-hrv.no-live-hr.no-inline-trends #hr-widget { display: none !important; }
 
 body.no-live-hr #hr-widget .inline-live-trace { display: none !important; }
 body.no-inline-trends #hr-widget > .compact-trend { display: none !important; }

@@ -912,7 +912,6 @@
           <span class="autosave-folder" id="autosave-folder-name">none</span>
           <span class="autosave-status" id="autosave-status">idle</span>
           <button id="autosave-pick">Choose...</button>
-          <button id="autosave-test" style="display: none;">Save now</button>
           <button id="autosave-clear" style="display: none;">Clear</button>
         </div>
         <div class="autosave-row">
@@ -1282,7 +1281,10 @@
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
         scales: {
-          x: { type: 'linear', display: false },
+          // Default 0–3 min window so the first few data points stick to the
+          // left edge and the line grows rightward as the session progresses.
+          // updateCharts slides the window after t=3 min.
+          x: { type: 'linear', display: false, min: 0, max: 3 },
           y: { display: false },
           y1: { position: 'right', display: false },
         },
@@ -2376,47 +2378,13 @@
   function updateAutoSaveUI() {
     const nameEl = $('autosave-folder-name');
     const clearBtn = $('autosave-clear');
-    const testBtn = $('autosave-test');
     if (autoSaveDirHandle) {
       nameEl.textContent = autoSaveDirHandle.name || 'selected';
       clearBtn.style.display = '';
-      if (testBtn) testBtn.style.display = '';
     } else {
       nameEl.textContent = 'none';
       clearBtn.style.display = 'none';
-      if (testBtn) testBtn.style.display = 'none';
       setAutoSaveStatus('', '');
-    }
-  }
-
-  // Manual "Save now" — useful for diagnosing write failures. Creates (or reuses) a
-  // file handle for the CURRENT session and flushes a CSV, reporting any error.
-  async function manualAutoSaveTest() {
-    if (!autoSaveDirHandle) return;
-    console.log('[autosave] Manual test triggered.');
-    const ok = await ensureAutoSavePermission();
-    if (!ok) {
-      setAutoSaveStatus('denied', 'denied');
-      alert('Browser denied write permission for the folder. Click Choose... and re-pick it.');
-      return;
-    }
-    try {
-      if (!autoSaveFileHandle) {
-        const filename = 'hrv_session_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.csv';
-        console.log('[autosave] Creating file:', filename);
-        autoSaveFileHandle = await autoSaveDirHandle.getFileHandle(filename, { create: true });
-      }
-      const { csv } = buildSessionCSV();
-      console.log('[autosave] Writing', csv.split('\n').length, 'rows');
-      const writable = await autoSaveFileHandle.createWritable();
-      await writable.write(csv);
-      await writable.close();
-      setAutoSaveStatus('writing', 'writing');
-      alert('Save succeeded. File is in the selected folder.');
-    } catch (e) {
-      console.error('[autosave] Manual test failed:', e);
-      setAutoSaveStatus('error', 'error');
-      alert('Save failed: ' + e.message + '\n\nCheck DevTools console for details (F12 → Console).');
     }
   }
 
@@ -3364,7 +3332,6 @@
     $('disconnect').addEventListener('click', disconnect);
     $('autosave-pick').addEventListener('click', pickAutoSaveFolder);
     $('autosave-clear').addEventListener('click', clearAutoSaveFolder);
-    $('autosave-test').addEventListener('click', manualAutoSaveTest);
     restoreAutoSaveFolder();
     // Google Drive sign-in wiring
     initGoogleAuth();
