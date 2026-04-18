@@ -123,9 +123,9 @@
     overflow: hidden;
   }
   /* Shrink-to-fit preview — container hugs the visible widgets instead of
-     filling the left column. Also shrinks the enclosing app-grid column so
-     the preview reflects the actual OBS source size (otherwise you'd see a
-     narrow widget floating in a 380px black block). */
+     filling the left column. Widget INTERNALS don't shrink (big HR number
+     stays the same size) — only the gap/padding around them is tighter, so
+     showing all widgets produces the same visual as shrink-to-fit OFF. */
   body.shrink-to-fit #app { grid-template-columns: auto 1fr; }
   body.shrink-to-fit #overlay-zone {
     width: fit-content;
@@ -133,21 +133,10 @@
     padding: 8px;
     gap: 8px;
   }
-  body.shrink-to-fit #overlay-zone .widget,
-  body.shrink-to-fit #overlay-zone .breath-widget {
-    padding: 10px 14px;
-  }
-  /* Compact's grid uses fr units (1.75fr 1fr) which gladly stretch to fill
-     available space. In shrink-to-fit mode we want each column to be content-
-     sized instead, so turning off Live HR trace actually narrows the widget
-     (big-number has its intrinsic width instead of a proportional slice). */
-  body.shrink-to-fit #overlay-zone.style-compact #hr-widget {
-    grid-template-columns: auto auto;
-  }
-  body.shrink-to-fit #overlay-zone.style-compact #hr-widget .inline-live-trace {
-    width: 120px;
-    flex: 0 0 120px;
-  }
+  /* Compact's grid uses fr units (1.75fr 1fr) which stretch to fill available
+     space. When the overlay-zone has width: fit-content (shrink-to-fit), fr
+     behaves like min-content by default but we want the HR column to still
+     dominate. Nothing to change here as long as widget padding stays normal. */
   /* Horizontal layout: overlay becomes a top banner. Widgets sit side-by-side. */
   body.layout-horizontal #overlay-zone {
     flex-direction: row;
@@ -237,6 +226,44 @@
     text-transform: uppercase;
   }
   /* Heart icon that pulses with HR */
+  /* Connection indicator — mirrors overlay.html. Green dot when connected,
+     grey pulsing dot + "reconnecting…" text when reconnecting, dim grey when
+     disconnected. Drives off body classes conn-live / conn-reconnecting. */
+  .conn-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .conn-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #3a3a3a;
+    flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .conn-text {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    font-weight: 600;
+    display: none;
+  }
+  body.conn-live .conn-dot {
+    background: #5DCAA5;
+    box-shadow: 0 0 6px rgba(93,202,165,0.6);
+  }
+  body.conn-reconnecting .conn-dot {
+    background: #6a6a6a;
+    animation: conn-pulse 1.4s ease-in-out infinite;
+  }
+  body.conn-reconnecting .conn-text { display: inline; }
+  @keyframes conn-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
   .heart-icon {
     width: 22px;
     height: 22px;
@@ -1292,6 +1319,12 @@
           <span class="warning-banner-icon" id="warning-icon"></span>
           <span class="warning-banner-text" id="warning-text"></span>
         </div>
+        <!-- Connection indicator — matches the one in the OBS overlay (dot +
+             optional "reconnecting…" label). Keeps preview WYSIWYG. -->
+        <span class="conn-indicator">
+          <span class="conn-text" id="conn-text">reconnecting…</span>
+          <span class="conn-dot" id="conn-dot" title="Connection status"></span>
+        </span>
       </div>
       <div class="number-row">
         <div class="big-number" id="hr-big">—</div>
@@ -2352,25 +2385,33 @@
     const style = localStorage.getItem('hr_monitor_style') || 'bold';
     const horizontal = widgetPrefs.layout === 'horizontal';
     const shrink = !!widgetPrefs.shrinkToFit;
-    // Compact = single combined widget. When only HRV shown (no HR), compact
-    // becomes a narrow HRV readout — about half the normal width.
+    // Widget width stays 380 regardless of shrink-to-fit — the toggle is about
+    // collapsing EMPTY space around hidden widgets, not resizing visible ones.
+    // Shrink only reduces container padding (16px→8px per side) so there's no
+    // width difference when every widget is shown and nothing can be trimmed.
+    const WIDGET_W = 380;
+    const padV = shrink ? 16 : 32; // 8px top+bottom vs 16px
+    const padH = shrink ? 16 : 32;
+    const gap = shrink ? 8 : 14;
+
     if (style === 'compact') {
+      // Compact is a single combined widget — its internal grid decides width.
       if (!widgetPrefs.showHr && !widgetPrefs.showHrv) return { w: 200, h: 80 };
+      // Dedicated compact-with-HRV-only shrink (narrower because HR column gone)
       if (shrink && !widgetPrefs.showHr) return { w: 220, h: widgetPrefs.showInlineTrends ? 180 : 120 };
-      if (shrink && !widgetPrefs.showHrv) return { w: 280, h: widgetPrefs.showInlineTrends ? 240 : 180 };
-      return { w: 380, h: widgetPrefs.showInlineTrends ? 260 : 200 };
+      return { w: WIDGET_W, h: widgetPrefs.showInlineTrends ? 260 : 200 };
     }
+
     // Other styles stack (or row) separate widgets
     let visible = 0;
-    let h = shrink ? 16 : 32; // shrink uses 8px padding top+bottom; normal 16px each
+    let h = padV;
     if (widgetPrefs.showHr) { h += 180; visible++; }
     if (widgetPrefs.showHrv) { h += 140; visible++; }
     if (widgetPrefs.showLiveHr) { h += 130; visible++; }
     if (visible === 0) return { w: 200, h: 80 };
-    if (visible > 1) h += (visible - 1) * (shrink ? 8 : 14);
-    const widgetW = shrink ? 280 : 380;
-    if (horizontal) return { w: widgetW * visible + (visible - 1) * (shrink ? 8 : 14) + (shrink ? 16 : 32), h: shrink ? 180 : 210 };
-    return { w: widgetW, h };
+    if (visible > 1) h += (visible - 1) * gap;
+    if (horizontal) return { w: WIDGET_W * visible + (visible - 1) * gap + padH, h: shrink ? 180 : 210 };
+    return { w: WIDGET_W, h };
   }
   function updateObsSizeDisplay() {
     const size = computeObsSize();
@@ -2418,6 +2459,18 @@
       trendHR,
       trendRmssd,
       trendWindow,
+      // Live widget-layout prefs so the OBS overlay reflects toggle changes in
+      // real time (no browser-source refresh needed). Mirrored in URL params
+      // too (on initial load) but the tick takes precedence once connected.
+      style: localStorage.getItem('hr_monitor_style') || 'bold',
+      prefs: {
+        showHr: widgetPrefs.showHr,
+        showHrv: widgetPrefs.showHrv,
+        showLiveHr: widgetPrefs.showLiveHr,
+        showInlineTrends: widgetPrefs.showInlineTrends,
+        shrinkToFit: widgetPrefs.shrinkToFit,
+        layout: widgetPrefs.layout,
+      },
     };
     overlayChannel.postMessage(tick);
     publishToRelay(tick);
@@ -2559,6 +2612,7 @@
     char.addEventListener('characteristicvaluechanged', onHRNotification);
     setStatus('Connected to ' + (device.name || 'device') + '. Streaming live.', 'connected');
     $('overlay-status').textContent = '• LIVE · ' + (device.name || 'strap').toUpperCase();
+    setConnState('live');
     logConnectionEvent('connect');
     // Battery is best-effort: not every strap exposes it, and a failed read shouldn't
     // block the main HR stream from being usable.
@@ -2615,10 +2669,12 @@
     if (state.autoReconnect) {
       setStatus('Disconnected. Reconnecting when strap is back in range...');
       $('overlay-status').textContent = '• RECONNECTING...';
+      setConnState('reconnecting');
       tryReconnect();
     } else {
       setStatus('Device disconnected. Click Connect strap to reconnect.');
       $('overlay-status').textContent = '• DISCONNECTED';
+      setConnState('idle');
       $('connect').disabled = false;
       $('disconnect').disabled = true;
       updateConnectButtonLabel();
@@ -2634,10 +2690,19 @@
     $('battery-display').textContent = 'Battery: —';
     $('battery-display').classList.remove('low', 'critical');
     $('overlay-status').textContent = '• DISCONNECTED';
+    setConnState('idle');
     $('connect').disabled = false;
     $('disconnect').disabled = true;
     updateConnectButtonLabel();
     setStatus('Disconnected by user.');
+  }
+
+  // Drive the body's conn-* class (mirrors overlay.html). 'live' = green dot,
+  // 'reconnecting' = grey pulse + label, 'idle'/anything else = dim grey dot.
+  function setConnState(state) {
+    document.body.classList.remove('conn-live', 'conn-reconnecting');
+    if (state === 'live') document.body.classList.add('conn-live');
+    else if (state === 'reconnecting') document.body.classList.add('conn-reconnecting');
   }
 
   function resetSession() {
@@ -3444,6 +3509,15 @@
     try { localStorage.setItem('hr_monitor_style', styleName); } catch(e) {}
     if (typeof updateObsSizeDisplay === 'function') updateObsSizeDisplay();
     resizeAllCharts();
+    pushPrefsToOverlay();
+  }
+
+  // Fire a fresh broadcast tick right after a layout pref changes so the OBS
+  // overlay updates immediately instead of waiting for the next scheduled tick
+  // (which might be a couple seconds away). No-op if broadcasting is disabled
+  // or we haven't connected to the strap yet — broadcastTick handles both.
+  function pushPrefsToOverlay() {
+    try { if (typeof broadcastTick === 'function') broadcastTick(); } catch (e) {}
   }
 
   function resizeAllCharts() {
@@ -3596,14 +3670,18 @@
     initCharts();
     populateAudioDropdowns();
     // Open a popup window OBS can Window-Capture cleanly. The popup receives
-    // live data via BroadcastChannel from this tab — no server needed.
+    // live data via BroadcastChannel from this tab — no server needed. Default
+    // background is magenta so OBS Chroma Key filter (defaults to magenta key)
+    // masks it out cleanly; hold Shift to open with black background instead.
     const openOverlay = $('nav-open-overlay');
     if (openOverlay) {
+      openOverlay.title = 'Open a preview popup for OBS Window Capture — click for magenta chroma-key background, Shift+click for black';
       openOverlay.addEventListener('click', (ev) => {
         ev.preventDefault();
-        // Popup = Window-Capture path. Shares the URL format with the Browser Source
-        // URL so what you see in the popup matches what OBS Browser Source renders.
-        const url = buildObsSourceUrl();
+        const base = buildObsSourceUrl();
+        // Replace bg= param (buildObsSourceUrl sets it to 'transparent') with
+        // magenta/black so OBS Chroma Key can mask it out on Window Capture.
+        const url = base.replace(/([?&])bg=[^&]*/, '$1bg=' + (ev.shiftKey ? 'black' : 'magenta'));
         // 380x640 matches the main app's overlay-zone column width exactly — so the
         // popup is a true preview at the same visual size (Chart.js responsive sizing
         // just fills the container, so wider popup = wider graph).
@@ -3718,6 +3796,7 @@
         widgetPrefs.layout = btn.dataset.layout;
         saveWidgetPrefs();
         applyWidgetPrefs();
+        pushPrefsToOverlay();
       });
     });
     // Widget visibility toggles
@@ -3728,6 +3807,7 @@
         widgetPrefs[key] = el.checked;
         saveWidgetPrefs();
         applyWidgetPrefs();
+        pushPrefsToOverlay();
       });
     }
     // Wire up section collapse toggles

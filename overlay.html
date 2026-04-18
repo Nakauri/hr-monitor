@@ -31,6 +31,14 @@
     overflow: hidden;
   }
   body.bg-dark { background: var(--bg); }
+  /* Chroma-key backgrounds for the Window-Capture popup path. OBS can key out
+     a solid color (magenta = #ff00ff is the classic chroma pick — no skin/cloth
+     tones or UI colors collide with it). Black fallback for users who'd rather
+     composite with an OBS filter. */
+  body.bg-magenta,
+  body.bg-magenta #overlay-zone { background: #ff00ff; }
+  body.bg-black,
+  body.bg-black #overlay-zone { background: #000000; }
 
   #overlay-zone {
     background: transparent;
@@ -45,27 +53,15 @@
     align-items: flex-start;
     gap: 12px;
   }
-  /* Shrink-to-fit: when only one widget is showing, or the user wants the
-     container to hug whatever is visible, don't leave empty space. Useful for
-     small OBS sources where you only want e.g. an HRV readout in a corner. */
+  /* Shrink-to-fit: container hugs visible widgets — useful when you've hidden
+     some (only HR, only HRV, etc). Widget INTERNALS don't shrink; only the
+     outer padding/gap tightens. When all widgets are shown, the size is the
+     same as with shrink-to-fit off. */
   body.shrink-to-fit #overlay-zone {
     width: fit-content;
     max-width: 100%;
     padding: 8px;
     gap: 8px;
-  }
-  body.shrink-to-fit .widget,
-  body.shrink-to-fit .breath-widget {
-    padding: 10px 14px;
-  }
-  /* Compact grid normally uses 1.75fr 1fr which stretches. In shrink-to-fit we
-     want columns to size to content so toggles actually narrow the widget. */
-  body.shrink-to-fit.style-compact #overlay-zone #hr-widget {
-    grid-template-columns: auto auto;
-  }
-  body.shrink-to-fit.style-compact #overlay-zone #hr-widget .inline-live-trace {
-    width: 120px;
-    flex: 0 0 120px;
   }
 
   .widget, .breath-widget {
@@ -478,6 +474,35 @@
     const stageIndex = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 }[stage] || 2;
     container.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('active', i < stageIndex));
   }
+
+  // Apply widget-layout prefs received in a tick so the OBS overlay matches
+  // whatever the live monitor is showing — no cache refresh needed. Style class
+  // lives on #overlay-zone; visibility classes live on <body>. Skipped silently
+  // if the tick doesn't carry prefs (older monitor version).
+  let lastPrefsFingerprint = '';
+  function applyRemotePrefs(msg) {
+    if (!msg) return;
+    const z = $('overlay-zone');
+    const prefs = msg.prefs || null;
+    const style = msg.style;
+    const fp = JSON.stringify({ style, prefs });
+    if (fp === lastPrefsFingerprint) return; // no change; skip DOM churn
+    lastPrefsFingerprint = fp;
+    if (style && z) {
+      z.classList.remove('style-bold', 'style-compact', 'style-minimal', 'style-neon');
+      z.classList.add('style-' + style);
+      document.body.classList.remove('style-bold', 'style-compact', 'style-minimal', 'style-neon');
+      document.body.classList.add('style-' + style);
+    }
+    if (prefs) {
+      document.body.classList.toggle('no-hr', !prefs.showHr);
+      document.body.classList.toggle('no-hrv', !prefs.showHrv);
+      document.body.classList.toggle('no-live-hr', !prefs.showLiveHr);
+      document.body.classList.toggle('no-inline-trends', !prefs.showInlineTrends);
+      document.body.classList.toggle('shrink-to-fit', !!prefs.shrinkToFit);
+      document.body.classList.toggle('layout-horizontal', prefs.layout === 'horizontal');
+    }
+  }
   function hexToRgba(hex, alpha) {
     const n = parseInt(hex.slice(1), 16);
     return 'rgba(' + ((n >> 16) & 0xff) + ',' + ((n >> 8) & 0xff) + ',' + (n & 0xff) + ',' + alpha + ')';
@@ -559,6 +584,12 @@
     lastTick = Date.now();
     document.body.classList.add('connected');
     setConnState('live');
+
+    // Apply live widget-layout prefs pushed from the monitor so toggling HR /
+    // HRV / trends / shrink-to-fit in the live app updates the OBS overlay
+    // immediately (no browser-source refresh). If prefs aren't in the tick,
+    // URL-param state set at load time stays in effect.
+    applyRemotePrefs(msg);
 
     $('hr-big').textContent = msg.hr != null ? msg.hr : '—';
     $('rmssd-big').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
