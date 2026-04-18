@@ -1937,10 +1937,10 @@
     <a data-view="all" href="#/all">All</a>
   </nav>
   <div class="folder-info">
-    <span>Folder:</span>
-    <span id="folder-name">—</span>
-    <button id="folder-pick">Change...</button>
-    <span class="drive-sep">|</span>
+    <span class="fsa-only">Folder:</span>
+    <span id="folder-name" class="fsa-only">—</span>
+    <button id="folder-pick" class="fsa-only">Change...</button>
+    <span class="drive-sep fsa-only">|</span>
     <span>Drive:</span>
     <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
     <button id="drive-signin">Sign in</button>
@@ -6522,8 +6522,17 @@
     route();
 
     window.addEventListener('hashchange', route);
-    document.getElementById('folder-pick').addEventListener('click', pickFolder);
-    document.getElementById('empty-pick').addEventListener('click', pickFolder);
+    // Hide local-folder UI entirely on browsers without File System Access
+    // (Firefox, Safari, mobile). These users sync via Drive exclusively — the
+    // viewer stays fully functional, the folder picker just isn't shown.
+    if (!window.showDirectoryPicker) {
+      document.querySelectorAll('.fsa-only').forEach(el => el.hidden = true);
+      const emptyPick = document.getElementById('empty-pick');
+      if (emptyPick) emptyPick.hidden = true;
+    } else {
+      document.getElementById('folder-pick').addEventListener('click', pickFolder);
+      document.getElementById('empty-pick').addEventListener('click', pickFolder);
+    }
     document.getElementById('empty-drive').addEventListener('click', driveSignIn);
     document.getElementById('drive-signin').addEventListener('click', driveSignIn);
     document.getElementById('drive-signout').addEventListener('click', driveSignOut);
