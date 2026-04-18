@@ -1877,7 +1877,7 @@
     <button class="icon-btn" id="viewer-settings-btn" title="Viewer settings (HR shift thresholds, etc.)" aria-label="Viewer settings">
       <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
     </button>
-    <button class="export-report-btn" id="export-report" title="Print/save this view as a report">Export report</button>
+    <button class="export-report-btn" id="export-report" title="Print/save this view as a report" style="display:none">Export report</button>
     <a class="nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Viewer&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Viewer%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
   </div>
 </header>
@@ -2805,6 +2805,10 @@
   function setHash(path) { location.hash = '#/' + path; }
 
   async function route() {
+    // Defensive: if the previous view left any annotation tooltip hovering,
+    // clear it before rendering the next one. Otherwise a chart tooltip can
+    // follow the user into a view that has no chart (e.g., Month / Day grid).
+    try { hideAnnoTip(); clearMarkerItemHighlight(); } catch (e) {}
     // Ensure the sessions index is warm before any view renders. If neither a
     // local folder nor any Drive-cached sessions exist, fall through to empty.
     if (Object.keys(sessionsIndex).length === 0) {
@@ -4405,7 +4409,7 @@
       sections.push({
         key: 'shifts',
         title: 'HR shifts',
-        desc: 'Big jumps in heart rate that happened quickly. The app does not guess why. Could be standing up, a scare, caffeine, exercise, or just thinking hard about something.',
+        desc: 'Big jumps in heart rate that happened quickly. Could be standing up, a scare, caffeine, exercise, or strong emotion.',
         count: s.hrDeltas.length,
         lines,
       });
@@ -4438,7 +4442,7 @@
       sections.push({
         key: 'chills',
         title: 'Chills / high volatility',
-        desc: 'A stretch where the HR jitters more than the rest of the session. Often lines up with shivering, since muscle activity bleeds into the strap signal. Can also show up during a bigger autonomic wave.',
+        desc: 'A stretch where the HR jitters more than the rest of the session. Often lines up with shivering or a bigger autonomic wave.',
         count: s.chillsWindows.length,
         lines: [{ text: `${formatDuration(total)} total across ${s.chillsWindows.length} window${s.chillsWindows.length === 1 ? '' : 's'}` }, ...lines],
       });
@@ -4489,7 +4493,7 @@
       sections.push({
         key: 'warnings',
         title: 'Warnings',
-        desc: 'Moments when your HR or HRV crossed a threshold you set in the live monitor. These are about what your body did, not a hardware issue.',
+        desc: 'Moments when your HR or HRV crossed a threshold you set in the live monitor.',
         count: s.warnCount,
         lines,
       });
@@ -4504,7 +4508,7 @@
       sections.push({
         key: 'connection',
         title: 'Connection gaps',
-        desc: 'Short windows where the chest strap lost Bluetooth contact with the app. No HR data got recorded during these stretches. This is a signal-quality issue, not something your body did.',
+        desc: 'Short windows where the chest strap lost Bluetooth contact with the app. No HR data got recorded during these stretches.',
         count: s.connGaps.length,
         lines: [
           { text: `${s.connGaps.length} gap${s.connGaps.length === 1 ? '' : 's'} · ${formatDuration(total)} total` },
@@ -4519,12 +4523,10 @@
 
     const chevron = `<svg class="insight-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
 
-    // One-line summary shown next to the caret when collapsed — gives a quick
-    // read without needing to expand. Uses the headline HR metric the user
-    // picked in Month/Week (Rest / Avg / Tachy % / Range) so the same "how do
-    // I read this session at a glance" framing carries across views.
-    const notableCount = sections.filter(sec => sec.key !== 'overview').length;
-    const totalPalps = s.palpCount || 0;
+    // One-line summary shown next to the caret when collapsed. Uses the
+    // headline HR metric the user picked in Month/Week (Rest / Avg / Tachy % /
+    // Range), plus the raw HR range delta (max − min) because that's a concrete
+    // number rather than a vague "N findings" count.
     const summaryBits = [];
     const headline = currentFilename ? computeHeadline(headlineMetric, [currentFilename]) : null;
     if (headline && headline.value != null) {
@@ -4532,8 +4534,10 @@
     } else if (s.hrAvg != null) {
       summaryBits.push(`avg ${s.hrAvg} bpm`);
     }
-    if (notableCount > 0) summaryBits.push(`${notableCount} finding${notableCount === 1 ? '' : 's'}`);
-    if (totalPalps > 0) summaryBits.push(`${totalPalps} palp${totalPalps === 1 ? '' : 's'}`);
+    if (s.hrMax && s.hrMin) {
+      const range = s.hrMax.v - s.hrMin.v;
+      summaryBits.push(`Δ ${range} bpm (${s.hrMin.v}–${s.hrMax.v})`);
+    }
     const summaryText = summaryBits.join(' · ');
 
     const childChevron = `<svg class="insight-child-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
@@ -4556,7 +4560,11 @@
             const whatHtml = (autonomicOn && l.what) ? `<div class="insight-what">${escape(l.what)}</div>` : '';
             return `<li><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
           }).join('');
-          const collapsedCls = sectionCollapsed[sec.key] ? ' collapsed' : '';
+          // Every session open starts with Overview expanded and everything
+          // else collapsed — keeps the report from overpowering the chart.
+          // User toggles are session-local only (not persisted) so the next
+          // open always starts clean.
+          const collapsedCls = sec.key === 'overview' ? '' : ' collapsed';
           return `<div class="insight-section${collapsedCls}" data-key="${sec.key}">
             <div class="insight-section-title">${childChevron}<span>${escape(sec.title)}</span>${countHtml}</div>
             <div class="insight-section-body">${descHtml}<ul>${listHtml}</ul></div>
@@ -5405,9 +5413,11 @@
       padding: 3,
     };
 
-    // Kill stale tooltip when pointer leaves the canvas entirely.
+    // Kill stale tooltip when pointer leaves the canvas entirely. Also clears
+    // the marker-list / highlight-line state so nothing lingers on the chart
+    // or sidebar after the cursor moves off.
     const canvasEl = document.getElementById('session-chart');
-    canvasEl.addEventListener('mouseleave', hideAnnoTip);
+    canvasEl.addEventListener('mouseleave', () => { hideAnnoTip(); unhighlightAtTime(); clearMarkerItemHighlight(); });
     currentChart = new Chart(ctx, {
       type: 'line',
       data: {

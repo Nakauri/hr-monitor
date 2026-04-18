@@ -122,17 +122,11 @@
     border-right: 1px solid var(--border);
     overflow: hidden;
   }
-  /* Shrink-to-fit preview — container hugs the visible widgets instead of
-     filling the left column. NOTHING else changes: padding, gap, widget
-     padding, widget width all stay identical to shrink-off. When every widget
-     is visible, shrink-on and shrink-off should render pixel-identical; the
-     toggle only matters when some widgets are hidden, because then the
-     container shrinks down to the remaining content. */
-  body.shrink-to-fit #app { grid-template-columns: auto 1fr; }
-  body.shrink-to-fit #overlay-zone {
-    width: fit-content;
-    max-width: 100%;
-  }
+  /* Overlay preview always sizes to its content — app-grid column is auto
+     so the preview column hugs the widget, and #overlay-zone itself has
+     fit-content width. The Source Size fields show measured pixel dims live. */
+  #app { grid-template-columns: auto 1fr !important; }
+  #overlay-zone { width: fit-content; max-width: 100%; }
   /* Horizontal layout: overlay becomes a top banner. Widgets sit side-by-side. */
   body.layout-horizontal #overlay-zone {
     flex-direction: row;
@@ -1035,6 +1029,18 @@
     cursor: pointer;
     user-select: none;
   }
+  .widget-toggles select {
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .widget-toggles select:hover { border-color: var(--border-strong); }
+  .widget-toggles select:focus { outline: 1px solid var(--accent-rmssd); }
   .widget-toggles input[type="checkbox"] {
     width: auto;
     accent-color: var(--accent-blue);
@@ -1507,7 +1513,6 @@
               </select>
             </label>
             <label><input type="checkbox" id="toggle-conn-dot" checked /> Connection dot</label>
-            <label title="Makes the overlay container hug whatever widgets are visible — useful when you only want a small HR or HRV readout in an OBS corner"><input type="checkbox" id="toggle-shrink-to-fit" /> Shrink to fit (hug content)</label>
           </div>
           <div style="height: 18px;"></div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
@@ -2459,7 +2464,9 @@
     if (!widgetPrefs.showHrv) params.set('hide_hrv', '1');
     if (!widgetPrefs.showLiveHr) params.set('hide_live_hr', '1');
     if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
-    if (widgetPrefs.shrinkToFit) params.set('shrink', '1');
+    // Always shrink-to-content now (it's the only mode). Keep the URL param
+    // for backward compat with older cached overlay.html versions.
+    params.set('shrink', '1');
     return origin + 'overlay.html?' + params.toString();
   }
   // Compute the recommended OBS Browser Source dimensions from current settings.
@@ -2508,10 +2515,10 @@
     if (horizontal) return { w: WIDGET_W * visible + (visible - 1) * gap + padH, h: 210 };
     return { w: WIDGET_W, h };
   }
-  // Update the Source Size fields in the Stream settings panel. When
-  // shrink-to-fit is ON, the fields reflect the auto-computed size and are
-  // read-only. When OFF, they show the user's custom size (falling back to the
-  // computed suggestion on first load) and are editable.
+  // Update the Source Size fields in the Stream settings panel. Always show
+  // the LIVE measured size — the widget auto-sizes to content so these are
+  // whatever the widget is rendering at right now. Read-only: the user's
+  // lever is the widget toggles above, not direct pixel editing.
   function updateObsSizeDisplay() {
     const size = getEffectiveSize();
     const text = size.w + ' × ' + size.h;
@@ -2519,19 +2526,8 @@
     if (hint) hint.textContent = text;
     const wEl = $('obs-size-w');
     const hEl = $('obs-size-h');
-    const lockedByShrink = !!widgetPrefs.shrinkToFit;
-    if (wEl) {
-      wEl.value = String(size.w);
-      wEl.readOnly = lockedByShrink;
-      wEl.type = 'number';
-      wEl.classList.toggle('obs-size-locked', lockedByShrink);
-    }
-    if (hEl) {
-      hEl.value = String(size.h);
-      hEl.readOnly = lockedByShrink;
-      hEl.type = 'number';
-      hEl.classList.toggle('obs-size-locked', lockedByShrink);
-    }
+    if (wEl) { wEl.value = String(size.w); wEl.readOnly = true; wEl.classList.add('obs-size-locked'); }
+    if (hEl) { hEl.value = String(size.h); hEl.readOnly = true; hEl.classList.add('obs-size-locked'); }
   }
   function updateStreamingUI() {
     const keyEl = $('broadcast-key-display');
@@ -2585,7 +2581,7 @@
         showWarning: widgetPrefs.showWarning,
         showConnDot: widgetPrefs.showConnDot,
         warningPlacement: widgetPrefs.warningPlacement || 'inside',
-        shrinkToFit: widgetPrefs.shrinkToFit,
+        shrinkToFit: true, // always on now
         layout: widgetPrefs.layout,
       },
       // The exact (width, height) the monitor is rendering at. OBS applies the
@@ -3680,40 +3676,60 @@
     // no warning is firing so the widget never reflows.
     warningPlacement: 'inside',
     showConnDot: true,
-    shrinkToFit: false,
     layout: 'vertical',
     broadcast: true,
-    // When shrinkToFit is OFF, these are the literal widget dimensions (the
-    // ground truth). When ON, computeObsSize() overrides them. null = not
-    // yet initialized — getEffectiveSize() will fill from computeObsSize.
+    // Measured dimensions of #overlay-zone after each render. Auto-populated
+    // via ResizeObserver — the widget is always content-sized, and these
+    // values are what we tell OBS to use as its source size.
     customWidth: null,
     customHeight: null,
   };
 
-  // Single source of truth for "how big is the widget box right now?". All
-  // CSS / preview / OBS broadcast reads from here. When shrink-to-fit is ON,
-  // the app decides (based on visible widgets); when OFF, the user decides
-  // (via the Width/Height inputs in Settings → Stream).
+  // Measured rendered size of #overlay-zone. The widget always auto-sizes to
+  // its content; we measure after layout and publish those dimensions so OBS
+  // can copy them. No user-settable width/height — if you want a smaller
+  // widget, toggle features off until it shrinks.
   function getEffectiveSize() {
-    if (widgetPrefs.shrinkToFit) return computeObsSize();
-    const fallback = computeObsSize();
     return {
-      w: Number.isFinite(widgetPrefs.customWidth)  ? widgetPrefs.customWidth  : fallback.w,
-      h: Number.isFinite(widgetPrefs.customHeight) ? widgetPrefs.customHeight : fallback.h,
+      w: Number.isFinite(widgetPrefs.customWidth)  ? widgetPrefs.customWidth  : 380,
+      h: Number.isFinite(widgetPrefs.customHeight) ? widgetPrefs.customHeight : 260,
     };
   }
-  // Apply the effective size to the preview's #overlay-zone as inline CSS.
-  // That becomes the ground truth for DOM layout — contents flow inside a
-  // box with these exact dimensions, chart canvases stabilize, no mid-session
-  // drift. overflow: hidden crops anything that doesn't fit (user picked the
-  // size; we honour it).
+  // Measure #overlay-zone after a paint, update widgetPrefs + the size fields,
+  // and broadcast to OBS. Re-runs whenever prefs change or the widget reflows.
+  let overlaySizeRaf = null;
   function applyOverlaySize() {
-    const { w, h } = getEffectiveSize();
     const zone = $('overlay-zone');
     if (!zone) return;
-    zone.style.width = w + 'px';
-    zone.style.height = h + 'px';
+    // Clear any inline dims so the zone sizes to its children naturally. A
+    // stale inline width/height from a previous toggle would otherwise lock
+    // the measurement to the old size.
+    zone.style.width = '';
+    zone.style.height = '';
     zone.style.overflow = 'hidden';
+    if (overlaySizeRaf) cancelAnimationFrame(overlaySizeRaf);
+    overlaySizeRaf = requestAnimationFrame(() => {
+      overlaySizeRaf = requestAnimationFrame(() => {
+        const rect = zone.getBoundingClientRect();
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
+        if (w > 0 && h > 0 && (w !== widgetPrefs.customWidth || h !== widgetPrefs.customHeight)) {
+          widgetPrefs.customWidth = w;
+          widgetPrefs.customHeight = h;
+          updateObsSizeDisplay();
+          if (typeof pushPrefsToOverlay === 'function') pushPrefsToOverlay();
+        }
+      });
+    });
+  }
+  // ResizeObserver keeps the measurement live — if the widget reflows (chart
+  // renders data, font metrics settle, etc), we catch it and update the fields.
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => applyOverlaySize());
+    requestAnimationFrame(() => {
+      const zone = $('overlay-zone');
+      if (zone) ro.observe(zone);
+    });
   }
 
   function applyWidgetPrefs() {
@@ -3728,12 +3744,12 @@
     document.body.classList.toggle('warning-above', widgetPrefs.warningPlacement === 'above');
     const wpSel = $('warning-placement');
     if (wpSel) wpSel.value = widgetPrefs.warningPlacement || 'inside';
-    document.body.classList.toggle('shrink-to-fit', !!widgetPrefs.shrinkToFit);
+    document.body.classList.add('shrink-to-fit'); // always on — only mode now
     document.body.classList.toggle('layout-horizontal', widgetPrefs.layout === 'horizontal');
     document.querySelectorAll('.layout-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.layout === widgetPrefs.layout);
     });
-    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
+    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggles)) {
       const el = $(id); if (el) el.checked = widgetPrefs[key];
     }
@@ -3912,24 +3928,6 @@
         }
       });
     });
-    // Width / Height inputs: editable when shrink-to-fit is OFF. Typing a new
-    // value updates widgetPrefs.customWidth/Height, writes the new size onto
-    // the preview via applyOverlaySize, and broadcasts so OBS re-renders.
-    ['obs-size-w', 'obs-size-h'].forEach((id, idx) => {
-      const el = $(id);
-      if (!el) return;
-      el.addEventListener('input', () => {
-        if (widgetPrefs.shrinkToFit) return; // field is read-only in this mode
-        const raw = parseInt(el.value, 10);
-        if (!Number.isFinite(raw)) return;
-        const clamped = Math.max(idx === 0 ? 160 : 80, Math.min(2000, raw));
-        if (idx === 0) widgetPrefs.customWidth = clamped;
-        else widgetPrefs.customHeight = clamped;
-        saveWidgetPrefs();
-        applyOverlaySize();
-        pushPrefsToOverlay();
-      });
-    });
     $('connect').addEventListener('click', connect);
     updateConnectButtonLabel();
     $('disconnect').addEventListener('click', disconnect);
@@ -3985,7 +3983,7 @@
       });
     });
     // Widget visibility toggles
-    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
+    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggleMap)) {
       const el = $(id);
       if (el) el.addEventListener('change', () => {
