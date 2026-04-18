@@ -1,0 +1,3929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>HR Monitor · Viewer</title>
+<link rel="manifest" href='data:application/manifest+json,{"name":"HRV Session Viewer","short_name":"HRV Viewer","start_url":"./hrv_viewer.html","display":"standalone","background_color":"%230a0a0a","theme_color":"%230a0a0a","icons":[{"src":"data:image/svg%2Bxml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 192 192%22%3E%3Crect width=%22192%22 height=%22192%22 fill=%22%230a0a0a%22/%3E%3Cpath d=%22M24 110 L60 110 L75 70 L110 150 L125 110 L170 110%22 fill=%22none%22 stroke=%22%235DCAA5%22 stroke-width=%228%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-panel: #101010;
+    --bg-input: #141414;
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --text: #d8d8d8;
+    --text-dim: #8a8a8a;
+    --text-faint: #5a5a5a;
+    --accent-hr: #E89858;
+    --accent-rmssd: #5DCAA5;
+    --accent-blue: #85B7EB;
+    --warn-high: #E24B4A;
+    --warn-low: #85B7EB;
+    --warn-crash: #BA7517;
+    --warn-palp: #D76CBA;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh;
+    overflow: hidden;
+  }
+  button {
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  button:hover { border-color: var(--border-strong); background: #1a1a1a; }
+  button.primary { background: var(--accent-blue); color: #0a1a2a; border-color: var(--accent-blue); font-weight: 600; }
+
+  /* Stage colors (shared with live app) */
+  .stage-low { color: #7DB8E8; }
+  .stage-normal { color: #B8D97E; }
+  .stage-elevated { color: #F0C75E; }
+  .stage-high { color: #E89858; }
+  .stage-critical { color: #E24B4A; }
+
+  /* Top app bar */
+  .app-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-panel);
+    height: 52px;
+  }
+  .app-title {
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .app-title .accent { color: var(--accent-hr); }
+  .view-nav {
+    display: flex;
+    gap: 2px;
+    flex: 1;
+  }
+  .view-nav a {
+    padding: 6px 14px;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--text-dim);
+    border-radius: 6px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: color 0.15s, background 0.15s;
+  }
+  .view-nav a:hover { color: var(--text); background: var(--bg-input); }
+  .view-nav a.active { color: var(--text); background: var(--bg-input); }
+  .folder-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+  }
+  #folder-name {
+    font-family: 'Consolas', 'Monaco', monospace;
+    background: var(--bg-input);
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: var(--text);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Main content area */
+  main {
+    height: calc(100vh - 52px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .view { padding: 24px 28px; min-height: 100%; }
+  .view.hidden { display: none; }
+  #view-session:not(.hidden) { display: flex; flex-direction: column; gap: 18px; }
+
+  /* Empty state */
+  #empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: calc(100vh - 52px);
+    padding: 20px;
+  }
+  .empty-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px 48px;
+    max-width: 520px;
+    text-align: center;
+  }
+  .empty-panel h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+  .empty-panel p { margin: 0 0 20px; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+  .empty-panel .hint { margin-top: 18px; font-size: 11px; color: var(--text-faint); line-height: 1.6; }
+
+  /* Sessions list view (landing page until month view is built) */
+  .sessions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+  }
+  .session-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  }
+  .session-card:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  .session-card-time {
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .session-card-date {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+  .session-card-stats {
+    display: flex;
+    gap: 22px;
+    font-size: 12px;
+  }
+  .session-card-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .session-card-stat-label {
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .session-card-stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+  }
+
+  /* MONTH CALENDAR */
+  .cal-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .cal-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    min-width: 220px;
+  }
+  .cal-nav {
+    display: flex;
+    gap: 6px;
+  }
+  .cal-nav button {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cal-today-btn { padding: 6px 14px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+  .metric-switch {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+  }
+  .metric-switch button {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 5px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .metric-switch button:hover { color: var(--text); }
+  .metric-switch button.active { background: var(--accent-blue); color: #0a1a2a; }
+  .cal-legend-strip {
+    display: flex;
+    gap: 16px;
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .cal-legend-strip .chart-legend-item { gap: 6px; }
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+  }
+  .cal-dow {
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    text-align: center;
+    padding: 8px 0;
+  }
+  .cal-cell {
+    aspect-ratio: 1;
+    background: #0a0a0a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: border-color 0.15s, transform 0.1s, background 0.15s;
+    min-height: 100px;
+  }
+  .cal-cell.has-sessions { cursor: pointer; }
+  .cal-cell.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+  .cal-cell.empty-month { opacity: 0.3; pointer-events: none; }
+  .cal-cell.today { border-color: #ffffff44; }
+  .cal-cell .cal-day-num {
+    font-size: 15px;
+    color: var(--text-dim);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .cal-cell.has-sessions .cal-day-num { color: var(--text); }
+  .cal-cell .cal-hr {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-size: 28px;
+    font-weight: 900;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .cal-cell .cal-hr-unit {
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 3px;
+    font-weight: 600;
+  }
+  .cal-cell .cal-badges {
+    display: flex;
+    gap: 6px;
+    font-size: 11px;
+    margin-top: 5px;
+  }
+  .cal-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+  }
+  .cal-badge-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+  }
+  .cal-badge.palp { background: rgba(215,108,186,0.14); color: var(--warn-palp); }
+  .cal-badge.palp .cal-badge-dot { background: var(--warn-palp); }
+  .cal-badge.warn { background: rgba(226,75,74,0.14); color: var(--warn-high); }
+  .cal-badge.warn .cal-badge-dot { background: var(--warn-high); }
+  .cal-badge.flush { background: rgba(232,168,88,0.14); color: #E8A858; }
+  .cal-badge.flush .cal-badge-dot { background: #E8A858; }
+  .cal-badge.chills { background: rgba(133,183,235,0.14); color: #85B7EB; }
+  .cal-badge.chills .cal-badge-dot { background: #85B7EB; }
+  .cal-cell .cal-session-count {
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  /* DAY VIEW */
+  .day-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .day-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .day-strip-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 22px;
+    margin-bottom: 20px;
+  }
+  .day-strip-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .day-strip {
+    position: relative;
+    height: 56px;
+    background: linear-gradient(90deg, #050505 0%, #0a0a0a 25%, #0d0d0d 50%, #0a0a0a 75%, #050505 100%);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .day-strip-block {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: transform 0.12s, box-shadow 0.12s;
+    border: 1px solid rgba(255,255,255,0.15);
+    min-width: 4px;
+  }
+  .day-strip-block:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.5);
+    z-index: 2;
+  }
+  .day-hour-axis {
+    position: relative;
+    height: 18px;
+    font-size: 11px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .day-hour-tick {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    letter-spacing: 0.08em;
+  }
+  .day-hour-gridline {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: rgba(255,255,255,0.05);
+  }
+  .day-strip-empty {
+    padding: 30px 0;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 13px;
+  }
+
+  /* WEEK VIEW */
+  .week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 12px;
+  }
+  .week-col {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 240px;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+  .week-col.has-sessions { cursor: pointer; }
+  .week-col.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+  .week-col.empty { opacity: 0.45; }
+  .week-col.today { border-color: #ffffff44; }
+  .week-col-head {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .week-dow { font-size: 11px; color: var(--text-faint); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
+  .week-date { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .week-col-hr {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-size: 28px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .week-col-hr-label { font-size: 10px; color: var(--text-faint); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
+  .week-col-spark {
+    height: 44px;
+    position: relative;
+    margin: 4px 0;
+  }
+  .week-col-stats { display: flex; gap: 12px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .week-col-stat { display: flex; flex-direction: column; gap: 2px; }
+  .week-col-stat-label { font-size: 10px; color: var(--text-faint); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+
+  /* ALL-TIME TRENDS */
+  .all-granularity {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px;
+    width: fit-content;
+  }
+  .all-granularity button {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .all-granularity button:hover { color: var(--text); }
+  .all-granularity button.active { background: var(--accent-blue); color: #0a1a2a; }
+  .all-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .all-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .all-card.wide { grid-column: 1 / -1; }
+  .all-card-title { font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
+  .all-card-sub { font-size: 12px; color: var(--text-faint); margin-top: -4px; }
+  .all-chart-wrap { height: 220px; position: relative; }
+  .all-polar-wrap { height: 280px; position: relative; }
+  .all-headline {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-size: 26px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    margin-top: 2px;
+  }
+
+  /* SESSION DETAIL VIEW */
+  .session-layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 22px;
+    flex: 1;
+    min-height: 440px;
+    /* Height is a hard cap, NOT min — keeps the grid row from stretching to fit
+       whatever markers happen to be visible. Anything taller scrolls internally. */
+    max-height: calc(100vh - 320px);
+    position: relative;
+    transition: grid-template-columns 0.22s ease, gap 0.22s ease;
+  }
+  .session-layout.sidebar-collapsed {
+    grid-template-columns: 1fr 0px;
+    gap: 0;
+  }
+  .session-layout.sidebar-collapsed .session-sidebar {
+    padding-left: 0;
+    padding-right: 0;
+    border-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* Toggle sits on the boundary between the chart and the markers panel.
+     Acts as a visible "divider handle" — moves to the right edge when sidebar collapses. */
+  .sidebar-toggle {
+    position: absolute;
+    top: 14px;
+    right: 340px;
+    transform: translateX(50%);
+    width: 30px;
+    height: 56px;
+    border-radius: 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #b0b0b0;
+    z-index: 15;
+    padding: 0;
+    transition: color 0.15s, border-color 0.15s, background 0.15s, right 0.22s ease;
+  }
+  .sidebar-toggle:hover {
+    color: var(--text);
+    border-color: #3a3a3a;
+    background: #141414;
+  }
+  .sidebar-toggle svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    fill: none;
+    transition: transform 0.2s;
+  }
+  /* Rotate icon to signal direction the sidebar will move */
+  .session-layout.sidebar-collapsed .sidebar-toggle {
+    right: 0;
+    transform: translateX(0);
+  }
+  .session-layout.sidebar-collapsed .sidebar-toggle svg {
+    transform: rotate(180deg);
+  }
+  .session-main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .session-sidebar {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* Summary header */
+  .summary-bar {
+    display: flex;
+    gap: 24px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 22px;
+    flex-wrap: wrap;
+  }
+  .summary-stat {
+    display: flex;
+    flex-direction: column;
+    min-width: 92px;
+  }
+  .summary-stat-label {
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .summary-stat-value {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    font-size: 30px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    margin-top: 4px;
+  }
+  .summary-stat-unit {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 3px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .summary-stat-value.warn { color: var(--warn-crash); }
+  .summary-stat-value.palp { color: var(--warn-palp); }
+
+  /* Chart container */
+  .chart-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    position: relative;
+  }
+  .chart-wrap {
+    flex: 1;
+    min-height: 300px;
+    position: relative;
+  }
+  .context-wrap {
+    height: 68px;
+    margin-top: 14px;
+    position: relative;
+    background: #050505;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .context-wrap canvas { position: absolute; inset: 0; }
+  /* Dim the portion of the session NOT currently in view. Gives a clear "window"
+     metaphor - the bright region is what the main chart shows. */
+  .context-dim {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(0,0,0,0.65);
+    pointer-events: none;
+    transition: none;
+  }
+  .context-brush {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: transparent;
+    border-left: 2px solid var(--accent-rmssd);
+    border-right: 2px solid var(--accent-rmssd);
+    pointer-events: none;
+    box-sizing: border-box;
+  }
+  /* Beefier handles so they're clearly grabbable */
+  .context-brush::before, .context-brush::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px;
+    height: 28px;
+    background: var(--accent-rmssd);
+    opacity: 0.85;
+    pointer-events: auto;
+    cursor: ew-resize;
+    border-radius: 3px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
+  .context-brush::before { left: -6px; }
+  .context-brush::after { right: -6px; }
+  .context-overlay {
+    position: absolute;
+    inset: 0;
+    cursor: crosshair;
+  }
+
+  /* Chart legend - an inline strip at the top of the chart panel. Flat, bordered below. */
+  .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 20px;
+    padding: 2px 4px 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+  }
+  .legend-spacer { flex: 1; }
+  .legend-reset-zoom {
+    padding: 4px 12px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s, opacity 0.15s;
+  }
+  .legend-reset-zoom:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-input); }
+  .legend-reset-zoom:disabled, .legend-reset-zoom.hidden { opacity: 0; pointer-events: none; }
+  .chart-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .legend-swatch {
+    width: 18px;
+    height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .legend-swatch.dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .legend-swatch.line {
+    height: 0;
+    border-top: 2px dashed var(--accent-rmssd);
+    border-radius: 0;
+  }
+
+  /* Annotation hover tooltip */
+  #anno-tip {
+    position: fixed;
+    pointer-events: none;
+    z-index: 1000;
+    background: rgba(15,15,15,0.97);
+    color: #d8d8d8;
+    padding: 8px 12px;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    max-width: 260px;
+    display: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }
+
+  /* HR x HRV interpretation panel */
+  .interp-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .interp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+  .interp-head:hover { color: var(--text); }
+  .interp-body { margin-top: 12px; }
+  .interp-panel.collapsed .interp-body { display: none; }
+  .interp-caret {
+    width: 10px;
+    height: 10px;
+    transition: transform 0.2s;
+  }
+  .interp-panel.collapsed .interp-caret { transform: rotate(-90deg); }
+  .interp-current {
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .interp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+    margin-top: 6px;
+  }
+  /* Quadrant cells are TOGGLE BUTTONS that overlay matching time ranges on the chart */
+  .interp-cell {
+    padding: 11px 14px;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--text-faint);
+    background: rgba(255,255,255,0.015);
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-dim);
+    transition: background 0.15s, border-color 0.15s, transform 0.1s, color 0.15s;
+    position: relative;
+  }
+  .interp-cell:hover {
+    background: rgba(255,255,255,0.04);
+    transform: translateY(-1px);
+  }
+  .interp-cell .interp-title {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-bottom: 5px;
+    font-size: 12px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .interp-empty-badge {
+    font-size: 10px;
+    color: var(--text-faint);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    font-style: italic;
+  }
+  /* Active (toggled ON) state for each tone */
+  .interp-cell.on { color: var(--text); background: rgba(255,255,255,0.05); border-left-width: 6px; }
+  .interp-cell.on .interp-title { color: inherit; }
+  .interp-cell.good.on { border-color: #B8D97E; border-left-color: #B8D97E; background: rgba(184,217,126,0.10); }
+  .interp-cell.good.on .interp-title { color: #B8D97E; }
+  .interp-cell.warn.on { border-color: #E89858; border-left-color: #E89858; background: rgba(232,152,88,0.10); }
+  .interp-cell.warn.on .interp-title { color: #E89858; }
+  .interp-cell.bad.on { border-color: #E24B4A; border-left-color: #E24B4A; background: rgba(226,75,74,0.12); }
+  .interp-cell.bad.on .interp-title { color: #E24B4A; }
+  .interp-cell.ok.on { border-color: var(--accent-rmssd); border-left-color: var(--accent-rmssd); background: rgba(93,202,165,0.10); }
+  .interp-cell.ok.on .interp-title { color: var(--accent-rmssd); }
+  /* Empty state: faded, not toggleable */
+  .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
+
+  /* Summary paragraph */
+  .insight-box {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-rmssd);
+    border-radius: 10px;
+    padding: 16px 20px;
+    font-size: 14.5px;
+    line-height: 1.65;
+    color: var(--text);
+  }
+
+  /* POTS panel */
+  .pots-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+  }
+  .pots-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .pots-card-label {
+    font-size: 9px;
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .pots-card-value {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-size: 22px;
+    font-weight: 900;
+    line-height: 1.1;
+    margin-top: 4px;
+  }
+  .pots-card-subtext {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+  .pots-card-value.bad { color: var(--warn-high); }
+  .pots-card-value.good { color: #B8D97E; }
+
+  /* Sidebar */
+  .sidebar-head {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .filter-chips {
+    display: flex;
+    gap: 7px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .filter-chip {
+    padding: 5px 12px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-dim);
+    transition: transform 0.1s;
+  }
+  .filter-chip:hover { transform: translateY(-1px); }
+  .filter-chip.active {
+    color: var(--text);
+    background: var(--bg-input);
+    border-color: var(--border-strong);
+  }
+  .filter-chip.type-event.active { border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
+  .filter-chip.type-warning.active { border-color: var(--warn-crash); color: var(--warn-crash); }
+  .filter-chip.type-palp.active { border-color: var(--warn-palp); color: var(--warn-palp); }
+  .filter-chip.type-delta.active { border-color: #8BB4FF; color: #8BB4FF; }
+  .filter-chip.type-disconnect.active { border-color: var(--text-dim); color: var(--text-dim); }
+  .marker-list {
+    overflow-y: auto;
+    flex: 1 1 0;
+    min-height: 0;
+    margin: 0 -6px;
+    padding-right: 4px;
+  }
+  .marker-item {
+    display: flex;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.12s, transform 0.1s, padding 0.1s;
+    border-left: 3px solid transparent;
+    line-height: 1.4;
+  }
+  .marker-item:hover {
+    background: var(--bg-input);
+    transform: translateX(2px);
+    padding-left: 14px;
+  }
+  .marker-item.type-event { border-left-color: var(--accent-rmssd); }
+  .marker-item.type-warning { border-left-color: var(--warn-crash); }
+  .marker-item.type-palp { border-left-color: var(--warn-palp); }
+  .marker-item.type-delta { border-left-color: #8BB4FF; }
+  .marker-item.type-disconnect { border-left-color: var(--text-dim); }
+  .marker-time {
+    color: var(--text-dim);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    min-width: 54px;
+  }
+  .marker-label { flex: 1; color: var(--text); }
+
+  /* Back button */
+  .back-link {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 12px;
+    display: inline-block;
+  }
+  .back-link:hover { color: var(--text); }
+
+  /* Stub view */
+  .stub-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    color: var(--text-dim);
+  }
+
+  /* Section heading */
+  .section-head {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin: 12px 0 8px;
+  }
+
+  /* Session top row: back link on the left, tags inline on the right */
+  .session-top-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .session-top-row .back-link { margin: 0; }
+  .tags-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    font-size: 12px;
+    flex-wrap: wrap;
+  }
+  .tags-inline-label {
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .tags-inline .tag-chip {
+    padding: 2px 9px;
+    font-size: 12px;
+    background: rgba(93,202,165,0.1);
+    border: 1px solid var(--accent-rmssd);
+    color: var(--accent-rmssd);
+    border-radius: 999px;
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+  }
+  .tags-inline .tag-chip .tag-x { color: var(--text-faint); font-weight: bold; cursor: pointer; }
+  .tags-inline .tag-chip .tag-x:hover { color: var(--warn-high); }
+  .tags-inline .tag-input {
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed var(--border-strong);
+    border-radius: 0;
+    padding: 2px 4px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    width: 110px;
+  }
+  .tags-inline .tag-input:focus { border-bottom-color: var(--accent-rmssd); border-bottom-style: solid; }
+
+  /* Auto-detected autonomic-event markers (chills-like volatility, sympathetic flush) */
+  .marker-item.type-flush { border-left-color: #E8A858; }
+  .filter-chip.type-flush.active { border-color: #E8A858; color: #E8A858; }
+  .marker-item.type-chills { border-left-color: #85B7EB; }
+  .marker-item.type-posture { border-left-color: #c8a8e6; }
+  .marker-item.type-sleep { border-left-color: #6E8CC8; }
+  .filter-chip.type-chills.active { border-color: #85B7EB; color: #85B7EB; }
+  .filter-chip.type-posture.active { border-color: #c8a8e6; color: #c8a8e6; }
+  .filter-chip.type-sleep.active { border-color: #6E8CC8; color: #6E8CC8; }
+  /* Chills sensitivity slider (session view sidebar) */
+  .chills-tune {
+    margin-top: 10px;
+    padding: 10px 2px 2px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .chills-tune-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .chills-tune-value { color: #85B7EB; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .chills-tune input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: #1a1a1a;
+    border-radius: 3px;
+    outline: none;
+  }
+  .chills-tune input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #85B7EB;
+    cursor: pointer;
+    border: 2px solid #0a0a0a;
+  }
+  .chills-tune-hints {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--text-faint);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* TAG UI (session view) */
+  .tags-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .tags-label { font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
+  .tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .tag-chip.selected { background: rgba(93,202,165,0.1); border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
+  .tag-chip .tag-x { color: var(--text-faint); font-weight: bold; }
+  .tag-chip .tag-x:hover { color: var(--warn-high); }
+  .tag-input {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    border-radius: 999px;
+    padding: 4px 12px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    min-width: 120px;
+  }
+  .tag-input:focus { border-color: var(--accent-rmssd); border-style: solid; }
+  .tag-preset {
+    padding: 3px 10px;
+    font-size: 11px;
+    border-radius: 999px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .tag-preset:hover { color: var(--text); border-color: var(--border-strong); }
+
+  /* Export-to-print mode: activated by the Export report button (NOT Ctrl+P).
+     The button applies body.printing, resizes charts, calls window.print(), and
+     removes the class on afterprint. Using a class-based approach (instead of
+     @media print alone) lets us force Chart.js to re-resize to a known width
+     before the print dialog renders — otherwise canvases keep their screen
+     dimensions and bleed off the page. */
+  body.printing {
+    background: #fff !important;
+    color: #111 !important;
+    overflow: auto;
+  }
+  body.printing .app-bar,
+  body.printing .view-nav,
+  body.printing .folder-info,
+  body.printing .session-sidebar,
+  body.printing .sidebar-toggle,
+  body.printing .context-wrap,
+  body.printing .back-link,
+  body.printing .tags-inline .tag-input,
+  body.printing .legend-reset-zoom,
+  body.printing .filter-chips,
+  body.printing .all-granularity,
+  body.printing .export-report-btn { display: none !important; }
+  body.printing #app { display: block; height: auto; }
+  body.printing main { overflow: visible; height: auto; }
+  body.printing .view { padding: 20px; }
+  body.printing #view-session { display: block; }
+  body.printing .session-layout {
+    display: block !important;
+    grid-template-columns: 1fr !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+  body.printing .chart-panel,
+  body.printing .summary-bar,
+  body.printing .insight-box,
+  body.printing .interp-panel,
+  body.printing .all-card {
+    background: #fff !important;
+    color: #111 !important;
+    border: 1px solid #888 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    margin-bottom: 12px;
+  }
+  body.printing .chart-legend { color: #444 !important; border-bottom-color: #aaa !important; }
+  body.printing .summary-stat-value,
+  body.printing .interp-current,
+  body.printing .cal-hr { color: #111 !important; }
+  body.printing .summary-stat-label,
+  body.printing .summary-stat-unit,
+  body.printing .insight-box,
+  body.printing .interp-cell { color: #222 !important; }
+  body.printing .interp-panel.collapsed .interp-body { display: block !important; }
+  body.printing .chart-wrap { min-height: 340px; height: 340px !important; }
+  body.printing .all-chart-wrap, body.printing .all-polar-wrap { height: 260px !important; }
+  body.printing canvas { max-width: 100% !important; }
+
+  @media print {
+    /* Safety net if the user hits Ctrl+P directly — still hide the chrome. */
+    .app-bar, .view-nav, .folder-info, .session-sidebar, .sidebar-toggle,
+    .context-wrap, .back-link, .filter-chips, .all-granularity,
+    .legend-reset-zoom, .export-report-btn { display: none !important; }
+  }
+
+  /* Export button in app bar */
+  .export-report-btn {
+    padding: 6px 14px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    border-radius: 999px;
+    cursor: pointer;
+    margin-left: 8px;
+  }
+  .export-report-btn:hover { background: #1a1a1a; border-color: #3a3a3a; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
+
+  /* ===== MOBILE (≤768px): stacked session layout, taller charts, bigger taps ===== */
+  @media (max-width: 768px) {
+    .app-bar {
+      height: auto;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 10px 14px;
+    }
+    .app-title { font-size: 13px; }
+    .view-nav { flex-wrap: wrap; width: 100%; order: 3; gap: 0; }
+    .view-nav a { padding: 6px 10px; font-size: 11px; }
+    .folder-info { font-size: 10px; gap: 6px; }
+    #folder-name { max-width: 100px; }
+    main { height: calc(100vh - 110px); }
+    .view { padding: 16px 14px; }
+    .session-layout {
+      grid-template-columns: 1fr !important;
+      max-height: none !important;
+      gap: 14px;
+    }
+    .session-layout.sidebar-collapsed { grid-template-columns: 1fr !important; }
+    .session-sidebar { max-height: 260px; }
+    .sidebar-toggle { display: none; }
+    .summary-bar { gap: 14px; padding: 14px; }
+    .summary-stat-value { font-size: 22px; }
+    .summary-stat { min-width: 74px; }
+    .chart-wrap { min-height: 260px; }
+    .interp-grid { grid-template-columns: 1fr; }
+    .sessions-grid { grid-template-columns: 1fr; }
+    .all-grid { grid-template-columns: 1fr; }
+    .all-card.wide { grid-column: auto; }
+    .cal-grid { gap: 4px; }
+    .cal-cell { min-height: 72px; padding: 6px; }
+    .cal-cell .cal-hr { font-size: 20px; }
+    .cal-day-num { font-size: 12px; }
+    .cal-hr-unit { font-size: 9px; }
+    .cal-badges { display: none; }
+    .week-grid { grid-template-columns: 1fr 1fr; }
+    .tags-inline { width: 100%; margin-left: 0; }
+    .chart-legend { font-size: 10px; gap: 10px; }
+    input, select, textarea { font-size: 16px !important; }
+    button { min-height: 38px; }
+  }
+
+  @media (max-width: 480px) {
+    .view { padding: 12px 10px; }
+    .summary-bar { padding: 10px 12px; gap: 12px; }
+    .summary-stat-value { font-size: 18px; }
+    .summary-stat-label { font-size: 9px; }
+    .session-top-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .chart-panel { padding: 12px 14px; }
+    .week-grid { grid-template-columns: 1fr; }
+    .view-nav a { padding: 5px 8px; font-size: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="app-bar">
+  <a class="app-title" href="#/index" style="text-decoration: none;">HR Monitor <span class="accent">·</span> Viewer</a>
+  <nav class="view-nav">
+    <a data-view="index" href="#/index">Sessions</a>
+    <a data-view="month" href="#/month">Month</a>
+    <a data-view="day" href="#/day">Day</a>
+    <a data-view="week" href="#/week">Week</a>
+    <a data-view="all" href="#/all">All</a>
+  </nav>
+  <div class="folder-info">
+    <span>Folder:</span>
+    <span id="folder-name">—</span>
+    <button id="folder-pick">Change...</button>
+    <button class="export-report-btn" id="export-report" title="Print/save this view as a report">Export report</button>
+  </div>
+</header>
+
+<main>
+  <div id="empty-state">
+    <div class="empty-panel">
+      <h2>No sessions folder selected</h2>
+      <p>This viewer reads the CSV files your live HR Monitor auto-saves. Point it at the folder you chose for auto-save.</p>
+      <button id="empty-pick" class="primary">Pick sessions folder</button>
+      <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically on next load.</div>
+    </div>
+  </div>
+
+  <div id="view-index" class="view hidden"></div>
+  <div id="view-session" class="view hidden"></div>
+  <div id="view-month" class="view hidden"></div>
+  <div id="view-day" class="view hidden"></div>
+  <div id="view-week" class="view hidden"></div>
+  <div id="view-all" class="view hidden"></div>
+</main>
+
+<script>
+(function() {
+  'use strict';
+
+  // ===== Constants =====
+  const IDB_NAME = 'hr_monitor_kv';
+  const IDB_STORE = 'kv';
+  const IDB_KEY_DIR = 'autosave-dir';
+  const LS_INDEX = 'hrv_viewer_index';
+  const LS_TAGS = 'hrv_viewer_tags';
+  const LS_THRESH = 'hr_monitor_color_thresholds'; // shared with live app
+
+  const STAGE_COLORS = {
+    'stage-low': '#7DB8E8',
+    'stage-normal': '#B8D97E',
+    'stage-elevated': '#F0C75E',
+    'stage-high': '#E89858',
+    'stage-critical': '#E24B4A',
+  };
+  const colorThresholds = { low: 70, normal: 90, elevated: 110, high: 130 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_THRESH) || 'null');
+    if (saved) Object.assign(colorThresholds, saved);
+  } catch (e) {}
+
+  function getHRStage(hr) {
+    if (hr == null) return 'stage-normal';
+    if (hr <= colorThresholds.low) return 'stage-low';
+    if (hr < colorThresholds.normal) return 'stage-normal';
+    if (hr < colorThresholds.elevated) return 'stage-elevated';
+    if (hr < colorThresholds.high) return 'stage-high';
+    return 'stage-critical';
+  }
+
+  // ===== IndexedDB helpers (shared handle with live app) =====
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbGet(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const r = tx.objectStore(IDB_STORE).get(key);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+  async function idbSet(key, value) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // ===== Folder handle management =====
+  let dirHandle = null;
+
+  async function restoreFolder() {
+    try {
+      const h = await idbGet(IDB_KEY_DIR);
+      if (h) {
+        dirHandle = h;
+        updateFolderUI();
+      }
+    } catch (e) {}
+  }
+
+  async function pickFolder() {
+    if (!window.showDirectoryPicker) {
+      alert('This viewer needs the File System Access API (Chrome / Edge / Comet).');
+      return;
+    }
+    try {
+      const h = await window.showDirectoryPicker({ mode: 'read', id: 'hr-monitor-sessions' });
+      dirHandle = h;
+      await idbSet(IDB_KEY_DIR, h);
+      updateFolderUI();
+      await loadSessions();
+      route();
+    } catch (e) {}
+  }
+
+  async function ensureReadPermission() {
+    if (!dirHandle) return false;
+    try {
+      const perm = await dirHandle.queryPermission({ mode: 'read' });
+      if (perm === 'granted') return true;
+      const req = await dirHandle.requestPermission({ mode: 'read' });
+      return req === 'granted';
+    } catch (e) { return false; }
+  }
+
+  function updateFolderUI() {
+    const el = document.getElementById('folder-name');
+    el.textContent = dirHandle ? (dirHandle.name || 'selected') : '—';
+  }
+
+  // ===== Sessions index (lazy parse + localStorage cache) =====
+  // Stored shape: { filename: { summary object } }
+  let sessionsIndex = {};
+  let sessionsByDate = {}; // 'YYYY-MM-DD' -> array of filenames
+
+  function loadCachedIndex() {
+    try {
+      sessionsIndex = JSON.parse(localStorage.getItem(LS_INDEX) || '{}');
+    } catch (e) { sessionsIndex = {}; }
+  }
+
+  function persistIndex() {
+    try { localStorage.setItem(LS_INDEX, JSON.stringify(sessionsIndex)); } catch (e) {}
+  }
+
+  function parseSessionFilename(fn) {
+    // hrv_session_2026-04-17T14-32-00.csv
+    const m = fn.match(/^hrv_session_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})\.csv$/);
+    if (m) {
+      const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}`;
+      return { date: new Date(iso), isoDate: m[1], isoTime: `${m[2]}:${m[3]}:${m[4]}`, filename: fn, kind: 'session' };
+    }
+    // hrv_daily_2026-04-17.csv — one file per calendar day, starts at local midnight
+    const d = fn.match(/^hrv_daily_(\d{4})-(\d{2})-(\d{2})\.csv$/);
+    if (d) {
+      const dt = new Date(+d[1], +d[2] - 1, +d[3], 0, 0, 0);
+      return { date: dt, isoDate: `${d[1]}-${d[2]}-${d[3]}`, isoTime: '00:00:00', filename: fn, kind: 'daily' };
+    }
+    return null;
+  }
+
+  // Epoch of the first row in a file, used to reconstruct epoch_ms when the
+  // column isn't present in older CSVs. Returns 0 if filename is unrecognised.
+  function deriveFileStartEpoch(filename) {
+    const m = parseSessionFilename(filename);
+    return m ? m.date.getTime() : 0;
+  }
+
+  async function loadSessions() {
+    if (!dirHandle) return;
+    const ok = await ensureReadPermission();
+    if (!ok) return;
+    loadCachedIndex();
+
+    const filenames = [];
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind === 'file' && /^hrv_session_.*\.csv$/.test(entry.name)) {
+        filenames.push(entry.name);
+      }
+    }
+
+    // Drop cached entries for files that no longer exist
+    for (const k of Object.keys(sessionsIndex)) {
+      if (!filenames.includes(k)) delete sessionsIndex[k];
+    }
+
+    // Parse new files OR re-parse stale entries missing fields that were added later.
+    let newParsed = 0;
+    for (const fn of filenames) {
+      const cached = sessionsIndex[fn];
+      const needsReparse = !cached || cached.__incomplete
+        || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
+        || !('quadPct' in cached) || !('restingHR' in cached);
+      // (postureSpans absence is fine — older CSVs may not have a posture column)
+      if (needsReparse) {
+        const summary = await parseSessionFile(fn);
+        if (summary) {
+          sessionsIndex[fn] = summary;
+          newParsed++;
+        }
+      }
+    }
+    if (newParsed > 0) persistIndex();
+
+    // Group by date
+    sessionsByDate = {};
+    for (const fn of Object.keys(sessionsIndex)) {
+      const meta = parseSessionFilename(fn);
+      if (!meta) continue;
+      if (!sessionsByDate[meta.isoDate]) sessionsByDate[meta.isoDate] = [];
+      sessionsByDate[meta.isoDate].push(fn);
+    }
+    for (const d of Object.keys(sessionsByDate)) {
+      sessionsByDate[d].sort();
+    }
+  }
+
+  async function parseSessionFile(filename) {
+    try {
+      const fh = await dirHandle.getFileHandle(filename);
+      const file = await fh.getFile();
+      const text = await file.text();
+      return summarizeCSV(filename, text);
+    } catch (e) {
+      console.error('Parse failed for', filename, e);
+      return null;
+    }
+  }
+
+  // ===== CSV parsing + per-session summary =====
+  function parseCSV(text) {
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 2) return { rows: [], header: [] };
+    const header = lines[0].split(',');
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l) continue;
+      const cells = l.split(',');
+      rows.push(cells);
+    }
+    return { rows, header };
+  }
+
+  // Rolling HR standard deviation flags high-volatility windows (possible shivering
+  // EMG bleedthrough or fast autonomic storms the strap reads as jittery R-to-R).
+  // Extracted so the viewer can re-run it with a user-chosen sensitivity threshold.
+  function detectChillsWindows(hr, ratioThreshold) {
+    const out = [];
+    if (!hr || !hr.length) return out;
+    const WIN_MIN = 0.5;    // 30-sec rolling window
+    const MIN_STD_ABS = 3;  // absolute floor so flat sessions don't trigger
+    const stds = [];
+    for (let i = 0; i < hr.length; i++) {
+      const samples = [];
+      for (let j = i; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) samples.push(hr[j].v);
+      if (samples.length < 8) { stds.push(null); continue; }
+      const m = samples.reduce((a, b) => a + b, 0) / samples.length;
+      const variance = samples.reduce((s, v) => s + (v - m) * (v - m), 0) / samples.length;
+      stds.push(Math.sqrt(variance));
+    }
+    const nonNull = stds.filter(v => v != null).sort((a, b) => a - b);
+    const medStd = nonNull.length ? nonNull[Math.floor(nonNull.length / 2)] : 0;
+    let cur = null;
+    for (let i = 0; i < hr.length; i++) {
+      const s = stds[i];
+      const isChill = s != null && s >= Math.max(medStd * ratioThreshold, MIN_STD_ABS);
+      if (isChill) {
+        if (!cur) cur = { start: hr[i].t, end: hr[i].t, maxStd: s };
+        else { cur.end = hr[i].t; if (s > cur.maxStd) cur.maxStd = s; }
+      } else if (cur) {
+        if (cur.end - cur.start >= 0.2) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
+        cur = null;
+      }
+    }
+    if (cur && cur.end - cur.start >= 0.2) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
+    return out;
+  }
+
+  function summarizeCSV(filename, text) {
+    const { rows, header } = parseCSV(text);
+    if (!rows.length) return null;
+    const idx = {};
+    header.forEach((h, i) => idx[h.trim()] = i);
+
+    const hr = [];          // {t, v}
+    const rmssd = [];       // {t, v}
+    const palpTimes = [];   // [t, t, ...]
+    const events = [];      // {t, label}
+    const warnings = [];    // {t, type}
+    const connections = []; // {t, type}
+    const postureLog = [];  // {t, posture}
+
+    const fileStartEpoch = deriveFileStartEpoch(filename);
+    const hasEpochCol = idx.epoch_ms != null;
+    function epochFor(t, row) {
+      // Prefer the CSV's epoch_ms column when present (post-schema-bump writer).
+      // Fall back to filename-derived start + elapsed time_min for older files.
+      if (hasEpochCol && row[idx.epoch_ms] !== '') {
+        const e = parseFloat(row[idx.epoch_ms]);
+        if (!isNaN(e)) return e;
+      }
+      return fileStartEpoch + t * 60000;
+    }
+    for (const r of rows) {
+      const t = parseFloat(r[idx.time_min]);
+      if (isNaN(t)) continue;
+      const ep = epochFor(t, r);
+      const h = r[idx.hr_bpm] !== '' ? parseFloat(r[idx.hr_bpm]) : null;
+      if (h != null && !isNaN(h)) hr.push({ t, v: h, ep });
+      const rm = r[idx.rmssd_ms] !== '' ? parseFloat(r[idx.rmssd_ms]) : null;
+      if (rm != null && !isNaN(rm)) rmssd.push({ t, v: rm, ep });
+      if (r[idx.palpitation] === '1') palpTimes.push(t);
+      if (r[idx.event] && r[idx.event] !== '') events.push({ t, label: r[idx.event] });
+      if (r[idx.warning] && r[idx.warning] !== '') warnings.push({ t, type: r[idx.warning] });
+      if (r[idx.connection] && r[idx.connection] !== '') connections.push({ t, type: r[idx.connection] });
+      if (idx.posture != null && r[idx.posture] && r[idx.posture] !== '') postureLog.push({ t, posture: r[idx.posture] });
+    }
+
+    if (!hr.length) return null;
+
+    const hrVals = hr.map(p => p.v);
+    const rmssdVals = rmssd.map(p => p.v);
+
+    // Max/min with timestamps
+    let maxHR = hr[0], minHR = hr[0];
+    for (const p of hr) { if (p.v > maxHR.v) maxHR = p; if (p.v < minHR.v) minHR = p; }
+    let maxRM = null, minRM = null;
+    if (rmssd.length) {
+      maxRM = rmssd[0]; minRM = rmssd[0];
+      for (const p of rmssd) { if (p.v > maxRM.v) maxRM = p; if (p.v < minRM.v) minRM = p; }
+    }
+
+    // Palpitation clustering: consecutive palps within 0.5 min -> one cluster
+    const palpClusters = [];
+    let cur = null;
+    for (const t of palpTimes) {
+      if (!cur) { cur = { start: t, end: t, count: 1 }; }
+      else if (t - cur.end <= 0.5) { cur.end = t; cur.count++; }
+      else { palpClusters.push(cur); cur = { start: t, end: t, count: 1 }; }
+    }
+    if (cur) palpClusters.push(cur);
+
+    // Warning segments: group same-type warnings within 1 min
+    const warnSegs = [];
+    for (const w of warnings) {
+      const last = warnSegs[warnSegs.length - 1];
+      if (last && last.type === w.type && w.t - last.end <= 1) last.end = w.t;
+      else warnSegs.push({ type: w.type, start: w.t, end: w.t });
+    }
+
+    // Connection gaps (disconnect -> next connect)
+    const connGaps = [];
+    for (let i = 0; i < connections.length; i++) {
+      if (connections[i].type === 'disconnect') {
+        const next = connections.find((c, j) => j > i && c.type === 'connect');
+        if (next) connGaps.push({ start: connections[i].t, end: next.t });
+        else connGaps.push({ start: connections[i].t, end: hr[hr.length - 1].t }); // open gap
+      }
+    }
+    const gapTotalMin = connGaps.reduce((s, g) => s + (g.end - g.start), 0);
+
+    // Resting HR proxy: the LOWEST 5-min rolling mean across the session. Unlike
+    // "morning HR" this works for non-24 / odd schedules — it finds the calmest
+    // stretch regardless of when in the day the session happened.
+    const ROLL_MIN = 5;
+    let restingHR = null;
+    for (let i = 0; i < hr.length; i++) {
+      const windowVals = [];
+      for (let j = i; j < hr.length && hr[j].t - hr[i].t <= ROLL_MIN; j++) windowVals.push(hr[j].v);
+      if (windowVals.length < 10) continue;
+      const m = windowVals.reduce((a, b) => a + b, 0) / windowVals.length;
+      if (restingHR == null || m < restingHR) restingHR = m;
+    }
+    restingHR = restingHR != null ? Math.round(restingHR) : null;
+
+    // Time in tachycardia (HR > 100) - approximate, assume uniform sampling
+    const tachy = hr.filter(p => p.v > 100).length / hr.length;
+
+    // HR delta events — sustained rises/drops of >=20 bpm within any window up to
+    // 10 min (POTS tilt-test criterion is 30 bpm in 10 min of standing). The
+    // earlier 3-min window missed anything slower than ~8 bpm/min. We also smooth
+    // HR with a 5-beat mean first so single-beat noise doesn't trigger false events.
+    const smHR = [];
+    for (let i = 0; i < hr.length; i++) {
+      let sum = 0, n = 0;
+      for (let j = Math.max(0, i - 2); j < Math.min(hr.length, i + 3); j++) { sum += hr[j].v; n++; }
+      smHR.push({ t: hr[i].t, v: sum / n });
+    }
+    // === Sympathetic flush detection ===
+    // Sharp HR rise (≥10 bpm) within ≤90 sec, with a concurrent RMSSD drop (≥25%).
+    // This maps to cold-flush / sympathetic-spike signatures — a fast-autonomic
+    // event shorter than a slow orthostatic HR shift.
+    const flushes = [];
+    const FLUSH_WIN_MIN = 1.5;
+    const FLUSH_HR_MIN = 10;
+    const FLUSH_RMSSD_DROP = 0.25;
+    let lastFlush = -Infinity;
+    for (let i = 1; i < hr.length; i++) {
+      const cur = hr[i];
+      if (cur.t < lastFlush + 2) continue;
+      let lowHR = cur.v, lowT = cur.t;
+      for (let j = i - 1; j >= 0 && cur.t - hr[j].t <= FLUSH_WIN_MIN; j--) {
+        if (hr[j].v < lowHR) { lowHR = hr[j].v; lowT = hr[j].t; }
+      }
+      if (cur.v - lowHR < FLUSH_HR_MIN) continue;
+      // RMSSD drop over the same window (find RMSSD values bracketing lowT and cur.t)
+      const rAtStart = rmssd.find(p => p.t >= lowT) || rmssd[0];
+      const rAtEnd = [...rmssd].reverse().find(p => p.t <= cur.t);
+      if (!rAtStart || !rAtEnd || rAtStart.v <= 0) continue;
+      const rDrop = (rAtStart.v - rAtEnd.v) / rAtStart.v;
+      if (rDrop < FLUSH_RMSSD_DROP) continue;
+      flushes.push({ start: lowT, end: cur.t, t: (lowT + cur.t) / 2, hrDelta: Math.round(cur.v - lowHR), rmssdDropPct: Math.round(rDrop * 100) });
+      lastFlush = cur.t;
+    }
+
+    // Chills/shivering volatility (extracted for re-run in the viewer)
+    const chillsWindows = detectChillsWindows(hr, 2.5);
+
+    const hrDeltas = [];
+    const DELTA_THRESH = 20;
+    const WIN_MIN = 10;
+    const COOLDOWN = 2;
+    let lastFlagAt = -Infinity;
+    for (let i = 1; i < smHR.length; i++) {
+      const cur = smHR[i];
+      if (cur.t < lastFlagAt + COOLDOWN) continue;
+      let rangeMin = cur.v, rangeMax = cur.v;
+      let minT = cur.t, maxT = cur.t;
+      for (let j = i - 1; j >= 0 && cur.t - smHR[j].t <= WIN_MIN; j--) {
+        if (smHR[j].v < rangeMin) { rangeMin = smHR[j].v; minT = smHR[j].t; }
+        if (smHR[j].v > rangeMax) { rangeMax = smHR[j].v; maxT = smHR[j].t; }
+      }
+      if (cur.v - rangeMin >= DELTA_THRESH && cur.v >= rangeMax - 3) {
+        hrDeltas.push({ start: minT, end: cur.t, startHR: Math.round(rangeMin), endHR: Math.round(cur.v), delta: Math.round(cur.v - rangeMin), direction: 'rise' });
+        lastFlagAt = cur.t;
+      } else if (rangeMax - cur.v >= DELTA_THRESH && cur.v <= rangeMin + 3) {
+        hrDeltas.push({ start: maxT, end: cur.t, startHR: Math.round(rangeMax), endHR: Math.round(cur.v), delta: Math.round(cur.v - rangeMax), direction: 'drop' });
+        lastFlagAt = cur.t;
+      }
+    }
+
+    const summary = {
+      filename,
+      duration: hr[hr.length - 1].t,
+      hrAvg: Math.round(hrVals.reduce((s, v) => s + v, 0) / hrVals.length),
+      hrMax: maxHR,
+      hrMin: minHR,
+      rmssdAvg: rmssdVals.length ? Math.round(rmssdVals.reduce((s, v) => s + v, 0) / rmssdVals.length) : null,
+      rmssdMax: maxRM,
+      rmssdMin: minRM,
+      restingHR,
+      palpCount: palpTimes.length,
+      palpClusters,
+      warnCount: warnSegs.length,
+      warnSegs,
+      events,
+      connGaps,
+      gapTotalMin,
+      tachyPct: Math.round(tachy * 100),
+      hrDeltas,
+      flushes,
+      chillsWindows,
+    };
+    // Per-session quadrant percentages — how much of the session was spent in each
+    // autonomic zone. Useful for cross-session POTS-severity trends.
+    // Pair HR + RMSSD, classify each RMSSD sample, sum durations.
+    const quadPct = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0 };
+    if (rmssd.length && hr.length) {
+      let hrIdx = 0;
+      const hrThresh = 90; // HR normal ceiling (matches colorThresholds.normal default)
+      const rmThresh = 40;
+      const quadCounts = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0 };
+      for (const p of rmssd) {
+        while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].t - p.t) <= Math.abs(hr[hrIdx].t - p.t)) hrIdx++;
+        const hrVal = hr[hrIdx].v;
+        const hrHigh = hrVal >= hrThresh;
+        const rmHigh = p.v >= rmThresh;
+        let key;
+        if (!hrHigh && rmHigh) key = 'low-high';
+        else if (hrHigh && rmHigh) key = 'high-high';
+        else if (!hrHigh && !rmHigh) key = 'low-low';
+        else key = 'high-low';
+        quadCounts[key]++;
+      }
+      const total = rmssd.length;
+      for (const k of Object.keys(quadCounts)) quadPct[k] = Math.round((quadCounts[k] / total) * 100);
+    }
+    summary.quadPct = quadPct;
+    // Posture: convert change points into contiguous spans (carry forward until next change)
+    if (postureLog.length) {
+      const spans = [];
+      for (let i = 0; i < postureLog.length; i++) {
+        spans.push({ start: postureLog[i].t, end: i + 1 < postureLog.length ? postureLog[i + 1].t : hr[hr.length - 1].t, posture: postureLog[i].posture });
+      }
+      summary.postureSpans = spans;
+    }
+    return summary;
+  }
+
+  // Full per-beat data (only loaded when rendering session view)
+  async function loadFullSession(filename) {
+    const fh = await dirHandle.getFileHandle(filename);
+    const file = await fh.getFile();
+    const text = await file.text();
+    const { rows, header } = parseCSV(text);
+    const idx = {};
+    header.forEach((h, i) => idx[h.trim()] = i);
+    const fileStartEpoch = deriveFileStartEpoch(filename);
+    const hasEpochCol = idx.epoch_ms != null;
+    const hr = [], rmssd = [];
+    for (const r of rows) {
+      const t = parseFloat(r[idx.time_min]);
+      if (isNaN(t)) continue;
+      let ep = fileStartEpoch + t * 60000;
+      if (hasEpochCol && r[idx.epoch_ms] !== '') {
+        const parsed = parseFloat(r[idx.epoch_ms]);
+        if (!isNaN(parsed)) ep = parsed;
+      }
+      if (r[idx.hr_bpm] !== '') hr.push({ x: t, y: parseFloat(r[idx.hr_bpm]), ep });
+      if (r[idx.rmssd_ms] !== '') rmssd.push({ x: t, y: parseFloat(r[idx.rmssd_ms]), ep });
+    }
+    return { hr, rmssd };
+  }
+
+  function downsample(series, target) {
+    if (series.length <= target) return series;
+    const step = series.length / target;
+    const out = [];
+    for (let i = 0; i < target; i++) {
+      out.push(series[Math.floor(i * step)]);
+    }
+    out.push(series[series.length - 1]);
+    return out;
+  }
+
+  // ===== Router =====
+  function parseHash() {
+    const h = (location.hash || '#/index').replace(/^#\/?/, '');
+    const parts = h.split('/');
+    return { view: parts[0] || 'index', arg: parts[1] };
+  }
+
+  function setHash(path) { location.hash = '#/' + path; }
+
+  async function route() {
+    if (!dirHandle) {
+      showOnly('empty-state');
+      return;
+    }
+    // Ensure the sessions index is warm before any view renders.
+    if (Object.keys(sessionsIndex).length === 0) {
+      await loadSessions();
+    }
+    const { view, arg } = parseHash();
+    document.querySelectorAll('.view-nav a').forEach(a => {
+      a.classList.toggle('active', a.dataset.view === view || (view === 'session' && false));
+    });
+    switch (view) {
+      case 'index': renderIndex(); showOnly('view-index'); break;
+      case 'session': await renderSession(arg); showOnly('view-session'); break;
+      case 'month': renderMonth(arg); showOnly('view-month'); break;
+      case 'day': renderDay(arg); showOnly('view-day'); break;
+      case 'week': renderWeek(arg); showOnly('view-week'); break;
+      case 'all': renderAll(); showOnly('view-all'); break;
+      default: renderIndex(); showOnly('view-index');
+    }
+  }
+
+  function showOnly(id) {
+    ['empty-state', 'view-index', 'view-session', 'view-month', 'view-day', 'view-week', 'view-all'].forEach(v => {
+      const el = document.getElementById(v);
+      if (el) el.classList.toggle('hidden', v !== id);
+    });
+    if (id === 'empty-state') document.getElementById('empty-state').style.display = 'flex';
+    else { const es = document.getElementById('empty-state'); if (es) es.style.display = 'none'; }
+  }
+
+  // ===== Index / sessions-list view (temporary landing page) =====
+  function renderIndex() {
+    const el = document.getElementById('view-index');
+    const filenames = Object.keys(sessionsIndex).sort().reverse();
+    if (!filenames.length) {
+      el.innerHTML = `
+        <div class="stub-panel">
+          <div style="font-size: 16px; margin-bottom: 8px;">No sessions yet</div>
+          <div style="font-size: 13px;">Run your live HR monitor with auto-save enabled to start building a history.</div>
+        </div>`;
+      return;
+    }
+    const cards = filenames.map(fn => {
+      const s = sessionsIndex[fn];
+      const meta = parseSessionFilename(fn);
+      const dur = formatDuration(s.duration);
+      const hrStage = getHRStage(s.hrAvg);
+      return `
+        <div class="session-card" data-filename="${encodeURIComponent(fn)}">
+          <div class="session-card-time">${meta ? meta.isoDate + ' · ' + meta.isoTime : fn}</div>
+          <div class="session-card-date">${dur} session</div>
+          <div class="session-card-stats">
+            <div class="session-card-stat">
+              <span class="session-card-stat-label">Avg HR</span>
+              <span class="session-card-stat-value ${hrStage}">${s.hrAvg}</span>
+            </div>
+            <div class="session-card-stat">
+              <span class="session-card-stat-label">Avg HRV</span>
+              <span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span>
+            </div>
+            <div class="session-card-stat">
+              <span class="session-card-stat-label">Palps</span>
+              <span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-faint)'};">${s.palpCount}</span>
+            </div>
+            <div class="session-card-stat">
+              <span class="session-card-stat-label">Warn</span>
+              <span class="session-card-stat-value" style="color: ${s.warnCount ? 'var(--warn-crash)' : 'var(--text-faint)'};">${s.warnCount}</span>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="section-head">All sessions · ${filenames.length}</div>
+      <div class="sessions-grid">${cards}</div>
+    `;
+    el.querySelectorAll('.session-card').forEach(c => {
+      c.addEventListener('click', () => setHash('session/' + c.dataset.filename));
+    });
+  }
+
+  // ===== Headline metric selector (Month + Week) =====
+  // POTS-friendly metrics — flat "avg HR" mixes lying + standing HR which is
+  // meaningless. Swap between resting baseline (calmest 5-min window), tachycardia
+  // burden (% time HR > 100), HR range (max-min reactivity), and plain average.
+  let headlineMetric = localStorage.getItem('hrv_viewer_headline_metric') || 'rest';
+
+  // Aggregate a metric across a day's sessions. Returns { value, label, unit, stage, color }
+  function computeHeadline(metric, files) {
+    if (!files || !files.length) return { value: null, label: '', unit: '', stage: 'stage-normal', color: STAGE_COLORS['stage-normal'] };
+    let totalDur = 0, weightedHR = 0, weightedTachy = 0, minRest = null, maxHR = null, minHR = null;
+    for (const fn of files) {
+      const s = sessionsIndex[fn];
+      if (!s) continue;
+      totalDur += s.duration;
+      weightedHR += s.hrAvg * s.duration;
+      weightedTachy += (s.tachyPct || 0) * s.duration;
+      if (s.restingHR != null && (minRest == null || s.restingHR < minRest)) minRest = s.restingHR;
+      if (s.hrMax && (maxHR == null || s.hrMax.v > maxHR)) maxHR = s.hrMax.v;
+      if (s.hrMin && (minHR == null || s.hrMin.v < minHR)) minHR = s.hrMin.v;
+    }
+    if (totalDur === 0) return { value: null, label: '', unit: '', stage: 'stage-normal', color: STAGE_COLORS['stage-normal'] };
+    if (metric === 'avg') {
+      const v = Math.round(weightedHR / totalDur);
+      const stage = getHRStage(v);
+      return { value: v, label: 'Avg HR', unit: 'bpm', stage, color: STAGE_COLORS[stage] };
+    }
+    if (metric === 'rest') {
+      const stage = getHRStage(minRest);
+      return { value: minRest, label: 'Resting', unit: 'bpm', stage, color: STAGE_COLORS[stage] };
+    }
+    if (metric === 'tachy') {
+      const v = Math.round(weightedTachy / totalDur);
+      // Tachy burden color bands: <10 green, <20 yellow, <40 orange, ≥40 red
+      let stage = 'stage-low', color;
+      if (v < 10) { stage = 'stage-normal'; color = STAGE_COLORS['stage-normal']; }
+      else if (v < 20) { stage = 'stage-elevated'; color = STAGE_COLORS['stage-elevated']; }
+      else if (v < 40) { stage = 'stage-high'; color = STAGE_COLORS['stage-high']; }
+      else { stage = 'stage-critical'; color = STAGE_COLORS['stage-critical']; }
+      return { value: v, label: 'Tachy', unit: '%', stage, color };
+    }
+    if (metric === 'range') {
+      const v = (maxHR != null && minHR != null) ? (maxHR - minHR) : null;
+      // HR range color bands: <20 good, <35 ok, <55 concerning, ≥55 POTS-flare-likely
+      let color = STAGE_COLORS['stage-normal'];
+      if (v == null) color = STAGE_COLORS['stage-normal'];
+      else if (v < 20) color = STAGE_COLORS['stage-normal'];
+      else if (v < 35) color = STAGE_COLORS['stage-elevated'];
+      else if (v < 55) color = STAGE_COLORS['stage-high'];
+      else color = STAGE_COLORS['stage-critical'];
+      return { value: v, label: 'HR Range', unit: 'Δbpm', stage: 'stage-normal', color };
+    }
+    return { value: null, label: '', unit: '', stage: 'stage-normal', color: STAGE_COLORS['stage-normal'] };
+  }
+
+  function metricSwitchHTML() {
+    const metrics = [
+      ['rest', 'Rest'],
+      ['avg', 'Avg'],
+      ['tachy', 'Tachy %'],
+      ['range', 'Range'],
+    ];
+    return `<div class="metric-switch">${metrics.map(([k, lbl]) =>
+      `<button data-metric="${k}" class="${headlineMetric === k ? 'active' : ''}">${lbl}</button>`
+    ).join('')}</div>`;
+  }
+
+  function wireMetricSwitch(container, onChange) {
+    container.querySelectorAll('.metric-switch button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        headlineMetric = btn.dataset.metric;
+        try { localStorage.setItem('hrv_viewer_headline_metric', headlineMetric); } catch (e) {}
+        onChange();
+      });
+    });
+  }
+
+  // ===== Month calendar =====
+  function renderMonth(ymArg) {
+    const el = document.getElementById('view-month');
+    // Default to the month of the newest session, else today
+    let year, month;
+    if (/^\d{4}-\d{2}$/.test(ymArg || '')) {
+      [year, month] = ymArg.split('-').map(Number);
+      month -= 1;
+    } else {
+      const dates = Object.keys(sessionsByDate).sort();
+      const pick = dates.length ? new Date(dates[dates.length - 1] + 'T00:00:00') : new Date();
+      year = pick.getFullYear();
+      month = pick.getMonth();
+    }
+    const first = new Date(year, month, 1);
+    const monthName = first.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const dowStart = first.getDay(); // 0=Sun
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    // Compute bounds for color scaling: use each day's morning HR across ALL sessions.
+    // We color with the stage colors (same vocabulary as live app).
+    const dayStats = {}; // 'YYYY-MM-DD' -> { avgHR, restingHR, ... }
+    for (const [dateStr, files] of Object.entries(sessionsByDate)) {
+      let weightedHR = 0, totalDur = 0, lowestRest = null;
+      let palp = 0, warn = 0, flush = 0, chills = 0;
+      for (const fn of files) {
+        const ss = sessionsIndex[fn];
+        if (!ss) continue;
+        weightedHR += ss.hrAvg * ss.duration;
+        totalDur += ss.duration;
+        if (ss.restingHR != null && (lowestRest == null || ss.restingHR < lowestRest)) lowestRest = ss.restingHR;
+        palp += ss.palpCount;
+        warn += ss.warnCount;
+        flush += (ss.flushes || []).length;
+        chills += (ss.chillsWindows || []).length;
+      }
+      const avgHR = totalDur > 0 ? Math.round(weightedHR / totalDur) : null;
+      dayStats[dateStr] = { avgHR, restingHR: lowestRest, sessionCount: files.length, palpCount: palp, warnCount: warn, flushCount: flush, chillsCount: chills, firstFile: files[0] };
+    }
+
+    const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let cells = '';
+    for (const d of dowNames) cells += `<div class="cal-dow">${d}</div>`;
+    // Pad leading empty days
+    for (let i = 0; i < dowStart; i++) cells += `<div class="cal-cell empty-month"></div>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const stats = dayStats[iso];
+      const isToday = iso === todayStr;
+      if (!stats) {
+        cells += `<div class="cal-cell ${isToday ? 'today' : ''}"><div class="cal-day-num">${d}</div></div>`;
+        continue;
+      }
+      const headline = computeHeadline(headlineMetric, sessionsByDate[iso]);
+      const palpBadge = stats.palpCount > 0 ? `<span class="cal-badge palp" title="${stats.palpCount} palpitation beats"><span class="cal-badge-dot"></span>${stats.palpCount}</span>` : '';
+      const warnBadge = stats.warnCount > 0 ? `<span class="cal-badge warn" title="${stats.warnCount} threshold warnings"><span class="cal-badge-dot"></span>${stats.warnCount}</span>` : '';
+      const flushBadge = stats.flushCount > 0 ? `<span class="cal-badge flush" title="${stats.flushCount} sympathetic flush events"><span class="cal-badge-dot"></span>${stats.flushCount}</span>` : '';
+      const chillsBadge = stats.chillsCount > 0 ? `<span class="cal-badge chills" title="${stats.chillsCount} chills / volatility windows"><span class="cal-badge-dot"></span>${stats.chillsCount}</span>` : '';
+      cells += `
+        <div class="cal-cell has-sessions ${isToday ? 'today' : ''}" data-date="${iso}" style="border-left: 4px solid ${headline.color};">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="cal-day-num">${d}</span>
+            <span class="cal-session-count">${stats.sessionCount} session${stats.sessionCount === 1 ? '' : 's'}</span>
+          </div>
+          <div>
+            <div class="cal-hr" style="color: ${headline.color};">${headline.value ?? '—'}${headline.unit === '%' ? '<span style="font-size: 16px;">%</span>' : ''}</div>
+            <div class="cal-hr-unit">${headline.label}${headlineMetric === 'rest' && stats.avgHR != null ? ` · avg ${stats.avgHR}` : ''}</div>
+          </div>
+          <div class="cal-badges">${palpBadge}${warnBadge}${flushBadge}${chillsBadge}</div>
+        </div>`;
+    }
+
+    // Legend for cell colors
+    const legend = `
+      <div class="cal-legend-strip">
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: #7DB8E8;"></span>Low</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: #B8D97E;"></span>Normal</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: #F0C75E;"></span>Elevated</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: #E89858;"></span>High</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: #E24B4A;"></span>Critical</div>
+      </div>`;
+
+    el.innerHTML = `
+      <div class="cal-header">
+        <div class="cal-title">${monthName}</div>
+        <div class="cal-nav">
+          <button id="cal-prev" title="Previous month">&larr;</button>
+          <button id="cal-next" title="Next month">&rarr;</button>
+        </div>
+        <button class="cal-today-btn" id="cal-today">Today</button>
+        ${metricSwitchHTML()}
+        ${legend}
+      </div>
+      <div class="cal-grid">${cells}</div>
+    `;
+
+    wireMetricSwitch(el, () => renderMonth(ymArg));
+
+    // Nav handlers
+    document.getElementById('cal-prev').addEventListener('click', () => {
+      const d = new Date(year, month - 1, 1);
+      setHash(`month/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    });
+    document.getElementById('cal-next').addEventListener('click', () => {
+      const d = new Date(year, month + 1, 1);
+      setHash(`month/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    });
+    document.getElementById('cal-today').addEventListener('click', () => {
+      const n = new Date();
+      setHash(`month/${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`);
+    });
+
+    // Cell click → day view (stub for now) or jump to first session of that day
+    el.querySelectorAll('.cal-cell.has-sessions').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const date = cell.dataset.date;
+        const files = sessionsByDate[date] || [];
+        // If only one session, open it directly; else go to day view
+        if (files.length === 1) {
+          setHash('session/' + encodeURIComponent(files[0]));
+        } else {
+          setHash('day/' + date);
+        }
+      });
+    });
+  }
+
+  // ===== Day view: single date, 24-hr strip + session cards =====
+  function renderDay(dateArg) {
+    const el = document.getElementById('view-day');
+    let iso = /^\d{4}-\d{2}-\d{2}$/.test(dateArg || '') ? dateArg : null;
+    if (!iso) {
+      const dates = Object.keys(sessionsByDate).sort();
+      iso = dates.length ? dates[dates.length - 1] : new Date().toISOString().slice(0, 10);
+    }
+    const date = new Date(iso + 'T00:00:00');
+    const title = date.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const files = sessionsByDate[iso] || [];
+
+    // Strip blocks per session, scaled to 24 hours
+    const blocksHtml = files.map(fn => {
+      const s = sessionsIndex[fn];
+      const meta = parseSessionFilename(fn);
+      if (!s || !meta) return '';
+      const startHr = meta.date.getHours() + meta.date.getMinutes() / 60 + meta.date.getSeconds() / 3600;
+      const durHr = s.duration / 60;
+      const left = (startHr / 24) * 100;
+      const width = Math.max(0.3, (durHr / 24) * 100);
+      const stage = getHRStage(s.hrAvg);
+      const color = STAGE_COLORS[stage];
+      const tip = `${meta.isoTime} · ${formatDuration(s.duration)} · avg HR ${s.hrAvg}${s.rmssdAvg != null ? ` · HRV ${s.rmssdAvg}` : ''}${s.palpCount ? ` · ${s.palpCount} palp` : ''}`;
+      return `<div class="day-strip-block" data-filename="${encodeURIComponent(fn)}" data-tip="${escape(tip)}" style="left: ${left}%; width: ${width}%; background: ${color};"></div>`;
+    }).join('');
+
+    // Hour axis (every 3 hours labeled, gridlines every hour)
+    let axisHtml = '';
+    let gridHtml = '';
+    for (let h = 0; h <= 24; h++) {
+      const pct = (h / 24) * 100;
+      if (h % 3 === 0) axisHtml += `<div class="day-hour-tick" style="left: ${pct}%;">${String(h).padStart(2, '0')}:00</div>`;
+      if (h > 0 && h < 24) gridHtml += `<div class="day-hour-gridline" style="left: ${pct}%;"></div>`;
+    }
+
+    const sessionCardsHtml = files.length ? files.map(fn => {
+      const s = sessionsIndex[fn];
+      const meta = parseSessionFilename(fn);
+      const hrStage = getHRStage(s.hrAvg);
+      return `
+        <div class="session-card" data-filename="${encodeURIComponent(fn)}">
+          <div class="session-card-time">${meta ? meta.isoTime : fn}</div>
+          <div class="session-card-date">${formatDuration(s.duration)} session</div>
+          <div class="session-card-stats">
+            <div class="session-card-stat"><span class="session-card-stat-label">Avg HR</span><span class="session-card-stat-value ${hrStage}">${s.hrAvg}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Palps</span><span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-faint)'};">${s.palpCount}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#8BB4FF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-faint)'};">${(s.flushes || []).length}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-faint)'};">${(s.chillsWindows || []).length}</span></div>
+          </div>
+        </div>`;
+    }).join('') : `<div class="stub-panel">No sessions on this date.</div>`;
+
+    // Prev/next day navigation. Only allow dates where there's actual data
+    // so you don't walk forever through empty days.
+    const dateKeys = Object.keys(sessionsByDate).sort();
+    const idxInDates = dateKeys.indexOf(iso);
+    const prevDate = idxInDates > 0 ? dateKeys[idxInDates - 1] : (dateKeys.length ? dateKeys[dateKeys.length - 1] : iso);
+    const nextDate = idxInDates >= 0 && idxInDates < dateKeys.length - 1 ? dateKeys[idxInDates + 1] : (dateKeys.length ? dateKeys[0] : iso);
+    const [year, month] = iso.split('-');
+
+    el.innerHTML = `
+      <div class="day-header">
+        <a class="back-link" href="#/month/${year}-${month}" style="margin: 0;">← ${date.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</a>
+        <div class="day-title">${title}</div>
+        <div class="cal-nav">
+          <button id="day-prev" title="Previous day with data">&larr;</button>
+          <button id="day-next" title="Next day with data">&rarr;</button>
+        </div>
+        <div style="margin-left: auto; color: var(--text-dim); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;">${files.length} session${files.length === 1 ? '' : 's'}</div>
+      </div>
+
+      <div class="day-strip-panel">
+        <div class="day-strip-label">24-hour timeline · click a block to open the session</div>
+        <div class="day-strip" id="day-strip">
+          ${gridHtml}
+          ${blocksHtml}
+          ${files.length ? '' : '<div class="day-strip-empty">No sessions recorded on this day.</div>'}
+        </div>
+        <div class="day-hour-axis">${axisHtml}</div>
+      </div>
+
+      <div class="section-head">Sessions</div>
+      <div class="sessions-grid">${sessionCardsHtml}</div>
+    `;
+
+    // Wire prev/next. If there's only one date with data, just stay.
+    document.getElementById('day-prev').addEventListener('click', () => setHash('day/' + prevDate));
+    document.getElementById('day-next').addEventListener('click', () => setHash('day/' + nextDate));
+
+    // Click handlers: strip blocks + session cards both open the session view
+    el.querySelectorAll('.day-strip-block').forEach(b => {
+      b.addEventListener('click', () => setHash('session/' + b.dataset.filename));
+      b.addEventListener('mouseenter', (e) => showAnnoTip(b.dataset.tip.replace(/·/g, '<br/>'), e));
+      b.addEventListener('mouseleave', hideAnnoTip);
+    });
+    el.querySelectorAll('.session-card').forEach(c => {
+      c.addEventListener('click', () => setHash('session/' + c.dataset.filename));
+    });
+  }
+
+  // ===== Week view =====
+  function renderWeek(weekArg) {
+    const el = document.getElementById('view-week');
+    // Resolve the week's Monday (ISO-ish — treat Sunday as start-of-week to match Month)
+    let anchor;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(weekArg || '')) {
+      anchor = new Date(weekArg + 'T00:00:00');
+    } else {
+      const dates = Object.keys(sessionsByDate).sort();
+      anchor = dates.length ? new Date(dates[dates.length - 1] + 'T00:00:00') : new Date();
+    }
+    // Back up to Sunday of that week
+    const weekStart = new Date(anchor);
+    weekStart.setDate(anchor.getDate() - anchor.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const weekStartStr = weekStart.toISOString().slice(0, 10);
+    const weekEndStr = weekEnd.toISOString().slice(0, 10);
+    const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    const cols = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart);
+      d.setDate(weekStart.getDate() + i);
+      const iso = d.toISOString().slice(0, 10);
+      const files = sessionsByDate[iso] || [];
+      // Duration-weighted avg HR across the day's sessions — more representative than
+      // picking one session's average or using morning-only resting HR.
+      let weightedHR = 0, totalDur = 0, totalPalp = 0, totalWarn = 0, totalShifts = 0, totalFlush = 0, totalChills = 0;
+      for (const fn of files) {
+        const s = sessionsIndex[fn];
+        if (!s) continue;
+        weightedHR += s.hrAvg * s.duration;
+        totalDur += s.duration;
+        totalPalp += s.palpCount;
+        totalWarn += s.warnCount;
+        totalShifts += (s.hrDeltas || []).length;
+        totalFlush += (s.flushes || []).length;
+        totalChills += (s.chillsWindows || []).length;
+      }
+      const avgHR = totalDur > 0 ? Math.round(weightedHR / totalDur) : null;
+      cols.push({ iso, date: d, dow: dowNames[i], files, avgHR, totalPalp, totalWarn, totalShifts, totalFlush, totalChills, totalDur });
+    }
+
+    const weekTitle = `Week of ${weekStart.toLocaleString(undefined, { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+    el.innerHTML = `
+      <div class="cal-header">
+        <div class="cal-title">${weekTitle}</div>
+        <div class="cal-nav">
+          <button id="week-prev" title="Previous week">&larr;</button>
+          <button id="week-next" title="Next week">&rarr;</button>
+        </div>
+        <button class="cal-today-btn" id="week-today">This week</button>
+        ${metricSwitchHTML()}
+        <div class="cal-legend-strip">
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: #7DB8E8;"></span>Low</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: #B8D97E;"></span>Normal</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: #F0C75E;"></span>Elevated</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: #E89858;"></span>High</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: #E24B4A;"></span>Critical</div>
+        </div>
+      </div>
+      <div class="week-grid">
+        ${cols.map(c => {
+          const hasData = c.files.length > 0;
+          const headline = computeHeadline(headlineMetric, c.files);
+          const isToday = c.iso === todayStr;
+          return `
+            <div class="week-col ${hasData ? 'has-sessions' : 'empty'} ${isToday ? 'today' : ''}" data-date="${c.iso}" style="${hasData ? `border-left: 4px solid ${headline.color};` : ''}">
+              <div class="week-col-head">
+                <span class="week-dow">${c.dow}</span>
+                <span class="week-date">${c.date.getDate()}</span>
+              </div>
+              ${hasData ? `
+                <div>
+                  <div class="week-col-hr" style="color: ${headline.color};">${headline.value ?? '—'}${headline.unit === '%' ? '<span style="font-size: 14px;">%</span>' : ''}</div>
+                  <div class="week-col-hr-label">${headline.label}</div>
+                </div>
+                <div class="week-col-spark"><canvas data-spark="${c.iso}"></canvas></div>
+                <div class="week-col-stats">
+                  <div class="week-col-stat"><span class="week-col-stat-label">Sess</span><span>${c.files.length}</span></div>
+                  <div class="week-col-stat"><span class="week-col-stat-label">Palp</span><span style="color: ${c.totalPalp ? 'var(--warn-palp)' : 'var(--text-dim)'};">${c.totalPalp}</span></div>
+                  <div class="week-col-stat"><span class="week-col-stat-label">Flush</span><span style="color: ${c.totalFlush ? '#E8A858' : 'var(--text-dim)'};">${c.totalFlush}</span></div>
+                  <div class="week-col-stat"><span class="week-col-stat-label">Chill</span><span style="color: ${c.totalChills ? '#85B7EB' : 'var(--text-dim)'};">${c.totalChills}</span></div>
+                </div>
+              ` : `<div style="font-size: 11px; color: var(--text-faint); font-style: italic; margin-top: 12px;">no sessions</div>`}
+            </div>`;
+        }).join('')}
+      </div>
+    `;
+
+    wireMetricSwitch(el, () => renderWeek(weekArg));
+
+    // Wire nav
+    const dayMs = 86400000;
+    document.getElementById('week-prev').addEventListener('click', () => {
+      const d = new Date(weekStart.getTime() - 7 * dayMs);
+      setHash('week/' + d.toISOString().slice(0, 10));
+    });
+    document.getElementById('week-next').addEventListener('click', () => {
+      const d = new Date(weekStart.getTime() + 7 * dayMs);
+      setHash('week/' + d.toISOString().slice(0, 10));
+    });
+    document.getElementById('week-today').addEventListener('click', () => {
+      setHash('week/' + todayStr);
+    });
+    el.querySelectorAll('.week-col.has-sessions').forEach(col => {
+      col.addEventListener('click', () => {
+        const files = sessionsByDate[col.dataset.date] || [];
+        if (files.length === 1) setHash('session/' + encodeURIComponent(files[0]));
+        else setHash('day/' + col.dataset.date);
+      });
+    });
+
+    // Sparklines: mini HR trace per day, aggregated across sessions
+    for (const col of cols) {
+      if (!col.files.length) continue;
+      const canvas = el.querySelector(`canvas[data-spark="${col.iso}"]`);
+      if (!canvas) continue;
+      drawDaySparkline(canvas, col.files, col.morningHR);
+    }
+  }
+
+  async function drawDaySparkline(canvas, files, morningHR) {
+    // Build a single-day 24-hr HR trace by stitching all sessions' HR series
+    // (downsampled) on a shared 24-hr x-axis. Fast-read only - uses cached summaries
+    // plus re-parses for HR data on demand.
+    const points = [];
+    for (const fn of files) {
+      try {
+        const fh = await dirHandle.getFileHandle(fn);
+        const file = await fh.getFile();
+        const text = await file.text();
+        const meta = parseSessionFilename(fn);
+        const startHr = meta.date.getHours() + meta.date.getMinutes() / 60;
+        const { rows, header } = parseCSV(text);
+        const idx = {};
+        header.forEach((h, i) => idx[h.trim()] = i);
+        // Downsample to ~30 points per session
+        const stride = Math.max(1, Math.floor(rows.length / 30));
+        for (let i = 0; i < rows.length; i += stride) {
+          const t = parseFloat(rows[i][idx.time_min]);
+          const h = parseFloat(rows[i][idx.hr_bpm]);
+          if (!isNaN(t) && !isNaN(h)) points.push({ x: startHr + t / 60, y: h });
+        }
+      } catch (e) {}
+    }
+    points.sort((a, b) => a.x - b.x);
+    const hrStage = getHRStage(morningHR);
+    const color = STAGE_COLORS[hrStage];
+    new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { datasets: [{ data: points, borderColor: color, backgroundColor: color + '20', tension: 0, pointRadius: 0, borderWidth: 1.2, fill: true }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { type: 'linear', min: 0, max: 24, display: false }, y: { display: false, grace: '10%' } },
+      },
+    });
+  }
+
+  // ===== All-time trends =====
+  let allGranularity = 'day'; // 'session' | 'day' | 'week' | 'month'
+
+  // Return a bucket key ('YYYY-MM-DD' etc.) for a session given the current granularity
+  function bucketKey(meta, gran) {
+    if (gran === 'session') return meta.isoDate + ' ' + meta.isoTime;
+    if (gran === 'day') return meta.isoDate;
+    if (gran === 'week') {
+      const d = new Date(meta.date);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - d.getDay()); // Sunday
+      return d.toISOString().slice(0, 10);
+    }
+    if (gran === 'month') return meta.isoDate.slice(0, 7);
+    return meta.isoDate;
+  }
+
+  // Aggregate per-session values into buckets by granularity, choosing reducer per metric.
+  function aggregateBuckets(allFilenames, gran, valueFn, reducer) {
+    const buckets = new Map(); // key -> array of values
+    for (const fn of allFilenames) {
+      const s = sessionsIndex[fn]; const meta = parseSessionFilename(fn);
+      if (!s || !meta) continue;
+      const v = valueFn(s, meta);
+      if (v == null) continue;
+      const k = bucketKey(meta, gran);
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k).push(v);
+    }
+    const ordered = Array.from(buckets.keys()).sort();
+    return ordered.map(k => ({ x: k, y: reducer(buckets.get(k)) }));
+  }
+  const reduceAvg = arr => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+  const reduceSum = arr => arr.reduce((a, b) => a + b, 0);
+  const reduceAvg1 = arr => +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1);
+
+  function renderAll() {
+    const el = document.getElementById('view-all');
+    const allFilenames = Object.keys(sessionsIndex).sort();
+    if (!allFilenames.length) {
+      el.innerHTML = `<div class="stub-panel">No sessions yet. Run your live HR monitor with auto-save enabled to build history.</div>`;
+      return;
+    }
+
+    const gran = allGranularity;
+    // Aggregated datasets for charts
+    const hrAvgAgg = aggregateBuckets(allFilenames, gran, s => s.hrAvg, reduceAvg);
+    const restingHRAgg = aggregateBuckets(allFilenames, gran, s => s.restingHR, reduceAvg);
+    const rmssdAgg = aggregateBuckets(allFilenames, gran, s => s.rmssdAvg, reduceAvg1);
+    const warnAgg = aggregateBuckets(allFilenames, gran, s => s.warnCount, reduceSum);
+    const sympAgg = aggregateBuckets(allFilenames, gran, s => (s.quadPct ? s.quadPct['high-low'] : null), reduceAvg);
+    const flushAgg = aggregateBuckets(allFilenames, gran, s => (s.flushes || []).length, reduceSum);
+    const chillsAgg = aggregateBuckets(allFilenames, gran, s => (s.chillsWindows || []).length, reduceSum);
+    const palpClustAgg = aggregateBuckets(allFilenames, gran, s => (s.palpClusters || []).length, reduceSum);
+    const shiftAgg = aggregateBuckets(allFilenames, gran, s => (s.hrDeltas || []).length, reduceSum);
+
+    // Rolling RMSSD window scaled to granularity
+    const rollWin = gran === 'session' ? 7 : gran === 'day' ? 7 : gran === 'week' ? 4 : 3;
+    const rollRmssd = [];
+    for (let i = 0; i < rmssdAgg.length; i++) {
+      const start = Math.max(0, i - rollWin + 1);
+      let sum = 0, n = 0;
+      for (let j = start; j <= i; j++) { sum += rmssdAgg[j].y; n++; }
+      rollRmssd.push({ x: rmssdAgg[i].x, y: +(sum / n).toFixed(1) });
+    }
+
+    // Palps by hour — always per-hour regardless of granularity (different dimension)
+    const palpsByHour = new Array(24).fill(0);
+    for (const fn of allFilenames) {
+      const s = sessionsIndex[fn]; const meta = parseSessionFilename(fn);
+      if (!s || !meta) continue;
+      if (s.palpCount > 0) palpsByHour[meta.date.getHours()] += s.palpCount;
+    }
+
+    // Align autonomic events to the same bucket keys for stacked bar
+    const bucketKeysUnion = Array.from(new Set([...flushAgg.map(b => b.x), ...chillsAgg.map(b => b.x), ...palpClustAgg.map(b => b.x), ...shiftAgg.map(b => b.x)])).sort();
+    const byKey = (arr) => Object.fromEntries(arr.map(b => [b.x, b.y]));
+    const fMap = byKey(flushAgg), cMap = byKey(chillsAgg), pMap = byKey(palpClustAgg), sMap = byKey(shiftAgg);
+
+    const granLabel = { session: 'Session', day: 'Day', week: 'Week', month: 'Month' }[gran];
+    el.innerHTML = `
+      <div class="section-head">All-time trends · ${allFilenames.length} sessions</div>
+      <div class="all-granularity" role="tablist">
+        <button data-gran="session" class="${gran === 'session' ? 'active' : ''}">Session</button>
+        <button data-gran="day" class="${gran === 'day' ? 'active' : ''}">Day</button>
+        <button data-gran="week" class="${gran === 'week' ? 'active' : ''}">Week</button>
+        <button data-gran="month" class="${gran === 'month' ? 'active' : ''}">Month</button>
+      </div>
+      <div class="all-grid">
+        <div class="all-card">
+          <div class="all-card-title">Heart rate trend</div>
+          <div class="all-card-sub">Average HR per ${granLabel.toLowerCase()} (warm) + resting HR baseline (cool). Rising = bad-day drift.</div>
+          <div class="all-chart-wrap"><canvas id="all-morning-hr"></canvas></div>
+        </div>
+        <div class="all-card">
+          <div class="all-card-title">Rolling RMSSD baseline</div>
+          <div class="all-card-sub">${rollWin}-${granLabel.toLowerCase()} rolling average. Higher = better parasympathetic tone.</div>
+          <div class="all-chart-wrap"><canvas id="all-rmssd-roll"></canvas></div>
+        </div>
+        <div class="all-card">
+          <div class="all-card-title">Warnings per ${granLabel.toLowerCase()}</div>
+          <div class="all-card-sub">Threshold crossings summed across ${gran === 'session' ? 'each session' : 'the bucket'}.</div>
+          <div class="all-chart-wrap"><canvas id="all-warn-bar"></canvas></div>
+        </div>
+        <div class="all-card">
+          <div class="all-card-title">Palpitations by hour of day</div>
+          <div class="all-card-sub">Ectopic beats aggregated by session start-hour (granularity-independent).</div>
+          <div class="all-polar-wrap"><canvas id="all-palp-hour"></canvas></div>
+        </div>
+        <div class="all-card wide">
+          <div class="all-card-title">Sympathetic-stress time</div>
+          <div class="all-card-sub">Avg % per ${granLabel.toLowerCase()} in the high-HR + low-HRV quadrant — the POTS-flare pattern. Rising bars = worse ${granLabel.toLowerCase() === 'session' ? 'sessions' : granLabel.toLowerCase() + 's'}.</div>
+          <div class="all-chart-wrap"><canvas id="all-sympathetic"></canvas></div>
+        </div>
+        <div class="all-card wide">
+          <div class="all-card-title">Autonomic events per ${granLabel.toLowerCase()}</div>
+          <div class="all-card-sub">Stacked count of flushes, chills windows, palpitation clusters, and HR shifts.</div>
+          <div class="all-chart-wrap"><canvas id="all-auto-events"></canvas></div>
+        </div>
+      </div>
+    `;
+
+    // Wire granularity buttons
+    el.querySelectorAll('.all-granularity button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        allGranularity = btn.dataset.gran;
+        renderAll();
+      });
+    });
+
+    // Avg HR + Resting baseline (two lines)
+    new Chart(document.getElementById('all-morning-hr').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: 'Avg HR', data: hrAvgAgg, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.08)', tension: 0, pointRadius: 2, borderWidth: 1.5, fill: true },
+        { label: 'Resting HR', data: restingHRAgg, borderColor: '#85B7EB', backgroundColor: 'transparent', tension: 0, pointRadius: 2, borderWidth: 1.5, borderDash: [3, 3] },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { labels: { color: '#b0b0b0', font: { size: 11 }, boxWidth: 12 } } },
+        scales: {
+          x: { type: 'category', ticks: { color: '#9a9a9a', font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y: { ticks: { color: '#b0b0b0', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        },
+      },
+    });
+
+    // Rolling RMSSD
+    new Chart(document.getElementById('all-rmssd-roll').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: granLabel, data: rmssdAgg, borderColor: 'rgba(93,202,165,0.35)', backgroundColor: 'transparent', tension: 0, pointRadius: 1.5, borderWidth: 1 },
+        { label: `${rollWin}-${granLabel.toLowerCase()} avg`, data: rollRmssd, borderColor: '#5DCAA5', backgroundColor: 'rgba(93,202,165,0.08)', tension: 0, pointRadius: 0, borderWidth: 2, fill: true },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { labels: { color: '#b0b0b0', font: { size: 11 }, boxWidth: 12 } } },
+        scales: {
+          x: { type: 'category', ticks: { color: '#9a9a9a', font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y: { ticks: { color: '#5DCAA5', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        },
+      },
+    });
+
+    // Warnings bar
+    new Chart(document.getElementById('all-warn-bar').getContext('2d'), {
+      type: 'bar',
+      data: { labels: warnAgg.map(w => w.x), datasets: [{ label: 'Warnings', data: warnAgg.map(w => w.y), backgroundColor: warnAgg.map(w => w.y > 0 ? '#BA7517' : '#2a2a2a'), borderWidth: 0 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#7a7a7a', font: { size: 9 }, maxRotation: 60, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
+          y: { ticks: { color: '#9a9a9a', font: { size: 11 }, stepSize: 1, precision: 0 }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true },
+        },
+      },
+    });
+
+    // Palpitations by hour of day (polar bar)
+    new Chart(document.getElementById('all-palp-hour').getContext('2d'), {
+      type: 'polarArea',
+      data: {
+        labels: Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')),
+        datasets: [{ data: palpsByHour, backgroundColor: palpsByHour.map(v => v > 0 ? 'rgba(215,108,186,0.5)' : 'rgba(40,40,40,0.4)'), borderColor: '#D76CBA', borderWidth: 1 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.label}:00 — ${ctx.raw} palps` } } },
+        scales: {
+          r: { ticks: { color: '#9a9a9a', font: { size: 9 }, backdropColor: 'transparent' }, grid: { color: 'rgba(255,255,255,0.05)' }, angleLines: { color: 'rgba(255,255,255,0.05)' }, pointLabels: { color: '#9a9a9a', font: { size: 10 } } },
+        },
+      },
+    });
+
+    // Sympathetic-stress % (avg per bucket of the 'high-low' quadrant)
+    new Chart(document.getElementById('all-sympathetic').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: sympAgg.map(p => p.x),
+        datasets: [{ label: 'High-HR × Low-HRV %', data: sympAgg.map(p => p.y), backgroundColor: sympAgg.map(p => p.y > 40 ? '#E24B4A' : p.y > 20 ? '#E89858' : p.y > 10 ? '#F0C75E' : '#5a5a5a'), borderWidth: 0 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.raw}% avg in sympathetic stress` } } },
+        scales: {
+          x: { ticks: { color: '#7a7a7a', font: { size: 9 }, maxRotation: 60, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
+          y: { ticks: { color: '#9a9a9a', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true, max: 100 },
+        },
+      },
+    });
+
+    // Autonomic events (stacked)
+    new Chart(document.getElementById('all-auto-events').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: bucketKeysUnion,
+        datasets: [
+          { label: 'Flushes', data: bucketKeysUnion.map(k => fMap[k] || 0), backgroundColor: '#E8A858', borderWidth: 0 },
+          { label: 'Chills', data: bucketKeysUnion.map(k => cMap[k] || 0), backgroundColor: '#85B7EB', borderWidth: 0 },
+          { label: 'Palp clusters', data: bucketKeysUnion.map(k => pMap[k] || 0), backgroundColor: '#D76CBA', borderWidth: 0 },
+          { label: 'HR shifts', data: bucketKeysUnion.map(k => sMap[k] || 0), backgroundColor: '#8BB4FF', borderWidth: 0 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { labels: { color: '#b0b0b0', font: { size: 11 }, boxWidth: 12 } } },
+        scales: {
+          x: { stacked: true, ticks: { color: '#7a7a7a', font: { size: 9 }, maxRotation: 60, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
+          y: { stacked: true, ticks: { color: '#9a9a9a', font: { size: 11 }, stepSize: 1, precision: 0 }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true },
+        },
+      },
+    });
+  }
+
+  // ===== Session detail view =====
+  let currentChart = null;
+  let currentContextChart = null;
+  let currentSummary = null;
+  let currentData = null;
+  let currentQuadRanges = null;
+  let brushMin = null, brushMax = null;
+  let activeFilters = { event: true, warning: true, palp: true, disconnect: true, delta: true, flush: true, chills: true, posture: true, sleep: true };
+  let activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
+
+  // Walk through paired HR + RMSSD samples, classify each point into a quadrant,
+  // and merge adjacent same-quadrant points into time ranges for chart overlays.
+  function computeQuadrantRanges(data) {
+    const out = { 'low-high': [], 'high-high': [], 'low-low': [], 'high-low': [] };
+    if (!data.rmssd.length || !data.hr.length) return out;
+    // Iterate RMSSD (coarser sampling) and find nearest HR value for each.
+    let hrIdx = 0;
+    const rr = data.rmssd;
+    const hr = data.hr;
+    const hrThresh = colorThresholds.normal;
+    const rmThresh = 40;
+    let cur = null;
+    for (const p of rr) {
+      // Advance hrIdx to the sample nearest in time
+      while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].x - p.x) <= Math.abs(hr[hrIdx].x - p.x)) hrIdx++;
+      const hrVal = hr[hrIdx].y;
+      const hrHigh = hrVal >= hrThresh;
+      const rmHigh = p.y >= rmThresh;
+      let key;
+      if (!hrHigh && rmHigh) key = 'low-high';
+      else if (hrHigh && rmHigh) key = 'high-high';
+      else if (!hrHigh && !rmHigh) key = 'low-low';
+      else key = 'high-low';
+      if (cur && cur.key === key && p.x - cur.end <= 0.5) {
+        cur.end = p.x;
+      } else {
+        if (cur) out[cur.key].push({ start: cur.start, end: cur.end });
+        cur = { key, start: p.x, end: p.x };
+      }
+    }
+    if (cur) out[cur.key].push({ start: cur.start, end: cur.end });
+    // Discard ranges shorter than 5 sec (0.083 min) to avoid chart clutter
+    for (const k of Object.keys(out)) {
+      out[k] = out[k].filter(r => r.end - r.start >= 0.083);
+    }
+    return out;
+  }
+
+  const QUAD_OVERLAY_COLORS = {
+    'low-high': { fill: 'rgba(184,217,126,0.12)', border: 'rgba(184,217,126,0.35)' },
+    'high-high': { fill: 'rgba(93,202,165,0.12)', border: 'rgba(93,202,165,0.35)' },
+    'low-low': { fill: 'rgba(232,152,88,0.12)', border: 'rgba(232,152,88,0.35)' },
+    'high-low': { fill: 'rgba(226,75,74,0.12)', border: 'rgba(226,75,74,0.35)' },
+  };
+
+  async function renderSession(filenameEncoded) {
+    const filename = decodeURIComponent(filenameEncoded || '');
+    const s = sessionsIndex[filename];
+    if (!s) {
+      document.getElementById('view-session').innerHTML = `<div class="stub-panel">Session not found: ${filename}</div>`;
+      return;
+    }
+    currentSummary = s;
+    const data = await loadFullSession(filename);
+    currentData = data;
+    currentQuadRanges = computeQuadrantRanges(data);
+    // Sleep detection needs full data — only run here (not indexed for all sessions).
+    s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
+    // Reset toggles + brush state on every new session open so prior values don't
+    // carry across (previously caused out-of-range zoom glitches on short sessions).
+    activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
+    activeFilters = { event: true, warning: true, palp: true, disconnect: true, delta: true, flush: true, chills: true, posture: true, sleep: true };
+    brushMin = null; brushMax = null;
+    const meta = parseSessionFilename(filename);
+    const dur = formatDuration(s.duration);
+
+    const hrStage = getHRStage(s.hrAvg);
+    const maxStage = getHRStage(s.hrMax.v);
+    const minStage = getHRStage(s.hrMin.v);
+
+    const el = document.getElementById('view-session');
+    el.innerHTML = `
+      <div class="session-top-row">
+        <a class="back-link" href="#/index">← All sessions</a>
+        <div class="tags-inline">
+          <span class="tags-inline-label">Tags:</span>
+          <span id="tags-current"></span>
+          <input class="tag-input" id="tag-input" placeholder="+ add (Enter)" />
+        </div>
+      </div>
+      <div class="summary-bar">
+        <div class="summary-stat">
+          <span class="summary-stat-label">Date</span>
+          <span class="summary-stat-value" style="font-size: 18px;">${meta ? meta.isoDate : '—'}</span>
+          <span class="summary-stat-unit">${meta ? meta.isoTime : ''}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Duration</span>
+          <span class="summary-stat-value">${dur}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Avg HR</span>
+          <span class="summary-stat-value ${hrStage}">${s.hrAvg}</span>
+          <span class="summary-stat-unit">bpm</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Max HR</span>
+          <span class="summary-stat-value ${maxStage}">${s.hrMax.v}</span>
+          <span class="summary-stat-unit">@ ${formatDuration(s.hrMax.t)}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Min HR</span>
+          <span class="summary-stat-value ${minStage}">${s.hrMin.v}</span>
+          <span class="summary-stat-unit">@ ${formatDuration(s.hrMin.t)}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Avg HRV</span>
+          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span>
+          <span class="summary-stat-unit">ms rmssd</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Palps</span>
+          <span class="summary-stat-value ${s.palpCount ? 'palp' : ''}">${s.palpCount}</span>
+          <span class="summary-stat-unit">${s.palpClusters.length} cluster${s.palpClusters.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Warnings</span>
+          <span class="summary-stat-value ${s.warnCount ? 'warn' : ''}">${s.warnCount}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">BLE gaps</span>
+          <span class="summary-stat-value" style="color: ${s.connGaps.length ? 'var(--text-dim)' : 'var(--text-faint)'};">${s.connGaps.length}</span>
+          <span class="summary-stat-unit">${s.gapTotalMin > 0 ? formatDuration(s.gapTotalMin) : '—'}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-label">Tachy %</span>
+          <span class="summary-stat-value" style="color: ${s.tachyPct > 20 ? 'var(--warn-high)' : 'var(--text-dim)'};">${s.tachyPct}<span style="font-size: 14px;">%</span></span>
+          <span class="summary-stat-unit">HR &gt; 100</span>
+        </div>
+      </div>
+
+      <div class="insight-box" id="insight-text"></div>
+
+      <div class="interp-panel" id="interp-panel">
+        <div class="interp-head" id="interp-head">
+          <span>Autonomic interpretation · HR × HRV</span>
+          <svg class="interp-caret" viewBox="0 0 10 10"><path d="M1 3l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+        </div>
+        <div class="interp-body">
+          <div class="interp-current" id="interp-current"></div>
+          <div class="interp-grid">
+            <div class="interp-cell good" data-quad="low-high"><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good — this is what sleep or vagal training looks like.</div>
+            <div class="interp-cell ok" data-quad="high-high"><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
+            <div class="interp-cell warn" data-quad="low-low"><div class="interp-title">Low HR · Low HRV</div>Fatigue, under-recovery, overtraining, deconditioning. Can also appear in illness. Watch if sustained across days.</div>
+            <div class="interp-cell bad" data-quad="high-low"><div class="interp-title">High HR · Low HRV</div>Sympathetic stress: pain, panic, dehydration, orthostatic strain, acute illness. For POTS, this is the classic orthostatic / flare pattern.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-layout" id="session-layout">
+        <div class="session-main">
+          <div class="chart-panel">
+            <div class="chart-legend">
+              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(232,152,88,0.35); border: 1px solid rgba(232,152,88,0.6);"></span>Warning span</div>
+              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>BLE gap</div>
+              <div class="chart-legend-item"><span class="legend-swatch line"></span>Event marker</div>
+              <div class="chart-legend-item"><span class="legend-swatch dot" style="background: #D76CBA;"></span>Palpitation cluster</div>
+              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(139,180,255,0.2); border: 1px solid rgba(139,180,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
+              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(232,168,88,0.2); border: 1px solid rgba(232,168,88,0.6);"></span>Sympathetic flush</div>
+              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(133,183,235,0.2); border: 1px solid rgba(133,183,235,0.6);"></span>Chills / volatility</div>
+              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(200,168,230,0.15); border: 1px solid rgba(200,168,230,0.4);"></span>Posture</div>
+              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(110,140,200,0.15); border: 1px dashed rgba(110,140,200,0.5);"></span>Sleep window</div>
+              <div class="chart-legend-item"><span class="legend-swatch dot" style="background: #B8D97E; border: 1px solid #000;"></span>Max / Min HR</div>
+              <div class="legend-spacer"></div>
+              <button class="legend-reset-zoom hidden" id="reset-zoom">Reset zoom</button>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="session-chart"></canvas>
+            </div>
+            <div class="context-wrap">
+              <canvas id="context-chart"></canvas>
+              <div class="context-dim" id="context-dim-left" style="left: 0; width: 0;"></div>
+              <div class="context-dim" id="context-dim-right" style="right: 0; width: 0;"></div>
+              <div class="context-brush" id="context-brush"></div>
+              <div class="context-overlay" id="context-overlay"></div>
+            </div>
+          </div>
+        </div>
+        <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle markers panel" aria-label="Toggle markers">
+          <svg viewBox="0 0 18 18"><line x1="3" y1="4" x2="15" y2="4"/><line x1="3" y1="9" x2="15" y2="9"/><line x1="3" y1="14" x2="15" y2="14"/></svg>
+        </button>
+        <div class="session-sidebar">
+          <div class="sidebar-head">Markers</div>
+          <div class="filter-chips">
+            <span class="filter-chip type-event active" data-type="event">Events</span>
+            <span class="filter-chip type-warning active" data-type="warning">Warnings</span>
+            <span class="filter-chip type-palp active" data-type="palp">Palps</span>
+            <span class="filter-chip type-delta active" data-type="delta">HR shifts</span>
+            <span class="filter-chip type-flush active" data-type="flush">Flushes</span>
+            <span class="filter-chip type-chills active" data-type="chills">Chills</span>
+            <span class="filter-chip type-posture active" data-type="posture">Posture</span>
+            <span class="filter-chip type-sleep active" data-type="sleep">Sleep</span>
+            <span class="filter-chip type-disconnect active" data-type="disconnect">Gaps</span>
+          </div>
+          <div class="marker-list" id="marker-list"></div>
+          <div class="chills-tune">
+            <div class="chills-tune-label">
+              <span>Chills sensitivity</span>
+              <span class="chills-tune-value" id="chills-tune-value">2.5×</span>
+            </div>
+            <input type="range" id="chills-tune-slider" min="1.5" max="4.0" step="0.1" value="2.5" />
+            <div class="chills-tune-hints">
+              <span>Very sensitive</span>
+              <span>Only spikes</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    renderInsight(s);
+    renderMarkerList(s);
+    renderInterpretation(s);
+    drawSessionChart(s, data);
+    drawContextChart(s, data);
+    wireBrush(s);
+    wireFilterChips();
+    wireInterpToggle();
+    wireSidebarToggle();
+    wireQuadrantToggles();
+    wireTags(filename);
+    wireChillsSlider();
+    document.getElementById('reset-zoom').addEventListener('click', resetZoom);
+    updateResetZoomVisibility();
+  }
+
+  // Posture + sleep overrides — stored per session in localStorage so the user can
+  // correct bad data in the viewer without rewriting the CSV.
+  function loadOverrides() {
+    try { return JSON.parse(localStorage.getItem('hrv_viewer_overrides') || '{}'); } catch (e) { return {}; }
+  }
+  function saveOverrides(o) { try { localStorage.setItem('hrv_viewer_overrides', JSON.stringify(o)); } catch (e) {} }
+  function getOverride(filename, key) {
+    const all = loadOverrides();
+    return all[filename] && all[filename][key];
+  }
+  function setOverride(filename, key, value) {
+    const all = loadOverrides();
+    if (!all[filename]) all[filename] = {};
+    all[filename][key] = value;
+    saveOverrides(all);
+  }
+
+  function getEffectivePostureSpans(s) {
+    const override = currentSummary && getOverride(currentSummary.filename, 'posture');
+    if (override) return override;
+    return s.postureSpans;
+  }
+
+  function getEffectiveSleepWindows(s) {
+    const override = currentSummary && getOverride(currentSummary.filename, 'sleep');
+    if (override) return override;
+    return s.sleepWindows;
+  }
+
+  // Auto-detect sleep windows: sustained >=30 min of low HR + high RMSSD.
+  // "Low HR" = within 5 bpm of the session's resting baseline (or bottom quartile).
+  // "High RMSSD" = above the session median.
+  function detectSleepWindows(s, hrSeries, rmssdSeries) {
+    if (!hrSeries || !hrSeries.length || !rmssdSeries || !rmssdSeries.length) return [];
+    const restBase = s.restingHR || Math.min(...hrSeries.map(p => p.v));
+    const rmssdVals = rmssdSeries.map(p => p.v).sort((a, b) => a - b);
+    const rmssdMedian = rmssdVals[Math.floor(rmssdVals.length / 2)];
+    // Walk samples; a sample "looks like sleep" if HR <= restBase+5 AND RMSSD >= median.
+    // Match RMSSD to HR by nearest-time.
+    let rmIdx = 0;
+    const spans = [];
+    let cur = null;
+    for (const p of hrSeries) {
+      while (rmIdx + 1 < rmssdSeries.length && Math.abs(rmssdSeries[rmIdx + 1].t - p.t) <= Math.abs(rmssdSeries[rmIdx].t - p.t)) rmIdx++;
+      const rmVal = rmssdSeries[rmIdx] ? rmssdSeries[rmIdx].v : null;
+      const isSleep = p.v <= restBase + 5 && rmVal != null && rmVal >= rmssdMedian;
+      if (isSleep) {
+        if (!cur) cur = { start: p.t, end: p.t };
+        else cur.end = p.t;
+      } else if (cur) {
+        if (cur.end - cur.start >= 30) spans.push(cur);
+        cur = null;
+      }
+    }
+    if (cur && cur.end - cur.start >= 30) spans.push(cur);
+    // Keep longest only (per user request — single dominant sleep window)
+    spans.sort((a, b) => (b.end - b.start) - (a.end - a.start));
+    return spans.length ? [spans[0]] : [];
+  }
+
+  function wireChillsSlider() {
+    const slider = document.getElementById('chills-tune-slider');
+    const label = document.getElementById('chills-tune-value');
+    if (!slider || !label) return;
+    const saved = parseFloat(localStorage.getItem('hrv_viewer_chills_ratio') || '2.5');
+    slider.value = saved;
+    label.textContent = saved.toFixed(1) + '×';
+    // Apply saved threshold immediately
+    if (saved !== 2.5 && currentData && currentSummary) {
+      currentSummary.chillsWindows = detectChillsWindows(currentData.hr, saved);
+      renderInsight(currentSummary);
+      renderMarkerList(currentSummary);
+      drawSessionChart(currentSummary, currentData);
+    }
+    let debounce;
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      label.textContent = v.toFixed(1) + '×';
+      localStorage.setItem('hrv_viewer_chills_ratio', v.toString());
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        if (!currentData || !currentSummary) return;
+        currentSummary.chillsWindows = detectChillsWindows(currentData.hr, v);
+        renderInsight(currentSummary);
+        renderMarkerList(currentSummary);
+        drawSessionChart(currentSummary, currentData);
+      }, 180);
+    });
+  }
+
+  // ===== Tag management (localStorage-backed, per-session) =====
+  function loadTags() {
+    try { return JSON.parse(localStorage.getItem('hrv_viewer_tags') || '{}'); } catch (e) { return {}; }
+  }
+  function saveTags(all) {
+    try { localStorage.setItem('hrv_viewer_tags', JSON.stringify(all)); } catch (e) {}
+  }
+  function renderTagsChips(filename) {
+    const all = loadTags();
+    const mine = all[filename] || [];
+    const container = document.getElementById('tags-current');
+    container.innerHTML = mine.length === 0
+      ? '<span style="color: var(--text-faint); font-size: 12px; font-style: italic;">none yet</span>'
+      : mine.map(t => `<span class="tag-chip selected" data-tag="${escape(t)}">${escape(t)} <span class="tag-x" data-remove="${escape(t)}">×</span></span>`).join(' ');
+    container.querySelectorAll('.tag-x').forEach(x => {
+      x.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const t = x.dataset.remove;
+        const all = loadTags();
+        all[filename] = (all[filename] || []).filter(tag => tag !== t);
+        saveTags(all);
+        renderTagsChips(filename);
+      });
+    });
+  }
+  function addTag(filename, tag) {
+    tag = tag.trim();
+    if (!tag) return;
+    const all = loadTags();
+    if (!all[filename]) all[filename] = [];
+    if (!all[filename].includes(tag)) all[filename].push(tag);
+    saveTags(all);
+    renderTagsChips(filename);
+  }
+  function wireTags(filename) {
+    renderTagsChips(filename);
+    const input = document.getElementById('tag-input');
+    input.value = '';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { addTag(filename, input.value); input.value = ''; }
+    });
+  }
+
+  function resizeAllViewerCharts() {
+    // Force every Chart.js instance in the page to pick up its new container size.
+    try { if (currentChart) currentChart.resize(); } catch(e) {}
+    try { if (currentContextChart) currentContextChart.resize(); } catch(e) {}
+    // Chart.js registry holds refs to every active chart — resize them all.
+    if (Chart && Chart.instances) {
+      for (const id of Object.keys(Chart.instances)) {
+        try { Chart.instances[id].resize(); } catch (e) {}
+      }
+    }
+  }
+
+  function exportReport() {
+    // Expand the interp panel so its body shows in the report, then apply printing
+    // mode, let Chart.js resize, and open the print dialog. afterprint handler
+    // (in init) removes the class and restores chart sizing.
+    const interp = document.getElementById('interp-panel');
+    const wasCollapsed = interp && interp.classList.contains('collapsed');
+    if (interp) interp.classList.remove('collapsed');
+    document.body.classList.add('printing');
+    requestAnimationFrame(() => {
+      resizeAllViewerCharts();
+      setTimeout(() => {
+        window.print();
+        if (wasCollapsed && interp) interp.classList.add('collapsed');
+      }, 200);
+    });
+  }
+
+  // ===== Keyboard nav: ← / → move between adjacent sessions or days =====
+  function setupKeyboardNav() {
+    document.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const { view, arg } = parseHash();
+      const dir = e.key === 'ArrowLeft' ? -1 : 1;
+      if (view === 'session') {
+        const all = Object.keys(sessionsIndex).sort();
+        const idx = all.indexOf(decodeURIComponent(arg || ''));
+        if (idx < 0) return;
+        const next = idx + dir;
+        if (next >= 0 && next < all.length) setHash('session/' + encodeURIComponent(all[next]));
+      } else if (view === 'day' || view === 'month' || view === 'week') {
+        const btn = document.getElementById(view + (dir < 0 ? '-prev' : '-next'));
+        if (btn) btn.click();
+      }
+    });
+  }
+
+  function renderInsight(s) {
+    const parts = [];
+    parts.push(`Session: ${formatDuration(s.duration)}.`);
+    parts.push(`Avg HR ${s.hrAvg} bpm (min ${s.hrMin.v} @ ${formatDuration(s.hrMin.t)}, max ${s.hrMax.v} @ ${formatDuration(s.hrMax.t)}).`);
+    if (s.rmssdAvg != null) parts.push(`RMSSD avg ${s.rmssdAvg} ms` + (s.rmssdMin ? `, lowest ${Math.round(s.rmssdMin.v)} @ ${formatDuration(s.rmssdMin.t)}.` : '.'));
+    if (s.palpCount > 0) {
+      const clusterText = s.palpClusters.length === 1
+        ? `1 cluster @ ${formatDuration(s.palpClusters[0].start)}`
+        : `${s.palpClusters.length} clusters`;
+      parts.push(`${s.palpCount} ectopic beats detected (${clusterText}).`);
+    }
+    if (s.hrDeltas && s.hrDeltas.length > 0) {
+      const rises = s.hrDeltas.filter(d => d.direction === 'rise');
+      const drops = s.hrDeltas.filter(d => d.direction === 'drop');
+      const biggest = s.hrDeltas.reduce((a, b) => Math.abs(b.delta) > Math.abs(a.delta) ? b : a);
+      parts.push(`${s.hrDeltas.length} sudden HR shift${s.hrDeltas.length === 1 ? '' : 's'} detected (${rises.length} rise / ${drops.length} drop). Biggest: ${biggest.direction === 'rise' ? '↑' : '↓'}${Math.abs(biggest.delta)} bpm @ ${formatDuration(biggest.start)}.`);
+    }
+    if (s.flushes && s.flushes.length > 0) {
+      parts.push(`${s.flushes.length} sympathetic flush${s.flushes.length === 1 ? '' : 'es'} detected (fast HR spike with concurrent HRV drop — classic cold-flush / sympathetic-burst signature).`);
+    }
+    if (s.chillsWindows && s.chillsWindows.length > 0) {
+      const total = s.chillsWindows.reduce((x, c) => x + (c.end - c.start), 0);
+      parts.push(`${s.chillsWindows.length} chills signature window${s.chillsWindows.length === 1 ? '' : 's'} (${formatDuration(total)} of HR volatility ≥2.5× baseline — possible shivering EMG artifact or autonomic storm).`);
+    }
+    const sleepForInsight = getEffectiveSleepWindows(s);
+    if (sleepForInsight && sleepForInsight.length) {
+      const w = sleepForInsight[0];
+      parts.push(`Sleep window detected: ${formatDuration(w.end - w.start)} starting at ${formatDuration(w.start)} (low HR + high HRV).`);
+    }
+    const postureForInsight = getEffectivePostureSpans(s);
+    if (postureForInsight && postureForInsight.length) {
+      const durByPos = { lying: 0, sitting: 0, standing: 0 };
+      for (const p of postureForInsight) durByPos[p.posture] = (durByPos[p.posture] || 0) + (p.end - p.start);
+      const parts2 = [];
+      if (durByPos.lying > 0) parts2.push(`${formatDuration(durByPos.lying)} lying`);
+      if (durByPos.sitting > 0) parts2.push(`${formatDuration(durByPos.sitting)} sitting`);
+      if (durByPos.standing > 0) parts2.push(`${formatDuration(durByPos.standing)} standing`);
+      if (parts2.length) parts.push(`Posture time: ${parts2.join(', ')}.`);
+    }
+    if (s.warnCount > 0) {
+      const types = Array.from(new Set(s.warnSegs.map(w => w.type))).join(', ');
+      parts.push(`${s.warnCount} warning ${s.warnCount === 1 ? 'segment' : 'segments'} (${types}).`);
+    }
+    if (s.connGaps.length > 0) {
+      const longest = s.connGaps.reduce((a, b) => (b.end - b.start) > (a.end - a.start) ? b : a);
+      parts.push(`${s.connGaps.length} connection ${s.connGaps.length === 1 ? 'gap' : 'gaps'} (longest ${formatDuration(longest.end - longest.start)}).`);
+    }
+    if (s.tachyPct > 20) parts.push(`${s.tachyPct}% of session in tachycardia (HR > 100).`);
+
+    document.getElementById('insight-text').textContent = parts.join(' ');
+  }
+
+  function renderMarkerList(s) {
+    const items = [];
+    if (activeFilters.event) {
+      for (const e of s.events) items.push({ type: 'event', t: e.t, label: e.label });
+    }
+    if (activeFilters.warning) {
+      for (const w of s.warnSegs) items.push({ type: 'warning', t: w.start, label: warnLabel(w.type) + ' (' + formatDuration(w.end - w.start) + ')' });
+    }
+    if (activeFilters.palp) {
+      for (const c of s.palpClusters) items.push({ type: 'palp', t: c.start, label: c.count === 1 ? 'Ectopic beat' : `${c.count} palpitations in ${formatDuration(c.end - c.start)}` });
+    }
+    if (activeFilters.disconnect) {
+      for (const g of s.connGaps) items.push({ type: 'disconnect', t: g.start, label: `BLE gap · ${formatDuration(g.end - g.start)}` });
+    }
+    if (activeFilters.delta && s.hrDeltas) {
+      for (const d of s.hrDeltas) {
+        const arrow = d.direction === 'rise' ? '↑' : '↓';
+        items.push({ type: 'delta', t: d.start, label: `${arrow} ${Math.abs(d.delta)} bpm in ${formatDuration(d.end - d.start)} (${d.startHR} → ${d.endHR})` });
+      }
+    }
+    if (activeFilters.flush && s.flushes) {
+      for (const f of s.flushes) items.push({ type: 'flush', t: f.t, label: `Sympathetic flush · HR +${f.hrDelta} bpm, HRV ↓${f.rmssdDropPct}%` });
+    }
+    if (activeFilters.chills && s.chillsWindows) {
+      for (const c of s.chillsWindows) items.push({ type: 'chills', t: c.start, label: `Chills signature · ${formatDuration(c.end - c.start)} of high HR volatility` });
+    }
+    const postureSpansForList = getEffectivePostureSpans(s);
+    if (activeFilters.posture && postureSpansForList) {
+      for (const p of postureSpansForList) items.push({ type: 'posture', t: p.start, label: `Posture · ${p.posture} (${formatDuration(p.end - p.start)})` });
+    }
+    const sleepWindowsForList = getEffectiveSleepWindows(s);
+    if (activeFilters.sleep && sleepWindowsForList) {
+      for (const w of sleepWindowsForList) items.push({ type: 'sleep', t: w.start, label: `Sleep window · ${formatDuration(w.end - w.start)}` });
+    }
+    items.sort((a, b) => a.t - b.t);
+    const el = document.getElementById('marker-list');
+    if (!items.length) { el.innerHTML = '<div style="color: var(--text-faint); font-size: 12px; padding: 8px;">No markers to show.</div>'; return; }
+    el.innerHTML = items.map(i => `
+      <div class="marker-item type-${i.type}" data-t="${i.t}">
+        <span class="marker-time">${formatDuration(i.t)}</span>
+        <span class="marker-label">${escape(i.label)}</span>
+      </div>`).join('');
+    el.querySelectorAll('.marker-item').forEach(mi => {
+      const t = parseFloat(mi.dataset.t);
+      const labelText = mi.querySelector('.marker-label').textContent;
+      const tLabel = mi.querySelector('.marker-time').textContent;
+      mi.addEventListener('click', () => zoomTo(t));
+      mi.addEventListener('mouseenter', (e) => highlightMarker(t, labelText, tLabel, e));
+      mi.addEventListener('mouseleave', unhighlightMarker);
+    });
+  }
+
+  // Hovering a sidebar marker: drop a bright vertical highlight on the chart at that
+  // time and show a tooltip anchored to the chart position (fallback: cursor position
+  // if the time is outside the currently brushed-in window).
+  function highlightMarker(t, labelText, tLabel, evt) {
+    if (!currentChart) return;
+    const yScale = currentChart.scales.y;
+    const yTop = yScale ? yScale.max : 200;
+    const yBottom = yScale ? yScale.min : 0;
+    const yHR = nearestY(currentData && currentData.hr, t);
+    // Find the HL datasets by label
+    const ds = currentChart.data.datasets;
+    for (let i = 0; i < ds.length; i++) {
+      if (ds[i].label === '_HL_LINE') ds[i].data = [{ x: t, y: yBottom }, { x: t, y: yTop }];
+      if (ds[i].label === '_HL_POINT') ds[i].data = [{ x: t, y: yHR }];
+    }
+    currentChart.update('none');
+    const xScale = currentChart.scales.x;
+    const inView = t >= xScale.min && t <= xScale.max;
+    const tip = getAnnoTip();
+    tip.innerHTML = `<b>${escape(labelText)}</b><br/>@ ${tLabel}`;
+    tip.style.display = 'block';
+    if (inView) {
+      const rect = currentChart.canvas.getBoundingClientRect();
+      const px = xScale.getPixelForValue(t);
+      const left = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, rect.left + px - tip.offsetWidth / 2));
+      tip.style.left = left + 'px';
+      tip.style.top = (rect.top + 10) + 'px';
+    } else if (evt) {
+      tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, evt.clientX + 14) + 'px';
+      tip.style.top = Math.max(8, evt.clientY - tip.offsetHeight - 8) + 'px';
+    }
+  }
+
+  function unhighlightMarker() {
+    if (!currentChart) return;
+    const ds = currentChart.data.datasets;
+    for (let i = 0; i < ds.length; i++) {
+      if (ds[i].label === '_HL_LINE' || ds[i].label === '_HL_POINT') ds[i].data = [];
+    }
+    currentChart.update('none');
+    hideAnnoTip();
+  }
+
+  function nearestY(series, t) {
+    if (!series || !series.length) return 0;
+    let best = series[0];
+    for (const p of series) {
+      if (Math.abs(p.x - t) < Math.abs(best.x - t)) best = p;
+    }
+    return best.y;
+  }
+
+  function warnLabel(type) {
+    return { 'warn-high': 'HR high', 'warn-low': 'HR low', 'warn-crash': 'HRV crash', 'warn-palp': 'Palpitations' }[type] || type;
+  }
+
+  // HR×HRV quadrant: classify the session's averages into one of four autonomic states.
+  function classifyQuadrant(hrAvg, rmssdAvg) {
+    // HR: "high" = above normal ceiling (user-configured); "low" = at/below low ceiling.
+    // Here we just use median-ish thresholds.
+    const hrHigh = hrAvg >= colorThresholds.normal; // 90+
+    const rmssdHigh = rmssdAvg != null && rmssdAvg >= 40; // ~above typical adult resting
+    if (!hrHigh && rmssdHigh) return { key: 'low-high', label: 'Low HR · High HRV', tone: 'Rest / recovery mode — good parasympathetic tone.' };
+    if (hrHigh && rmssdHigh) return { key: 'high-high', label: 'High HR · High HRV', tone: 'Post-exertion rebound or regulated arousal.' };
+    if (!hrHigh && !rmssdHigh) return { key: 'low-low', label: 'Low HR · Low HRV', tone: 'Fatigue / under-recovery pattern.' };
+    return { key: 'high-low', label: 'High HR · Low HRV', tone: 'Sympathetic stress — classic POTS / flare pattern.' };
+  }
+
+  function renderInterpretation(s) {
+    if (s.rmssdAvg == null) {
+      document.getElementById('interp-current').textContent = 'Not enough HRV data to classify.';
+      return;
+    }
+    const q = classifyQuadrant(s.hrAvg, s.rmssdAvg);
+    document.getElementById('interp-current').innerHTML =
+      `<div style="font-size: 11px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px;">Session average</div>` +
+      `<div style="font-size: 16px;">${q.label} — <span style="color: var(--text-dim); font-weight: 500;">${q.tone}</span></div>` +
+      `<div style="font-size: 11px; color: var(--text-dim); margin-top: 8px;">Click a card below to highlight the time ranges on the chart that match that quadrant.</div>`;
+    // Decorate each cell: show percent of session time, total duration, span count.
+    // Empty cells get "none in this session" and are non-clickable.
+    const totalSession = s.duration || 1;
+    document.querySelectorAll('.interp-cell').forEach(cell => {
+      const key = cell.dataset.quad;
+      const ranges = (currentQuadRanges && currentQuadRanges[key]) || [];
+      const titleEl = cell.querySelector('.interp-title');
+      const oldBadge = titleEl.querySelector('.interp-empty-badge');
+      if (oldBadge) oldBadge.remove();
+      if (ranges.length === 0) {
+        const badge = document.createElement('span');
+        badge.className = 'interp-empty-badge';
+        badge.textContent = 'none in this session';
+        titleEl.appendChild(badge);
+        cell.classList.add('empty');
+        cell.classList.remove('on');
+      } else {
+        cell.classList.remove('empty');
+        const totalMin = ranges.reduce((x, r) => x + (r.end - r.start), 0);
+        const pct = Math.round((totalMin / totalSession) * 100);
+        const badge = document.createElement('span');
+        badge.className = 'interp-empty-badge';
+        badge.style.color = 'var(--text-dim)';
+        badge.style.fontStyle = 'normal';
+        badge.style.fontWeight = '700';
+        badge.textContent = `${pct}% · ${formatDuration(totalMin)}`;
+        titleEl.appendChild(badge);
+      }
+    });
+  }
+
+  function wireQuadrantToggles() {
+    document.querySelectorAll('.interp-cell').forEach(cell => {
+      cell.addEventListener('click', () => {
+        if (cell.classList.contains('empty')) return;
+        const key = cell.dataset.quad;
+        activeQuadrants[key] = !activeQuadrants[key];
+        cell.classList.toggle('on', activeQuadrants[key]);
+        if (currentSummary && currentData) drawSessionChart(currentSummary, currentData);
+      });
+    });
+  }
+
+  function wireInterpToggle() {
+    const panel = document.getElementById('interp-panel');
+    const head = document.getElementById('interp-head');
+    // Default collapsed state from localStorage
+    const saved = localStorage.getItem('hrv_viewer_interp_collapsed') === 'true';
+    panel.classList.toggle('collapsed', saved);
+    head.addEventListener('click', () => {
+      panel.classList.toggle('collapsed');
+      localStorage.setItem('hrv_viewer_interp_collapsed', panel.classList.contains('collapsed'));
+    });
+  }
+
+  function wireSidebarToggle() {
+    const layout = document.getElementById('session-layout');
+    const btn = document.getElementById('sidebar-toggle');
+    const saved = localStorage.getItem('hrv_viewer_sidebar_collapsed') === 'true';
+    layout.classList.toggle('sidebar-collapsed', saved);
+    btn.addEventListener('click', () => {
+      layout.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('hrv_viewer_sidebar_collapsed', layout.classList.contains('sidebar-collapsed'));
+      // Chart needs to resize when the container width changes
+      setTimeout(() => currentChart && currentChart.resize(), 260);
+    });
+  }
+
+  // Floating tooltip used for annotation hover (warning bands, gaps, events)
+  function getAnnoTip() {
+    let tip = document.getElementById('anno-tip');
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.id = 'anno-tip';
+      document.body.appendChild(tip);
+    }
+    return tip;
+  }
+  function showAnnoTip(text, evt) {
+    const tip = getAnnoTip();
+    tip.innerHTML = text;
+    tip.style.display = 'block';
+    // Chart.js annotation plugin wraps DOM events in {native, x, y, ...}
+    const e = evt && evt.native ? evt.native : evt;
+    const cx = (e && e.clientX) || 0;
+    const cy = (e && e.clientY) || 0;
+    const pad = 14;
+    tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, cx + pad) + 'px';
+    tip.style.top = Math.max(8, cy - tip.offsetHeight - 8) + 'px';
+  }
+  function hideAnnoTip() {
+    const tip = document.getElementById('anno-tip');
+    if (tip) tip.style.display = 'none';
+  }
+
+  function wireFilterChips() {
+    document.querySelectorAll('.filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const t = chip.dataset.type;
+        activeFilters[t] = !activeFilters[t];
+        chip.classList.toggle('active', activeFilters[t]);
+        if (currentSummary) {
+          renderMarkerList(currentSummary);
+          drawSessionChart(currentSummary, currentData);
+        }
+      });
+    });
+  }
+
+  function drawSessionChart(s, data) {
+    const ctx = document.getElementById('session-chart').getContext('2d');
+    if (currentChart) currentChart.destroy();
+
+    const hr = downsample(data.hr, 2000);
+    const rmssd = downsample(data.rmssd, 2000);
+
+    // Palpitation cluster dots (one dot per cluster, sized by count)
+    const palpDots = activeFilters.palp ? s.palpClusters.map(c => {
+      const midT = (c.start + c.end) / 2;
+      // Find HR value near this time
+      const near = data.hr.reduce((best, p) => Math.abs(p.x - midT) < Math.abs(best.x - midT) ? p : best, data.hr[0]);
+      return { x: midT, y: near.y, _count: c.count, _start: c.start, _end: c.end };
+    }) : [];
+
+    // Build annotations (warnings as bands, disconnects as grey masks, events as vertical lines, max/min labels)
+    const annotations = {};
+    let idCounter = 0;
+
+    // Quadrant overlays (drawn first so they sit below other bands).
+    if (currentQuadRanges) {
+      const QUAD_LABELS = {
+        'low-high': 'Low HR · High HRV (rest/recovery)',
+        'high-high': 'High HR · High HRV (rebound)',
+        'low-low': 'Low HR · Low HRV (fatigue)',
+        'high-low': 'High HR · Low HRV (sympathetic stress)',
+      };
+      for (const key of Object.keys(activeQuadrants)) {
+        if (!activeQuadrants[key]) continue;
+        const color = QUAD_OVERLAY_COLORS[key];
+        const label = QUAD_LABELS[key];
+        const ranges = currentQuadRanges[key] || [];
+        for (const r of ranges) {
+          annotations['quad_' + idCounter++] = {
+            type: 'box',
+            xScaleID: 'x',
+            xMin: r.start, xMax: r.end,
+            backgroundColor: color.fill,
+            borderColor: color.border,
+            borderWidth: 1,
+            drawTime: 'beforeDatasetsDraw',
+            enter: (ctx, evt) => showAnnoTip(`<b>${label}</b><br/>${formatDuration(r.start)} → ${formatDuration(r.end)} (${formatDuration(r.end - r.start)})`, evt),
+            leave: hideAnnoTip,
+          };
+        }
+      }
+    }
+
+    if (activeFilters.warning) {
+      for (const w of s.warnSegs) {
+        const label = warnLabel(w.type);
+        const dur = formatDuration(w.end - w.start);
+        annotations['warn_' + idCounter++] = {
+          type: 'box',
+          xScaleID: 'x',
+          xMin: w.start, xMax: w.end,
+          backgroundColor: 'rgba(232,152,88,0.12)',
+          borderColor: 'rgba(232,152,88,0.45)',
+          borderWidth: 1,
+          drawTime: 'beforeDatasetsDraw',
+          enter: (ctx, evt) => showAnnoTip(`<b>${label}</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${dur})`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    if (activeFilters.disconnect) {
+      for (const g of s.connGaps) {
+        const dur = formatDuration(g.end - g.start);
+        annotations['gap_' + idCounter++] = {
+          type: 'box',
+          xScaleID: 'x',
+          xMin: g.start, xMax: g.end,
+          backgroundColor: 'rgba(120,120,120,0.30)',
+          borderColor: 'rgba(160,160,160,0.55)',
+          borderWidth: 1,
+          drawTime: 'beforeDatasetsDraw',
+          enter: (ctx, evt) => showAnnoTip(`<b>BLE connection gap</b><br/>${formatDuration(g.start)} → ${formatDuration(g.end)} (${dur})<br/><span style="color: var(--text-dim);">No HR data during this span.</span>`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    if (activeFilters.delta && s.hrDeltas) {
+      for (const d of s.hrDeltas) {
+        const arrow = d.direction === 'rise' ? '↑' : '↓';
+        const color = d.direction === 'rise' ? 'rgba(139,180,255,0.35)' : 'rgba(180,140,255,0.35)';
+        const fill = d.direction === 'rise' ? 'rgba(139,180,255,0.10)' : 'rgba(180,140,255,0.10)';
+        annotations['delta_' + idCounter++] = {
+          type: 'box',
+          xScaleID: 'x',
+          xMin: d.start, xMax: d.end,
+          backgroundColor: fill,
+          borderColor: color,
+          borderWidth: 1,
+          drawTime: 'beforeDatasetsDraw',
+          enter: (ctx, evt) => showAnnoTip(`<b>HR shift ${arrow} ${Math.abs(d.delta)} bpm</b><br/>${d.startHR} → ${d.endHR} bpm over ${formatDuration(d.end - d.start)}<br/>${formatDuration(d.start)} → ${formatDuration(d.end)}`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    if (activeFilters.event) {
+      for (const e of s.events) {
+        const eLabel = e.label;
+        const eTime = formatDuration(e.t);
+        annotations['ev_' + idCounter++] = {
+          type: 'line',
+          xScaleID: 'x',
+          xMin: e.t, xMax: e.t,
+          borderColor: 'rgba(93,202,165,0.75)',
+          borderWidth: 1.5,
+          borderDash: [3, 3],
+          label: { display: true, content: e.label, position: 'start', backgroundColor: 'rgba(93,202,165,0.18)', color: '#B8D97E', font: { size: 11, weight: '600' }, padding: 4 },
+          enter: (ctx, evt) => showAnnoTip(`<b>Event</b><br/>${escape(eLabel)} @ ${eTime}`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    // Auto-detected sympathetic flush (short fast HR spike + concurrent HRV drop)
+    if (activeFilters.flush && s.flushes) {
+      for (const f of s.flushes) {
+        annotations['flush_' + idCounter++] = {
+          type: 'box',
+          xScaleID: 'x',
+          xMin: f.start, xMax: f.end,
+          backgroundColor: 'rgba(232,168,88,0.12)',
+          borderColor: 'rgba(232,168,88,0.6)',
+          borderWidth: 1,
+          drawTime: 'beforeDatasetsDraw',
+          enter: (ctx, evt) => showAnnoTip(`<b>Sympathetic flush</b><br/>HR +${f.hrDelta} bpm in ${formatDuration(f.end - f.start)}<br/>RMSSD ↓${f.rmssdDropPct}%<br/><span style='color: var(--text-dim);'>Cold flush / sudden arousal signature</span>`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    // Posture bands (background tints behind all data)
+    const postureSpans = getEffectivePostureSpans(s);
+    if (activeFilters.posture && postureSpans && postureSpans.length) {
+      const POSTURE_COLORS = {
+        'lying': { fill: 'rgba(125,184,232,0.08)', border: 'rgba(125,184,232,0.35)' },
+        'sitting': { fill: 'rgba(184,217,126,0.05)', border: 'rgba(184,217,126,0.25)' },
+        'standing': { fill: 'rgba(232,152,88,0.08)', border: 'rgba(232,152,88,0.35)' },
+      };
+      for (const sp of postureSpans) {
+        const c = POSTURE_COLORS[sp.posture];
+        if (!c) continue;
+        annotations['posture_' + idCounter++] = {
+          type: 'box',
+          xScaleID: 'x',
+          xMin: sp.start, xMax: sp.end,
+          backgroundColor: c.fill,
+          borderColor: c.border,
+          borderWidth: 0,
+          drawTime: 'beforeDatasetsDraw',
+          enter: (ctx, evt) => showAnnoTip(`<b>Posture: ${sp.posture}</b><br/>${formatDuration(sp.start)} → ${formatDuration(sp.end)} (${formatDuration(sp.end - sp.start)})`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    // Sleep windows (dim blue band)
+    const sleepWindows = getEffectiveSleepWindows(s);
+    if (activeFilters.sleep && sleepWindows && sleepWindows.length) {
+      for (const w of sleepWindows) {
+        annotations['sleep_' + idCounter++] = {
+          type: 'box',
+          xScaleID: 'x',
+          xMin: w.start, xMax: w.end,
+          backgroundColor: 'rgba(110,140,200,0.10)',
+          borderColor: 'rgba(110,140,200,0.4)',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          drawTime: 'beforeDatasetsDraw',
+          enter: (ctx, evt) => showAnnoTip(`<b>Sleep window</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${formatDuration(w.end - w.start)})`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    // Auto-detected chills signature (high HR volatility — possible shivering EMG artifact)
+    if (activeFilters.chills && s.chillsWindows) {
+      for (const c of s.chillsWindows) {
+        annotations['chills_' + idCounter++] = {
+          type: 'box',
+          xScaleID: 'x',
+          xMin: c.start, xMax: c.end,
+          backgroundColor: 'rgba(133,183,235,0.12)',
+          borderColor: 'rgba(133,183,235,0.6)',
+          borderWidth: 1,
+          drawTime: 'beforeDatasetsDraw',
+          enter: (ctx, evt) => showAnnoTip(`<b>Chills signature</b><br/>High HR volatility (std ${c.std.toFixed(1)} bpm, ${c.ratio.toFixed(1)}× session baseline)<br/><span style='color: var(--text-dim);'>Possible shivering EMG artifact or autonomic storm</span>`, evt),
+          leave: hideAnnoTip,
+        };
+      }
+    }
+    // Max/min markers (always shown)
+    annotations['maxHR'] = {
+      type: 'point',
+      xScaleID: 'x', yScaleID: 'y',
+      xValue: s.hrMax.t, yValue: s.hrMax.v,
+      backgroundColor: STAGE_COLORS[getHRStage(s.hrMax.v)],
+      radius: 5, borderWidth: 2, borderColor: '#000',
+    };
+    annotations['maxHR_label'] = {
+      type: 'label',
+      xScaleID: 'x', yScaleID: 'y',
+      xValue: s.hrMax.t, yValue: s.hrMax.v,
+      content: [`MAX ${s.hrMax.v}`],
+      color: STAGE_COLORS[getHRStage(s.hrMax.v)],
+      font: { size: 10, weight: 'bold' },
+      position: { x: 'center', y: 'start' },
+      yAdjust: -14,
+      backgroundColor: 'rgba(10,10,10,0.8)',
+      padding: 3,
+    };
+    annotations['minHR'] = {
+      type: 'point',
+      xScaleID: 'x', yScaleID: 'y',
+      xValue: s.hrMin.t, yValue: s.hrMin.v,
+      backgroundColor: STAGE_COLORS[getHRStage(s.hrMin.v)],
+      radius: 5, borderWidth: 2, borderColor: '#000',
+    };
+    annotations['minHR_label'] = {
+      type: 'label',
+      xScaleID: 'x', yScaleID: 'y',
+      xValue: s.hrMin.t, yValue: s.hrMin.v,
+      content: [`MIN ${s.hrMin.v}`],
+      color: STAGE_COLORS[getHRStage(s.hrMin.v)],
+      font: { size: 10, weight: 'bold' },
+      yAdjust: 14,
+      backgroundColor: 'rgba(10,10,10,0.8)',
+      padding: 3,
+    };
+
+    // Kill stale tooltip when pointer leaves the canvas entirely.
+    const canvasEl = document.getElementById('session-chart');
+    canvasEl.addEventListener('mouseleave', hideAnnoTip);
+    currentChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          { label: 'HR', data: hr, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, fill: true },
+          { label: 'RMSSD', data: rmssd, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3] },
+          { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: palpDots.map(p => Math.min(3 + p._count, 10)), pointHoverRadius: 12, pointStyle: 'circle' },
+          // Highlight overlay datasets for marker-list hover (populated on demand)
+          { label: '_HL_LINE', data: [], borderColor: '#ffffff', backgroundColor: 'transparent', yAxisID: 'y', showLine: true, pointRadius: 0, borderWidth: 2, fill: false, order: -1 },
+          { label: '_HL_POINT', data: [], borderColor: '#000', backgroundColor: '#ffffff', yAxisID: 'y', showLine: false, pointRadius: 6, pointStyle: 'circle', pointBorderWidth: 2, order: -2 },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#b0b0b0', font: { size: 13, weight: '600' }, boxWidth: 14, padding: 12, filter: (item) => item.text !== 'Palp' && !item.text.startsWith('_HL') } },
+          tooltip: {
+            callbacks: {
+              title: (items) => items.length ? formatDuration(items[0].parsed.x) : '',
+              label: (ctx) => {
+                if (ctx.dataset.label && ctx.dataset.label.startsWith('_HL')) return '';
+                if (ctx.dataset.label === 'Palp') {
+                  const p = ctx.raw;
+                  return p._count === 1 ? `Ectopic beat` : `${p._count} palps in ${formatDuration(p._end - p._start)}`;
+                }
+                if (ctx.dataset.label === 'HR') return `HR ${Math.round(ctx.parsed.y)} bpm`;
+                if (ctx.dataset.label === 'RMSSD') return `RMSSD ${Math.round(ctx.parsed.y)} ms`;
+                return '';
+              }
+            },
+            backgroundColor: 'rgba(15,15,15,0.97)',
+            borderColor: '#2a2a2a',
+            borderWidth: 1,
+            titleColor: '#d8d8d8',
+            bodyColor: '#d8d8d8',
+            titleFont: { size: 13, weight: '700' },
+            bodyFont: { size: 13 },
+            padding: 10,
+            boxPadding: 4,
+          },
+          annotation: { annotations },
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            min: brushMin !== null ? brushMin : 0,
+            max: brushMax !== null ? brushMax : s.duration,
+            ticks: { color: '#9a9a9a', font: { size: 12 }, callback: v => formatDuration(v) },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+          y: {
+            position: 'left',
+            ticks: { color: '#E89858', font: { size: 12, weight: '600' } },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+          y1: {
+            position: 'right',
+            ticks: { color: '#5DCAA5', font: { size: 12, weight: '600' } },
+            grid: { display: false },
+          },
+        },
+        onClick: (evt, items) => {
+          // If a palp point clicked, zoom to its cluster
+          for (const it of items) {
+            if (currentChart.data.datasets[it.datasetIndex].label === 'Palp') {
+              const p = currentChart.data.datasets[it.datasetIndex].data[it.index];
+              zoomTo(p.x, Math.max(0.5, (p._end - p._start) * 3));
+              return;
+            }
+          }
+        },
+      },
+    });
+  }
+
+  function drawContextChart(s, data) {
+    const ctx = document.getElementById('context-chart').getContext('2d');
+    if (currentContextChart) currentContextChart.destroy();
+    const hr = downsample(data.hr, 600);
+    currentContextChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          { data: hr, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.12)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1, fill: true },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { type: 'linear', min: 0, max: s.duration, display: false },
+          y: { display: false },
+        },
+      },
+    });
+  }
+
+  function wireBrush(s) {
+    const overlay = document.getElementById('context-overlay');
+    const brush = document.getElementById('context-brush');
+    const duration = s.duration;
+    let drag = null; // {mode: 'pan'|'left'|'right'|'create', startX, startMin, startMax}
+
+    function xToMin(x) {
+      const w = overlay.clientWidth;
+      return Math.max(0, Math.min(duration, (x / w) * duration));
+    }
+    const dimLeft = document.getElementById('context-dim-left');
+    const dimRight = document.getElementById('context-dim-right');
+    function renderBrush() {
+      // Hard safety clamp - prevents out-of-range drift from edge-case drag math.
+      if (brushMin < 0 || !isFinite(brushMin)) brushMin = 0;
+      if (brushMax > duration || !isFinite(brushMax)) brushMax = duration;
+      if (brushMax - brushMin < 0.01) brushMax = Math.min(duration, brushMin + 0.01);
+      const w = overlay.clientWidth;
+      const lo = (brushMin / duration) * w;
+      const hi = (brushMax / duration) * w;
+      brush.style.left = lo + 'px';
+      brush.style.width = (hi - lo) + 'px';
+      if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
+      if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
+      if (currentChart) {
+        currentChart.options.scales.x.min = brushMin;
+        currentChart.options.scales.x.max = brushMax;
+        currentChart.update('none');
+      }
+      updateResetZoomVisibility();
+    }
+
+    // Default brush = data range (trims leading / trailing empty time)
+    if (brushMin === null || brushMax === null) {
+      const r = getDataRange();
+      brushMin = r.start; brushMax = r.end;
+    }
+    renderBrush();
+
+    overlay.addEventListener('mousedown', (e) => {
+      const rect = overlay.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const w = rect.width;
+      const loPx = (brushMin / duration) * w;
+      const hiPx = (brushMax / duration) * w;
+      let mode = 'create';
+      if (Math.abs(x - loPx) < 6) mode = 'left';
+      else if (Math.abs(x - hiPx) < 6) mode = 'right';
+      else if (x > loPx && x < hiPx) mode = 'pan';
+      drag = { mode, startX: x, startMin: brushMin, startMax: brushMax };
+      if (mode === 'create') {
+        brushMin = xToMin(x); brushMax = brushMin + 0.01;
+        renderBrush();
+      }
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!drag) return;
+      const rect = overlay.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const curMin = xToMin(x);
+      if (drag.mode === 'left') {
+        brushMin = Math.min(curMin, brushMax - 0.05);
+      } else if (drag.mode === 'right') {
+        brushMax = Math.max(curMin, brushMin + 0.05);
+      } else if (drag.mode === 'pan') {
+        const span = drag.startMax - drag.startMin;
+        const dx = ((x - drag.startX) / rect.width) * duration;
+        let newMin = drag.startMin + dx;
+        let newMax = drag.startMax + dx;
+        if (newMin < 0) { newMax -= newMin; newMin = 0; }
+        if (newMax > duration) { newMin -= (newMax - duration); newMax = duration; }
+        brushMin = newMin; brushMax = newMax;
+      } else if (drag.mode === 'create') {
+        brushMax = Math.max(brushMin + 0.05, curMin);
+      }
+      renderBrush();
+    });
+    window.addEventListener('mouseup', () => {
+      if (drag && drag.mode === 'create' && (brushMax - brushMin) < 0.1) {
+        // Too small -> reset to full
+        brushMin = 0; brushMax = duration;
+        renderBrush();
+      }
+      drag = null;
+    });
+    // Double-click overlay to reset
+    overlay.addEventListener('dblclick', () => {
+      brushMin = 0; brushMax = duration;
+      renderBrush();
+    });
+  }
+
+  // Shared: sync the brush visual + dim masks + main chart to the current brushMin/Max.
+  function paintBrush() {
+    if (!currentSummary) return;
+    const d = currentSummary.duration;
+    const overlay = document.getElementById('context-overlay');
+    const brush = document.getElementById('context-brush');
+    const dimLeft = document.getElementById('context-dim-left');
+    const dimRight = document.getElementById('context-dim-right');
+    if (!overlay || !brush) return;
+    const w = overlay.clientWidth;
+    const lo = (brushMin / d) * w;
+    const hi = (brushMax / d) * w;
+    brush.style.left = lo + 'px';
+    brush.style.width = (hi - lo) + 'px';
+    if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
+    if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
+    if (currentChart) {
+      currentChart.options.scales.x.min = brushMin;
+      currentChart.options.scales.x.max = brushMax;
+      currentChart.update('none');
+    }
+    updateResetZoomVisibility();
+  }
+
+  function zoomTo(t, span) {
+    if (!currentSummary) return;
+    const s = currentSummary;
+    const halfSpan = (span || Math.max(0.5, s.duration * 0.04)) / 2;
+    brushMin = Math.max(0, t - halfSpan);
+    brushMax = Math.min(s.duration, t + halfSpan * 2);
+    paintBrush();
+  }
+
+  // "Reset zoom" = back to the data range (skips leading/trailing empty time).
+  function resetZoom() {
+    if (!currentSummary) return;
+    const r = getDataRange();
+    brushMin = r.start;
+    brushMax = r.end;
+    paintBrush();
+  }
+
+  // Walk the HR series to find the actual filled span - skips leading and trailing
+  // BLE gaps so "Reset zoom" takes you to the data, not a black empty void.
+  function getDataRange() {
+    if (!currentSummary) return { start: 0, end: 1 };
+    const d = currentSummary.duration;
+    if (!currentData || !currentData.hr.length) return { start: 0, end: d };
+    const first = currentData.hr[0].x;
+    const last = currentData.hr[currentData.hr.length - 1].x;
+    return { start: Math.max(0, first), end: Math.min(d, last) };
+  }
+
+  function updateResetZoomVisibility() {
+    const btn = document.getElementById('reset-zoom');
+    if (!btn || !currentSummary) return;
+    const r = getDataRange();
+    const atDefault = Math.abs(brushMin - r.start) < 0.001 && Math.abs(brushMax - r.end) < 0.001;
+    btn.classList.toggle('hidden', atDefault);
+  }
+
+  // ===== Utilities =====
+  function formatDuration(min) {
+    if (min == null || isNaN(min)) return '—';
+    const totalSec = Math.round(min * 60);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function escape(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // ===== Init =====
+  async function init() {
+    await restoreFolder();
+    if (dirHandle) {
+      // Try silent permission check first
+      const perm = await dirHandle.queryPermission({ mode: 'read' });
+      if (perm === 'granted') {
+        await loadSessions();
+      }
+      // If not granted, user will need to click pick / an interaction to re-grant
+    }
+    // If nothing happens yet, route() will show empty-state
+    route();
+
+    window.addEventListener('hashchange', route);
+    document.getElementById('folder-pick').addEventListener('click', pickFolder);
+    document.getElementById('empty-pick').addEventListener('click', pickFolder);
+    document.getElementById('export-report').addEventListener('click', exportReport);
+    setupKeyboardNav();
+
+    // Restore chart sizing after the print dialog closes
+    window.addEventListener('afterprint', () => {
+      document.body.classList.remove('printing');
+      resizeAllViewerCharts();
+    });
+    // Default to the month calendar if no hash is set yet.
+    if (!location.hash) setHash('month');
+  }
+  init();
+})();
+</script>
+</body>
+</html>

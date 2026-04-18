@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0a0a">
+<title>HR Monitor</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #101010;
+    --border: #1f1f1f;
+    --text: #d8d8d8;
+    --dim: #8a8a8a;
+    --accent: #E89858;
+    --accent-rmssd: #5DCAA5;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .container {
+    max-width: 520px;
+    padding: 40px 32px;
+    text-align: center;
+  }
+  h1 {
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin: 0 0 8px;
+  }
+  h1 .dot { color: var(--accent); }
+  .tagline {
+    color: var(--dim);
+    font-size: 14px;
+    margin-bottom: 32px;
+    line-height: 1.5;
+  }
+  .cards {
+    display: grid;
+    gap: 14px;
+  }
+  a.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    text-decoration: none;
+    color: var(--text);
+    text-align: left;
+    transition: border-color 0.2s, transform 0.15s;
+    display: block;
+  }
+  a.card:hover {
+    border-color: #2a2a2a;
+    transform: translateY(-2px);
+  }
+  .card-title {
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title .accent-heart { color: var(--accent); }
+  .card-title .accent-line { color: var(--accent-rmssd); }
+  .card-desc {
+    color: var(--dim);
+    font-size: 13px;
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .footer {
+    margin-top: 28px;
+    font-size: 11px;
+    color: #5a5a5a;
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>HR Monitor <span class="dot">·</span></h1>
+    <div class="tagline">Live heart rate + HRV tracking from a chest strap, with POTS-aware session review.</div>
+    <div class="cards">
+      <a class="card" href="./hr_monitor.html">
+        <div class="card-title"><span class="accent-heart">♥</span> Live monitor</div>
+        <div class="card-desc">Connect a BLE chest strap. Real-time HR / HRV, alerts, overlay-ready widgets, auto-save to disk.</div>
+      </a>
+      <a class="card" href="./hrv_viewer.html">
+        <div class="card-title"><span class="accent-line">∿</span> Session viewer</div>
+        <div class="card-desc">Browse saved sessions by month / week / day. Autonomic interpretation, palpitation detection, sleep + posture overlays, export.</div>
+      </a>
+    </div>
+    <div class="footer">Private by default · Your data stays on your device</div>
+  </div>
+</body>
+</html>
