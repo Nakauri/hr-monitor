@@ -1049,21 +1049,20 @@
   .insight-master-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
+    gap: 12px;
+    padding: 16px 20px;
     cursor: pointer;
     user-select: none;
-    font-size: 12px;
+    font-size: 15px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0.04em;
     color: var(--text);
     transition: background 0.12s;
   }
   .insight-master-head:hover { background: rgba(255,255,255,0.02); }
   .insight-master-head .insight-chevron {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     stroke: currentColor;
     stroke-width: 2;
     stroke-linecap: round;
@@ -1074,10 +1073,10 @@
   .insight-box.collapsed .insight-chevron { transform: rotate(-90deg); }
   .insight-master-summary {
     margin-left: auto;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     font-weight: 500;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.02em;
     text-transform: none;
   }
   .insight-body { border-top: 1px solid var(--border); }
@@ -1085,15 +1084,14 @@
   .insight-section { border-bottom: 1px solid var(--border); }
   .insight-section:last-child { border-bottom: 0; }
   .insight-section-title {
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    padding: 10px 18px;
+    letter-spacing: 0.03em;
+    color: var(--text);
+    padding: 12px 20px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: pointer;
     user-select: none;
     transition: background 0.12s, color 0.12s;
@@ -1112,32 +1110,32 @@
   }
   .insight-section.collapsed .insight-child-chevron { transform: rotate(-90deg); }
   .insight-section-title .insight-count {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--accent-rmssd);
     background: rgba(93,202,165,0.12);
-    padding: 1px 7px;
+    padding: 2px 8px;
     border-radius: 10px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
   }
   /* Section body: desc + list. Padded inside the section, hidden when collapsed. */
   .insight-section-body {
-    padding: 0 18px 12px;
+    padding: 0 20px 14px;
   }
   .insight-section.collapsed .insight-section-body { display: none; }
   .insight-section ul {
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 14px;
-    line-height: 1.6;
+    font-size: 15px;
+    line-height: 1.55;
     color: var(--text);
   }
-  .insight-section li { padding: 2px 0; }
-  .insight-section li + li { margin-top: 3px; }
+  .insight-section li { padding: 4px 0; }
+  .insight-section li + li { margin-top: 5px; }
   .insight-section .insight-sub {
     color: var(--text-dim);
-    font-size: 12.5px;
-    margin-top: 2px;
+    font-size: 13.5px;
+    margin-top: 4px;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1147,22 +1145,22 @@
      section title, italic muted so it reads as "subtitle" without competing. */
   .insight-section .insight-desc {
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 13.5px;
     font-style: italic;
     line-height: 1.55;
-    margin: 0 0 10px;
-    max-width: 68ch;
+    margin: 0 0 12px;
+    max-width: 72ch;
   }
   /* Per-item explanations (what does RMSSD mean, what is tachycardia) — similar
      tone but indented slightly under the line they explain. */
   .insight-section .insight-what {
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 13px;
     font-style: italic;
     line-height: 1.55;
-    margin-top: 4px;
-    max-width: 66ch;
-    padding-left: 12px;
+    margin-top: 6px;
+    max-width: 68ch;
+    padding-left: 14px;
     border-left: 2px solid var(--border);
   }
   /* Inline "jump to this time" button — shows as a subtle link-like control in
@@ -1687,7 +1685,7 @@
       <svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="drive-sep">|</span>
-    <label class="autonomic-toggle" title="When ON: interpret the data in terms of autonomic (sympathetic/parasympathetic) patterns — useful for POTS, dysautonomia, and anyone studying stress response. When OFF: only descriptive stats, no interpretive overlays.">
+    <label class="autonomic-toggle" title="When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you are tracking dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.">
       <input type="checkbox" id="autonomic-toggle" checked />
       <span>Autonomic analysis</span>
     </label>
@@ -1899,7 +1897,7 @@
     if (driveAccessToken) {
       if (driveFolderId) {
         statusEl.textContent = 'on';
-        statusEl.title = 'Signed in — Drive sessions sync automatically';
+        statusEl.title = 'Signed in. Drive sessions sync automatically.';
         statusEl.classList.add('drive-syncing');
       } else {
         statusEl.textContent = '…';
@@ -1911,7 +1909,7 @@
       syncBtn.style.display = driveFolderId ? '' : 'none';
     } else {
       statusEl.textContent = 'off';
-      statusEl.title = 'Not signed in — click Sign in to enable Drive sync';
+      statusEl.title = 'Not signed in. Click Sign in to enable Drive sync.';
       statusEl.classList.add('drive-idle');
       signIn.style.display = '';
       signOut.style.display = 'none';
@@ -1925,7 +1923,7 @@
     // in-progress spin animation now — the header stays compact.
     const btn = document.getElementById('drive-sync');
     if (!btn) return;
-    btn.title = text ? ('Sync from Drive — ' + text) : 'Sync sessions from Drive';
+    btn.title = text ? ('Sync from Drive. ' + text) : 'Sync sessions from Drive';
     const isBusy = !!text && /\//.test(text); // "3/10" pattern = actively working
     btn.classList.toggle('spinning', isBusy);
   }
@@ -3514,6 +3512,10 @@
     currentQuadRanges = computeQuadrantRanges(data);
     // Sleep detection needs full data — only run here (not indexed for all sessions).
     s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
+    // Noteworthy windows: sustained HR / HRV departures from the session median.
+    // Runs once per session view; results are attached to the summary for
+    // renderInsight to consume.
+    s.noteworthy = detectNoteworthyMoments(data.hr, data.rmssd);
     // Reset toggles + brush state on every new session open so prior values don't
     // carry across (previously caused out-of-range zoom glitches on short sessions).
     activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
@@ -3762,6 +3764,83 @@
     return spans.length ? [spans[0]] : [];
   }
 
+  // Noteworthy-moments detector — surface windows where HR or HRV sustained a
+  // meaningful departure from the session's own baseline. Purely statistical:
+  // we take the session-wide median + MAD (median absolute deviation, which is
+  // robust to outliers) and flag windows where the rolling median is >kMad
+  // standard-ish units away, with a floor so trivial shifts don't trigger.
+  //
+  // Returns up to 5 windows: { start, end, kind, metric, sessionMedian,
+  // windowMedian, delta, direction } sorted by |delta| desc. `kind` is 'hr_low'
+  // / 'hr_high' / 'hrv_low' / 'hrv_high' so the report can speak about each
+  // deviation in the appropriate direction.
+  function detectNoteworthyMoments(hrSeries, rmssdSeries) {
+    const out = [];
+    if (!hrSeries || hrSeries.length < 20) return out;
+    const WINDOW_MIN = 3;             // rolling-window length (minutes)
+    const MIN_HR_DELTA = 10;          // floor in bpm — ignore smaller drifts
+    const MIN_RMSSD_DELTA_PCT = 0.35; // floor for HRV deviations
+    const K_MAD = 1.5;
+    const seriesScan = (series, key, minDelta, minDeltaIsPct) => {
+      if (!series || series.length < 20) return;
+      const vals = series.map(p => p.v).filter(v => isFinite(v));
+      if (!vals.length) return;
+      const median = medianOf(vals);
+      const mad = medianOf(vals.map(v => Math.abs(v - median))) || 1;
+      const windows = [];
+      let cur = null;
+      for (let i = 0; i < series.length; i++) {
+        // Walk a rolling-median over a WINDOW_MIN-long tail ending at series[i].
+        const endT = series[i].t;
+        const startT = endT - WINDOW_MIN;
+        // Find a reasonable slice — binary search would be faster but the data
+        // size here is small enough that a linear scan is clearer to read.
+        let j = i;
+        while (j > 0 && series[j - 1].t >= startT) j--;
+        if (i - j < 10) continue; // need enough samples for a stable median
+        const sliceVals = [];
+        for (let k = j; k <= i; k++) sliceVals.push(series[k].v);
+        const wMedian = medianOf(sliceVals);
+        const diff = wMedian - median;
+        const absDiff = Math.abs(diff);
+        const zish = absDiff / mad; // rough robust-z
+        const floor = minDeltaIsPct ? Math.max(minDelta * median, 1) : minDelta;
+        const significant = zish >= K_MAD && absDiff >= floor;
+        if (significant) {
+          const direction = diff > 0 ? 'high' : 'low';
+          if (cur && cur.direction === direction) {
+            cur.end = endT;
+            cur.windowMedian = wMedian; // update to most recent
+            if (absDiff > Math.abs(cur.delta)) cur.delta = diff;
+          } else {
+            if (cur) windows.push(cur);
+            cur = { start: startT, end: endT, direction, delta: diff, sessionMedian: median, windowMedian: wMedian, metric: key };
+          }
+        } else if (cur) {
+          windows.push(cur);
+          cur = null;
+        }
+      }
+      if (cur) windows.push(cur);
+      // Merge: drop windows shorter than 90 sec (too fleeting to surface).
+      for (const w of windows) {
+        if (w.end - w.start < 1.5) continue;
+        out.push(Object.assign({ kind: key + '_' + w.direction }, w));
+      }
+    };
+    seriesScan(hrSeries, 'hr', MIN_HR_DELTA, false);
+    seriesScan(rmssdSeries, 'hrv', MIN_RMSSD_DELTA_PCT, true);
+    // Rank by largest |delta| relative to baseline (percent), keep top 5.
+    out.sort((a, b) => Math.abs(b.delta / b.sessionMedian) - Math.abs(a.delta / a.sessionMedian));
+    return out.slice(0, 5);
+  }
+  function medianOf(values) {
+    const s = values.slice().sort((a, b) => a - b);
+    const n = s.length;
+    if (!n) return 0;
+    return n % 2 ? s[(n - 1) >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2;
+  }
+
   function wireChillsSlider() {
     const slider = document.getElementById('chills-tune-slider');
     const label = document.getElementById('chills-tune-value');
@@ -3910,7 +3989,7 @@
         lines.push({
           text: `Average HRV (RMSSD): ${s.rmssdAvg} ms`,
           sub,
-          what: 'HRV measures how much your heartbeat-to-heartbeat timing varies. Higher usually means more relaxed / recovered; lower can mean stressed, tired, or sick. Typical adults sit between 20–90 ms at rest.',
+          what: 'HRV is how much the gap between heartbeats changes from beat to beat. Higher usually means relaxed or recovered. Lower can mean stressed, tired, or fighting off something. Most adults sit between 20 and 90 ms at rest.',
           at: s.rmssdMin ? { t: s.rmssdMin.t, label: `low @ ${formatDuration(s.rmssdMin.t)}` } : null,
         });
       }
@@ -3918,13 +3997,56 @@
         lines.push({
           text: `${s.tachyPct}% of session above 100 bpm`,
           sub: 'Tachycardia range',
-          what: 'Tachycardia means a resting HR above 100 bpm. Common during exercise or stress — concerning if it happens when you\'re just sitting still.',
+          what: 'Tachycardia is an HR above 100 bpm. Normal during exercise or stress. Worth noticing if it happens while you are just sitting still.',
         });
       }
       sections.push({ key: 'overview', title: 'Overview', lines });
     }
 
-    // 2. Palpitations — neutral terminology (ectopic beat = a heartbeat that
+    // 2. Noteworthy moments — windows where HR or HRV held a sustained departure
+    // from this session's own median. Plain-English neutral phrasing so no one
+    // reads it as a diagnosis. Autonomic ON adds a short pattern descriptor.
+    if (s.noteworthy && s.noteworthy.length) {
+      const lines = s.noteworthy.slice(0, 4).map(n => {
+        const dur = formatDuration(n.end - n.start);
+        const when = formatDuration(n.start) + ' to ' + formatDuration(n.end);
+        const winMed = Math.round(n.windowMedian);
+        const sessMed = Math.round(n.sessionMedian);
+        const delta = Math.round(Math.abs(n.delta));
+        let text, sub;
+        if (n.kind === 'hr_low') {
+          text = 'HR dipped to around ' + winMed + ' bpm for ' + dur + '.';
+          sub = 'Roughly ' + delta + ' bpm below the rest of the session (typical ' + sessMed + ').';
+        } else if (n.kind === 'hr_high') {
+          text = 'HR climbed to around ' + winMed + ' bpm for ' + dur + '.';
+          sub = 'Roughly ' + delta + ' bpm above the rest of the session (typical ' + sessMed + ').';
+        } else if (n.kind === 'hrv_low') {
+          text = 'HRV dropped to around ' + winMed + ' ms for ' + dur + '.';
+          sub = 'Noticeably lower than your session median (' + sessMed + ' ms).';
+        } else {
+          text = 'HRV rose to around ' + winMed + ' ms for ' + dur + '.';
+          sub = 'Noticeably higher than your session median (' + sessMed + ' ms).';
+        }
+        let what = null;
+        if (autonomicOn) {
+          if (n.kind === 'hr_low' || n.kind === 'hrv_high') {
+            what = 'Low HR or rising HRV usually shows up during rest or recovery. The body is in a calmer, parasympathetic state.';
+          } else {
+            what = 'High HR or dropping HRV usually shows up during activity, stress, standing up, or an autonomic flare. The body is in a more activated, sympathetic state.';
+          }
+        }
+        return { text, sub, what, at: { t: n.start, label: 'jump to ' + formatDuration(n.start) } };
+      });
+      sections.push({
+        key: 'noteworthy',
+        title: 'Noteworthy moments',
+        desc: 'Stretches where your HR or HRV behaved differently from the rest of this session. These are pattern callouts only. Context matters, and the app is not a medical tool.',
+        count: s.noteworthy.length,
+        lines,
+      });
+    }
+
+    // 3. Palpitations — neutral terminology (ectopic beat = a heartbeat that
     // fires off-rhythm). Always shown when present, no autonomic gating needed.
     if (s.palpCount > 0) {
       const lines = [];
@@ -3948,7 +4070,7 @@
       sections.push({
         key: 'palps',
         title: 'Palpitations',
-        desc: 'An ectopic beat is a heartbeat triggered outside the heart\'s normal rhythm. A few per session is usually harmless; frequent clusters can feel like a flutter or skipped beat in your chest.',
+        desc: 'An ectopic beat is a heartbeat that fires off-rhythm. A few per session is very common. Bigger clusters tend to feel like a flutter or a skipped beat in your chest.',
         count: s.palpCount,
         lines,
       });
@@ -3972,7 +4094,7 @@
       sections.push({
         key: 'shifts',
         title: 'HR shifts',
-        desc: 'Large HR changes that happen quickly — doesn\'t say why. Could be exercise, standing up, a scare, caffeine, finishing a sprint, or plain old anxiety.',
+        desc: 'Big jumps in heart rate that happened quickly. The app does not guess why. Could be standing up, a scare, caffeine, exercise, or just thinking hard about something.',
         count: s.hrDeltas.length,
         lines,
       });
@@ -3988,7 +4110,7 @@
       sections.push({
         key: 'flushes',
         title: 'Sympathetic flushes',
-        desc: 'A short HR spike paired with a simultaneous HRV drop — the signature of a quick "fight-or-flight" burst. Common triggers: standing up, cold, pain, sudden noise, or emotional arousal.',
+        desc: 'A quick HR spike paired with an HRV drop at the same time. This pattern shows up during short bursts of fight-or-flight activation. Common triggers include standing up, cold, pain, a sudden noise, or strong emotion.',
         count: s.flushes.length,
         lines,
       });
@@ -4005,7 +4127,7 @@
       sections.push({
         key: 'chills',
         title: 'Chills / high volatility',
-        desc: 'A stretch where the HR jitters noticeably more than the session\'s baseline. Often corresponds to shivering (muscle EMG bleeds into the HR signal) or to an autonomic storm.',
+        desc: 'A stretch where the HR jitters more than the rest of the session. Often lines up with shivering, since muscle activity bleeds into the strap signal. Can also show up during a bigger autonomic wave.',
         count: s.chillsWindows.length,
         lines: [{ text: `${formatDuration(total)} total across ${s.chillsWindows.length} window${s.chillsWindows.length === 1 ? '' : 's'}` }, ...lines],
       });
@@ -4037,7 +4159,7 @@
         sections.push({
           key: 'posture',
           title: 'Posture & sleep',
-          desc: 'Sleep is auto-detected from extended low-HR + high-HRV stretches. Posture comes from whatever you tagged during the session.',
+          desc: 'Sleep is guessed from long stretches of low HR and high HRV together. Posture is whatever you tagged during the session.',
           lines,
         });
       }
@@ -4056,7 +4178,7 @@
       sections.push({
         key: 'warnings',
         title: 'Warnings',
-        desc: 'Moments where your HR or HRV crossed a threshold you set in the live monitor — a physiological signal, not a hardware problem.',
+        desc: 'Moments when your HR or HRV crossed a threshold you set in the live monitor. These are about what your body did, not a hardware issue.',
         count: s.warnCount,
         lines,
       });
@@ -4071,7 +4193,7 @@
       sections.push({
         key: 'connection',
         title: 'Connection gaps',
-        desc: 'Short windows where the chest strap lost Bluetooth contact with the app — no HR data was recorded during these stretches. A technical artifact, not a physiological event.',
+        desc: 'Short windows where the chest strap lost Bluetooth contact with the app. No HR data got recorded during these stretches. This is a signal-quality issue, not something your body did.',
         count: s.connGaps.length,
         lines: [
           { text: `${s.connGaps.length} gap${s.connGaps.length === 1 ? '' : 's'} · ${formatDuration(total)} total` },
@@ -4366,10 +4488,10 @@
     // Here we just use median-ish thresholds.
     const hrHigh = hrAvg >= colorThresholds.normal; // 90+
     const rmssdHigh = rmssdAvg != null && rmssdAvg >= 40; // ~above typical adult resting
-    if (!hrHigh && rmssdHigh) return { key: 'low-high', label: 'Low HR · High HRV', tone: 'Rest / recovery mode — good parasympathetic tone.' };
+    if (!hrHigh && rmssdHigh) return { key: 'low-high', label: 'Low HR · High HRV', tone: 'Rest or recovery mode. Strong parasympathetic tone.' };
     if (hrHigh && rmssdHigh) return { key: 'high-high', label: 'High HR · High HRV', tone: 'Post-exertion rebound or regulated arousal.' };
     if (!hrHigh && !rmssdHigh) return { key: 'low-low', label: 'Low HR · Low HRV', tone: 'Fatigue / under-recovery pattern.' };
-    return { key: 'high-low', label: 'High HR · Low HRV', tone: 'Sympathetic stress — classic POTS / flare pattern.' };
+    return { key: 'high-low', label: 'High HR · Low HRV', tone: 'Sympathetic stress. Classic flare / orthostatic pattern.' };
   }
 
   function renderInterpretation(s) {
