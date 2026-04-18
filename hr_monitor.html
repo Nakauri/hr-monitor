@@ -80,6 +80,22 @@
   .nav-preview:hover { color: var(--text); background: #141414; }
   .nav-copy { color: var(--accent-rmssd); border: 1px solid var(--accent-rmssd); }
   .nav-copy:hover { color: #0a1a14; background: var(--accent-rmssd); }
+  /* Shown when Web Bluetooth is unavailable (Firefox, Safari). Gives the
+     user a clear path to the Viewer instead of the "Connect strap" button
+     silently failing. */
+  #browser-compat-banner {
+    background: rgba(232,152,88,0.12);
+    border-bottom: 1px solid rgba(232,152,88,0.35);
+    color: var(--text);
+    padding: 10px 24px;
+    font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+  }
+  #browser-compat-banner a {
+    color: var(--accent-rmssd);
+    text-decoration: underline;
+  }
   .nav-copy.copied { background: var(--accent-rmssd); color: #0a1a14; }
   .obs-size-hint {
     font-family: 'Consolas', 'Monaco', monospace;
@@ -811,6 +827,9 @@
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
   <a class="app-nav-link nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Live%20Monitor&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Live%20Monitor%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
 </nav>
+<div id="browser-compat-banner" hidden>
+  Strap pairing needs Web Bluetooth, which this browser doesn't support. Record from Chrome, Edge, Comet, or Android Chrome. You CAN still watch a live stream here from another device — paste that device's broadcast URL (looks like <code>overlay.html?key=…</code>). To browse past sessions, <a href="./hrv_viewer.html">open the Viewer</a>.
+</div>
 <div id="app">
 
   <!-- LEFT: Overlay zone for OBS cropping -->
@@ -3194,6 +3213,19 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    // Reveal the browser-compat banner + disable the connect button when Web
+    // Bluetooth is absent (Firefox, Safari, iOS). Anything that isn't pairing-
+    // related still works, so the user can inspect settings or jump to the
+    // viewer via the in-banner link.
+    if (!navigator.bluetooth) {
+      const banner = document.getElementById('browser-compat-banner');
+      if (banner) banner.hidden = false;
+      const connectBtn = document.getElementById('connect');
+      if (connectBtn) {
+        connectBtn.disabled = true;
+        connectBtn.title = 'Not supported in this browser';
+      }
+    }
     initCharts();
     populateAudioDropdowns();
     // Open a popup window OBS can Window-Capture cleanly. The popup receives
