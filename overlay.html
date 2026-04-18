@@ -40,7 +40,11 @@
 
   #overlay-zone {
     background: transparent;
-    padding: 14px;
+    /* Padding stays 0 in the overlay: the monitor measures .widget-row (no
+       zone padding) and we pin #overlay-zone to that size. Any padding here
+       would eat width and push the HRV column past the card edge. The widget
+       itself carries internal padding, so the card still looks breathable. */
+    padding: 0;
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -194,7 +198,9 @@
   #hr-widget {
     display: grid;
     grid-template-columns: 1.75fr 1fr;
-    grid-template-rows: auto auto auto auto;
+    /* Fixed row heights match hr_monitor.html so toggling HRV can't make the
+       widget grow taller. Row 4 (compact-trend) is auto-sized implicitly. */
+    grid-template-rows: auto 68px 14px;
     gap: 10px 16px;
     align-items: start;
   }
@@ -267,7 +273,6 @@
     align-items: center;
     height: 34px;
     padding: 2px 0;
-    margin-bottom: 10px;
   }
   body.warning-above.no-warning .warning-slot-above { display: none !important; }
   body.warning-above .widget-header > .warning-banner { display: none !important; }
