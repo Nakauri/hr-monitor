@@ -91,6 +91,19 @@
     transition: color 0.15s, background 0.15s;
   }
   .app-nav-cross:hover { color: var(--accent-hr); background: rgba(232,152,88,0.08); }
+  .watch-live-link {
+    color: var(--accent-rmssd);
+    border: 1px solid var(--accent-rmssd);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    text-decoration: none;
+    margin-left: 8px;
+  }
+  .watch-live-link:hover { background: rgba(93,202,165,0.08); }
   .nav-feedback {
     color: var(--text-faint);
     text-decoration: none;
@@ -1935,6 +1948,7 @@
     <a data-view="week" href="#/week">Week</a>
     <a data-view="day" href="#/day">Day</a>
     <a data-view="all" href="#/all">All</a>
+    <a id="watch-live-link" class="watch-live-link" href="#" target="_blank" rel="noopener" hidden title="Open the live widget for whatever device is currently recording">Watch live ↗</a>
   </nav>
   <div class="folder-info">
     <span class="fsa-only">Folder:</span>
@@ -2124,6 +2138,20 @@
   function updateFolderUI() {
     const el = document.getElementById('folder-name');
     el.textContent = dirHandle ? (dirHandle.name || 'selected') : '—';
+  }
+
+  // Watch live link shows up only when we know a broadcast key. Key can come
+  // from two places: the shared Drive config (driveSyncConfig writes it) or
+  // localStorage carried over from a prior monitor session on this browser.
+  // Opens overlay.html with &bg=dark so the page renders visibly instead of
+  // the transparent-for-OBS default.
+  function updateWatchLiveUI() {
+    const link = document.getElementById('watch-live-link');
+    if (!link) return;
+    const key = localStorage.getItem('hr_monitor_broadcast_key');
+    if (!key) { link.hidden = true; return; }
+    link.href = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark';
+    link.hidden = false;
   }
 
   // ===== Google Drive read integration =====
@@ -2364,6 +2392,28 @@
     } else {
       // Folder doesn't exist yet — viewer won't auto-create it (the live app does).
       driveFolderId = null;
+    }
+    // Pull the shared broadcast key so this device can subscribe to whatever
+    // device is currently recording. Any signed-in device ends up on the same
+    // PartyKit room.
+    if (driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));
+  }
+
+  // Read .hr-monitor-config.json from the Drive folder and copy the shared
+  // broadcastKey into localStorage. Viewer never writes here — the live app
+  // owns the seed. Updating Watch-live UI once the key is resolved.
+  async function driveSyncConfig() {
+    if (!driveAccessToken || !driveFolderId) return;
+    const q = encodeURIComponent(`'${driveFolderId}' in parents and name='.hr-monitor-config.json' and trashed=false`);
+    const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
+    const data = await resp.json();
+    if (!data.files || !data.files.length) return;
+    const id = data.files[0].id;
+    const content = await driveFetch('files/' + id + '?alt=media');
+    const cfg = await content.json();
+    if (cfg && typeof cfg.broadcastKey === 'string') {
+      localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
+      updateWatchLiveUI();
     }
   }
 
@@ -6505,6 +6555,7 @@
     await restoreFolder();
     driveLoadMeta();
     driveUpdateUI();
+    updateWatchLiveUI();
     initGoogleAuth();
     if (dirHandle) {
       // Try silent permission check first
