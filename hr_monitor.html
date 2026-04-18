@@ -1,0 +1,2760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f11">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>HR Monitor</title>
+<link rel="manifest" href='data:application/manifest+json,{"name":"HR Monitor","short_name":"HR Monitor","start_url":"./hr_monitor.html","display":"standalone","background_color":"%230a0a0a","theme_color":"%230f0f11","icons":[{"src":"data:image/svg%2Bxml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 192 192%22%3E%3Crect width=%22192%22 height=%22192%22 fill=%22%23101010%22/%3E%3Cpath d=%22M96 160 c-40 -32 -64 -56 -64 -88 0 -24 16 -40 40 -40 16 0 24 8 24 16 0 -8 8 -16 24 -16 24 0 40 16 40 40 0 32 -24 56 -64 88z%22 fill=%22%23E89858%22/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f0f11;
+    --bg-panel: #1a1a1d;
+    --bg-input: #242428;
+    --text: #ebebeb;
+    --text-dim: #9a9a9f;
+    --text-faint: #5a5a60;
+    --border: #2a2a2e;
+    --border-strong: #3a3a40;
+    --accent-hr: #E88464;
+    --accent-rmssd: #5DCAA5;
+    --accent-blue: #85B7EB;
+    --warn-high: #E24B4A;
+    --warn-low: #85B7EB;
+    --warn-crash: #BA7517;
+    --warn-palp: #D76CBA;
+    --overlay-bg: rgba(15,15,17,0.85);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    height: 100vh;
+    gap: 0;
+  }
+  body.layout-horizontal #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+
+  /* Left overlay zone - the part you crop to */
+  #overlay-zone {
+    background: #000;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+  /* Horizontal layout: overlay becomes a top banner. Widgets sit side-by-side. */
+  body.layout-horizontal #overlay-zone {
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 14px 18px;
+    gap: 14px;
+    align-items: flex-start;
+    height: auto;
+  }
+  body.layout-horizontal #overlay-zone .widget,
+  body.layout-horizontal #overlay-zone .breath-widget {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  /* Overlay status and CROP label shrink and wrap at end */
+  body.layout-horizontal .overlay-status {
+    align-self: center;
+    padding: 0 10px;
+    flex: 0 0 auto;
+  }
+  body.layout-horizontal #overlay-zone > div[style*="flex: 1"] { display: none; }
+  body.layout-horizontal #overlay-zone > div:last-child { display: none; }
+  /* In horizontal mode the big HR number would be too tall - scale down.
+     Raised-specificity selectors so they win over style-specific sizes below. */
+  body.layout-horizontal #overlay-zone .big-number,
+  body.layout-horizontal #overlay-zone.style-minimal .big-number,
+  body.layout-horizontal #overlay-zone.style-neon .big-number {
+    font-size: 72px;
+  }
+  body.layout-horizontal #overlay-zone .big-number.medium,
+  body.layout-horizontal #overlay-zone.style-minimal .big-number.medium,
+  body.layout-horizontal #overlay-zone.style-neon .big-number.medium {
+    font-size: 54px;
+  }
+  .widget {
+    background: #0a0a0a;
+    border: 1px solid #1f1f1f;
+    border-radius: 16px;
+    padding: 18px 22px;
+    position: relative;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .widget.warn-crash {
+    border-color: var(--warn-crash);
+    box-shadow: 0 0 0 1px var(--warn-crash), 0 0 24px rgba(186,117,23,0.2);
+  }
+  .widget-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .palp-chip {
+    display: none;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(215,108,186,0.14);
+    border: 1px solid var(--warn-palp);
+    color: var(--warn-palp);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+  }
+  .palp-chip.active { display: inline-flex; }
+  .palp-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--warn-palp);
+    box-shadow: 0 0 6px var(--warn-palp);
+  }
+  .widget-label {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: #8a8a8a;
+    text-transform: uppercase;
+  }
+  /* Heart icon that pulses with HR */
+  .heart-icon {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+    animation: heartbeat 1s ease-in-out infinite;
+    transition: color 0.4s;
+  }
+  @keyframes heartbeat {
+    0%, 100% { transform: scale(1); }
+    15% { transform: scale(1.18); }
+    30% { transform: scale(1); }
+    45% { transform: scale(1.12); }
+    60% { transform: scale(1); }
+  }
+  /* Big chunky number */
+  .big-number {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    font-size: 110px;
+    line-height: 0.95;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.4s;
+    text-align: left;
+    padding: 4px 0 10px;
+  }
+  .big-number.medium {
+    font-size: 78px;
+    padding: 2px 0 8px;
+  }
+  /* Row that pairs the big number with an inline 3-min trend chart */
+  .number-row {
+    display: flex;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .number-row > .big-number {
+    flex: 0 0 auto;
+  }
+  .inline-trend {
+    flex: 1 1 0;
+    min-width: 0;
+    position: relative;
+    padding: 6px 0 14px;
+  }
+  .inline-trend canvas {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  /* Compact mode replaces the 3-min inline trend with the live HR trace. */
+  .inline-live-trace {
+    display: none;
+    flex: 1 1 0;
+    min-width: 0;
+    position: relative;
+    padding: 6px 0 10px;
+  }
+  .inline-live-trace canvas {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  /* In Compact, the .number-row itself becomes a grid cell (col 1, row 2) and its
+     children (number + live trace) sit side-by-side via the flex rules above. */
+  #overlay-zone.style-compact .number-row {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  #overlay-zone.style-compact .inline-trend { display: none; }
+  #overlay-zone.style-compact .inline-live-trace { display: block; }
+  /* User toggle to hide inline trends in Bold/Minimal/Neon */
+  #overlay-zone.no-inline-trends .inline-trend,
+  #overlay-zone.no-inline-trends .inline-live-trace { display: none; }
+  /* Widget visibility toggles */
+  #overlay-zone.no-hr #hr-widget,
+  #overlay-zone.no-hrv #rmssd-widget,
+  #overlay-zone.no-live-hr #breath-widget { display: none; }
+  /* In Compact the combined widget is a single card — route visibility toggles to
+     the internal sections instead. Grid template adjusts when HRV side is hidden. */
+  #overlay-zone.style-compact.no-hrv .compact-hrv { display: none; }
+  #overlay-zone.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr; }
+  #overlay-zone.style-compact.no-live-hr .inline-live-trace { display: none; }
+  #overlay-zone.style-compact.no-inline-trends .compact-trend { display: none; }
+  /* Pips indicator row at the bottom */
+  .pips {
+    display: flex;
+    gap: 6px;
+    height: 6px;
+  }
+  .pip {
+    flex: 1;
+    background: #1a1a1a;
+    border-radius: 2px;
+    transition: background 0.4s;
+  }
+  /* HR color stages - matches text color and pip fills */
+  .stage-low { color: #7DB8E8; }
+  .stage-low .pip.active { background: #7DB8E8; }
+  .stage-normal { color: #B8D97E; }
+  .stage-normal .pip.active { background: #B8D97E; }
+  .stage-elevated { color: #F0C75E; }
+  .stage-elevated .pip.active { background: #F0C75E; }
+  .stage-high { color: #E89858; }
+  .stage-high .pip.active { background: #E89858; }
+  .stage-critical { color: #E24B4A; }
+  .stage-critical .pip.active { background: #E24B4A; }
+
+  /* Compact-only elements hidden by default */
+  .compact-hrv,
+  .compact-trend {
+    display: none;
+  }
+  #overlay-zone.style-compact .compact-hrv,
+  #overlay-zone.style-compact .compact-trend {
+    display: flex;
+  }
+  #overlay-zone.style-compact .compact-trend {
+    display: block;
+  }
+
+  /* ===== Widget style: COMPACT (single combined widget) ===== */
+  #overlay-zone.style-compact {
+    padding: 14px;
+    gap: 0;
+  }
+  /* Hide the separate HRV and trend widgets - combine everything into HR widget */
+  #overlay-zone.style-compact #rmssd-widget,
+  #overlay-zone.style-compact .trend-widget,
+  #overlay-zone.style-compact .breath-widget {
+    display: none;
+  }
+  #overlay-zone.style-compact #hr-widget {
+    padding: 14px 18px;
+    display: grid;
+    grid-template-columns: 1.75fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 4px 16px;
+    align-items: start;
+  }
+  /* Header spans both columns */
+  #overlay-zone.style-compact #hr-widget > .widget-header {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+  }
+  /* Big HR number on left (descendant selector because .number-row wrapper uses display:contents) */
+  #overlay-zone.style-compact #hr-widget .big-number {
+    grid-column: 1;
+    grid-row: 2;
+    font-size: 64px;
+    padding: 0;
+    line-height: 1;
+  }
+  /* Pips full width under HR number */
+  #overlay-zone.style-compact #hr-pips {
+    grid-column: 1;
+    grid-row: 3;
+    margin-top: 6px;
+  }
+  /* HRV mini display - top right */
+  #overlay-zone.style-compact #hr-widget::after {
+    /* placeholder to show where inline HRV goes - actual HRV inserted by JS */
+  }
+  #overlay-zone.style-compact .compact-hrv {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-end;
+    border-left: 1px solid #1f1f1f;
+    padding-left: 16px;
+  }
+  #overlay-zone.style-compact .compact-hrv-label {
+    font-size: 12px;
+    color: #c8c8c8;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    margin-bottom: 3px;
+  }
+  #overlay-zone.style-compact .compact-hrv-value {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    font-size: 36px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+    transition: color 0.4s;
+  }
+  #overlay-zone.style-compact .compact-hrv-unit {
+    font-size: 11px;
+    color: #9a9a9a;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+  /* Mini trend line spans full width at bottom */
+  #overlay-zone.style-compact #hr-widget > .compact-trend {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    height: 64px;
+    position: relative;
+    margin-top: 12px;
+    padding: 6px 0 4px;
+    border-top: 1px solid #1f1f1f;
+  }
+
+  /* ===== Widget style: MINIMAL ===== */
+  #overlay-zone.style-minimal {
+    padding: 16px;
+    gap: 10px;
+  }
+  #overlay-zone.style-minimal .widget {
+    background: transparent;
+    border: none;
+    padding: 8px 12px;
+  }
+  #overlay-zone.style-minimal .widget-label {
+    font-size: 10px;
+    color: #5a5a5a;
+  }
+  #overlay-zone.style-minimal .heart-icon {
+    width: 16px;
+    height: 16px;
+  }
+  #overlay-zone.style-minimal .big-number {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 300;
+    font-size: 80px;
+    letter-spacing: -0.03em;
+  }
+  #overlay-zone.style-minimal .big-number.medium {
+    font-size: 54px;
+  }
+  #overlay-zone.style-minimal .pips {
+    display: none;
+  }
+  #overlay-zone.style-minimal .trend-widget,
+  #overlay-zone.style-minimal .breath-widget {
+    background: transparent;
+    border: none;
+  }
+
+  /* ===== Widget style: NEON ===== */
+  #overlay-zone.style-neon .widget {
+    background: #050509;
+    border: 1px solid #222238;
+    box-shadow: inset 0 0 20px rgba(100,150,255,0.04);
+  }
+  #overlay-zone.style-neon .widget-label {
+    color: #6a7aa0;
+  }
+  #overlay-zone.style-neon .big-number {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-weight: 700;
+    font-size: 96px;
+    text-shadow: 0 0 12px currentColor, 0 0 24px currentColor;
+  }
+  #overlay-zone.style-neon .big-number.medium {
+    font-size: 68px;
+  }
+  #overlay-zone.style-neon .heart-icon {
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+  #overlay-zone.style-neon .trend-widget,
+  #overlay-zone.style-neon .breath-widget {
+    background: #050509;
+    border-color: #222238;
+    box-shadow: inset 0 0 20px rgba(100,150,255,0.04);
+  }
+  #overlay-zone.style-neon .pip.active {
+    box-shadow: 0 0 8px currentColor;
+  }
+  .trend-widget {
+    background: #0a0a0a;
+    border: 1px solid #1f1f1f;
+    border-radius: 16px;
+    padding: 14px 18px;
+    position: relative;
+  }
+  .trend-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .trend-legend {
+    display: flex;
+    gap: 10px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+  }
+  .legend-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+  .trend-chart-wrap {
+    position: relative;
+    height: 90px;
+  }
+
+  /* Breathing pacer widget */
+  .breath-widget {
+    background: #0a0a0a;
+    border: 1px solid #1f1f1f;
+    border-radius: 16px;
+    padding: 14px 18px;
+    position: relative;
+  }
+  .breath-rate {
+    font-size: 11px;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .rsa-chart-wrap {
+    position: relative;
+    height: 90px;
+    padding: 4px 0;
+  }
+
+  .overlay-status {
+    font-size: 10px;
+    color: #5a5a5a;
+    text-align: center;
+    padding: 4px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* Warning banner - fades in when warning active, preserves widget aesthetic */
+  .warning-banner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    margin-left: auto;
+    transition: max-width 0.3s ease, opacity 0.25s, border-color 0.3s, background 0.3s, padding 0.3s;
+  }
+  .warning-banner.active {
+    max-width: 260px;
+    opacity: 1;
+  }
+  .warning-banner.warn-high { border-color: var(--warn-high); background: rgba(232,152,88,0.1); }
+  .warning-banner.warn-low { border-color: var(--warn-low); background: rgba(125,184,232,0.1); }
+  .warning-banner.warn-crash { border-color: var(--warn-crash); background: rgba(226,75,74,0.14); }
+  .warning-banner.warn-palp { border-color: var(--warn-palp); background: rgba(215,108,186,0.14); }
+  .warning-banner-icon {
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .warning-banner-icon svg {
+    width: 100%;
+    height: 100%;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+  }
+  .warning-banner.warn-high .warning-banner-icon,
+  .warning-banner.warn-high .warning-banner-text { color: var(--warn-high); }
+  .warning-banner.warn-low .warning-banner-icon,
+  .warning-banner.warn-low .warning-banner-text { color: var(--warn-low); }
+  .warning-banner.warn-crash .warning-banner-icon,
+  .warning-banner.warn-crash .warning-banner-text { color: var(--warn-crash); }
+  .warning-banner.warn-palp .warning-banner-icon,
+  .warning-banner.warn-palp .warning-banner-text { color: var(--warn-palp); }
+  .warning-banner-text {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .warning-banner.active {
+    animation: warning-flash 1.5s ease-in-out infinite;
+  }
+  @keyframes warning-flash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* Right panel - your controls and data */
+  #control-panel {
+    background: var(--bg);
+    padding: 20px 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .battery-display {
+    font-size: 11px;
+    color: #8a8a8a;
+    margin-top: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .battery-display.low { color: #E89858; }
+  .battery-display.critical { color: #E24B4A; }
+  .autosave-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #8a8a8a;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .autosave-label {
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .autosave-folder {
+    color: var(--text);
+    font-family: 'Consolas', 'Monaco', monospace;
+    background: var(--bg-input);
+    padding: 2px 8px;
+    border-radius: 4px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .autosave-row button {
+    padding: 3px 10px;
+    font-size: 11px;
+  }
+  .autosave-status {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .autosave-status.writing { color: var(--accent-rmssd); background: rgba(93,202,165,0.1); }
+  .autosave-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
+  .autosave-status.denied { color: var(--warn-crash); background: rgba(186,117,23,0.14); }
+  .section {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    margin: 0 0 10px;
+  }
+  .section-header:hover .section-title { color: var(--text); }
+  .section-title {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 0;
+    font-weight: 500;
+    transition: color 0.15s;
+  }
+  .section-caret {
+    color: var(--text-faint);
+    width: 18px;
+    height: 18px;
+    transition: transform 0.2s, color 0.15s;
+    flex-shrink: 0;
+  }
+  .section-caret svg {
+    width: 100%;
+    height: 100%;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+  }
+  .section-header:hover .section-caret { color: var(--text); }
+  .section.collapsed .section-caret {
+    transform: rotate(-90deg);
+  }
+  .section.collapsed .section-header {
+    margin: 0;
+  }
+  .section-body {
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s;
+    max-height: 2000px;
+    opacity: 1;
+  }
+  .section.collapsed .section-body {
+    max-height: 0;
+    opacity: 0;
+  }
+  .controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  button {
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover:not(:disabled) { background: #2e2e32; border-color: var(--border-strong); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent-blue);
+    color: #0a1a2a;
+    border-color: var(--accent-blue);
+    font-weight: 500;
+  }
+  button.primary:hover:not(:disabled) { background: #A3C8EF; }
+  button.claude {
+    background: #d97757;
+    color: #fff;
+    border-color: #d97757;
+    font-weight: 500;
+  }
+  button.claude:hover:not(:disabled) { background: #e08866; }
+
+  .status {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 6px 10px;
+    background: var(--bg-input);
+    border-radius: 6px;
+  }
+  .status.connected { color: var(--accent-rmssd); }
+  .status.error { color: var(--warn-high); }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .stat {
+    background: var(--bg-input);
+    border-radius: 6px;
+    padding: 10px;
+  }
+  .stat-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .stat-value {
+    font-size: 18px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .main-chart-wrap {
+    position: relative;
+    height: 180px;
+  }
+
+  .thresh-grid {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px 10px;
+    align-items: center;
+    font-size: 12px;
+  }
+  .thresh-grid label {
+    color: var(--text-dim);
+  }
+  input[type="number"], input[type="text"], input[type="password"] {
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    width: 100%;
+  }
+  input[type="number"]:focus, input[type="text"]:focus, input[type="password"]:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+  }
+  input[type="checkbox"] { accent-color: var(--accent-blue); }
+
+  .thresh-grid input[type="number"] { width: 70px; text-align: center; }
+  .thresh-grid .unit { color: var(--text-faint); font-size: 11px; }
+
+  .audio-grid {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px 10px;
+    align-items: center;
+    font-size: 12px;
+  }
+  .audio-grid label {
+    color: var(--text-dim);
+  }
+  .audio-grid select {
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    width: 100%;
+  }
+  .audio-grid select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+  }
+  .audio-grid .audio-test {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+  .audio-grid input[type="range"] {
+    accent-color: var(--accent-blue);
+    width: 100%;
+  }
+
+  .style-options {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .style-btn, .layout-btn {
+    padding: 8px 4px;
+    font-size: 12px;
+  }
+  .style-btn.active, .layout-btn.active {
+    background: var(--accent-blue);
+    color: #0a1a2a;
+    border-color: var(--accent-blue);
+    font-weight: 500;
+  }
+  /* Horizontal and vertical layout buttons live in a 2-col grid */
+  .tab-panel[data-tabpanel="widgets"] .style-options {
+    grid-template-columns: 1fr 1fr;
+  }
+  .widget-toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .widget-toggles label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+  }
+  .widget-toggles input[type="checkbox"] {
+    width: auto;
+    accent-color: var(--accent-blue);
+  }
+
+  /* Tabs for Settings */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
+  }
+  .tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: inherit;
+    border-radius: 0;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab:hover {
+    color: var(--text);
+    background: transparent;
+    border-color: transparent;
+    border-bottom-color: var(--border-strong);
+  }
+  .tab.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+  }
+  .tab-panel {
+    display: none;
+  }
+  .tab-panel.active {
+    display: block;
+  }
+
+  .marker-input {
+    display: flex;
+    gap: 6px;
+  }
+  .marker-input input { flex: 1; }
+  .posture-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .posture-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-right: 4px;
+  }
+  .posture-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .posture-btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .posture-btn.active[data-posture="lying"] { background: rgba(125,184,232,0.15); border-color: #7DB8E8; color: #7DB8E8; }
+  .posture-btn.active[data-posture="sitting"] { background: rgba(184,217,126,0.15); border-color: #B8D97E; color: #B8D97E; }
+  .posture-btn.active[data-posture="standing"] { background: rgba(232,152,88,0.15); border-color: #E89858; color: #E89858; }
+
+  .events {
+    max-height: 140px;
+    overflow-y: auto;
+    font-size: 12px;
+    background: var(--bg-input);
+    border-radius: 6px;
+    padding: 4px 10px;
+  }
+  .event {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .event:last-child { border-bottom: none; }
+  .event-label { font-weight: 500; }
+  .event-time { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .empty { color: var(--text-faint); padding: 8px 0; font-size: 12px; font-style: italic; }
+
+  .claude-response {
+    margin-top: 10px;
+    padding: 12px 14px;
+    background: var(--bg-input);
+    border-left: 3px solid #d97757;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .claude-response.error { border-left-color: var(--warn-high); color: var(--warn-high); }
+  .claude-response.empty-state { color: var(--text-faint); font-style: italic; border-left-color: var(--border); }
+
+  .api-key-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .api-key-row input { flex: 1; font-family: monospace; font-size: 11px; }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4a4a50; }
+
+  /* Crop guide overlay */
+  .crop-hint {
+    position: fixed;
+    bottom: 12px;
+    left: 12px;
+    font-size: 10px;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+
+  /* ===== MOBILE (≤768px): stack the two-column layout, tighter spacing ===== */
+  @media (max-width: 768px) {
+    #app {
+      grid-template-columns: 1fr;
+      height: auto;
+      min-height: 100vh;
+    }
+    #overlay-zone {
+      flex-direction: column;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      padding: 12px;
+      max-height: none;
+    }
+    #control-panel {
+      padding: 12px 14px;
+      gap: 12px;
+    }
+    .widget {
+      padding: 14px 16px;
+    }
+    .big-number { font-size: 72px; }
+    .big-number.medium { font-size: 54px; }
+    /* Prevent iOS input zoom: inputs need ≥16px font */
+    input, select, textarea { font-size: 16px !important; }
+    button { min-height: 38px; }
+    /* Ensure horizontal layout behaves sensibly on mobile — single column anyway */
+    body.layout-horizontal #app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+    }
+    body.layout-horizontal #overlay-zone {
+      flex-direction: column;
+      height: auto;
+    }
+  }
+
+  @media (max-width: 480px) {
+    #overlay-zone { padding: 10px; }
+    #control-panel { padding: 10px; }
+    .widget { padding: 12px 14px; }
+    .big-number { font-size: 64px; }
+    .big-number.medium { font-size: 48px; }
+    .section { padding: 12px; }
+    .section-header { padding: 8px 0; }
+    .pots-quick-grid { grid-template-columns: repeat(2, 1fr); }
+    .autosave-row, .controls { flex-wrap: wrap; }
+    .controls button { flex: 1 1 auto; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- LEFT: Overlay zone for OBS cropping -->
+  <div id="overlay-zone">
+    <!-- HR widget -->
+    <div class="widget stage-normal" id="hr-widget">
+      <div class="widget-header">
+        <div class="header-left">
+          <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+          <span class="widget-label">BPM</span>
+          <span class="palp-chip" id="palp-chip" title="Palpitations in last 60 seconds"><span class="palp-dot"></span><span id="palp-chip-count">0</span></span>
+        </div>
+        <div class="warning-banner" id="warning-banner">
+          <span class="warning-banner-icon" id="warning-icon"></span>
+          <span class="warning-banner-text" id="warning-text"></span>
+        </div>
+      </div>
+      <div class="number-row">
+        <div class="big-number" id="hr-big">—</div>
+        <div class="inline-trend"><canvas id="hr-inline-chart"></canvas></div>
+        <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas></div>
+      </div>
+      <div class="pips" id="hr-pips">
+        <div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div>
+      </div>
+      <!-- Compact mode only: inline HRV + mini trend -->
+      <div class="compact-hrv" id="compact-hrv">
+        <div class="compact-hrv-label">HRV</div>
+        <div class="compact-hrv-value" id="compact-hrv-value">—</div>
+        <div class="compact-hrv-unit">ms rmssd</div>
+      </div>
+      <div class="compact-trend">
+        <canvas id="compact-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- HRV widget -->
+    <div class="widget stage-normal" id="rmssd-widget">
+      <div class="widget-header">
+        <span class="widget-label">HRV</span>
+        <span style="font-size: 10px; color: #5a5a5a; letter-spacing: 0.1em;">RMSSD MS</span>
+      </div>
+      <div class="number-row">
+        <div class="big-number medium" id="rmssd-big">—</div>
+        <div class="inline-trend"><canvas id="rmssd-inline-chart"></canvas></div>
+      </div>
+      <div class="pips" id="rmssd-pips">
+        <div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div>
+      </div>
+    </div>
+
+    <!-- Live HR trace widget (shows per-beat HR over last 45s - RSA visible as HR oscillation) -->
+    <div class="breath-widget" id="breath-widget">
+      <div class="trend-header">
+        <span>Live HR</span>
+        <span class="breath-rate" id="breath-rate">—</span>
+      </div>
+      <div class="rsa-chart-wrap">
+        <canvas id="rsa-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="overlay-status" id="overlay-status">• Not connected</div>
+    <div style="flex: 1;"></div>
+    <div style="font-size: 9px; color: #3a3a3a; text-align: center; letter-spacing: 0.1em;">CROP TO THIS ZONE</div>
+  </div>
+
+  <!-- RIGHT: Controls and details -->
+  <div id="control-panel">
+
+    <div class="section" data-section="connection">
+      <div class="section-header">
+        <div class="section-title">Connection</div>
+        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+      </div>
+      <div class="section-body">
+        <div class="status" id="status">Click Connect strap to pair.</div>
+        <div style="height: 10px;"></div>
+        <div class="controls">
+          <button class="primary" id="connect">Connect strap</button>
+          <button id="disconnect" disabled>Disconnect</button>
+          <button id="reset">Reset session</button>
+          <button id="export">Export CSV</button>
+        </div>
+        <div class="battery-display" id="battery-display">Battery: —</div>
+        <div class="autosave-row">
+          <span class="autosave-label">Auto-save folder:</span>
+          <span class="autosave-folder" id="autosave-folder-name">none</span>
+          <span class="autosave-status" id="autosave-status">idle</span>
+          <button id="autosave-pick">Choose...</button>
+          <button id="autosave-test" style="display: none;">Save now</button>
+          <button id="autosave-clear" style="display: none;">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-section="settings">
+      <div class="section-header">
+        <div class="section-title">Settings</div>
+        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+      </div>
+      <div class="section-body">
+        <div class="tabs">
+          <button class="tab active" data-tab="style">Style</button>
+          <button class="tab" data-tab="widgets">Widgets</button>
+          <button class="tab" data-tab="thresholds">Thresholds</button>
+          <button class="tab" data-tab="audio">Audio</button>
+        </div>
+
+        <div class="tab-panel active" data-tabpanel="style">
+          <div class="style-options">
+            <button class="style-btn active" data-style="bold">Bold</button>
+            <button class="style-btn" data-style="compact">Compact</button>
+            <button class="style-btn" data-style="minimal">Minimal</button>
+            <button class="style-btn" data-style="neon">Neon</button>
+          </div>
+        </div>
+
+        <div class="tab-panel" data-tabpanel="widgets">
+          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Layout</div>
+          <div class="style-options" style="margin-bottom: 16px;">
+            <button class="layout-btn active" data-layout="vertical">Vertical (left)</button>
+            <button class="layout-btn" data-layout="horizontal">Horizontal (top)</button>
+          </div>
+          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Show widgets</div>
+          <div class="widget-toggles">
+            <label><input type="checkbox" id="toggle-hr" checked /> Heart rate</label>
+            <label><input type="checkbox" id="toggle-hrv" checked /> HRV (RMSSD)</label>
+            <label><input type="checkbox" id="toggle-live-hr" checked /> Live HR trace</label>
+            <label><input type="checkbox" id="toggle-inline-trends" checked /> Inline mini trends</label>
+          </div>
+        </div>
+
+        <div class="tab-panel" data-tabpanel="thresholds">
+          <div class="thresh-grid">
+            <label>High HR</label><input type="number" id="thresh-high" value="130" /><span class="unit">bpm</span>
+            <label>Low HR</label><input type="number" id="thresh-low" value="55" /><span class="unit">bpm</span>
+            <label>Low RMSSD</label><input type="number" id="thresh-rmssd" value="15" /><span class="unit">ms</span>
+            <label>Palpitations</label><input type="number" id="thresh-palp" value="5" /><span class="unit">/min</span>
+          </div>
+          <div style="height: 12px;"></div>
+          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Text color stages</div>
+          <div class="thresh-grid">
+            <label>Low zone ceiling</label><input type="number" id="color-low" value="70" /><span class="unit">bpm</span>
+            <label>Normal ceiling</label><input type="number" id="color-normal" value="90" /><span class="unit">bpm</span>
+            <label>Elevated ceiling</label><input type="number" id="color-elevated" value="110" /><span class="unit">bpm</span>
+            <label>High ceiling</label><input type="number" id="color-high" value="130" /><span class="unit">bpm</span>
+          </div>
+        </div>
+
+        <div class="tab-panel" data-tabpanel="audio">
+          <div class="audio-grid">
+            <label>Audio alerts</label>
+            <input type="checkbox" id="audio-on" checked style="width: auto; justify-self: start;" />
+            <span></span>
+
+            <label>High HR alert</label>
+            <select id="audio-high"></select>
+            <button class="audio-test" data-type="high">Test</button>
+
+            <label>Low HR alert</label>
+            <select id="audio-low"></select>
+            <button class="audio-test" data-type="low">Test</button>
+
+            <label>HRV crash</label>
+            <select id="audio-crash"></select>
+            <button class="audio-test" data-type="crash">Test</button>
+
+            <label>Palpitations</label>
+            <select id="audio-palp"></select>
+            <button class="audio-test" data-type="palp">Test</button>
+
+            <label>Volume</label>
+            <input type="range" id="audio-volume" min="0" max="100" value="15" />
+            <span class="unit" id="volume-label">15%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-section="stats">
+      <div class="section-header">
+        <div class="section-title">Session stats</div>
+        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+      </div>
+      <div class="section-body">
+        <div class="stats-grid">
+          <div class="stat"><div class="stat-label">Time</div><div class="stat-value" id="session-time">0:00</div></div>
+          <div class="stat"><div class="stat-label">Avg HR</div><div class="stat-value" id="avg-hr">—</div></div>
+          <div class="stat"><div class="stat-label">Avg RMSSD</div><div class="stat-value" id="avg-rmssd">—</div></div>
+          <div class="stat"><div class="stat-label">Max HR</div><div class="stat-value" id="max-hr">—</div></div>
+          <div class="stat"><div class="stat-label">Min HR</div><div class="stat-value" id="min-hr">—</div></div>
+          <div class="stat"><div class="stat-label">Palp / min</div><div class="stat-value" id="palp-rate">0</div></div>
+          <div class="stat"><div class="stat-label">Palp total</div><div class="stat-value" id="palp-total">0</div></div>
+          <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="warn-count">0</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-section="chart">
+      <div class="section-header">
+        <div class="section-title">Full session trend</div>
+        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+      </div>
+      <div class="section-body">
+        <div class="main-chart-wrap"><canvas id="main-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section" data-section="events">
+      <div class="section-header">
+        <div class="section-title">Event markers</div>
+        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+      </div>
+      <div class="section-body">
+        <div class="posture-row">
+          <span class="posture-label">Posture:</span>
+          <button class="posture-btn" data-posture="lying">Lying</button>
+          <button class="posture-btn active" data-posture="sitting">Sitting</button>
+          <button class="posture-btn" data-posture="standing">Standing</button>
+        </div>
+        <div style="height: 10px;"></div>
+        <div class="marker-input">
+          <input type="text" id="marker-label" placeholder="e.g. drank miso" />
+          <button id="add-marker">Log</button>
+        </div>
+        <div style="height: 8px;"></div>
+        <div class="events" id="events"><div class="empty">No events logged yet.</div></div>
+      </div>
+    </div>
+
+    <div class="section" data-section="claude">
+      <div class="section-header">
+        <div class="section-title">Ask Claude about this session</div>
+        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+      </div>
+      <div class="section-body">
+        <div class="api-key-row">
+          <input type="password" id="api-key" placeholder="sk-ant-... (saved locally in browser)" />
+          <button id="save-key">Save</button>
+        </div>
+        <div style="height: 10px;"></div>
+        <div class="controls">
+          <button class="claude" id="ask-claude">Analyze with API</button>
+          <button id="open-claude-web">Download CSV &amp; ask Claude.ai</button>
+          <button id="clear-response">Clear</button>
+        </div>
+        <div class="claude-response empty-state" id="claude-response">Analyze with API uses your API key (Anthropic console). Download CSV &amp; ask Claude.ai downloads the session, copies a review prompt, and opens a new Claude.ai chat — drag the CSV in and paste the prompt to use your Pro subscription.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function() {
+  const HR_SERVICE = 0x180D;
+  const HR_CHAR = 0x2A37;
+  const BATTERY_SERVICE = 0x180F;
+  const BATTERY_CHAR = 0x2A19;
+  let device = null, server = null, char = null, batteryChar = null;
+
+  const state = {
+    startTime: null,
+    hrSeries: [],
+    rmssdSeries: [],
+    rrBuffer: [],
+    breathBuffer: [],
+    breathPhase: null,
+    events: [],
+    warnings: [],
+    ectopicEvents: [],
+    connectionEvents: [],
+    currentPosture: 'sitting',
+    postureLog: [], // [{ t, posture }]
+    lastPalpAlertTime: 0,
+    currentHR: null,
+    currentRMSSD: null,
+    currentWarn: null,
+    lastAlertTime: 0,
+    lastDataTime: 0,
+    audioOn: true,
+    autoReconnect: false,
+  };
+  const thresholds = { high: 130, low: 55, rmssd: 15, palpPerMin: 5 };
+
+  const $ = id => document.getElementById(id);
+  const setStatus = (msg, cls = '') => {
+    $('status').textContent = msg;
+    $('status').className = 'status ' + cls;
+  };
+
+  function parseHR(value) {
+    const flags = value.getUint8(0);
+    const hrFormat16 = flags & 0x01;
+    const rrPresent = flags & 0x10;
+    const energyPresent = flags & 0x08;
+    let offset = 1;
+    const hr = hrFormat16 ? value.getUint16(offset, true) : value.getUint8(offset);
+    offset += hrFormat16 ? 2 : 1;
+    if (energyPresent) offset += 2;
+    const rrs = [];
+    if (rrPresent) {
+      while (offset + 1 < value.byteLength) {
+        const raw = value.getUint16(offset, true);
+        rrs.push(raw * 1000 / 1024);
+        offset += 2;
+      }
+    }
+    return { hr, rrs };
+  }
+
+  function computeRMSSD(rrs) {
+    if (rrs.length < 2) return null;
+    const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
+    if (clean.length < 2) return null;
+    let sumSq = 0, count = 0;
+    for (let i = 1; i < clean.length; i++) {
+      const d = clean[i] - clean[i-1];
+      if (Math.abs(d) < 200) {
+        sumSq += d * d;
+        count++;
+      }
+    }
+    if (count < 1) return null;
+    return Math.sqrt(sumSq / count);
+  }
+
+  let mainChart = null, compactChart = null, rsaChart = null, hrInlineChart = null, rmssdInlineChart = null, hrLiveTraceChart = null;
+
+  // Build a vertical gradient fill for a chart. Re-called on resize to keep proportions right.
+  function makeGradient(ctx, colorTop, colorBottom) {
+    const g = ctx.createLinearGradient(0, 0, 0, 120);
+    g.addColorStop(0, colorTop);
+    g.addColorStop(1, colorBottom);
+    return g;
+  }
+
+  function initCharts() {
+    // Live HR trace - beat-to-beat iHR. Monotone cubic keeps peaks honest without the
+    // overshoot tension produces. X-axis is a fixed 45-sec window that scrolls with now,
+    // so early data doesn't stretch to fill the canvas.
+    const rsaCtx = $('rsa-chart').getContext('2d');
+    rsaChart = new Chart(rsaCtx, {
+      type: 'line',
+      data: { datasets: [
+        { label: 'iHR', data: [], borderColor: '#B8D97E', backgroundColor: makeGradient(rsaCtx, 'rgba(184,217,126,0.35)', 'rgba(184,217,126,0)'), tension: 0, pointRadius: 0, borderWidth: 1.75, fill: true },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { type: 'linear', display: false, min: 0, max: 45, reverse: false },
+          y: { display: false, grace: '12%' },
+        },
+      },
+    });
+    // Inline HR mini-trend (3-min window, just HR)
+    hrInlineChart = new Chart($('hr-inline-chart').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: 'HR', data: [], borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.1)', cubicInterpolationMode: 'monotone', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { type: 'linear', display: false },
+          y: { display: false, grace: '8%' },
+        },
+      },
+    });
+    // Inline RMSSD mini-trend (3-min window, smoothed)
+    rmssdInlineChart = new Chart($('rmssd-inline-chart').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: 'RMSSD', data: [], borderColor: '#5DCAA5', backgroundColor: 'rgba(93,202,165,0.1)', cubicInterpolationMode: 'monotone', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { type: 'linear', display: false },
+          y: { display: false, grace: '8%' },
+        },
+      },
+    });
+    // Compact-mode inline live HR trace (45-sec window, per-beat). Rendered only in Compact.
+    hrLiveTraceChart = new Chart($('hr-live-trace').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: 'iHR', data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.12)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { type: 'linear', display: false, min: 0, max: 45, reverse: false },
+          y: { display: false, grace: '12%' },
+        },
+      },
+    });
+    // Compact chart - dual HR + RMSSD trend
+    compactChart = new Chart($('compact-chart').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: 'HR', data: [], borderColor: '#E89858', backgroundColor: 'transparent', yAxisID: 'y', tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
+        { label: 'RMSSD', data: [], borderColor: '#d8d8d8', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0.4, pointRadius: 0, borderWidth: 1.3, borderDash: [3, 3] },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { type: 'linear', display: false },
+          y: { display: false },
+          y1: { position: 'right', display: false },
+        },
+      },
+    });
+    // Main chart - full detail
+    mainChart = new Chart($('main-chart').getContext('2d'), {
+      type: 'line',
+      data: { datasets: [
+        { label: 'HR (bpm)', data: [], borderColor: '#E88464', backgroundColor: 'transparent', yAxisID: 'y', tension: 0.25, pointRadius: 0, borderWidth: 1.5 },
+        { label: 'RMSSD (ms)', data: [], borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0.25, pointRadius: 0, borderWidth: 1.5 },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { labels: { color: '#9a9a9f', font: { size: 11 }, boxWidth: 12 } } },
+        scales: {
+          x: { type: 'linear', title: { display: true, text: 'min', color: '#5a5a60', font: { size: 10 } }, ticks: { color: '#9a9a9f', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y: { position: 'left', ticks: { color: '#E88464', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y1: { position: 'right', ticks: { color: '#5DCAA5', font: { size: 10 } }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  // Trailing moving-average smoother for time series. Elite HRV-style session trends
+  // use heavy smoothing over the per-beat RMSSD so the line reads as an envelope.
+  function smoothSeries(series, window) {
+    const out = [];
+    let sum = 0;
+    const q = [];
+    for (let i = 0; i < series.length; i++) {
+      q.push(series[i].v);
+      sum += series[i].v;
+      if (q.length > window) sum -= q.shift();
+      out.push({ x: series[i].t, y: sum / q.length });
+    }
+    return out;
+  }
+
+  function updateCharts() {
+    if (!state.startTime) return;
+    const now = (Date.now() - state.startTime) / 60000;
+    // 3-min window that anchors at x=0 early, then scrolls so newest is on the right edge.
+    const WINDOW_MIN = 3;
+    const cutoff = now - WINDOW_MIN;
+    const xMin = Math.max(0, cutoff);
+    const xMax = Math.max(WINDOW_MIN, now);
+    const hrData = state.hrSeries.filter(p => p.t >= cutoff).map(p => ({ x: p.t, y: p.v }));
+    const rmssdSmoothShort = smoothSeries(state.rmssdSeries.filter(p => p.t >= cutoff), 10);
+    if (compactChart) {
+      compactChart.data.datasets[0].data = hrData;
+      compactChart.data.datasets[1].data = rmssdSmoothShort;
+      compactChart.options.scales.x.min = xMin;
+      compactChart.options.scales.x.max = xMax;
+      try { compactChart.update('none'); } catch(e) {}
+    }
+    if (hrInlineChart) {
+      hrInlineChart.data.datasets[0].data = hrData;
+      hrInlineChart.options.scales.x.min = xMin;
+      hrInlineChart.options.scales.x.max = xMax;
+      try { hrInlineChart.update('none'); } catch(e) {}
+    }
+    if (rmssdInlineChart) {
+      rmssdInlineChart.data.datasets[0].data = rmssdSmoothShort;
+      rmssdInlineChart.options.scales.x.min = xMin;
+      rmssdInlineChart.options.scales.x.max = xMax;
+      try { rmssdInlineChart.update('none'); } catch(e) {}
+    }
+    // Main: full session. Smooth RMSSD with ~30-beat window for Elite HRV-style envelope.
+    if (mainChart) {
+      mainChart.data.datasets[0].data = state.hrSeries.map(p => ({ x: p.t, y: p.v }));
+      mainChart.data.datasets[1].data = smoothSeries(state.rmssdSeries, 30);
+      try { mainChart.update('none'); } catch(e) {}
+    }
+  }
+
+  function updateStats() {
+    if (state.hrSeries.length === 0) {
+      $('avg-hr').textContent = '—';
+      $('avg-rmssd').textContent = '—';
+      $('max-hr').textContent = '—';
+      $('min-hr').textContent = '—';
+      return;
+    }
+    const hrs = state.hrSeries.map(p => p.v);
+    $('avg-hr').textContent = Math.round(hrs.reduce((a,b) => a+b, 0) / hrs.length);
+    $('max-hr').textContent = Math.max(...hrs);
+    $('min-hr').textContent = Math.min(...hrs);
+    if (state.rmssdSeries.length > 0) {
+      const rmssds = state.rmssdSeries.map(p => p.v);
+      $('avg-rmssd').textContent = Math.round(rmssds.reduce((a,b) => a+b, 0) / rmssds.length);
+    }
+    $('warn-count').textContent = state.warnings.length;
+    const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;
+    const palpMin = ectopicsPerMinute(nowMin);
+    $('palp-rate').textContent = palpMin;
+    $('palp-total').textContent = state.ectopicEvents.length;
+    const chip = $('palp-chip');
+    chip.classList.toggle('active', palpMin > 0);
+    $('palp-chip-count').textContent = palpMin;
+  }
+
+  function updateSessionTime() {
+    if (!state.startTime) return;
+    const elapsed = (Date.now() - state.startTime) / 1000;
+    const m = Math.floor(elapsed / 60);
+    const s = Math.floor(elapsed % 60);
+    $('session-time').textContent = m + ':' + String(s).padStart(2, '0');
+  }
+
+  // Audio alerts - customizable per warning type
+  let audioCtx = null;
+  const AUDIO_PRESETS = {
+    'beep-high':    { freqs: [880, 660], type: 'sine',     dur: 0.22, label: 'Double beep (high)' },
+    'beep-low':     { freqs: [440, 330], type: 'sine',     dur: 0.22, label: 'Double beep (low)' },
+    'triple-tone':  { freqs: [550, 440, 550], type: 'sine', dur: 0.22, label: 'Triple tone' },
+    'chime':        { freqs: [1047, 1319, 1568], type: 'sine', dur: 0.3, label: 'Chime (ascending)' },
+    'alert':        { freqs: [1200, 800, 1200, 800], type: 'square', dur: 0.15, label: 'Alert (square wave)' },
+    'soft':         { freqs: [523, 659], type: 'triangle', dur: 0.4, label: 'Soft (triangle)' },
+    'pulse':        { freqs: [440, 440, 440], type: 'sine', dur: 0.1, label: 'Pulse (3 quick)' },
+    'urgent':       { freqs: [1000, 600, 1000, 600, 1000], type: 'sawtooth', dur: 0.1, label: 'Urgent (sawtooth)' },
+  };
+  const audioConfig = {
+    high: 'beep-high',
+    low: 'beep-low',
+    crash: 'triple-tone',
+    palp: 'pulse',
+    volume: 0.15,
+  };
+
+  function playSound(presetKey, volume) {
+    const preset = AUDIO_PRESETS[presetKey];
+    if (!preset) return;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      preset.freqs.forEach((f, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = f;
+        osc.type = preset.type;
+        const start = audioCtx.currentTime + i * (preset.dur * 1.05);
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(volume, start + 0.02);
+        gain.gain.linearRampToValueAtTime(0, start + preset.dur);
+        osc.start(start);
+        osc.stop(start + preset.dur + 0.02);
+      });
+    } catch (e) {}
+  }
+
+  function playAlert(type) {
+    if (!state.audioOn) return;
+    const nowMs = Date.now();
+    if (nowMs - state.lastAlertTime < 10000) return;
+    state.lastAlertTime = nowMs;
+    const presetKey = audioConfig[type] || 'beep-high';
+    playSound(presetKey, audioConfig.volume);
+  }
+
+  const colorThresholds = { low: 70, normal: 90, elevated: 110, high: 130 };
+  function getHRStage(hr) {
+    if (hr == null) return 'stage-normal';
+    if (hr <= colorThresholds.low) return 'stage-low';
+    if (hr < colorThresholds.normal) return 'stage-normal';
+    if (hr < colorThresholds.elevated) return 'stage-elevated';
+    if (hr < colorThresholds.high) return 'stage-high';
+    return 'stage-critical';
+  }
+
+  function getRMSSDStage(rmssd) {
+    if (rmssd == null) return 'stage-normal';
+    if (rmssd < thresholds.rmssd) return 'stage-critical';   // red - crashed
+    if (rmssd < 20) return 'stage-high';                      // orange - low
+    if (rmssd < 35) return 'stage-elevated';                  // yellow - below avg
+    if (rmssd < 60) return 'stage-normal';                    // green - good
+    return 'stage-low';                                       // light blue - excellent (rare)
+  }
+
+  const STAGE_PIPS = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 };
+  function setPips(containerId, stageClass) {
+    const container = $(containerId);
+    const pips = container.querySelectorAll('.pip');
+    pips.forEach(p => p.classList.remove('active'));
+    const count = STAGE_PIPS[stageClass] || 0;
+    for (let i = 0; i < count; i++) {
+      pips[i].classList.add('active');
+    }
+  }
+
+  function updateHeartRate(hr) {
+    const heart = $('heart-icon');
+    if (hr == null || hr <= 0) {
+      heart.style.animationDuration = '1s';
+      return;
+    }
+    // Sync heartbeat animation to actual HR
+    const duration = 60 / hr; // seconds per beat
+    heart.style.animationDuration = duration + 's';
+  }
+
+  // Colors match the stage-class CSS rules — keep in sync.
+  const STAGE_COLORS = {
+    'stage-low': '#7DB8E8',
+    'stage-normal': '#B8D97E',
+    'stage-elevated': '#F0C75E',
+    'stage-high': '#E89858',
+    'stage-critical': '#E24B4A',
+  };
+
+  function hexToRgba(hex, alpha) {
+    const n = parseInt(hex.slice(1), 16);
+    return 'rgba(' + ((n >> 16) & 0xff) + ',' + ((n >> 8) & 0xff) + ',' + (n & 0xff) + ',' + alpha + ')';
+  }
+
+  function tintChart(chart, color) {
+    if (!chart || !color) return;
+    const ds = chart.data.datasets[0];
+    ds.borderColor = color;
+    // Rebuild gradient against chart ctx if we can, else flat fill
+    try {
+      const ctx = chart.ctx;
+      const g = ctx.createLinearGradient(0, 0, 0, chart.height || 80);
+      g.addColorStop(0, hexToRgba(color, 0.32));
+      g.addColorStop(1, hexToRgba(color, 0));
+      ds.backgroundColor = g;
+    } catch (e) {
+      ds.backgroundColor = hexToRgba(color, 0.12);
+    }
+    try { chart.update('none'); } catch(e) {}
+  }
+
+  function applyStage(widgetId, stageClass) {
+    const widget = $(widgetId);
+    widget.classList.remove('stage-low', 'stage-normal', 'stage-elevated', 'stage-high', 'stage-critical');
+    widget.classList.add(stageClass);
+    const color = STAGE_COLORS[stageClass];
+    if (widgetId === 'hr-widget') {
+      tintChart(hrInlineChart, color);
+      tintChart(rsaChart, color);
+      tintChart(hrLiveTraceChart, color);
+      if (compactChart) {
+        compactChart.data.datasets[0].borderColor = color;
+        try { compactChart.update('none'); } catch(e) {}
+      }
+    } else if (widgetId === 'rmssd-widget') {
+      tintChart(rmssdInlineChart, color);
+      // Keep compact chart's RMSSD line a fixed neutral so it's always legible against
+      // the stage-colored HR line - otherwise both go green in "normal" and blend.
+    }
+  }
+
+  function applyHRVStageToCompact(stageClass) {
+    const el = $('compact-hrv-value');
+    el.classList.remove('stage-low', 'stage-normal', 'stage-elevated', 'stage-high', 'stage-critical');
+    el.classList.add(stageClass);
+  }
+
+  const WARN_ICONS = {
+    'warn-high': '<svg viewBox="0 0 24 24"><polyline points="17 11 12 6 7 11"></polyline><polyline points="17 17 12 12 7 17"></polyline></svg>',
+    'warn-low': '<svg viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 7 12 12 17 7"></polyline></svg>',
+    'warn-crash': '<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+    'warn-palp': '<svg viewBox="0 0 24 24"><path d="M3 12h4l2-8 4 16 2-8h6"></path></svg>',
+  };
+  const WARN_TEXT = {
+    'warn-high': 'Heart rate high',
+    'warn-low': 'Heart rate low',
+    'warn-crash': 'HRV crashed',
+    'warn-palp': 'Palpitations elevated',
+  };
+
+  function showWarningBanner(warnType) {
+    const banner = $('warning-banner');
+    banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
+    if (warnType) {
+      banner.classList.add(warnType, 'active');
+      $('warning-icon').innerHTML = WARN_ICONS[warnType] || '';
+      $('warning-text').textContent = WARN_TEXT[warnType] || '';
+    }
+  }
+
+  function checkWarnings() {
+    const hrStage = getHRStage(state.currentHR);
+    const rmssdStage = getRMSSDStage(state.currentRMSSD);
+
+    applyStage('hr-widget', hrStage);
+    applyStage('rmssd-widget', rmssdStage);
+    applyHRVStageToCompact(rmssdStage);
+
+    setPips('hr-pips', hrStage);
+    setPips('rmssd-pips', rmssdStage);
+
+    updateHeartRate(state.currentHR);
+
+    // Track warnings for alerts and logging
+    let newWarn = null;
+    if (state.currentHR != null) {
+      if (state.currentHR >= thresholds.high) newWarn = 'warn-high';
+      else if (state.currentHR <= thresholds.low) newWarn = 'warn-low';
+    }
+    if (!newWarn && state.currentRMSSD != null && state.currentRMSSD < thresholds.rmssd && state.rmssdSeries.length > 20) {
+      newWarn = 'warn-crash';
+    }
+    if (!newWarn && state.startTime) {
+      const rate = ectopicsPerMinute((Date.now() - state.startTime) / 60000);
+      if (rate >= thresholds.palpPerMin) newWarn = 'warn-palp';
+    }
+
+    showWarningBanner(newWarn);
+
+    if (newWarn && newWarn !== state.currentWarn) {
+      const alertType = newWarn === 'warn-high' ? 'high'
+                      : newWarn === 'warn-low' ? 'low'
+                      : newWarn === 'warn-palp' ? 'palp'
+                      : 'crash';
+      playAlert(alertType);
+      state.warnings.push({ t: (Date.now() - state.startTime) / 60000, type: newWarn, hr: state.currentHR, rmssd: state.currentRMSSD });
+    }
+    state.currentWarn = newWarn;
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function renderEvents() {
+    const el = $('events');
+    if (state.events.length === 0) {
+      el.innerHTML = '<div class="empty">No events logged yet.</div>';
+      return;
+    }
+    el.innerHTML = state.events.slice().reverse().map(ev => {
+      const m = Math.floor(ev.t);
+      const s = Math.round((ev.t - m) * 60);
+      const ts = m + ':' + String(s).padStart(2, '0');
+      const hr = ev.hr != null ? ev.hr + ' bpm' : '—';
+      const rmssd = ev.rmssd != null ? Math.round(ev.rmssd) + ' ms' : '—';
+      return '<div class="event"><span class="event-label">' + escapeHtml(ev.label) + '</span><span class="event-time">' + ts + ' · ' + hr + ' · ' + rmssd + '</span></div>';
+    }).join('');
+  }
+
+  // Ectopic (palpitation) detection. Compares each new RR interval to the running
+  // median of the last 30 intervals. A beat is flagged when it deviates >25% from
+  // that baseline - this catches both the short premature beat and its long
+  // compensatory pause, which is the RR signature of a felt palpitation.
+  function detectEctopics(newRRs, tMinutes) {
+    const recentCount = 30;
+    const buffer = state.rrBuffer.map(r => r.rr);
+    if (buffer.length < recentCount) return;
+    const window = buffer.slice(-recentCount - newRRs.length, -newRRs.length);
+    if (window.length < 10) return;
+    const median = [...window].sort((a, b) => a - b)[Math.floor(window.length / 2)];
+    for (const rr of newRRs) {
+      if (rr < 300 || rr > 2000) continue; // clearly bad sample, skip
+      const dev = Math.abs(rr - median) / median;
+      if (dev > 0.25) {
+        state.ectopicEvents.push({ t: tMinutes, rr: Math.round(rr), dev: +dev.toFixed(2) });
+      }
+    }
+    // Keep last 10 min of events so the rolling per-minute count stays cheap
+    const keep = tMinutes - 10;
+    state.ectopicEvents = state.ectopicEvents.filter(e => e.t >= keep);
+  }
+
+  function ectopicsPerMinute(nowMin) {
+    const cutoff = nowMin - 1;
+    return state.ectopicEvents.filter(e => e.t >= cutoff).length;
+  }
+
+  function onHRNotification(event) {
+    // Guard against notifications arriving before startTime is set
+    if (state.startTime == null) state.startTime = Date.now();
+    const value = event.target.value;
+    const { hr, rrs } = parseHR(value);
+    const now = (Date.now() - state.startTime) / 60000;
+    state.currentHR = hr;
+    state.lastDataTime = Date.now();
+    state.hrSeries.push({ t: now, v: hr });
+    if (state.hrSeries.length > 5000) state.hrSeries.shift();
+
+    if (rrs.length > 0) {
+      state.rrBuffer.push(...rrs.map(rr => ({ t: now, rr })));
+      const cutoff = now - 1;
+      state.rrBuffer = state.rrBuffer.filter(r => r.t >= cutoff);
+      const rmssd = computeRMSSD(state.rrBuffer.map(r => r.rr));
+      if (rmssd != null) {
+        state.currentRMSSD = rmssd;
+        state.rmssdSeries.push({ t: now, v: rmssd });
+        if (state.rmssdSeries.length > 5000) state.rmssdSeries.shift();
+      }
+      state.breathBuffer.push(...rrs.map(rr => ({ t: now, rr })));
+      const breathCutoff = now - 0.75;
+      state.breathBuffer = state.breathBuffer.filter(r => r.t >= breathCutoff);
+      detectEctopics(rrs, now);
+    }
+    // Isolate visual updates from the BLE callback. If a hidden-canvas render or any
+    // DOM call throws, the notification chain must keep running.
+    try {
+      $('hr-big').textContent = hr;
+      $('rmssd-big').textContent = state.currentRMSSD != null ? Math.round(state.currentRMSSD) : '—';
+      $('compact-hrv-value').textContent = state.currentRMSSD != null ? Math.round(state.currentRMSSD) : '—';
+      if (rrs.length > 0) updateBreathing();
+      updateCharts();
+      updateStats();
+      updateSessionTime();
+      checkWarnings();
+    } catch (err) {
+      console.error('HR UI update failed:', err);
+    }
+  }
+
+  async function connect() {
+    if (!navigator.bluetooth) {
+      setStatus('Web Bluetooth not supported. Use Chrome, Edge, or Opera.', 'error');
+      return;
+    }
+    thresholds.high = parseInt($('thresh-high').value) || 130;
+    thresholds.low = parseInt($('thresh-low').value) || 55;
+    thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15;
+    thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5;
+    state.audioOn = $('audio-on').checked;
+    // Request the folder write permission FIRST, while we still have user-gesture
+    // context from the Connect click. If deferred until after BLE async work, Chrome
+    // silently denies it and the session writes nothing.
+    if (autoSaveDirHandle) {
+      const granted = await ensureAutoSavePermission();
+      if (!granted) {
+        setStatus('Auto-save folder permission was denied — sessions will NOT be saved.', 'error');
+      }
+    }
+    try {
+      setStatus('Requesting device...');
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [HR_SERVICE, BATTERY_SERVICE],
+      });
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+      if (state.startTime === null) state.startTime = Date.now();
+      state.lastDataTime = Date.now();
+      state.autoReconnect = true;
+      $('connect').disabled = true;
+      $('disconnect').disabled = false;
+      await attachConnection();
+      if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+      startSessionAutoSave();
+      acquireWakeLock();
+    } catch (e) {
+      setStatus('Connection failed: ' + e.message, 'error');
+      $('connect').disabled = false;
+      $('disconnect').disabled = true;
+    }
+  }
+
+  // Screen Wake Lock: keep the phone/laptop awake during an active session so BLE
+  // doesn't drop when the display times out. Auto-released on tab hide; re-request
+  // on visibility change if we're still recording.
+  let wakeLock = null;
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (e) { console.warn('Wake lock request failed:', e); }
+  }
+  async function releaseWakeLock() {
+    if (wakeLock) { try { await wakeLock.release(); } catch (e) {} wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && device && device.gatt && device.gatt.connected && !wakeLock) {
+      acquireWakeLock();
+    }
+  });
+
+  async function attachConnection() {
+    setStatus('Connecting to ' + (device.name || 'device') + '...');
+    server = await device.gatt.connect();
+    const service = await server.getPrimaryService(HR_SERVICE);
+    char = await service.getCharacteristic(HR_CHAR);
+    await char.startNotifications();
+    char.addEventListener('characteristicvaluechanged', onHRNotification);
+    setStatus('Connected to ' + (device.name || 'device') + '. Streaming live.', 'connected');
+    $('overlay-status').textContent = '• LIVE · ' + (device.name || 'strap').toUpperCase();
+    logConnectionEvent('connect');
+    // Battery is best-effort: not every strap exposes it, and a failed read shouldn't
+    // block the main HR stream from being usable.
+    readBattery().catch(() => {});
+  }
+
+  function logConnectionEvent(type) {
+    if (!state.startTime) return;
+    const t = (Date.now() - state.startTime) / 60000;
+    state.connectionEvents.push({ t, type });
+  }
+
+  async function readBattery() {
+    if (!server) return;
+    try {
+      const svc = await server.getPrimaryService(BATTERY_SERVICE);
+      batteryChar = await svc.getCharacteristic(BATTERY_CHAR);
+      const val = await batteryChar.readValue();
+      updateBatteryDisplay(val.getUint8(0));
+      // Some straps push notifications when the level changes; subscribe if supported.
+      try {
+        await batteryChar.startNotifications();
+        batteryChar.addEventListener('characteristicvaluechanged', e => {
+          updateBatteryDisplay(e.target.value.getUint8(0));
+        });
+      } catch (e) { /* notifications unsupported, manual read on connect is fine */ }
+    } catch (e) {
+      $('battery-display').textContent = 'Battery: n/a';
+    }
+  }
+
+  function updateBatteryDisplay(pct) {
+    const el = $('battery-display');
+    el.textContent = 'Battery: ' + pct + '%';
+    el.classList.remove('low', 'critical');
+    if (pct <= 10) el.classList.add('critical');
+    else if (pct <= 25) el.classList.add('low');
+  }
+
+  async function tryReconnect() {
+    if (!state.autoReconnect || !device) return;
+    if (device.gatt.connected) return;
+    try {
+      await attachConnection();
+      state.lastDataTime = Date.now();
+    } catch (e) {
+      // Strap still out of range or off - wait and try again.
+      if (state.autoReconnect) setTimeout(tryReconnect, 2000);
+    }
+  }
+
+  function onDisconnected() {
+    logConnectionEvent('disconnect');
+    if (state.autoReconnect) {
+      setStatus('Disconnected. Reconnecting when strap is back in range...');
+      $('overlay-status').textContent = '• RECONNECTING...';
+      tryReconnect();
+    } else {
+      setStatus('Device disconnected. Click Connect strap to reconnect.');
+      $('overlay-status').textContent = '• DISCONNECTED';
+      $('connect').disabled = false;
+      $('disconnect').disabled = true;
+    }
+  }
+
+  async function disconnect() {
+    state.autoReconnect = false;
+    stopSessionAutoSave();
+    releaseWakeLock();
+    if (device && device.gatt.connected) device.gatt.disconnect();
+    batteryChar = null;
+    $('battery-display').textContent = 'Battery: —';
+    $('battery-display').classList.remove('low', 'critical');
+    $('overlay-status').textContent = '• DISCONNECTED';
+    $('connect').disabled = false;
+    $('disconnect').disabled = true;
+    setStatus('Disconnected by user.');
+  }
+
+  function resetSession() {
+    state.hrSeries = [];
+    state.rmssdSeries = [];
+    state.rrBuffer = [];
+    state.events = [];
+    state.warnings = [];
+    state.ectopicEvents = [];
+    state.connectionEvents = [];
+    state.postureLog = [];
+    state.currentPosture = 'sitting';
+    // Reset posture button UI
+    document.querySelectorAll('.posture-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.posture === 'sitting');
+    });
+    state.currentHR = null;
+    state.currentRMSSD = null;
+    state.currentWarn = null;
+    state.lastAlertTime = 0;
+    state.breathBuffer = [];
+    state.breathPhase = null;
+    state.startTime = device && device.gatt.connected ? Date.now() : null;
+    showWarningBanner(null);
+    $('hr-big').textContent = '—';
+    $('rmssd-big').textContent = '—';
+    $('breath-rate').textContent = '—';
+    $('session-time').textContent = '0:00';
+    if (rsaChart) { rsaChart.data.datasets[0].data = []; rsaChart.update('none'); }
+    if (hrLiveTraceChart) { hrLiveTraceChart.data.datasets[0].data = []; hrLiveTraceChart.update('none'); }
+    if (hrInlineChart) { hrInlineChart.data.datasets[0].data = []; hrInlineChart.update('none'); }
+    if (rmssdInlineChart) { rmssdInlineChart.data.datasets[0].data = []; rmssdInlineChart.update('none'); }
+    updateCharts();
+    updateStats();
+    renderEvents();
+    setStatus('Session reset.');
+  }
+
+  function addMarker() {
+    if (!state.startTime) { setStatus('Connect a device first to log markers.', 'error'); return; }
+    const label = $('marker-label').value.trim() || 'event';
+    const t = (Date.now() - state.startTime) / 60000;
+    state.events.push({ t, label, hr: state.currentHR, rmssd: state.currentRMSSD });
+    $('marker-label').value = '';
+    renderEvents();
+  }
+
+  // ----- Auto-save: write the session CSV into a user-picked folder every 10 sec -----
+  // Uses File System Access API (Chromium-only). Directory handle persists across
+  // reloads via IndexedDB; Chrome may require a one-time re-grant click after a full
+  // browser restart (handled by requesting permission on the Connect user-gesture).
+  const IDB_NAME = 'hr_monitor_kv';
+  const IDB_STORE = 'kv';
+
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbGet(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const r = tx.objectStore(IDB_STORE).get(key);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+  async function idbSet(key, value) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbDel(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  let autoSaveDirHandle = null;
+  let autoSaveFileHandle = null;
+  let autoSaveInterval = null;
+
+  async function pickAutoSaveFolder() {
+    if (!window.showDirectoryPicker) {
+      alert('Your browser does not support folder access (File System Access API). Use Chromium-based browser.');
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'hr-monitor-sessions' });
+      autoSaveDirHandle = handle;
+      await idbSet('autosave-dir', handle);
+      updateAutoSaveUI();
+    } catch (e) { /* user canceled */ }
+  }
+
+  async function clearAutoSaveFolder() {
+    autoSaveDirHandle = null;
+    await idbDel('autosave-dir');
+    updateAutoSaveUI();
+  }
+
+  async function restoreAutoSaveFolder() {
+    try {
+      const h = await idbGet('autosave-dir');
+      if (h) autoSaveDirHandle = h;
+    } catch (e) {}
+    updateAutoSaveUI();
+  }
+
+  function updateAutoSaveUI() {
+    const nameEl = $('autosave-folder-name');
+    const clearBtn = $('autosave-clear');
+    const testBtn = $('autosave-test');
+    if (autoSaveDirHandle) {
+      nameEl.textContent = autoSaveDirHandle.name || 'selected';
+      clearBtn.style.display = '';
+      if (testBtn) testBtn.style.display = '';
+    } else {
+      nameEl.textContent = 'none';
+      clearBtn.style.display = 'none';
+      if (testBtn) testBtn.style.display = 'none';
+      setAutoSaveStatus('', '');
+    }
+  }
+
+  // Manual "Save now" — useful for diagnosing write failures. Creates (or reuses) a
+  // file handle for the CURRENT session and flushes a CSV, reporting any error.
+  async function manualAutoSaveTest() {
+    if (!autoSaveDirHandle) return;
+    console.log('[autosave] Manual test triggered.');
+    const ok = await ensureAutoSavePermission();
+    if (!ok) {
+      setAutoSaveStatus('denied', 'denied');
+      alert('Browser denied write permission for the folder. Click Choose... and re-pick it.');
+      return;
+    }
+    try {
+      if (!autoSaveFileHandle) {
+        const filename = 'hrv_session_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.csv';
+        console.log('[autosave] Creating file:', filename);
+        autoSaveFileHandle = await autoSaveDirHandle.getFileHandle(filename, { create: true });
+      }
+      const { csv } = buildSessionCSV();
+      console.log('[autosave] Writing', csv.split('\n').length, 'rows');
+      const writable = await autoSaveFileHandle.createWritable();
+      await writable.write(csv);
+      await writable.close();
+      setAutoSaveStatus('writing', 'writing');
+      alert('Save succeeded. File is in the selected folder.');
+    } catch (e) {
+      console.error('[autosave] Manual test failed:', e);
+      setAutoSaveStatus('error', 'error');
+      alert('Save failed: ' + e.message + '\n\nCheck DevTools console for details (F12 → Console).');
+    }
+  }
+
+  function setAutoSaveStatus(text, cls) {
+    const el = $('autosave-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'autosave-status' + (cls ? ' ' + cls : '');
+  }
+
+  async function ensureAutoSavePermission() {
+    if (!autoSaveDirHandle) return false;
+    try {
+      const perm = await autoSaveDirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') return true;
+      const req = await autoSaveDirHandle.requestPermission({ mode: 'readwrite' });
+      return req === 'granted';
+    } catch (e) {
+      console.error('Auto-save permission check failed:', e);
+      return false;
+    }
+  }
+
+  async function startSessionAutoSave() {
+    if (!autoSaveDirHandle) return;
+    const ok = await ensureAutoSavePermission();
+    if (!ok) {
+      setAutoSaveStatus('denied', 'denied');
+      return;
+    }
+    const filename = 'hrv_session_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.csv';
+    try {
+      autoSaveFileHandle = await autoSaveDirHandle.getFileHandle(filename, { create: true });
+      if (autoSaveInterval) clearInterval(autoSaveInterval);
+      autoSaveInterval = setInterval(writeAutoSave, 10000);
+      writeAutoSave();
+      setAutoSaveStatus('writing', 'writing');
+    } catch (e) {
+      console.error('Auto-save file creation failed:', e);
+      autoSaveFileHandle = null;
+      setAutoSaveStatus('error', 'error');
+    }
+  }
+
+  async function writeAutoSave() {
+    if (!autoSaveFileHandle) return;
+    try {
+      const { csv } = buildSessionCSV();
+      const writable = await autoSaveFileHandle.createWritable();
+      await writable.write(csv);
+      await writable.close();
+    } catch (e) {
+      console.error('Auto-save write failed:', e);
+      setAutoSaveStatus('write error', 'error');
+      // Permission may have been revoked mid-session — null the handle so next connect
+      // attempts a fresh permission check rather than silently failing every 10 sec.
+      autoSaveFileHandle = null;
+      if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+    }
+  }
+
+  async function stopSessionAutoSave() {
+    if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+    await writeAutoSave();
+    autoSaveFileHandle = null;
+    if (autoSaveDirHandle) setAutoSaveStatus('idle');
+  }
+
+  function buildSessionCSV() {
+    // epoch_ms: absolute Unix-ms timestamp per row. Makes the CSV self-describing
+    // for cross-file analysis (e.g. sleep spanning midnight in daily-mode files)
+    // without having to parse the filename.
+    const rows = [['time_min', 'epoch_ms', 'hr_bpm', 'rmssd_ms', 'palpitation', 'event', 'warning', 'connection', 'posture']];
+    const allTimes = new Set();
+    state.hrSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
+    state.rmssdSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
+    state.events.forEach(e => allTimes.add(e.t.toFixed(4)));
+    state.warnings.forEach(w => allTimes.add(w.t.toFixed(4)));
+    state.ectopicEvents.forEach(e => allTimes.add(e.t.toFixed(4)));
+    state.connectionEvents.forEach(c => allTimes.add(c.t.toFixed(4)));
+    state.postureLog.forEach(p => allTimes.add(p.t.toFixed(4)));
+    const sorted = Array.from(allTimes).map(Number).sort((a,b) => a-b);
+    const hrMap = new Map(state.hrSeries.map(p => [p.t.toFixed(4), p.v]));
+    const rmssdMap = new Map(state.rmssdSeries.map(p => [p.t.toFixed(4), p.v]));
+    const evMap = new Map(state.events.map(e => [e.t.toFixed(4), e.label]));
+    const warnMap = new Map(state.warnings.map(w => [w.t.toFixed(4), w.type]));
+    const palpSet = new Set(state.ectopicEvents.map(e => e.t.toFixed(4)));
+    const connMap = new Map(state.connectionEvents.map(c => [c.t.toFixed(4), c.type]));
+    const postureMap = new Map(state.postureLog.map(p => [p.t.toFixed(4), p.posture]));
+    const startEpoch = state.startTime || Date.now();
+    sorted.forEach(t => {
+      const k = t.toFixed(4);
+      const epochMs = Math.round(startEpoch + t * 60000);
+      rows.push([t.toFixed(4), epochMs, hrMap.get(k) ?? '', rmssdMap.get(k)?.toFixed(2) ?? '', palpSet.has(k) ? '1' : '', evMap.get(k) ?? '', warnMap.get(k) ?? '', connMap.get(k) ?? '', postureMap.get(k) ?? '']);
+    });
+    const csv = rows.map(r => r.join(',')).join('\n');
+    const filename = 'hrv_session_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.csv';
+    return { csv, filename };
+  }
+
+  function downloadCSV({ csv, filename }) {
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportCSV() {
+    downloadCSV(buildSessionCSV());
+  }
+
+  // Claude API integration
+  function buildSessionSummary() {
+    if (state.hrSeries.length === 0) return null;
+    const hrs = state.hrSeries.map(p => p.v);
+    const rmssds = state.rmssdSeries.map(p => p.v);
+    const elapsed = (Date.now() - state.startTime) / 60000;
+    const avgHr = Math.round(hrs.reduce((a,b) => a+b, 0) / hrs.length);
+    const maxHr = Math.max(...hrs);
+    const minHr = Math.min(...hrs);
+    const avgRmssd = rmssds.length ? Math.round(rmssds.reduce((a,b) => a+b, 0) / rmssds.length) : null;
+    const minRmssd = rmssds.length ? Math.round(Math.min(...rmssds)) : null;
+    const maxRmssd = rmssds.length ? Math.round(Math.max(...rmssds)) : null;
+
+    // Sample data at ~20 points for a compact trend summary
+    const sampleCount = Math.min(20, state.hrSeries.length);
+    const samples = [];
+    for (let i = 0; i < sampleCount; i++) {
+      const idx = Math.floor(i * (state.hrSeries.length - 1) / (sampleCount - 1));
+      const p = state.hrSeries[idx];
+      const rp = state.rmssdSeries.find(r => Math.abs(r.t - p.t) < 0.1);
+      samples.push({ t: p.t.toFixed(1), hr: p.v, rmssd: rp ? Math.round(rp.v) : null });
+    }
+
+    let summary = `HR/HRV monitoring session, ${elapsed.toFixed(1)} minutes elapsed.\n\n`;
+    summary += `Stats:\n`;
+    summary += `- Current HR: ${state.currentHR} bpm, current RMSSD: ${state.currentRMSSD ? Math.round(state.currentRMSSD) : 'n/a'} ms\n`;
+    summary += `- Avg HR: ${avgHr} bpm (range ${minHr}-${maxHr})\n`;
+    if (avgRmssd !== null) summary += `- Avg RMSSD: ${avgRmssd} ms (range ${minRmssd}-${maxRmssd})\n`;
+    summary += `- ${state.ectopicEvents.length} ectopic/palpitation beats detected (>25% RR deviation from running median)\n`;
+    summary += `- ${state.warnings.length} threshold warnings logged\n\n`;
+
+    if (state.events.length > 0) {
+      summary += `Events logged by user:\n`;
+      state.events.forEach(e => {
+        const hrStr = e.hr ? ` at HR ${e.hr}` : '';
+        const rmStr = e.rmssd ? `, RMSSD ${Math.round(e.rmssd)}` : '';
+        summary += `- ${e.t.toFixed(1)}min: "${e.label}"${hrStr}${rmStr}\n`;
+      });
+      summary += '\n';
+    }
+
+    if (state.warnings.length > 0) {
+      summary += `Warnings triggered:\n`;
+      state.warnings.forEach(w => {
+        summary += `- ${w.t.toFixed(1)}min: ${w.type} (HR ${w.hr}, RMSSD ${w.rmssd ? Math.round(w.rmssd) : 'n/a'})\n`;
+      });
+      summary += '\n';
+    }
+
+    summary += `Trend samples (time in min, HR bpm, RMSSD ms):\n`;
+    samples.forEach(s => {
+      summary += `  ${s.t}: HR ${s.hr}, RMSSD ${s.rmssd ?? '—'}\n`;
+    });
+
+    summary += `\nContext: User has POTS (postural orthostatic tachycardia syndrome). Resting HR tends to run 85-95 bpm. Interested in parasympathetic regulation and autonomic stability. Baseline RMSSD typically 20-30ms range.\n\n`;
+    summary += `Please analyze this session. Comment on notable patterns, any meaningful correlations between events and autonomic shifts, and anything that stands out. Be concise and specific — no generic wellness advice.`;
+
+    return summary;
+  }
+
+  async function askClaude() {
+    const apiKey = $('api-key').value.trim();
+    const respEl = $('claude-response');
+    if (!apiKey) {
+      respEl.className = 'claude-response error';
+      respEl.textContent = 'Enter your API key first. Get one at console.anthropic.com.';
+      return;
+    }
+    if (state.hrSeries.length < 10) {
+      respEl.className = 'claude-response error';
+      respEl.textContent = 'Not enough data yet. Let the session run a minute or two first.';
+      return;
+    }
+    const summary = buildSessionSummary();
+    respEl.className = 'claude-response';
+    respEl.textContent = 'Asking Claude...';
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-opus-4-5',
+          max_tokens: 1024,
+          messages: [{ role: 'user', content: summary }],
+        }),
+      });
+      const data = await response.json();
+      if (data.error) {
+        respEl.className = 'claude-response error';
+        respEl.textContent = 'Error: ' + data.error.message;
+        return;
+      }
+      const text = data.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+      respEl.className = 'claude-response';
+      respEl.textContent = text;
+    } catch (e) {
+      respEl.className = 'claude-response error';
+      respEl.textContent = 'Request failed: ' + e.message;
+    }
+  }
+
+  async function openInClaudeWeb() {
+    const respEl = $('claude-response');
+    if (state.hrSeries.length < 10) {
+      respEl.className = 'claude-response error';
+      respEl.textContent = 'Not enough data yet. Let the session run a minute or two first.';
+      return;
+    }
+    const { csv, filename } = buildSessionCSV();
+    downloadCSV({ csv, filename });
+    const prompt = 'Attached is ' + filename + ' — an HR/HRV monitoring session from a chest strap. Columns: time_min, hr_bpm, rmssd_ms, event, warning. I have POTS (resting HR 85-95), baseline RMSSD 20-30ms. Please review this session — call out notable patterns, event correlations, autonomic shifts, anything that stands out. Be concise and specific, no generic wellness advice.';
+    try {
+      await navigator.clipboard.writeText(prompt);
+      respEl.className = 'claude-response';
+      respEl.textContent = 'CSV downloaded: ' + filename + '\nPrompt copied to clipboard.\n\nClaude.ai is opening — drag the CSV from your Downloads folder into the chat, paste (Ctrl+V) to add the review request, and send.';
+    } catch (e) {
+      respEl.className = 'claude-response';
+      respEl.textContent = 'CSV downloaded: ' + filename + '\nCopy failed — paste this into Claude.ai yourself after attaching the CSV:\n\n' + prompt;
+    }
+    window.open('https://claude.ai/new', '_blank', 'noopener');
+  }
+
+  function saveApiKey() {
+    const key = $('api-key').value.trim();
+    if (key) {
+      localStorage.setItem('claude_api_key', key);
+      setStatus('API key saved locally.');
+    }
+  }
+
+  function loadApiKey() {
+    const key = localStorage.getItem('claude_api_key');
+    if (key) $('api-key').value = key;
+  }
+
+  function populateAudioDropdowns() {
+    const selects = ['audio-high', 'audio-low', 'audio-crash', 'audio-palp'];
+    selects.forEach(id => {
+      const sel = $(id);
+      Object.entries(AUDIO_PRESETS).forEach(([key, preset]) => {
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = preset.label;
+        sel.appendChild(opt);
+      });
+    });
+    // Set defaults
+    $('audio-high').value = audioConfig.high;
+    $('audio-low').value = audioConfig.low;
+    $('audio-crash').value = audioConfig.crash;
+    $('audio-palp').value = audioConfig.palp;
+  }
+
+  function wireAudioControls() {
+    $('audio-high').addEventListener('change', (e) => {
+      audioConfig.high = e.target.value;
+      saveAudioConfig();
+    });
+    $('audio-low').addEventListener('change', (e) => {
+      audioConfig.low = e.target.value;
+      saveAudioConfig();
+    });
+    $('audio-crash').addEventListener('change', (e) => {
+      audioConfig.crash = e.target.value;
+      saveAudioConfig();
+    });
+    $('audio-palp').addEventListener('change', (e) => {
+      audioConfig.palp = e.target.value;
+      saveAudioConfig();
+    });
+    $('audio-volume').addEventListener('input', (e) => {
+      audioConfig.volume = e.target.value / 100;
+      $('volume-label').textContent = e.target.value + '%';
+      saveAudioConfig();
+    });
+    document.querySelectorAll('.audio-test').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const type = btn.dataset.type;
+        const presetKey = audioConfig[type];
+        playSound(presetKey, audioConfig.volume);
+      });
+    });
+  }
+
+  function saveAudioConfig() {
+    try { localStorage.setItem('hr_monitor_audio', JSON.stringify(audioConfig)); } catch(e) {}
+  }
+
+  function loadAudioConfig() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('hr_monitor_audio') || 'null');
+      if (saved) {
+        Object.assign(audioConfig, saved);
+        $('audio-volume').value = Math.round(audioConfig.volume * 100);
+        $('volume-label').textContent = Math.round(audioConfig.volume * 100) + '%';
+      }
+    } catch(e) {}
+  }
+
+  function setWidgetStyle(styleName) {
+    const zone = $('overlay-zone');
+    zone.classList.remove('style-bold', 'style-compact', 'style-minimal', 'style-neon');
+    zone.classList.add('style-' + styleName);
+    document.querySelectorAll('.style-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.style === styleName);
+    });
+    try { localStorage.setItem('hr_monitor_style', styleName); } catch(e) {}
+    resizeAllCharts();
+  }
+
+  function resizeAllCharts() {
+    requestAnimationFrame(() => {
+      try { if (rsaChart) rsaChart.resize(); } catch(e) {}
+      try { if (compactChart) compactChart.resize(); } catch(e) {}
+      try { if (mainChart) mainChart.resize(); } catch(e) {}
+      try { if (hrInlineChart) hrInlineChart.resize(); } catch(e) {}
+      try { if (rmssdInlineChart) rmssdInlineChart.resize(); } catch(e) {}
+      try { if (hrLiveTraceChart) hrLiveTraceChart.resize(); } catch(e) {}
+      updateCharts();
+      updateBreathing();
+    });
+  }
+
+  function loadWidgetStyle() {
+    // URL ?style=compact|bold|minimal|neon overrides saved prefs (useful for OBS,
+    // where Browser Source has its own isolated localStorage).
+    const params = new URLSearchParams(location.search);
+    const urlStyle = params.get('style');
+    const valid = ['bold', 'compact', 'minimal', 'neon'];
+    const saved = localStorage.getItem('hr_monitor_style') || 'bold';
+    setWidgetStyle(valid.includes(urlStyle) ? urlStyle : saved);
+  }
+
+  // Widget visibility toggles and layout orientation. Applied as classes on
+  // #overlay-zone and <body>; persisted to localStorage.
+  const widgetPrefs = {
+    showHr: true,
+    showHrv: true,
+    showLiveHr: true,
+    showInlineTrends: true,
+    layout: 'vertical',
+  };
+
+  function applyWidgetPrefs() {
+    const zone = $('overlay-zone');
+    zone.classList.toggle('no-hr', !widgetPrefs.showHr);
+    zone.classList.toggle('no-hrv', !widgetPrefs.showHrv);
+    zone.classList.toggle('no-live-hr', !widgetPrefs.showLiveHr);
+    zone.classList.toggle('no-inline-trends', !widgetPrefs.showInlineTrends);
+    document.body.classList.toggle('layout-horizontal', widgetPrefs.layout === 'horizontal');
+    document.querySelectorAll('.layout-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.layout === widgetPrefs.layout);
+    });
+    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends' };
+    for (const [id, key] of Object.entries(toggles)) {
+      const el = $(id); if (el) el.checked = widgetPrefs[key];
+    }
+    resizeAllCharts();
+  }
+
+  function saveWidgetPrefs() {
+    try { localStorage.setItem('hr_monitor_widget_prefs', JSON.stringify(widgetPrefs)); } catch(e) {}
+  }
+
+  function loadWidgetPrefs() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('hr_monitor_widget_prefs') || 'null');
+      if (saved) Object.assign(widgetPrefs, saved);
+    } catch(e) {}
+    applyWidgetPrefs();
+  }
+
+  function updateBreathing() {
+    if (!rsaChart) return;
+    if (state.breathBuffer.length < 5) {
+      $('breath-rate').textContent = '—';
+      rsaChart.data.datasets[0].data = [];
+      try { rsaChart.update('none'); } catch(e) {}
+      state.breathPhase = null;
+      return;
+    }
+    const times = state.breathBuffer.map(r => r.t);
+    const instHR = state.breathBuffer.map(r => 60000 / r.rr);
+    // Detrend raw iHR for peak-picking only. The chart renders raw iHR so the shape
+    // reflects every beat the strap delivered — no smoothing artifacts.
+    const detrended = [];
+    for (let i = 0; i < instHR.length; i++) {
+      const start = Math.max(0, i - 15);
+      const end = Math.min(instHR.length, i + 15);
+      let sum = 0;
+      for (let j = start; j < end; j++) sum += instHR[j];
+      detrended.push(instHR[i] - sum / (end - start));
+    }
+    const peaks = [];
+    for (let i = 1; i < detrended.length - 1; i++) {
+      if (detrended[i] > detrended[i-1] && detrended[i] > detrended[i+1] && detrended[i] > 0) {
+        peaks.push(times[i]);
+      }
+    }
+    let breathRate = null;
+    if (peaks.length >= 2) {
+      const intervals = [];
+      for (let i = 1; i < peaks.length; i++) intervals.push(peaks[i] - peaks[i-1]);
+      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      if (avgInterval > 0) breathRate = 1 / avgInterval;
+    }
+    const recent = detrended.slice(-3);
+    state.breathPhase = (recent.length >= 2 && recent[recent.length - 1] > recent[recent.length - 2]) ? 'inhale' : 'exhale';
+    // Absolute-time x-axis in seconds. Window anchors at x=0 until session passes 45s,
+    // then scrolls so the newest point is always on the right edge. Early data fills
+    // from the left and grows rightward - no right-to-left rendering.
+    const nowSec = state.startTime ? (Date.now() - state.startTime) / 1000 : times[times.length - 1] * 60;
+    const WINDOW = 45;
+    const xMin = Math.max(0, nowSec - WINDOW);
+    const xMax = Math.max(WINDOW, nowSec);
+    const points = instHR.map((v, i) => ({ x: times[i] * 60, y: v }));
+    rsaChart.data.datasets[0].data = points;
+    rsaChart.options.scales.x.min = xMin;
+    rsaChart.options.scales.x.max = xMax;
+    rsaChart.options.scales.x.reverse = false;
+    try { rsaChart.update('none'); } catch(e) {}
+    if (hrLiveTraceChart) {
+      hrLiveTraceChart.data.datasets[0].data = points;
+      hrLiveTraceChart.options.scales.x.min = xMin;
+      hrLiveTraceChart.options.scales.x.max = xMax;
+      hrLiveTraceChart.options.scales.x.reverse = false;
+      try { hrLiveTraceChart.update('none'); } catch(e) {}
+    }
+    $('breath-rate').textContent = (breathRate != null && breathRate >= 3 && breathRate <= 40) ? Math.round(breathRate) + ' br/min' : '—';
+  }
+
+  function saveColorThresholds() {
+    try { localStorage.setItem('hr_monitor_color_thresholds', JSON.stringify(colorThresholds)); } catch(e) {}
+  }
+
+  function loadColorThresholds() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('hr_monitor_color_thresholds') || 'null');
+      if (saved) {
+        Object.assign(colorThresholds, saved);
+        $('color-low').value = colorThresholds.low;
+        $('color-normal').value = colorThresholds.normal;
+        $('color-elevated').value = colorThresholds.elevated;
+        $('color-high').value = colorThresholds.high;
+      }
+    } catch(e) {}
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initCharts();
+    populateAudioDropdowns();
+    $('connect').addEventListener('click', connect);
+    $('disconnect').addEventListener('click', disconnect);
+    $('autosave-pick').addEventListener('click', pickAutoSaveFolder);
+    $('autosave-clear').addEventListener('click', clearAutoSaveFolder);
+    $('autosave-test').addEventListener('click', manualAutoSaveTest);
+    restoreAutoSaveFolder();
+    $('reset').addEventListener('click', resetSession);
+    $('export').addEventListener('click', exportCSV);
+    $('add-marker').addEventListener('click', addMarker);
+    $('marker-label').addEventListener('keydown', e => { if (e.key === 'Enter') addMarker(); });
+    document.querySelectorAll('.posture-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = btn.dataset.posture;
+        if (p === state.currentPosture) return;
+        state.currentPosture = p;
+        document.querySelectorAll('.posture-btn').forEach(b => b.classList.toggle('active', b.dataset.posture === p));
+        if (state.startTime) {
+          const t = (Date.now() - state.startTime) / 60000;
+          state.postureLog.push({ t, posture: p });
+        }
+      });
+    });
+    $('ask-claude').addEventListener('click', askClaude);
+    $('open-claude-web').addEventListener('click', openInClaudeWeb);
+    $('clear-response').addEventListener('click', () => {
+      const r = $('claude-response');
+      r.className = 'claude-response empty-state';
+      r.textContent = "Claude's response will appear here.";
+    });
+    $('save-key').addEventListener('click', saveApiKey);
+    loadApiKey();
+    loadSectionStates();
+    loadAudioConfig();
+    loadWidgetStyle();
+    loadWidgetPrefs();
+    wireAudioControls();
+    // Style switcher buttons
+    document.querySelectorAll('.style-btn').forEach(btn => {
+      btn.addEventListener('click', () => setWidgetStyle(btn.dataset.style));
+    });
+    // Layout switcher
+    document.querySelectorAll('.layout-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        widgetPrefs.layout = btn.dataset.layout;
+        saveWidgetPrefs();
+        applyWidgetPrefs();
+      });
+    });
+    // Widget visibility toggles
+    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends' };
+    for (const [id, key] of Object.entries(toggleMap)) {
+      const el = $(id);
+      if (el) el.addEventListener('change', () => {
+        widgetPrefs[key] = el.checked;
+        saveWidgetPrefs();
+        applyWidgetPrefs();
+      });
+    }
+    // Wire up section collapse toggles
+    document.querySelectorAll('.section-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const section = header.closest('.section');
+        section.classList.toggle('collapsed');
+        saveSectionStates();
+      });
+    });
+    setInterval(updateSessionTime, 1000);
+    setInterval(updateBreathing, 1000);
+    // Tab handlers
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = tab.dataset.tab;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelector('.tab-panel[data-tabpanel="' + tabName + '"]').classList.add('active');
+      });
+    });
+    // Live audio toggle
+    $('audio-on').addEventListener('change', () => { state.audioOn = $('audio-on').checked; });
+    // Live threshold inputs
+    $('thresh-high').addEventListener('input', () => { thresholds.high = parseInt($('thresh-high').value) || 130; });
+    $('thresh-low').addEventListener('input', () => { thresholds.low = parseInt($('thresh-low').value) || 55; });
+    $('thresh-rmssd').addEventListener('input', () => { thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15; });
+    $('thresh-palp').addEventListener('input', () => { thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5; });
+    // Color threshold inputs
+    ['color-low', 'color-normal', 'color-elevated', 'color-high'].forEach(id => {
+      $(id).addEventListener('input', () => {
+        colorThresholds.low = parseInt($('color-low').value) || 70;
+        colorThresholds.normal = parseInt($('color-normal').value) || 90;
+        colorThresholds.elevated = parseInt($('color-elevated').value) || 110;
+        colorThresholds.high = parseInt($('color-high').value) || 130;
+        saveColorThresholds();
+      });
+    });
+    loadColorThresholds();
+  });
+
+  function saveSectionStates() {
+    const states = {};
+    document.querySelectorAll('.section[data-section]').forEach(s => {
+      states[s.dataset.section] = s.classList.contains('collapsed');
+    });
+    try { localStorage.setItem('hr_monitor_sections', JSON.stringify(states)); } catch(e) {}
+  }
+
+  function loadSectionStates() {
+    try {
+      const states = JSON.parse(localStorage.getItem('hr_monitor_sections') || '{}');
+      Object.entries(states).forEach(([key, collapsed]) => {
+        const section = document.querySelector('.section[data-section="' + key + '"]');
+        if (section && collapsed) section.classList.add('collapsed');
+      });
+    } catch(e) {}
+  }
+})();
+</script>
+</body>
+</html>
