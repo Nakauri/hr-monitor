@@ -1353,6 +1353,7 @@
             <label><input type="checkbox" id="toggle-hrv" checked /> HRV (RMSSD)</label>
             <label><input type="checkbox" id="toggle-live-hr" checked /> Live HR trace</label>
             <label><input type="checkbox" id="toggle-inline-trends" checked /> Inline mini trends</label>
+            <label title="Makes the overlay container hug whatever widgets are visible — useful when you only want a small HR or HRV readout in an OBS corner"><input type="checkbox" id="toggle-shrink-to-fit" /> Shrink to fit (hug content)</label>
           </div>
           <div style="height: 18px;"></div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
@@ -2278,6 +2279,7 @@
     if (!widgetPrefs.showHrv) params.set('hide_hrv', '1');
     if (!widgetPrefs.showLiveHr) params.set('hide_live_hr', '1');
     if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
+    if (widgetPrefs.shrinkToFit) params.set('shrink', '1');
     return origin + 'overlay.html?' + params.toString();
   }
   // Compute the recommended OBS Browser Source dimensions from current settings.
@@ -2286,18 +2288,26 @@
   function computeObsSize() {
     const style = localStorage.getItem('hr_monitor_style') || 'bold';
     const horizontal = widgetPrefs.layout === 'horizontal';
-    // Compact = single combined widget
-    if (style === 'compact') return { w: 380, h: widgetPrefs.showInlineTrends ? 260 : 200 };
+    const shrink = !!widgetPrefs.shrinkToFit;
+    // Compact = single combined widget. When only HRV shown (no HR), compact
+    // becomes a narrow HRV readout — about half the normal width.
+    if (style === 'compact') {
+      if (!widgetPrefs.showHr && !widgetPrefs.showHrv) return { w: 200, h: 80 };
+      if (shrink && !widgetPrefs.showHr) return { w: 220, h: widgetPrefs.showInlineTrends ? 180 : 120 };
+      if (shrink && !widgetPrefs.showHrv) return { w: 280, h: widgetPrefs.showInlineTrends ? 240 : 180 };
+      return { w: 380, h: widgetPrefs.showInlineTrends ? 260 : 200 };
+    }
     // Other styles stack (or row) separate widgets
     let visible = 0;
-    let h = 32; // 16px padding top + bottom
+    let h = shrink ? 16 : 32; // shrink uses 8px padding top+bottom; normal 16px each
     if (widgetPrefs.showHr) { h += 180; visible++; }
     if (widgetPrefs.showHrv) { h += 140; visible++; }
     if (widgetPrefs.showLiveHr) { h += 130; visible++; }
-    if (visible === 0) return { w: 380, h: 100 };
-    if (visible > 1) h += (visible - 1) * 14;
-    if (horizontal) return { w: 380 * visible + (visible - 1) * 14 + 32, h: 210 };
-    return { w: 380, h };
+    if (visible === 0) return { w: 200, h: 80 };
+    if (visible > 1) h += (visible - 1) * (shrink ? 8 : 14);
+    const widgetW = shrink ? 280 : 380;
+    if (horizontal) return { w: widgetW * visible + (visible - 1) * (shrink ? 8 : 14) + (shrink ? 16 : 32), h: shrink ? 180 : 210 };
+    return { w: widgetW, h };
   }
   function updateObsSizeDisplay() {
     const size = computeObsSize();
@@ -3276,6 +3286,7 @@
     showHrv: true,
     showLiveHr: true,
     showInlineTrends: true,
+    shrinkToFit: false,
     layout: 'vertical',
     broadcast: true,
   };
@@ -3286,11 +3297,14 @@
     zone.classList.toggle('no-hrv', !widgetPrefs.showHrv);
     zone.classList.toggle('no-live-hr', !widgetPrefs.showLiveHr);
     zone.classList.toggle('no-inline-trends', !widgetPrefs.showInlineTrends);
+    // shrink-to-fit applies to <body> rather than #overlay-zone so compact mode
+    // (which sets display: grid on children) doesn't override the width: fit-content.
+    document.body.classList.toggle('shrink-to-fit', !!widgetPrefs.shrinkToFit);
     document.body.classList.toggle('layout-horizontal', widgetPrefs.layout === 'horizontal');
     document.querySelectorAll('.layout-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.layout === widgetPrefs.layout);
     });
-    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-broadcast': 'broadcast' };
+    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggles)) {
       const el = $(id); if (el) el.checked = widgetPrefs[key];
     }
@@ -3516,7 +3530,7 @@
       });
     });
     // Widget visibility toggles
-    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-broadcast': 'broadcast' };
+    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggleMap)) {
       const el = $(id);
       if (el) el.addEventListener('change', () => {
