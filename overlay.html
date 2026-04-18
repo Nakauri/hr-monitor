@@ -6,42 +6,69 @@
 <title>HR Monitor · Overlay</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
+  /* This file mirrors the live monitor's overlay zone. Kept in sync manually —
+     any change to widget / style / compact / minimal / neon CSS in hr_monitor.html
+     should be reflected here. One day, extract shared CSS to a separate file. */
   :root {
+    --bg: #0a0a0a;
+    --bg-panel: #0a0a0a;
+    --bg-input: #141414;
+    --border: #1f1f1f;
+    --text: #d8d8d8;
+    --text-dim: #8a8a8a;
+    --text-faint: #5a5a5a;
     --accent-hr: #E89858;
     --accent-rmssd: #5DCAA5;
+    --warn-palp: #D76CBA;
   }
+  * { box-sizing: border-box; }
   html, body {
-    margin: 0;
-    padding: 0;
+    margin: 0; padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: #d8d8d8;
+    color: var(--text);
     -webkit-font-smoothing: antialiased;
     background: transparent;
     overflow: hidden;
   }
-  body.bg-dark { background: #0a0a0a; }
+  body.bg-dark { background: var(--bg); }
 
-  #zone {
+  #overlay-zone {
+    background: transparent;
     padding: 16px;
     display: flex;
     flex-direction: column;
     gap: 14px;
   }
-  body.layout-row #zone { flex-direction: row; }
+  body.bg-dark #overlay-zone { background: #000; }
+  body.layout-horizontal #overlay-zone {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+  }
 
-  .widget {
+  .widget, .breath-widget {
     background: #0a0a0a;
     border: 1px solid #1f1f1f;
     border-radius: 16px;
     padding: 16px 20px;
-    min-width: 200px;
+    position: relative;
+    transition: border-color 0.3s, box-shadow 0.3s;
   }
-  body.bg-transparent .widget { background: rgba(10,10,10,0.85); }
+  body.layout-horizontal .widget,
+  body.layout-horizontal .breath-widget { flex: 1 1 0; min-width: 0; }
+
   .widget-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
+    gap: 8px;
     margin-bottom: 4px;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .widget-label {
+    font-size: 14px; font-weight: 600;
+    letter-spacing: 0.1em; color: #8a8a8a;
+    text-transform: uppercase;
   }
   .heart-icon {
     width: 22px; height: 22px;
@@ -56,30 +83,33 @@
     45% { transform: scale(1.12); }
     60% { transform: scale(1); }
   }
-  .widget-label {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    color: #9a9a9a;
-    text-transform: uppercase;
-  }
+
   .big-number {
     font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
     font-weight: 900;
-    font-size: 96px;
+    font-size: 110px;
     line-height: 0.95;
     letter-spacing: -0.04em;
     font-variant-numeric: tabular-nums;
     transition: color 0.4s;
-    padding: 2px 0 6px;
+    text-align: left;
+    padding: 4px 0 10px;
   }
-  .big-number.medium { font-size: 64px; }
-  .pips {
-    display: flex;
-    gap: 6px;
-    height: 6px;
+  .big-number.medium { font-size: 78px; padding: 2px 0 8px; }
+
+  .number-row { display: flex; align-items: stretch; gap: 14px; }
+  .number-row > .big-number { flex: 0 0 auto; }
+  .inline-trend, .inline-live-trace {
+    flex: 1 1 0; min-width: 0; position: relative; padding: 6px 0 14px;
   }
+  .inline-live-trace { display: none; padding: 6px 0 10px; }
+  .inline-trend canvas, .inline-live-trace canvas {
+    width: 100% !important; height: 100% !important;
+  }
+
+  .pips { display: flex; gap: 6px; height: 6px; }
   .pip { flex: 1; background: #1a1a1a; border-radius: 2px; transition: background 0.4s; }
+
   .stage-low { color: #7DB8E8; }
   .stage-low .pip.active { background: #7DB8E8; }
   .stage-normal { color: #B8D97E; }
@@ -91,149 +121,225 @@
   .stage-critical { color: #E24B4A; }
   .stage-critical .pip.active { background: #E24B4A; }
 
-  .live-widget {
-    background: #0a0a0a;
-    border: 1px solid #1f1f1f;
-    border-radius: 16px;
-    padding: 14px 18px;
-    min-height: 120px;
-  }
-  body.bg-transparent .live-widget { background: rgba(10,10,10,0.85); }
-  .live-header {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: #8a8a8a;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  .live-chart { height: 90px; position: relative; }
-
+  /* Palp chip in HR widget header */
   .palp-chip {
     display: none;
     align-items: center;
-    gap: 6px;
-    padding: 2px 10px;
+    gap: 5px;
+    padding: 2px 8px;
     border-radius: 999px;
     background: rgba(215,108,186,0.14);
-    border: 1px solid #D76CBA;
-    color: #D76CBA;
-    font-size: 12px;
+    border: 1px solid var(--warn-palp);
+    color: var(--warn-palp);
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.08em;
-    margin-left: auto;
   }
   .palp-chip.active { display: inline-flex; }
   .palp-dot {
     width: 6px; height: 6px; border-radius: 50%;
-    background: #D76CBA;
-    box-shadow: 0 0 6px #D76CBA;
+    background: var(--warn-palp);
+    box-shadow: 0 0 6px var(--warn-palp);
   }
 
+  /* Compact mode combined widget */
+  .compact-hrv, .compact-trend { display: none; }
+  #overlay-zone.style-compact .compact-hrv,
+  #overlay-zone.style-compact .compact-trend { display: flex; }
+  #overlay-zone.style-compact .compact-trend { display: block; }
+
+  #overlay-zone.style-compact { padding: 14px; gap: 0; }
+  #overlay-zone.style-compact #rmssd-widget,
+  #overlay-zone.style-compact .breath-widget { display: none; }
+  #overlay-zone.style-compact #hr-widget {
+    padding: 14px 18px;
+    display: grid;
+    grid-template-columns: 1.75fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 4px 16px;
+    align-items: start;
+  }
+  #overlay-zone.style-compact #hr-widget > .widget-header { grid-column: 1 / -1; margin-bottom: 0; }
+  #overlay-zone.style-compact #hr-widget .big-number {
+    grid-column: 1; grid-row: 2;
+    font-size: 64px; padding: 0; line-height: 1;
+  }
+  #overlay-zone.style-compact #hr-pips { grid-column: 1; grid-row: 3; margin-top: 6px; }
+  #overlay-zone.style-compact .compact-hrv {
+    grid-column: 2; grid-row: 2 / 4;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: flex-end;
+    border-left: 1px solid #1f1f1f; padding-left: 16px;
+  }
+  #overlay-zone.style-compact .compact-hrv-label {
+    font-size: 12px; color: #c8c8c8;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    font-weight: 700; margin-bottom: 3px;
+  }
+  #overlay-zone.style-compact .compact-hrv-value {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-weight: 900; font-size: 36px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+    transition: color 0.4s;
+  }
+  #overlay-zone.style-compact .compact-hrv-unit {
+    font-size: 11px; color: #9a9a9a;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    font-weight: 600; margin-top: 4px;
+  }
+  #overlay-zone.style-compact #hr-widget > .compact-trend {
+    grid-column: 1 / -1; grid-row: 4;
+    height: 64px; position: relative;
+    margin-top: 12px; padding: 6px 0 4px;
+    border-top: 1px solid #1f1f1f;
+  }
+  #overlay-zone.style-compact .number-row { grid-column: 1; grid-row: 2; }
+  #overlay-zone.style-compact .inline-trend { display: none; }
+  #overlay-zone.style-compact .inline-live-trace { display: block; }
+
+  /* Minimal */
+  #overlay-zone.style-minimal { padding: 16px; gap: 10px; }
+  #overlay-zone.style-minimal .widget,
+  #overlay-zone.style-minimal .breath-widget { background: transparent; border: none; padding: 8px 12px; }
+  #overlay-zone.style-minimal .widget-label { font-size: 10px; color: #5a5a5a; }
+  #overlay-zone.style-minimal .heart-icon { width: 16px; height: 16px; }
+  #overlay-zone.style-minimal .big-number {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 300; font-size: 80px; letter-spacing: -0.03em;
+  }
+  #overlay-zone.style-minimal .big-number.medium { font-size: 54px; }
+  #overlay-zone.style-minimal .pips { display: none; }
+
+  /* Neon */
+  #overlay-zone.style-neon .widget,
+  #overlay-zone.style-neon .breath-widget {
+    background: #050509; border: 1px solid #222238;
+    box-shadow: inset 0 0 20px rgba(100,150,255,0.04);
+  }
+  #overlay-zone.style-neon .widget-label { color: #6a7aa0; }
+  #overlay-zone.style-neon .big-number {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-weight: 700; font-size: 96px;
+    text-shadow: 0 0 12px currentColor, 0 0 24px currentColor;
+  }
+  #overlay-zone.style-neon .big-number.medium { font-size: 68px; }
+  #overlay-zone.style-neon .heart-icon { filter: drop-shadow(0 0 8px currentColor); }
+  #overlay-zone.style-neon .pip.active { box-shadow: 0 0 8px currentColor; }
+
+  /* Breath widget */
+  .breath-widget { padding: 14px 18px; }
+  .trend-header {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 8px;
+    font-size: 11px; color: #8a8a8a;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .rsa-chart-wrap { position: relative; height: 90px; padding: 4px 0; }
+
+  /* Widget visibility toggles */
+  body.no-hr #hr-widget { display: none; }
+  body.no-hrv #rmssd-widget { display: none; }
+  body.no-live-hr #breath-widget { display: none; }
+  body.no-inline-trends .inline-trend,
+  body.no-inline-trends .inline-live-trace { display: none; }
+  /* Compact overrides from hr_monitor */
+  body.style-compact.no-hrv .compact-hrv,
+  body.style-compact.no-hrv #overlay-zone .compact-hrv { display: none; }
+  body.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
+
+  /* Waiting state when no data has arrived yet */
   #waiting {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    gap: 8px;
-    color: #5a5a5a;
-    font-size: 13px;
-    text-align: center;
-    letter-spacing: 0.08em;
-    pointer-events: none;
-    padding: 16px;
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 8px;
+    color: #5a5a5a; font-size: 13px;
+    text-align: center; letter-spacing: 0.08em;
+    pointer-events: none; padding: 16px;
+    background: inherit;
   }
   #waiting .hint { font-size: 10px; color: #3a3a3a; }
   body.connected #waiting { display: none; }
-
-  /* Widget visibility driven by URL params */
-  body:not(.show-hr) #hr-widget { display: none; }
-  body:not(.show-hrv) #hrv-widget { display: none; }
-  body:not(.show-live) #live-widget { display: none; }
 </style>
 </head>
 <body>
+
 <div id="waiting">
   <div>◌ Waiting for live app…</div>
   <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
 </div>
 
-<div id="zone">
+<div id="overlay-zone" class="style-bold">
   <div class="widget stage-normal" id="hr-widget">
     <div class="widget-header">
-      <svg class="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-      <span class="widget-label">BPM</span>
-      <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
+      <div class="header-left">
+        <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        <span class="widget-label">BPM</span>
+        <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
+      </div>
     </div>
-    <div class="big-number" id="hr-value">—</div>
+    <div class="number-row">
+      <div class="big-number" id="hr-big">—</div>
+      <div class="inline-trend"><canvas id="hr-inline-chart"></canvas></div>
+      <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas></div>
+    </div>
     <div class="pips" id="hr-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
+    <div class="compact-hrv" id="compact-hrv">
+      <div class="compact-hrv-label">HRV</div>
+      <div class="compact-hrv-value" id="compact-hrv-value">—</div>
+      <div class="compact-hrv-unit">ms rmssd</div>
+    </div>
+    <div class="compact-trend"><canvas id="compact-chart"></canvas></div>
   </div>
 
-  <div class="widget stage-normal" id="hrv-widget">
+  <div class="widget stage-normal" id="rmssd-widget">
     <div class="widget-header">
       <span class="widget-label">HRV</span>
-      <span style="font-size: 10px; color: #5a5a5a; letter-spacing: 0.1em; margin-left: auto;">RMSSD MS</span>
+      <span style="font-size: 10px; color: #5a5a5a; letter-spacing: 0.1em;">RMSSD MS</span>
     </div>
-    <div class="big-number medium" id="hrv-value">—</div>
-    <div class="pips" id="hrv-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
+    <div class="number-row">
+      <div class="big-number medium" id="rmssd-big">—</div>
+      <div class="inline-trend"><canvas id="rmssd-inline-chart"></canvas></div>
+    </div>
+    <div class="pips" id="rmssd-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
   </div>
 
-  <div class="live-widget" id="live-widget">
-    <div class="live-header">
+  <div class="breath-widget" id="breath-widget">
+    <div class="trend-header">
       <span>Live HR</span>
       <span id="breath-rate">—</span>
     </div>
-    <div class="live-chart"><canvas id="live-chart"></canvas></div>
+    <div class="rsa-chart-wrap"><canvas id="rsa-chart"></canvas></div>
   </div>
 </div>
 
 <script>
 (function() {
   'use strict';
-
-  // ==== URL params drive layout + widget visibility ====
+  const $ = id => document.getElementById(id);
   const params = new URLSearchParams(location.search);
-  const style = params.get('style') || 'bold';          // visual preset (kept loose here)
-  const layout = params.get('layout') || 'col';          // col | row
-  const bg = params.get('bg') || 'transparent';          // transparent | dark
-  const widgets = (params.get('widgets') || 'hr,hrv,live').split(',').map(s => s.trim());
+  const style = params.get('style') || 'bold';
+  const layout = params.get('layout') || 'vertical';
+  const bg = params.get('bg') || 'transparent';
+  const hideHr = params.get('hide_hr') === '1';
+  const hideHrv = params.get('hide_hrv') === '1';
+  const hideLiveHr = params.get('hide_live_hr') === '1';
+  const hideInline = params.get('hide_inline') === '1';
 
   document.body.classList.add('bg-' + bg);
-  document.body.classList.add('layout-' + layout);
-  if (widgets.includes('hr')) document.body.classList.add('show-hr');
-  if (widgets.includes('hrv')) document.body.classList.add('show-hrv');
-  if (widgets.includes('live')) document.body.classList.add('show-live');
+  document.body.classList.add('style-' + style);
+  if (layout === 'horizontal') document.body.classList.add('layout-horizontal');
+  if (hideHr) document.body.classList.add('no-hr');
+  if (hideHrv) document.body.classList.add('no-hrv');
+  if (hideLiveHr) document.body.classList.add('no-live-hr');
+  if (hideInline) document.body.classList.add('no-inline-trends');
+  const zone = $('overlay-zone');
+  zone.className = '';
+  zone.classList.add('style-' + style);
 
-  // ==== Chart for live HR trace ====
-  let liveChart = null;
-  if (widgets.includes('live')) {
-    const ctx = document.getElementById('live-chart').getContext('2d');
-    liveChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        datasets: [{
-          label: 'iHR', data: [],
-          borderColor: '#B8D97E',
-          backgroundColor: 'rgba(184,217,126,0.12)',
-          tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: {
-          x: { type: 'linear', display: false, min: 0, max: 45 },
-          y: { display: false, grace: '12%' },
-        },
-      },
-    });
-  }
-
-  // ==== Stage helpers ====
+  // Stage helpers
   function applyStage(el, stage) {
     el.classList.remove('stage-low', 'stage-normal', 'stage-elevated', 'stage-high', 'stage-critical');
     el.classList.add(stage || 'stage-normal');
@@ -243,64 +349,116 @@
     container.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('active', i < stageIndex));
   }
 
-  // ==== BroadcastChannel listener ====
-  // Main live-app tab posts messages to this channel on every beat.
-  // Separate-tab overlay window subscribes here. Works across any two tabs/windows
-  // on the same origin in the same browser — no server, no OAuth, no latency.
+  // Charts
+  const baseOpts = {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    scales: { x: { type: 'linear', display: false }, y: { display: false, grace: '8%' } },
+  };
+  const hrInline = new Chart($('hr-inline-chart').getContext('2d'), {
+    type: 'line',
+    data: { datasets: [{ data: [], borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.1)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    options: baseOpts,
+  });
+  const rmssdInline = new Chart($('rmssd-inline-chart').getContext('2d'), {
+    type: 'line',
+    data: { datasets: [{ data: [], borderColor: '#5DCAA5', backgroundColor: 'rgba(93,202,165,0.1)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    options: baseOpts,
+  });
+  const hrLiveTrace = new Chart($('hr-live-trace').getContext('2d'), {
+    type: 'line',
+    data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.12)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    options: { ...baseOpts, scales: { x: { type: 'linear', display: false, min: 0, max: 45 }, y: { display: false, grace: '12%' } } },
+  });
+  const rsa = new Chart($('rsa-chart').getContext('2d'), {
+    type: 'line',
+    data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.1)', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true }] },
+    options: { ...baseOpts, scales: { x: { type: 'linear', display: false, min: 0, max: 45 }, y: { display: false, grace: '12%' } } },
+  });
+  const compactTrend = new Chart($('compact-chart').getContext('2d'), {
+    type: 'line',
+    data: { datasets: [
+      { label: 'HR', data: [], borderColor: '#E89858', backgroundColor: 'transparent', yAxisID: 'y', tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
+      { label: 'RMSSD', data: [], borderColor: '#d8d8d8', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0.4, pointRadius: 0, borderWidth: 1.3, borderDash: [3, 3] },
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: {
+        x: { type: 'linear', display: false },
+        y: { display: false },
+        y1: { position: 'right', display: false },
+      },
+    },
+  });
+
+  // BroadcastChannel listener
   const channel = new BroadcastChannel('hr-monitor-broadcast');
   let lastTick = 0;
-
   channel.addEventListener('message', (ev) => {
     const msg = ev.data;
     if (!msg || msg.type !== 'tick') return;
     lastTick = Date.now();
     document.body.classList.add('connected');
 
-    // HR widget
-    const hrEl = document.getElementById('hr-value');
-    hrEl.textContent = msg.hr != null ? msg.hr : '—';
-    const hrWidget = document.getElementById('hr-widget');
-    applyStage(hrWidget, msg.hrStage);
-    setPips(document.getElementById('hr-pips'), msg.hrStage);
-
-    // HRV widget
-    const hrvEl = document.getElementById('hrv-value');
-    hrvEl.textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
-    const hrvWidget = document.getElementById('hrv-widget');
-    applyStage(hrvWidget, msg.rmssdStage);
-    setPips(document.getElementById('hrv-pips'), msg.rmssdStage);
+    // HR + HRV widgets
+    $('hr-big').textContent = msg.hr != null ? msg.hr : '—';
+    $('rmssd-big').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
+    $('compact-hrv-value').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
+    applyStage($('hr-widget'), msg.hrStage);
+    applyStage($('rmssd-widget'), msg.rmssdStage);
+    setPips($('hr-pips'), msg.hrStage);
+    setPips($('rmssd-pips'), msg.rmssdStage);
 
     // Palp chip
-    const palpChip = document.getElementById('palp-chip');
-    if (msg.palpPerMin != null && msg.palpPerMin > 0) {
+    const palpChip = $('palp-chip');
+    if (msg.palpPerMin > 0) {
       palpChip.classList.add('active');
-      document.getElementById('palp-count').textContent = msg.palpPerMin;
+      $('palp-count').textContent = msg.palpPerMin;
     } else {
       palpChip.classList.remove('active');
     }
 
-    // Breath rate label
-    if (msg.breathRate != null) {
-      document.getElementById('breath-rate').textContent = Math.round(msg.breathRate) + ' br/min';
+    // Breath rate
+    if (msg.breathRate != null) $('breath-rate').textContent = Math.round(msg.breathRate) + ' br/min';
+
+    // Live HR trace (both the big rsa chart and the compact inline live trace)
+    if (msg.livePoints) {
+      rsa.data.datasets[0].data = msg.livePoints;
+      rsa.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
+      rsa.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
+      try { rsa.update('none'); } catch(e) {}
+
+      hrLiveTrace.data.datasets[0].data = msg.livePoints;
+      hrLiveTrace.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
+      hrLiveTrace.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
+      try { hrLiveTrace.update('none'); } catch(e) {}
     }
 
-    // Live HR chart update
-    if (liveChart && msg.livePoints) {
-      liveChart.data.datasets[0].data = msg.livePoints;
-      liveChart.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
-      liveChart.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
-      try { liveChart.update('none'); } catch(e) {}
+    // 3-min inline mini-charts
+    if (msg.trendHR) {
+      hrInline.data.datasets[0].data = msg.trendHR;
+      if (msg.trendWindow) { hrInline.options.scales.x.min = msg.trendWindow[0]; hrInline.options.scales.x.max = msg.trendWindow[1]; }
+      try { hrInline.update('none'); } catch(e) {}
+    }
+    if (msg.trendRmssd) {
+      rmssdInline.data.datasets[0].data = msg.trendRmssd;
+      if (msg.trendWindow) { rmssdInline.options.scales.x.min = msg.trendWindow[0]; rmssdInline.options.scales.x.max = msg.trendWindow[1]; }
+      try { rmssdInline.update('none'); } catch(e) {}
+    }
+    if (msg.trendHR && msg.trendRmssd) {
+      compactTrend.data.datasets[0].data = msg.trendHR;
+      compactTrend.data.datasets[1].data = msg.trendRmssd;
+      try { compactTrend.update('none'); } catch(e) {}
     }
   });
 
-  // Fade to disconnected if we haven't heard in 15 sec
+  // Fade to disconnected if no ticks for 15 sec
   setInterval(() => {
-    if (lastTick > 0 && Date.now() - lastTick > 15000) {
-      document.body.classList.remove('connected');
-    }
+    if (lastTick > 0 && Date.now() - lastTick > 15000) document.body.classList.remove('connected');
   }, 3000);
 
-  // Request current state on open (the live tab sends a snapshot back if it has one)
+  // Ask the live tab to send a snapshot now
   channel.postMessage({ type: 'request-snapshot' });
 })();
 </script>
