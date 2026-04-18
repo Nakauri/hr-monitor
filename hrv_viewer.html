@@ -500,21 +500,24 @@
     border: 1px solid rgba(255,255,255,0.15);
     min-width: 4px;
   }
+  /* Day view hover sync — mousing over EITHER a strip block or a session card
+     highlights BOTH in the same way (lift + green outline). Keeps the visual
+     language consistent no matter which side the user is on. */
   .day-strip-block:hover,
   .day-strip-block.hovered {
     transform: translateY(-2px);
     box-shadow: 0 3px 10px rgba(0,0,0,0.5);
-    z-index: 2;
-  }
-  /* Hover driven by the session card below — subtle outline so it's clearly a
-     reflection of another hover, not a direct hover. */
-  .day-strip-block.hovered {
     outline: 2px solid var(--accent-rmssd);
     outline-offset: 2px;
+    z-index: 2;
   }
+  .session-card:hover,
   .session-card.hovered {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.5);
     border-color: var(--accent-rmssd);
-    box-shadow: 0 0 0 1px var(--accent-rmssd);
+    outline: 1px solid var(--accent-rmssd);
+    outline-offset: -1px;
   }
   .day-hour-axis {
     position: relative;
@@ -1223,6 +1226,12 @@
   }
   #quadrant-thresh-popover .thresh-reset:hover { color: var(--text); border-color: var(--border-strong); }
 
+  /* Aggregate report cards (Daily / Weekly / Monthly) reuse the same .insight-box
+     styles as the session report but live inside view containers that have
+     their own layouts. Give them breathing room so they can't butt up against
+     the calendar / week-grid / session-grid below. */
+  .aggregate-report { margin: 0 0 22px; position: relative; z-index: 2; }
+
   /* Session report — one compact card with a single master caret. Collapsed by
      default so it stays small; expanding shows all sub-sections stacked as
      static labeled blocks (no per-section carets). */
@@ -1329,24 +1338,24 @@
     gap: 4px 8px;
   }
   /* Plain-English explanation of what a section is — sits right under the
-     section title, italic muted so it reads as "subtitle" without competing. */
+     section title. Uses the full card width so long descriptions don't waste
+     a chunk of empty horizontal space when the card is wide. */
   .insight-section .insight-desc {
     color: var(--text-dim);
     font-size: 13.5px;
     font-style: italic;
     line-height: 1.55;
     margin: 0 0 12px;
-    max-width: 72ch;
   }
-  /* Per-item explanations (what does RMSSD mean, what is tachycardia) — similar
-     tone but indented slightly under the line they explain. */
+  /* Per-item explanations (what RMSSD means, what tachycardia is) — full
+     width too; the left border is enough visual indication that they're tied
+     to the line above. */
   .insight-section .insight-what {
     color: var(--text-dim);
     font-size: 13px;
     font-style: italic;
     line-height: 1.55;
     margin-top: 6px;
-    max-width: 68ch;
     padding-left: 14px;
     border-left: 2px solid var(--border);
   }
@@ -3076,7 +3085,7 @@
       <div class="cal-grid">${cells}</div>
     `;
 
-    wireAggregateReport();
+    wireAggregateReport(el);
     wireMetricSwitch(el, () => renderMonth(ymArg));
 
     // Nav handlers
@@ -3212,7 +3221,7 @@
       <div class="sessions-grid">${sessionCardsHtml}</div>
     `;
 
-    wireAggregateReport();
+    wireAggregateReport(el);
     // Wire prev/next. If there's only one date with data, just stay.
     document.getElementById('day-prev').addEventListener('click', () => setHash('day/' + prevDate));
     document.getElementById('day-next').addEventListener('click', () => setHash('day/' + nextDate));
@@ -3341,7 +3350,7 @@
       </div>
     `;
 
-    wireAggregateReport();
+    wireAggregateReport(el);
     wireMetricSwitch(el, () => renderWeek(weekArg));
 
     // Wire nav
@@ -4473,7 +4482,7 @@
         <div class="insight-section-body">${descHtml}<ul>${listHtml}</ul></div>
       </div>`;
     }).join('');
-    return `<div class="insight-box collapsed" id="aggregate-report">
+    return `<div class="insight-box collapsed aggregate-report">
       <div class="insight-master-head">
         ${chevron}
         <span>${escape(scopeLabel)} report</span>
@@ -4483,13 +4492,16 @@
     </div>`;
   }
   // Wire the aggregate report's accordion behaviour (master-caret toggle +
-  // per-section carets). Called after each D/W/M render has injected the HTML.
-  function wireAggregateReport() {
-    const box = document.getElementById('aggregate-report');
+  // per-section carets) for whichever view just rendered it. Scoped to the
+  // passed container so stale reports in hidden views (day left mounted when
+  // the user navigated to week, etc.) don't capture clicks meant for the
+  // currently-visible one.
+  function wireAggregateReport(viewEl) {
+    const scope = viewEl || document;
+    const box = scope.querySelector('.aggregate-report');
     if (!box) return;
-    box.querySelector('.insight-master-head').addEventListener('click', () => {
-      box.classList.toggle('collapsed');
-    });
+    const head = box.querySelector('.insight-master-head');
+    head.addEventListener('click', () => { box.classList.toggle('collapsed'); });
     box.querySelectorAll('.insight-section[data-key]').forEach(sec => {
       const title = sec.querySelector('.insight-section-title');
       title.addEventListener('click', () => sec.classList.toggle('collapsed'));
@@ -5329,13 +5341,17 @@
     const tip = getAnnoTip();
     tip.innerHTML = text;
     tip.style.display = 'block';
-    // On the session view (where `currentChart` is live), anchor to the top of
-    // the chart canvas as a banner so it coexists with Chart.js's own data
-    // tooltip at the cursor. Everywhere else (day strip hover, calendar,
-    // sparkline), anchor to the cursor the usual way.
+    // On the session view (where `currentChart` is live AND the session view
+    // is the one being displayed), anchor to the top of the chart canvas as
+    // a banner so it coexists with Chart.js's own data tooltip at the cursor.
+    // Everywhere else (day strip, calendar, sparkline), anchor at the cursor.
     const chart = currentChart;
     const canvas = chart && chart.canvas;
-    const isSessionChartContext = !!canvas && document.body.contains(canvas);
+    const sessionViewVisible = (() => {
+      const v = document.getElementById('view-session');
+      return v && !v.classList.contains('hidden');
+    })();
+    const isSessionChartContext = !!canvas && document.body.contains(canvas) && sessionViewVisible;
     if (isSessionChartContext) {
       const rect = canvas.getBoundingClientRect();
       tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8, rect.left + rect.width / 2 - tip.offsetWidth / 2)) + 'px';
