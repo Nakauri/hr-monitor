@@ -91,19 +91,27 @@
     transition: color 0.15s, background 0.15s;
   }
   .app-nav-cross:hover { color: var(--accent-hr); background: rgba(232,152,88,0.08); }
-  .watch-live-link {
+  /* Compact Watch-live icon button — only shows when a broadcast key is known. */
+  .watch-live-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     color: var(--accent-rmssd);
     border: 1px solid var(--accent-rmssd);
-    padding: 4px 10px;
+    padding: 5px 9px;
     border-radius: 6px;
-    font-size: 11px;
+    font-size: 10px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    font-weight: 600;
+    font-weight: 700;
     text-decoration: none;
-    margin-left: 8px;
   }
-  .watch-live-link:hover { background: rgba(93,202,165,0.08); }
+  .watch-live-btn:hover { background: rgba(93,202,165,0.08); }
+  .watch-live-btn svg { animation: pulse-live 1.8s ease-in-out infinite; }
+  @keyframes pulse-live {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
   .nav-ext-icon {
     width: 10px;
     height: 10px;
@@ -124,13 +132,54 @@
     transition: color 0.15s, background 0.15s;
   }
   .nav-feedback:hover { color: var(--text-dim); background: var(--bg-input); }
-  .view-nav {
-    display: flex;
-    gap: 2px;
-    flex: 1;
+  /* Compact view dropdown: button shows current view, menu lists the rest.
+     Replaces the five-tab nav that was taking too much horizontal space. */
+  .view-switcher {
+    position: relative;
   }
+  .view-switcher-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 120px;
+    justify-content: space-between;
+  }
+  .view-switcher-btn:hover { border-color: var(--border-strong); }
+  .view-switcher-chev {
+    width: 10px;
+    height: 10px;
+    stroke: currentColor;
+    transition: transform 0.15s;
+  }
+  .view-switcher.open .view-switcher-chev { transform: rotate(-180deg); }
+  .view-nav {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    min-width: 160px;
+    z-index: 50;
+  }
+  .view-switcher.open .view-nav { display: flex; }
   .view-nav a {
-    padding: 6px 14px;
+    padding: 8px 14px;
     font-size: 12px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -1911,33 +1960,30 @@
     .mobile-menu-btn:hover { border-color: var(--border-strong); }
     /* Hide everything but the logo + hamburger until the menu opens. */
     .app-nav-cross,
-    .view-nav,
+    .view-switcher,
     .folder-info,
-    .nav-feedback {
+    .nav-feedback,
+    #watch-live-link {
       display: none;
     }
     /* Menu open: reveal the items as a stacked column below the header. */
     body.menu-open .app-nav-cross,
-    body.menu-open .view-nav,
+    body.menu-open .view-switcher,
     body.menu-open .folder-info,
-    body.menu-open .nav-feedback {
+    body.menu-open .nav-feedback,
+    body.menu-open #watch-live-link.watch-live-btn {
       display: flex;
       width: 100%;
       flex-basis: 100%;
-      flex-wrap: wrap;
       order: 10;
     }
-    body.menu-open .view-nav {
-      flex-direction: column;
-      gap: 4px;
-      background: var(--bg-panel);
-      padding: 8px;
-      border-radius: 8px;
-    }
-    body.menu-open .view-nav a {
-      padding: 10px 12px;
-      font-size: 13px;
-      border-radius: 6px;
+    body.menu-open #watch-live-link[hidden] { display: none; }
+    body.menu-open .view-switcher { flex-basis: 100%; }
+    body.menu-open .view-switcher-btn { width: 100%; }
+    body.menu-open .view-switcher.open .view-nav {
+      position: static;
+      width: 100%;
+      box-shadow: none;
     }
     body.menu-open .app-nav-cross,
     body.menu-open .nav-feedback {
@@ -2076,14 +2122,23 @@
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
   </button>
   <a class="app-nav-cross" href="./hr_monitor.html">← Live monitor</a>
-  <nav class="view-nav">
-    <a data-view="index" href="#/index">Sessions</a>
-    <a data-view="month" href="#/month">Month</a>
-    <a data-view="week" href="#/week">Week</a>
-    <a data-view="day" href="#/day">Day</a>
-    <a data-view="all" href="#/all">All</a>
-    <a id="watch-live-link" class="watch-live-link" href="#" target="_blank" rel="noopener" hidden title="Open the live widget for whatever device is currently recording">Watch live <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
-  </nav>
+  <div class="view-switcher">
+    <button class="view-switcher-btn" id="view-switcher-btn" aria-haspopup="listbox" aria-expanded="false">
+      <span id="view-switcher-label">Sessions</span>
+      <svg class="view-switcher-chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 3l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+    </button>
+    <nav class="view-nav" id="view-nav">
+      <a data-view="index" href="#/index">Sessions</a>
+      <a data-view="month" href="#/month">Month</a>
+      <a data-view="week" href="#/week">Week</a>
+      <a data-view="day" href="#/day">Day</a>
+      <a data-view="all" href="#/all">All</a>
+    </nav>
+  </div>
+  <a id="watch-live-link" class="watch-live-btn" href="#" target="_blank" rel="noopener" hidden title="Watch the live stream from whatever device is currently broadcasting" aria-label="Watch live">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+    <span class="watch-live-label">Live</span>
+  </a>
   <div class="folder-info">
     <div class="fi-group fi-folder">
       <span class="fsa-only">Folder:</span>
@@ -2104,11 +2159,7 @@
     </div>
     <span class="drive-sep">|</span>
     <div class="fi-group fi-autonomic">
-      <label class="autonomic-toggle" title="When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you are tracking dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.">
-        <input type="checkbox" id="autonomic-toggle" checked />
-        <span>Autonomic analysis</span>
-      </label>
-      <button class="icon-btn" id="viewer-settings-btn" title="Viewer settings (HR shift thresholds, etc.)" aria-label="Viewer settings">
+      <button class="icon-btn" id="viewer-settings-btn" title="Viewer settings (autonomic analysis, HR shift thresholds)" aria-label="Viewer settings">
         <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       </button>
       <button class="export-report-btn" id="export-report" title="Print/save this view as a report" style="display:none">Export report</button>
@@ -3368,9 +3419,12 @@
       return;
     }
     const { view, arg } = parseHash();
+    const VIEW_LABELS = { index: 'Sessions', session: 'Session', month: 'Month', week: 'Week', day: 'Day', all: 'All' };
     document.querySelectorAll('.view-nav a').forEach(a => {
       a.classList.toggle('active', a.dataset.view === view || (view === 'session' && false));
     });
+    const vsLabel = document.getElementById('view-switcher-label');
+    if (vsLabel) vsLabel.textContent = VIEW_LABELS[view] || 'Sessions';
     switch (view) {
       case 'index': renderIndex(); showOnly('view-index'); break;
       case 'session': await renderSession(arg); showOnly('view-session'); break;
@@ -4421,6 +4475,12 @@
       pop = document.createElement('div');
       pop.id = 'viewer-settings-popover';
       pop.innerHTML = `
+        <h4>Autonomic analysis</h4>
+        <div class="thresh-blurb">When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you track dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.</div>
+        <label class="autonomic-toggle" style="margin: 2px 0 14px;">
+          <input type="checkbox" id="autonomic-toggle" />
+          <span>Show autonomic pattern callouts</span>
+        </label>
         <h4>HR shift detector</h4>
         <div class="thresh-blurb">A shift is flagged when HR rises or drops by at least this many bpm within the window. POTS clinical criterion is 30 bpm within 10 min of standing; a smaller threshold surfaces more everyday jumps.</div>
         <div class="thresh-row">
@@ -4439,6 +4499,19 @@
         </div>
       `;
       document.body.appendChild(pop);
+      // Bind the autonomic toggle once on first open — it's stateful and
+      // affects rendering immediately on change, so no save button needed.
+      const autTog = pop.querySelector('#autonomic-toggle');
+      if (autTog) {
+        autTog.checked = isAutonomicOn();
+        autTog.addEventListener('change', () => {
+          setAutonomicOn(autTog.checked);
+          applyAutonomicClass();
+          applyQuadrantThresh();
+          invalidateQuadrantCache();
+          route();
+        });
+      }
       document.addEventListener('click', (e) => {
         if (!pop.classList.contains('open')) return;
         if (pop.contains(e.target) || e.target.closest('#viewer-settings-btn')) return;
@@ -4448,6 +4521,10 @@
         if (e.key === 'Escape' && pop.classList.contains('open')) pop.classList.remove('open');
       });
     }
+    // Ensure the autonomic toggle reflects current state each time the popover
+    // opens (in case it was changed from another tab via localStorage).
+    const aut = pop.querySelector('#autonomic-toggle');
+    if (aut) aut.checked = isAutonomicOn();
     const s = getHrShiftSettings();
     const thrEl = pop.querySelector('#hrshift-thresh');
     const winEl = pop.querySelector('#hrshift-win');
@@ -6755,21 +6832,41 @@
         });
       });
     }
+    // View-switcher dropdown (Sessions / Month / Week / Day / All). Single
+    // button on the header replaces the 5-tab nav. Click toggles open, click
+    // on a link closes, click outside closes.
+    const vsBtn = document.getElementById('view-switcher-btn');
+    const vsWrap = vsBtn ? vsBtn.closest('.view-switcher') : null;
+    if (vsBtn && vsWrap) {
+      vsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = vsWrap.classList.toggle('open');
+        vsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.querySelectorAll('.view-nav a').forEach(a => {
+        a.addEventListener('click', () => {
+          vsWrap.classList.remove('open');
+          vsBtn.setAttribute('aria-expanded', 'false');
+        });
+      });
+      document.addEventListener('click', (e) => {
+        if (!vsWrap.classList.contains('open')) return;
+        if (vsWrap.contains(e.target)) return;
+        vsWrap.classList.remove('open');
+        vsBtn.setAttribute('aria-expanded', 'false');
+      });
+    }
     applyAutonomicClass();
-    document.getElementById('autonomic-toggle').addEventListener('change', (e) => {
-      setAutonomicOn(e.target.checked);
-      applyAutonomicClass();
-      // If user hasn't customized thresholds, switch profile defaults to match
-      // the new mode (POTS vs typical adult). Customized values stay put.
-      applyQuadrantThresh();
-      invalidateQuadrantCache();
-      // Re-render the current session (or whatever view is active) so the report,
-      // filters, and chart reflect the new setting without a page reload.
-      route();
-    });
+    // Autonomic toggle lives inside the viewer-settings popover now; change
+    // handler is bound there when the popover is first created.
     document.getElementById('viewer-settings-btn').addEventListener('click', (e) => {
       e.stopPropagation();
-      openViewerSettings(e.currentTarget);
+      const pop = document.getElementById('viewer-settings-popover');
+      if (pop && pop.classList.contains('open')) {
+        pop.classList.remove('open');
+      } else {
+        openViewerSettings(e.currentTarget);
+      }
     });
     document.getElementById('export-report').addEventListener('click', exportReport);
     setupKeyboardNav();
