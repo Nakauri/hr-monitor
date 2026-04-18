@@ -263,41 +263,36 @@
   #waiting .hint { font-size: 10px; color: #3a3a3a; }
   body.connected #waiting { display: none; }
 
-  /* Connection indicator — small dot fixed top-right of the overlay area.
-     Green = live data flowing, amber = no tick in 3+ sec (reconnecting),
-     grey = never received any data yet. Works for any style preset. */
-  #conn-dot {
-    position: fixed;
-    top: 10px;
-    right: 10px;
-    width: 10px;
-    height: 10px;
+  /* Connection indicator — lives inside the HR widget header, on the right.
+     Green = live, amber = reconnecting, grey = never connected.
+     Works for any style preset since the HR widget header exists in all of them. */
+  .conn-dot {
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     background: #3a3a3a;
-    box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
-    z-index: 50;
+    margin-left: auto;
+    flex-shrink: 0;
     transition: background 0.3s, box-shadow 0.3s;
   }
-  body.conn-live #conn-dot {
+  body.conn-live .conn-dot {
     background: #5DCAA5;
-    box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 8px rgba(93,202,165,0.6);
+    box-shadow: 0 0 6px rgba(93,202,165,0.6);
   }
-  body.conn-reconnecting #conn-dot {
+  body.conn-reconnecting .conn-dot {
     background: #F0C75E;
-    box-shadow: 0 0 0 2px rgba(0,0,0,0.4), 0 0 6px rgba(240,199,94,0.5);
+    box-shadow: 0 0 5px rgba(240,199,94,0.5);
     animation: conn-pulse 1.4s ease-in-out infinite;
   }
   @keyframes conn-pulse {
     0%, 100% { opacity: 0.7; }
     50% { opacity: 1; }
   }
-  /* Hide dot if user explicitly wants a "clean" overlay via ?nodot=1 */
-  body.no-dot #conn-dot { display: none; }
+  body.no-dot .conn-dot { display: none; }
 </style>
 </head>
 <body>
 
-<div id="conn-dot" title="Connection status"></div>
 <div id="waiting">
   <div>◌ Waiting for live app…</div>
   <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
@@ -311,6 +306,7 @@
         <span class="widget-label">BPM</span>
         <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
       </div>
+      <span class="conn-dot" id="conn-dot" title="Connection status"></span>
     </div>
     <div class="number-row">
       <div class="big-number" id="hr-big">—</div>
@@ -372,7 +368,15 @@
   zone.className = '';
   zone.classList.add('style-' + style);
 
-  // Stage helpers
+  // Stage helpers — kept in sync with hr_monitor.html. If you update stage colors
+  // there, update them here too (no shared CSS file yet).
+  const STAGE_COLORS = {
+    'stage-low':      '#7DB8E8',
+    'stage-normal':   '#B8D97E',
+    'stage-elevated': '#F0C75E',
+    'stage-high':     '#E89858',
+    'stage-critical': '#E24B4A',
+  };
   function applyStage(el, stage) {
     el.classList.remove('stage-low', 'stage-normal', 'stage-elevated', 'stage-high', 'stage-critical');
     el.classList.add(stage || 'stage-normal');
@@ -380,6 +384,24 @@
   function setPips(container, stage) {
     const stageIndex = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 }[stage] || 2;
     container.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('active', i < stageIndex));
+  }
+  function hexToRgba(hex, alpha) {
+    const n = parseInt(hex.slice(1), 16);
+    return 'rgba(' + ((n >> 16) & 0xff) + ',' + ((n >> 8) & 0xff) + ',' + (n & 0xff) + ',' + alpha + ')';
+  }
+  function tintChart(chart, color) {
+    if (!chart || !color) return;
+    const ds = chart.data.datasets[0];
+    ds.borderColor = color;
+    try {
+      const ctx = chart.ctx;
+      const g = ctx.createLinearGradient(0, 0, 0, chart.height || 100);
+      g.addColorStop(0, hexToRgba(color, 0.3));
+      g.addColorStop(1, hexToRgba(color, 0));
+      ds.backgroundColor = g;
+    } catch (e) {
+      ds.backgroundColor = hexToRgba(color, 0.12);
+    }
   }
 
   // Charts
@@ -452,6 +474,18 @@
     applyStage($('rmssd-widget'), msg.rmssdStage);
     setPips($('hr-pips'), msg.hrStage);
     setPips($('rmssd-pips'), msg.rmssdStage);
+    // Tint charts to match stage — HR-side charts track the HR stage; RMSSD-side
+    // charts track the RMSSD stage. compactChart keeps its HR dataset synced with
+    // HR stage and leaves RMSSD dataset neutral white (matches hr_monitor.html).
+    const hrColor = STAGE_COLORS[msg.hrStage || 'stage-normal'];
+    const rmssdColor = STAGE_COLORS[msg.rmssdStage || 'stage-normal'];
+    tintChart(hrInline, hrColor);
+    tintChart(hrLiveTrace, hrColor);
+    tintChart(rsa, hrColor);
+    tintChart(rmssdInline, rmssdColor);
+    if (compactTrend && compactTrend.data.datasets[0]) {
+      compactTrend.data.datasets[0].borderColor = hrColor;
+    }
 
     const palpChip = $('palp-chip');
     if (msg.palpPerMin > 0) {

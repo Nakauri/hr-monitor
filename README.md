@@ -20,7 +20,11 @@ Two static HTML files, no build step. Opens directly in a modern Chromium browse
 
 ## Privacy
 
-No telemetry. No accounts. No remote storage unless the user explicitly signs in with Google to enable Drive backup. Health data never leaves the user's device unless they opt into cloud sync.
+No accounts. No telemetry. Saved session CSVs stay on the user's device (File System Access). The app is free and open.
+
+**When the OBS broadcast feature is used**, live HR readings transit through a Cloudflare-hosted PartyKit relay so that an OBS Browser Source — which runs in a separate browser from the monitor — can receive them. The relay does not persist data; messages exist only long enough to fan out. Access is gated by a random per-user broadcast key stored in the user's browser (anyone with the key can subscribe to that user's stream, so the key should be treated as a secret).
+
+If the broadcast feature isn't used, no data leaves the user's device at all.
 
 ## Hardware
 
