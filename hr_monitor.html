@@ -2423,6 +2423,42 @@
     publishToRelay(tick);
   }
 
+  // Last-used strap memory. We save just the name (user-friendly label) since
+  // Web Bluetooth device IDs are origin-scoped and already handled by the
+  // permissions layer via getDevices(). Used for the "Reconnect to X" button.
+  const LS_LAST_STRAP = 'hr_monitor_last_strap';
+  function getLastStrap() {
+    try { return JSON.parse(localStorage.getItem(LS_LAST_STRAP) || 'null'); }
+    catch (e) { return null; }
+  }
+  function saveLastStrap(dev) {
+    try {
+      if (dev && dev.name) localStorage.setItem(LS_LAST_STRAP, JSON.stringify({ name: dev.name }));
+    } catch (e) {}
+  }
+  function updateConnectButtonLabel() {
+    const btn = $('connect');
+    if (!btn || btn.disabled) return;
+    const last = getLastStrap();
+    btn.textContent = last && last.name ? 'Reconnect to ' + last.name : 'Connect strap';
+  }
+
+  // Try to find a previously-paired device without prompting. Requires the
+  // user to have chrome://flags/#enable-web-bluetooth-new-permissions-backend
+  // enabled. Returns null if unavailable — caller falls back to requestDevice.
+  async function findPairedDevice(preferredName) {
+    if (!navigator.bluetooth.getDevices) return null;
+    try {
+      const devs = await navigator.bluetooth.getDevices();
+      if (!devs || !devs.length) return null;
+      if (preferredName) {
+        const match = devs.find(d => d.name === preferredName);
+        if (match) return match;
+      }
+      return devs[0];
+    } catch (e) { return null; }
+  }
+
   async function connect() {
     if (!navigator.bluetooth) {
       setStatus('Web Bluetooth not supported. Use Chrome, Edge, or Opera.', 'error');
@@ -2442,12 +2478,39 @@
         setStatus('Auto-save folder permission was denied — sessions will NOT be saved.', 'error');
       }
     }
+    const last = getLastStrap();
     try {
-      setStatus('Requesting device...');
-      device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: [HR_SERVICE, BATTERY_SERVICE],
-      });
+      // Fast path: if the browser remembers a previously-paired device with a
+      // matching name, connect straight to it — no picker UI. Falls back to the
+      // normal requestDevice flow if the permissions-backend flag isn't enabled.
+      if (last && last.name) {
+        const paired = await findPairedDevice(last.name);
+        if (paired) {
+          setStatus('Reconnecting to ' + paired.name + '...');
+          device = paired;
+        }
+      }
+      if (!device) {
+        setStatus('Requesting device...');
+        // If we know the last-used name, filter the picker to just that device —
+        // still shows a chooser (required by spec) but it's a 1-tap confirmation.
+        const requestOpts = last && last.name
+          ? { filters: [{ name: last.name }], optionalServices: [HR_SERVICE, BATTERY_SERVICE] }
+          : { acceptAllDevices: true, optionalServices: [HR_SERVICE, BATTERY_SERVICE] };
+        try {
+          device = await navigator.bluetooth.requestDevice(requestOpts);
+        } catch (e) {
+          // If the filtered request failed (device out of range, renamed, etc.)
+          // fall back to the open picker so the user isn't stuck.
+          if (last && last.name) {
+            setStatus('Couldn\'t find ' + last.name + ' — picking any strap...');
+            device = await navigator.bluetooth.requestDevice({
+              acceptAllDevices: true,
+              optionalServices: [HR_SERVICE, BATTERY_SERVICE],
+            });
+          } else { throw e; }
+        }
+      }
       device.addEventListener('gattserverdisconnected', onDisconnected);
       if (state.startTime === null) state.startTime = Date.now();
       state.lastDataTime = Date.now();
@@ -2455,6 +2518,7 @@
       $('connect').disabled = true;
       $('disconnect').disabled = false;
       await attachConnection();
+      saveLastStrap(device);
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
       startSessionAutoSave();
       acquireWakeLock();
@@ -2462,6 +2526,7 @@
       setStatus('Connection failed: ' + e.message, 'error');
       $('connect').disabled = false;
       $('disconnect').disabled = true;
+      updateConnectButtonLabel();
     }
   }
 
@@ -2556,6 +2621,7 @@
       $('overlay-status').textContent = '• DISCONNECTED';
       $('connect').disabled = false;
       $('disconnect').disabled = true;
+      updateConnectButtonLabel();
     }
   }
 
@@ -2570,6 +2636,7 @@
     $('overlay-status').textContent = '• DISCONNECTED';
     $('connect').disabled = false;
     $('disconnect').disabled = true;
+    updateConnectButtonLabel();
     setStatus('Disconnected by user.');
   }
 
@@ -2900,6 +2967,7 @@
         driveAccessToken = resp.access_token;
         driveTokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
         saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
+        scheduleDriveTokenRefresh();
         driveUpdateUI();
         driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
       },
@@ -2911,9 +2979,25 @@
     if (cached) {
       driveAccessToken = cached.token;
       driveTokenExpiresAt = cached.expiresAt;
+      scheduleDriveTokenRefresh();
       driveUpdateUI();
       driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
     }
+  }
+
+  // Proactive silent refresh. Google access tokens last 1 hour; long streaming
+  // sessions (3-4 hours) outlive one token and would otherwise silently lose
+  // Drive uploads mid-session. Schedule a re-auth call with empty prompt
+  // (silent if user's Google session is still valid) ~10 min before expiry.
+  let driveRefreshTimer = null;
+  function scheduleDriveTokenRefresh() {
+    if (driveRefreshTimer) { clearTimeout(driveRefreshTimer); driveRefreshTimer = null; }
+    if (!driveTokenExpiresAt) return;
+    const msUntilRefresh = Math.max(60_000, driveTokenExpiresAt - Date.now() - 10 * 60_000);
+    driveRefreshTimer = setTimeout(() => {
+      if (!driveTokenClient) return;
+      try { driveTokenClient.requestAccessToken({ prompt: '' }); } catch (e) { console.warn('Silent token refresh failed:', e); }
+    }, msUntilRefresh);
   }
   // Cross-tab sync: if the user signs in/out in one tab, reflect it here.
   window.addEventListener('storage', (e) => {
@@ -2922,6 +3006,7 @@
     if (cached) {
       driveAccessToken = cached.token;
       driveTokenExpiresAt = cached.expiresAt;
+      scheduleDriveTokenRefresh();
       driveUpdateUI();
       if (!driveFolderId) driveEnsureFolder().catch(() => {});
     } else {
@@ -2956,12 +3041,45 @@
   }
 
   async function driveFetch(path, init = {}) {
-    if (!driveAccessToken || Date.now() > driveTokenExpiresAt) {
-      throw new Error('No Drive token — sign in first');
+    if (!driveAccessToken) throw new Error('No Drive token — sign in first');
+    // Proactively refresh if we're already past expiry (browser sleep, etc.)
+    if (Date.now() > driveTokenExpiresAt) {
+      await tryRefreshDriveToken();
+      if (Date.now() > driveTokenExpiresAt) throw new Error('Drive token expired — please sign in again');
     }
     const url = path.startsWith('http') ? path : 'https://www.googleapis.com/drive/v3/' + path;
     const headers = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
-    return fetch(url, Object.assign({}, init, { headers }));
+    const resp = await fetch(url, Object.assign({}, init, { headers }));
+    // Auth failed even though we thought we had a valid token — Google may
+    // have invalidated the session. One retry after a silent refresh.
+    if (resp.status === 401) {
+      const refreshed = await tryRefreshDriveToken();
+      if (refreshed) {
+        const retryHeaders = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
+        return fetch(url, Object.assign({}, init, { headers: retryHeaders }));
+      }
+    }
+    return resp;
+  }
+
+  // Request a new token silently (no popup) and wait for the callback to land.
+  // Returns true on success. Gated by a 5s timeout so a hung refresh doesn't
+  // deadlock auto-save uploads.
+  function tryRefreshDriveToken() {
+    return new Promise((resolve) => {
+      if (!driveTokenClient) { resolve(false); return; }
+      const startExpires = driveTokenExpiresAt;
+      const timeout = setTimeout(() => resolve(false), 5000);
+      const checkInterval = setInterval(() => {
+        if (driveTokenExpiresAt > startExpires) {
+          clearInterval(checkInterval);
+          clearTimeout(timeout);
+          resolve(true);
+        }
+      }, 100);
+      try { driveTokenClient.requestAccessToken({ prompt: '' }); }
+      catch (e) { clearInterval(checkInterval); clearTimeout(timeout); resolve(false); }
+    });
   }
 
   async function driveEnsureFolder() {
@@ -3541,6 +3659,7 @@
       });
     });
     $('connect').addEventListener('click', connect);
+    updateConnectButtonLabel();
     $('disconnect').addEventListener('click', disconnect);
     $('autosave-pick').addEventListener('click', pickAutoSaveFolder);
     $('autosave-clear').addEventListener('click', clearAutoSaveFolder);

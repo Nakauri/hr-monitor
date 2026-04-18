@@ -1912,6 +1912,7 @@
         driveAccessToken = resp.access_token;
         driveTokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
         saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
+        scheduleDriveTokenRefresh();
         driveUpdateUI();
         try {
           await driveEnsureFolder();
@@ -1932,12 +1933,27 @@
     if (cached) {
       driveAccessToken = cached.token;
       driveTokenExpiresAt = cached.expiresAt;
+      scheduleDriveTokenRefresh();
       driveUpdateUI();
       driveEnsureFolder().then(() => {
         driveUpdateUI();
         return driveSync();
       }).catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
     }
+  }
+
+  // Silent refresh — kick off a new access-token request ~10 min before the
+  // current one expires. Long viewer sessions (browsing all-time data for an
+  // hour+) stay authenticated without the user having to re-sign-in.
+  let driveRefreshTimer = null;
+  function scheduleDriveTokenRefresh() {
+    if (driveRefreshTimer) { clearTimeout(driveRefreshTimer); driveRefreshTimer = null; }
+    if (!driveTokenExpiresAt) return;
+    const msUntilRefresh = Math.max(60_000, driveTokenExpiresAt - Date.now() - 10 * 60_000);
+    driveRefreshTimer = setTimeout(() => {
+      if (!driveTokenClient) return;
+      try { driveTokenClient.requestAccessToken({ prompt: '' }); } catch (e) { console.warn('Silent token refresh failed:', e); }
+    }, msUntilRefresh);
   }
   // Cross-tab sync: reflect sign-in / sign-out that happened in another tab.
   window.addEventListener('storage', (e) => {
@@ -1946,6 +1962,7 @@
     if (cached) {
       driveAccessToken = cached.token;
       driveTokenExpiresAt = cached.expiresAt;
+      scheduleDriveTokenRefresh();
       driveUpdateUI();
       if (!driveFolderId) driveEnsureFolder().then(driveUpdateUI).catch(() => {});
     } else {
@@ -1980,12 +1997,41 @@
   }
 
   async function driveFetch(path, init = {}) {
-    if (!driveAccessToken || Date.now() > driveTokenExpiresAt) {
-      throw new Error('No Drive token — sign in first');
+    if (!driveAccessToken) throw new Error('No Drive token — sign in first');
+    if (Date.now() > driveTokenExpiresAt) {
+      await tryRefreshDriveToken();
+      if (Date.now() > driveTokenExpiresAt) throw new Error('Drive token expired — please sign in again');
     }
     const url = path.startsWith('http') ? path : 'https://www.googleapis.com/drive/v3/' + path;
     const headers = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
-    return fetch(url, Object.assign({}, init, { headers }));
+    const resp = await fetch(url, Object.assign({}, init, { headers }));
+    if (resp.status === 401) {
+      const refreshed = await tryRefreshDriveToken();
+      if (refreshed) {
+        const retryHeaders = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
+        return fetch(url, Object.assign({}, init, { headers: retryHeaders }));
+      }
+    }
+    return resp;
+  }
+
+  // Silent refresh — same pattern as hr_monitor.html. Resolves true when the
+  // GSI callback lands with a new token; bounded by a 5 s timeout.
+  function tryRefreshDriveToken() {
+    return new Promise((resolve) => {
+      if (!driveTokenClient) { resolve(false); return; }
+      const startExpires = driveTokenExpiresAt;
+      const timeout = setTimeout(() => resolve(false), 5000);
+      const checkInterval = setInterval(() => {
+        if (driveTokenExpiresAt > startExpires) {
+          clearInterval(checkInterval);
+          clearTimeout(timeout);
+          resolve(true);
+        }
+      }, 100);
+      try { driveTokenClient.requestAccessToken({ prompt: '' }); }
+      catch (e) { clearInterval(checkInterval); clearTimeout(timeout); resolve(false); }
+    });
   }
 
   async function driveEnsureFolder() {
