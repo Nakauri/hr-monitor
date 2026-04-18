@@ -102,16 +102,12 @@
 
   #app {
     display: grid;
-    /* Fixed 380px left column for the overlay preview. Wider would let charts
-       run away (responsive Chart.js with no size cap crashes into broken-image
-       canvases); narrower would cramp the widgets. */
     grid-template-columns: 380px 1fr;
     height: calc(100vh - 52px);
     gap: 0;
   }
 
 
-  /* Left overlay zone - the part you crop to */
   #overlay-zone {
     background: #000;
     padding: 20px;
@@ -126,9 +122,9 @@
      OBS source size (NOT overlay-zone, which includes the "crop zone"
      visual padding + status text + label at the bottom). */
   #overlay-zone { width: 100%; }
-  #overlay-zone .widget-row { width: fit-content; max-width: 360px; }
-  /* Widget row: the compact HR widget lives inside this. Warning-slot-above
-     stays OUTSIDE this container so it always sits above the widget. */
+  /* widget-row hugs content so disabling features shrinks the card.
+     warning-slot-above is a sibling, NOT inside this row. */
+  #overlay-zone .widget-row { width: fit-content; max-width: 500px; }
   #overlay-zone .widget-row {
     display: flex;
     flex-direction: column;
@@ -191,12 +187,7 @@
     color: #8a8a8a;
     text-transform: uppercase;
   }
-  /* Heart icon that pulses with HR */
-  /* Connection indicator — mirrors overlay.html. Green dot when connected,
-     grey pulsing dot + "reconnecting…" text when reconnecting, dim grey when
-     disconnected. Drives off body classes conn-live / conn-reconnecting.
-     Position: absolute so the "reconnecting…" label doesn't push the widget
-     wider when it appears — the label floats into the header's right edge. */
+  /* Absolute so the reconnecting label doesn't push the widget wider. */
   .conn-indicator {
     position: absolute;
     top: 0;
@@ -249,7 +240,6 @@
     45% { transform: scale(1.12); }
     60% { transform: scale(1); }
   }
-  /* Big chunky number */
   .big-number {
     font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
     font-weight: 900;
@@ -265,7 +255,6 @@
     font-size: 78px;
     padding: 2px 0 8px;
   }
-  /* Row that pairs the big number with an inline 3-min trend chart */
   .number-row {
     display: flex;
     align-items: stretch;
@@ -288,13 +277,11 @@
     height: 100% !important;
     max-height: 100% !important;
   }
-  /* Compact mode replaces the 3-min inline trend with the live HR trace.
-     Height is pinned so Chart.js's responsive canvas can't grow past the
-     big-number row and paint into the pips row below. */
+  /* Height pinned so the responsive canvas can't paint into the pips row. */
   .inline-live-trace {
     display: none;
     flex: 1 1 0;
-    min-width: 0;
+    min-width: 140px;
     position: relative;
     padding: 6px 0 10px;
     height: 68px;
@@ -306,52 +293,31 @@
     height: 100% !important;
     max-height: 100% !important;
   }
-  /* In Compact, the .number-row itself becomes a grid cell (col 1, row 2) and its
-     children (number + live trace) sit side-by-side via the flex rules above. */
   #overlay-zone.style-compact .number-row {
     grid-column: 1;
     grid-row: 2;
   }
   #overlay-zone.style-compact .inline-trend { display: none; }
   #overlay-zone.style-compact .inline-live-trace { display: block; }
-  /* User toggle to hide inline trends in Bold/Minimal/Neon */
-  /* "Inline mini trends" only affects the tiny mini-chart next to the big HR number,
-     NOT the live HR trace (that has its own showLiveHr toggle). */
   #overlay-zone.no-inline-trends .inline-trend { display: none; }
-  /* User-toggleable extras: palp chip, warning banner, and conn dot can all be
-     hidden independently so small OBS sources aren't cluttered. */
   #overlay-zone.no-palp-chip .palp-chip,
   #overlay-zone.no-palp-chip #palp-chip { display: none !important; }
   #overlay-zone.no-warning .warning-banner { display: none !important; }
   body.no-conn-dot .conn-indicator,
   #overlay-zone.no-conn-dot .conn-indicator { display: none !important; }
-  /* Widget visibility toggles */
   #overlay-zone.no-hr #hr-widget,
   #overlay-zone.no-hrv #rmssd-widget,
   #overlay-zone.no-live-hr #breath-widget { display: none; }
-  /* Compact-mode overrides. Compact uses a single #hr-widget that contains both
-     HR (left cell) and HRV (right cell). The global `no-hr { display:none }`
-     rule would incorrectly blank the entire widget, so these rules hide just
-     the HR-specific children while keeping HRV visible, and vice versa. When
-     BOTH are hidden the whole widget disappears. High-specificity selectors
-     (two ids + multiple classes) so they beat `.style-compact #hr-widget`. */
-  /* HRV off: hide just the HRV column and promote HR to full width. */
+  /* HR off: hide only the BPM readout chrome. Pips + live trace stay. */
   #overlay-zone.style-compact.no-hrv .compact-hrv { display: none !important; }
-  #overlay-zone.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
-  /* HR off: hide only the BPM readout chrome (label, icon, big number, palp
-     chip). Pips and live trace stay visible — they live in the HR column but
-     still convey useful state; user asked for them to remain. */
+  #overlay-zone.style-compact.no-hrv #hr-widget { grid-template-columns: auto !important; }
   #overlay-zone.style-compact.no-hr #hr-widget .big-number,
   #overlay-zone.style-compact.no-hr #hr-widget .widget-label,
   #overlay-zone.style-compact.no-hr #hr-widget .heart-icon,
   #overlay-zone.style-compact.no-hr #hr-widget .palp-chip { display: none !important; }
-  /* Both HR + HRV off: hide the whole widget. */
   #overlay-zone.style-compact.no-hr.no-hrv #hr-widget { display: none !important; }
-  /* Live HR trace toggle — hides only the inline trace in the HR column. */
   #overlay-zone.style-compact.no-live-hr .inline-live-trace { display: none !important; }
-  /* Mini trends toggle — hides the combined HR+RMSSD trend at the bottom. */
   #overlay-zone.style-compact.no-inline-trends .compact-trend { display: none !important; }
-  /* Pips indicator row at the bottom */
   .pips {
     display: flex;
     gap: 6px;
@@ -363,7 +329,6 @@
     border-radius: 2px;
     transition: background 0.4s;
   }
-  /* HR color stages - matches text color and pip fills */
   .stage-low { color: #7DB8E8; }
   .stage-low .pip.active { background: #7DB8E8; }
   .stage-normal { color: #B8D97E; }
@@ -375,7 +340,6 @@
   .stage-critical { color: #E24B4A; }
   .stage-critical .pip.active { background: #E24B4A; }
 
-  /* Compact-only elements hidden by default */
   .compact-hrv,
   .compact-trend {
     display: none;
@@ -388,12 +352,10 @@
     display: block;
   }
 
-  /* ===== Widget style: COMPACT (single combined widget) ===== */
   #overlay-zone.style-compact {
     padding: 14px;
     gap: 0;
   }
-  /* Hide the separate HRV and trend widgets - combine everything into HR widget */
   #overlay-zone.style-compact #rmssd-widget,
   #overlay-zone.style-compact .trend-widget,
   #overlay-zone.style-compact .breath-widget {
@@ -402,22 +364,15 @@
   #overlay-zone.style-compact #hr-widget {
     padding: 14px 18px;
     display: grid;
-    grid-template-columns: 1.75fr 1fr;
-    /* Fixed row heights so the widget can't grow taller when HRV is toggled
-       off or anything else reflows. Auto rows recalculate based on visible
-       content; explicit heights lock them in. OBS source size stays honest. */
+    grid-template-columns: auto auto;
     grid-template-rows: auto 68px 14px;
-    /* Vertical gap bumped from 4 → 10 so the inline-live-trace canvas can't
-       paint over the pips row below. Horizontal gap stays tight. */
     gap: 10px 16px;
     align-items: start;
   }
-  /* Header spans both columns */
   #overlay-zone.style-compact #hr-widget > .widget-header {
     grid-column: 1 / -1;
     margin-bottom: 0;
   }
-  /* Big HR number on left (descendant selector because .number-row wrapper uses display:contents) */
   #overlay-zone.style-compact #hr-widget .big-number {
     grid-column: 1;
     grid-row: 2;
@@ -430,10 +385,6 @@
     grid-column: 1;
     grid-row: 3;
     margin-top: 6px;
-  }
-  /* HRV mini display - top right */
-  #overlay-zone.style-compact #hr-widget::after {
-    /* placeholder to show where inline HRV goes - actual HRV inserted by JS */
   }
   #overlay-zone.style-compact .compact-hrv {
     grid-column: 2;
@@ -470,7 +421,6 @@
     font-weight: 600;
     margin-top: 4px;
   }
-  /* Mini trend line spans full width at bottom */
   #overlay-zone.style-compact #hr-widget > .compact-trend {
     grid-column: 1 / -1;
     grid-row: 4;
@@ -642,7 +592,6 @@
     50% { opacity: 0.55; }
   }
 
-  /* Right panel - your controls and data */
   #control-panel {
     background: var(--bg);
     padding: 20px 24px;
@@ -1020,8 +969,7 @@
     min-width: 0;
   }
   .obs-size-value:focus { outline: 1px solid var(--accent-rmssd); }
-  /* Locked state: when shrink-to-fit is ON, the size fields are computed by
-     the app. Dim them so the user understands they're read-only right now. */
+  /* Size fields are always computed from the live widget; dim to read-only. */
   .obs-size-value.obs-size-locked {
     color: var(--text-dim);
     background: #0c0c0c;
@@ -1072,7 +1020,6 @@
   .streaming-status.live { color: var(--accent-rmssd); background: rgba(93,202,165,0.12); }
   .streaming-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
 
-  /* Tabs for Settings */
   .tabs {
     display: flex;
     gap: 0;
@@ -1187,13 +1134,11 @@
   }
   .api-key-row input { flex: 1; font-family: monospace; font-size: 11px; }
 
-  /* Scrollbar styling */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: #4a4a50; }
 
-  /* Crop guide overlay */
   .crop-hint {
     position: fixed;
     bottom: 12px;
@@ -2123,17 +2068,12 @@
   };
   WARN_ICONS['status-reconnecting'] = '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>';
 
-  // Unified status banner: conn state takes priority over warnings (if the
-  // strap is reconnecting, showing "HRV crashed" would be misleading — the
-  // sensor has dropped signal, any low-HRV reading is stale). Idle = no
-  // session active → no banner.
+  // Conn state beats warnings: a low-HRV reading during a sensor dropout is stale.
   function showWarningBanner(warnType) {
     state.currentWarn = warnType;
     let effectiveType = null;
     if (state.connState === 'reconnecting') effectiveType = 'status-reconnecting';
     else if (state.connState === 'live') effectiveType = warnType;
-    // Apply to both banner slots (inside-card + above-slot); CSS hides
-    // whichever isn't active based on body.warning-above.
     const banners = [['warning-banner', 'warning-icon', 'warning-text'],
                      ['warning-banner-above', 'warning-icon-above', 'warning-text-above']];
     for (const [bId, iId, tId] of banners) {
@@ -2331,14 +2271,11 @@
       relaySocket = ws;
       ws.addEventListener('open', () => {
         setStreamingStatus('live');
-        // Catch-up broadcast: push current prefs + HR state as soon as the
-        // relay is ready, so OBS immediately reflects whatever toggle state
-        // the user had set while the socket was connecting/reconnecting.
+        // Catch-up tick so OBS sees current state right after (re)connect.
         try { broadcastTick(); } catch (e) {}
       });
       ws.addEventListener('close', () => {
         relaySocket = null;
-        // Only auto-reconnect if broadcast is still enabled; otherwise stay closed.
         if (widgetPrefs.broadcast) {
           setStreamingStatus('offline');
           relayReconnectTimer = setTimeout(connectRelay, 5000);
@@ -2395,16 +2332,10 @@
     if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
     return origin + 'overlay.html?' + params.toString();
   }
-  // computeObsSize is no longer used — dimensions come from the live measured
-  // size of the widget-row via applyOverlaySize's ResizeObserver (see below).
-  // Kept as a thin shim so any old callers still receive a plausible value.
+  // Shim for legacy callers; measurement is driven by ResizeObserver below.
   function computeObsSize() {
     return getEffectiveSize();
   }
-  // Update the Source Size fields in the Stream settings panel. Always show
-  // the LIVE measured size — the widget auto-sizes to content so these are
-  // whatever the widget is rendering at right now. Read-only: the user's
-  // lever is the widget toggles above, not direct pixel editing.
   function updateObsSizeDisplay() {
     const size = getEffectiveSize();
     const text = size.w + ' × ' + size.h;
@@ -2470,8 +2401,6 @@
         showWarning: widgetPrefs.showWarning,
         warningPlacement: widgetPrefs.warningPlacement || 'inside',
       },
-      // The exact (width, height) the monitor is rendering at. OBS applies the
-      // same inline style so its widget box is pixel-identical to the preview.
       widgetSize: getEffectiveSize(),
     };
     overlayChannel.postMessage(tick);
@@ -3589,21 +3518,14 @@
     customHeight: null,
   };
 
-  // Measured rendered size of #overlay-zone. The widget always auto-sizes to
-  // its content; we measure after layout and publish those dimensions so OBS
-  // can copy them. No user-settable width/height — if you want a smaller
-  // widget, toggle features off until it shrinks.
   function getEffectiveSize() {
     return {
       w: Number.isFinite(widgetPrefs.customWidth)  ? widgetPrefs.customWidth  : 380,
       h: Number.isFinite(widgetPrefs.customHeight) ? widgetPrefs.customHeight : 260,
     };
   }
-  // Measure .widget-row (the actual widget content) for the OBS source size.
-  // overlay-zone would include the left column's padding + status / crop
-  // labels that AREN'T part of the OBS source, which is why the old numbers
-  // were wildly inflated (e.g. 1094 for a compact card). Remeasured whenever
-  // prefs change or the widget reflows.
+  // Measure .widget-row, not #overlay-zone: the zone includes the crop-guide
+  // padding and label that aren't part of the OBS source.
   let overlaySizeRaf = null;
   function applyOverlaySize() {
     const row = document.querySelector('#overlay-zone .widget-row');
@@ -3614,16 +3536,12 @@
         const rowRect = row.getBoundingClientRect();
         let w = Math.round(rowRect.width);
         let h = Math.round(rowRect.height);
-        // If the warning-slot-above is visible (placement === 'above' and
-        // warnings are on), its height adds to the OBS source's height. We
-        // measure it separately so the recommended size reflects the full
-        // rendered footprint.
+        // warning-slot-above is a sibling of widget-row; add its height when visible.
         const above = document.getElementById('warning-slot-above');
         if (above && widgetPrefs.warningPlacement === 'above' && widgetPrefs.showWarning) {
           const abRect = above.getBoundingClientRect();
           const abH = Math.round(abRect.height);
           if (abH > 0) h += abH;
-          // Width is max of widget row and above slot (usually equal).
           const abW = Math.round(abRect.width);
           if (abW > w) w = abW;
         }
@@ -3636,10 +3554,6 @@
       });
     });
   }
-  // ResizeObserver keeps the measurement live — if the widget reflows (chart
-  // renders data, font metrics settle, etc), we catch it and update the fields.
-  // Watching both the widget row AND the above-warning slot so either reflow
-  // retriggers the size calc.
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => applyOverlaySize());
     requestAnimationFrame(() => {
@@ -3661,7 +3575,7 @@
     document.body.classList.toggle('warning-above', widgetPrefs.warningPlacement === 'above');
     const wpSel = $('warning-placement');
     if (wpSel) wpSel.value = widgetPrefs.warningPlacement || 'inside';
-    document.body.classList.add('shrink-to-fit'); // always on — only mode now
+    document.body.classList.add('shrink-to-fit');
     const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggles)) {
       const el = $(id); if (el) el.checked = widgetPrefs[key];
