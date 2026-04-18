@@ -253,6 +253,77 @@
   }
   .battery-display.low { color: #E89858; }
   .battery-display.critical { color: #E24B4A; }
+  /* Shown only in Firefox / Safari / iOS (no Web Bluetooth) when the watch
+     iframe is active. Explains why the stats sections below are empty. */
+  .watch-mode-note {
+    background: rgba(93,202,165,0.08);
+    border: 1px solid rgba(93,202,165,0.35);
+    color: var(--text);
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 14px;
+  }
+  body.watch-mode .watch-mode-note { display: block; }
+
+  /* Active broadcasters panel: lists other devices currently publishing to
+     the same relay key. Populated live by presence heartbeats + tick frames. */
+  .broadcasters-panel {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .broadcasters-head {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .broadcasters-list { display: flex; flex-direction: column; gap: 6px; }
+  .broadcaster-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .broadcaster-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-rmssd);
+    box-shadow: 0 0 6px rgba(93,202,165,0.55);
+    flex-shrink: 0;
+    animation: conn-pulse 1.5s ease-in-out infinite;
+  }
+  .broadcaster-label { flex: 1; font-weight: 600; color: var(--text); }
+  .broadcaster-time {
+    color: var(--text-dim);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .broadcaster-takeover {
+    padding: 4px 10px;
+    font-size: 11px;
+    background: transparent;
+    border: 1px solid var(--warn-high);
+    color: var(--warn-high);
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .broadcaster-takeover:hover { background: rgba(232,152,88,0.1); }
+  .broadcasters-hint {
+    font-size: 10px;
+    color: var(--text-faint);
+    line-height: 1.4;
+    margin-top: 8px;
+  }
   .autosave-row {
     display: flex;
     align-items: center;
@@ -809,6 +880,9 @@
     }
     .app-nav-title { font-size: 13px; }
     .app-nav-link { padding: 6px 10px; font-size: 11px; }
+    /* Preview popup + Copy OBS URL are desktop-only concerns (Window Capture,
+       Browser Source URL). Hide on phones to declutter the header. */
+    .app-nav .nav-preview, .app-nav .nav-copy { display: none; }
     #app {
       grid-template-columns: 1fr;
       height: auto;
@@ -859,7 +933,7 @@
   <a class="app-nav-link nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Live%20Monitor&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Live%20Monitor%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
 </nav>
 <div id="browser-compat-banner" hidden>
-  Strap pairing needs Web Bluetooth, which this browser doesn't support. Record from Chrome, Edge, Comet, or Android Chrome. You CAN still watch a live stream here from another device — paste that device's broadcast URL (looks like <code>overlay.html?key=…</code>). To browse past sessions, <a href="./hrv_viewer.html">open the Viewer</a>.
+  Strap pairing needs Web Bluetooth, which this browser doesn't support. Connect and record from a supported browser. You CAN still watch a stream here from another device. <a href="https://caniuse.com/web-bluetooth" target="_blank" rel="noopener">See supported browsers</a>. To browse past sessions, <a href="./hrv_viewer.html">open the Viewer</a>.
 </div>
 <div id="app">
 
@@ -943,6 +1017,10 @@
   <!-- RIGHT: Controls and details -->
   <div id="control-panel">
 
+    <div class="watch-mode-note" hidden>
+      Read-only view. A stream from another device is shown on the left. Full session stats and the scrollable trend are only available on the broadcasting device.
+    </div>
+
     <div class="section" data-section="connection">
       <div class="section-header">
         <div class="section-title">Connection</div>
@@ -970,6 +1048,11 @@
           <span class="autosave-folder" id="drive-status">not signed in</span>
           <button id="drive-signin">Sign in with Google</button>
           <button id="drive-signout" style="display: none;">Sign out</button>
+        </div>
+        <div class="broadcasters-panel" hidden>
+          <div class="broadcasters-head">Active broadcasts</div>
+          <div class="broadcasters-list" id="broadcasters-list"></div>
+          <div class="broadcasters-hint">Other devices currently broadcasting to your relay key. Tap Take over to stop a device and start recording here instead.</div>
         </div>
       </div>
     </div>
@@ -1863,37 +1946,148 @@
     connectRelay();
   }
   function connectRelay() {
-    if (!widgetPrefs.broadcast) return;
+    // Always connect when we have a key so the monitor can SEE other devices'
+    // presence heartbeats even when its own broadcast toggle is off. Publishing
+    // is gated inside publishToRelay on broadcast + navigator.bluetooth.
     const key = getOrCreateBroadcastKey();
+    if (!key) return;
     setStreamingStatus('connecting');
     try {
       const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key);
       relaySocket = ws;
       ws.addEventListener('open', () => {
-        setStreamingStatus('live');
+        const canPublish = !!navigator.bluetooth && widgetPrefs.broadcast;
+        setStreamingStatus(canPublish ? 'live' : 'listening');
         // Catch-up tick so OBS sees current state right after (re)connect.
-        try { broadcastTick(); } catch (e) {}
+        if (canPublish) { try { broadcastTick(); } catch (e) {} }
+      });
+      ws.addEventListener('message', (ev) => {
+        try { handleRelayMessage(JSON.parse(ev.data)); } catch (e) {}
       });
       ws.addEventListener('close', () => {
         relaySocket = null;
-        if (widgetPrefs.broadcast) {
-          setStreamingStatus('offline');
-          relayReconnectTimer = setTimeout(connectRelay, 5000);
-        } else {
-          setStreamingStatus('offline');
-        }
+        setStreamingStatus('offline');
+        relayReconnectTimer = setTimeout(connectRelay, 5000);
       });
       ws.addEventListener('error', () => setStreamingStatus('error'));
     } catch (e) {
       console.error('Relay connect failed:', e);
       setStreamingStatus('error');
-      if (widgetPrefs.broadcast) relayReconnectTimer = setTimeout(connectRelay, 5000);
+      relayReconnectTimer = setTimeout(connectRelay, 5000);
     }
   }
   function publishToRelay(payload) {
-    if (!widgetPrefs.broadcast) return;
+    // Only publishes when the user is actively broadcasting AND this browser
+    // can produce real tick data. Firefox / Safari / idle tabs stay silent.
+    if (!widgetPrefs.broadcast || !navigator.bluetooth) return;
     if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
     try { relaySocket.send(JSON.stringify(payload)); } catch (e) {}
+  }
+  // Sends a control message regardless of broadcast toggle — used for the
+  // Take over button (tell another device to stop) so even a view-only
+  // Firefox can issue control signals.
+  function sendControlMessage(obj) {
+    if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
+    try { relaySocket.send(JSON.stringify(obj)); } catch (e) {}
+  }
+
+  // Track everyone we've heard from in the last ~15 s. Shown in the Connection
+  // section so the user can see who's broadcasting and Take Over if needed.
+  const activeBroadcasters = new Map(); // senderId -> { label, lastAt, startedAt }
+  function handleRelayMessage(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if ((msg.type === 'tick' || msg.type === 'presence') && msg.senderId) {
+      const dev = getDeviceIdentity();
+      // Skip ourselves — no point listing our own device.
+      if (msg.senderId === dev.id) return;
+      activeBroadcasters.set(msg.senderId, {
+        label: msg.senderLabel || 'Unknown',
+        lastAt: Date.now(),
+        startedAt: msg.startedAt || msg.senderBooted || Date.now(),
+      });
+      renderBroadcastersPanel();
+    } else if (msg.type === 'control' && msg.action === 'stop') {
+      const dev = getDeviceIdentity();
+      if (msg.targetId === dev.id) {
+        // Another device just took over. Disconnect and stop publishing.
+        widgetPrefs.broadcast = false;
+        saveWidgetPrefs();
+        if (typeof applyBroadcastPref === 'function') applyBroadcastPref();
+        try { if (typeof disconnect === 'function') disconnect(); } catch (e) {}
+        setStatus('Broadcast stopped: another device took over.', 'warn');
+      }
+    }
+  }
+  // 5-s presence heartbeat while actively recording, so other devices can see
+  // us in their Active broadcasts list even during BLE gaps when no ticks fire.
+  let presenceTimer = null;
+  function startPresenceHeartbeat() {
+    if (presenceTimer) clearInterval(presenceTimer);
+    presenceTimer = setInterval(() => {
+      if (!widgetPrefs.broadcast || !navigator.bluetooth || !state.startTime) return;
+      const dev = getDeviceIdentity();
+      publishToRelay({
+        type: 'presence',
+        senderId: dev.id,
+        senderLabel: dev.label,
+        startedAt: state.startTime,
+      });
+    }, 5000);
+  }
+  // Clean up stale entries so the list doesn't linger after a broadcaster
+  // disappears without a clean close.
+  setInterval(() => {
+    const cutoff = Date.now() - 15000;
+    let dirty = false;
+    for (const [id, s] of activeBroadcasters) {
+      if (s.lastAt < cutoff) { activeBroadcasters.delete(id); dirty = true; }
+    }
+    if (dirty) renderBroadcastersPanel();
+  }, 3000);
+
+  function renderBroadcastersPanel() {
+    const list = document.getElementById('broadcasters-list');
+    if (!list) return;
+    const panel = list.closest('.broadcasters-panel');
+    if (activeBroadcasters.size === 0) {
+      if (panel) panel.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+    if (panel) panel.hidden = false;
+    const now = Date.now();
+    const rows = [];
+    for (const [id, s] of activeBroadcasters) {
+      const ageMin = Math.max(0, Math.round((now - s.startedAt) / 60000));
+      const ageLabel = ageMin < 1 ? 'just now' : (ageMin < 60 ? `${ageMin} min` : `${Math.floor(ageMin / 60)}h ${ageMin % 60}m`);
+      rows.push(`
+        <div class="broadcaster-row" data-id="${id}">
+          <span class="broadcaster-dot"></span>
+          <span class="broadcaster-label">${escapeText(s.label)}</span>
+          <span class="broadcaster-time">${ageLabel}</span>
+          <button class="broadcaster-takeover" data-id="${id}">Take over</button>
+        </div>
+      `);
+    }
+    list.innerHTML = rows.join('');
+    list.querySelectorAll('.broadcaster-takeover').forEach(btn => {
+      btn.addEventListener('click', () => takeOverBroadcaster(btn.dataset.id));
+    });
+  }
+  function takeOverBroadcaster(targetId) {
+    sendControlMessage({ type: 'control', action: 'stop', targetId });
+    activeBroadcasters.delete(targetId);
+    renderBroadcastersPanel();
+    if (navigator.bluetooth && !state.startTime) {
+      // Offer to start a fresh session here. Paired with the same button
+      // click so Web Bluetooth gesture-gating sees this as user-initiated.
+      if (confirm('Stopped the other device. Start recording here now?')) {
+        try { connect(); } catch (e) { console.warn(e); }
+      }
+    }
+  }
+  function escapeText(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
 
   // Slow heartbeat. HR ticks only fire while the strap is streaming — if the
@@ -3353,9 +3547,11 @@
     if (!zone) return;
     // Build the iframe URL with a cache-bust param so a freshly-deployed
     // overlay.html is picked up on next load rather than reusing a cached one.
-    const src = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark&_v=' + Date.now();
+    const src = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark&embed=1&_v=' + Date.now();
     zone.innerHTML = '<iframe class="watch-frame" src="' + src + '" title="Live stream"></iframe>';
     document.body.classList.add('watch-mode');
+    const note = document.querySelector('.watch-mode-note');
+    if (note) note.hidden = false;
   }
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -3398,8 +3594,11 @@
         window.open(url, 'hrmonitor_overlay', 'width=380,height=640,menubar=no,toolbar=no,location=no,status=no');
       });
     }
-    // Relay: open on load, reconnect on key change
+    // Relay: open on load, reconnect on key change. Connects as subscriber
+    // unconditionally so the monitor can see other devices broadcasting; only
+    // publishes when toggle is on + Web Bluetooth exists.
     connectRelay();
+    startPresenceHeartbeat();
     updateStreamingUI();
     // Top-nav "Copy OBS URL" shortcut — copies the same URL as the buried button.
     const navCopy = $('nav-copy-obs-url');
