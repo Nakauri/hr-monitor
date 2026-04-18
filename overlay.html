@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HR Monitor · Overlay</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --accent-hr: #E89858;
+    --accent-rmssd: #5DCAA5;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #d8d8d8;
+    -webkit-font-smoothing: antialiased;
+    background: transparent;
+    overflow: hidden;
+  }
+  body.bg-dark { background: #0a0a0a; }
+
+  #zone {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  body.layout-row #zone { flex-direction: row; }
+
+  .widget {
+    background: #0a0a0a;
+    border: 1px solid #1f1f1f;
+    border-radius: 16px;
+    padding: 16px 20px;
+    min-width: 200px;
+  }
+  body.bg-transparent .widget { background: rgba(10,10,10,0.85); }
+  .widget-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .heart-icon {
+    width: 22px; height: 22px;
+    fill: currentColor;
+    animation: heartbeat 1s ease-in-out infinite;
+    transition: color 0.4s;
+  }
+  @keyframes heartbeat {
+    0%, 100% { transform: scale(1); }
+    15% { transform: scale(1.18); }
+    30% { transform: scale(1); }
+    45% { transform: scale(1.12); }
+    60% { transform: scale(1); }
+  }
+  .widget-label {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #9a9a9a;
+    text-transform: uppercase;
+  }
+  .big-number {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    font-size: 96px;
+    line-height: 0.95;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.4s;
+    padding: 2px 0 6px;
+  }
+  .big-number.medium { font-size: 64px; }
+  .pips {
+    display: flex;
+    gap: 6px;
+    height: 6px;
+  }
+  .pip { flex: 1; background: #1a1a1a; border-radius: 2px; transition: background 0.4s; }
+  .stage-low { color: #7DB8E8; }
+  .stage-low .pip.active { background: #7DB8E8; }
+  .stage-normal { color: #B8D97E; }
+  .stage-normal .pip.active { background: #B8D97E; }
+  .stage-elevated { color: #F0C75E; }
+  .stage-elevated .pip.active { background: #F0C75E; }
+  .stage-high { color: #E89858; }
+  .stage-high .pip.active { background: #E89858; }
+  .stage-critical { color: #E24B4A; }
+  .stage-critical .pip.active { background: #E24B4A; }
+
+  .live-widget {
+    background: #0a0a0a;
+    border: 1px solid #1f1f1f;
+    border-radius: 16px;
+    padding: 14px 18px;
+    min-height: 120px;
+  }
+  body.bg-transparent .live-widget { background: rgba(10,10,10,0.85); }
+  .live-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .live-chart { height: 90px; position: relative; }
+
+  .palp-chip {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: rgba(215,108,186,0.14);
+    border: 1px solid #D76CBA;
+    color: #D76CBA;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin-left: auto;
+  }
+  .palp-chip.active { display: inline-flex; }
+  .palp-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #D76CBA;
+    box-shadow: 0 0 6px #D76CBA;
+  }
+
+  #waiting {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    color: #5a5a5a;
+    font-size: 13px;
+    text-align: center;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+    padding: 16px;
+  }
+  #waiting .hint { font-size: 10px; color: #3a3a3a; }
+  body.connected #waiting { display: none; }
+
+  /* Widget visibility driven by URL params */
+  body:not(.show-hr) #hr-widget { display: none; }
+  body:not(.show-hrv) #hrv-widget { display: none; }
+  body:not(.show-live) #live-widget { display: none; }
+</style>
+</head>
+<body>
+<div id="waiting">
+  <div>◌ Waiting for live app…</div>
+  <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
+</div>
+
+<div id="zone">
+  <div class="widget stage-normal" id="hr-widget">
+    <div class="widget-header">
+      <svg class="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+      <span class="widget-label">BPM</span>
+      <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
+    </div>
+    <div class="big-number" id="hr-value">—</div>
+    <div class="pips" id="hr-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
+  </div>
+
+  <div class="widget stage-normal" id="hrv-widget">
+    <div class="widget-header">
+      <span class="widget-label">HRV</span>
+      <span style="font-size: 10px; color: #5a5a5a; letter-spacing: 0.1em; margin-left: auto;">RMSSD MS</span>
+    </div>
+    <div class="big-number medium" id="hrv-value">—</div>
+    <div class="pips" id="hrv-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
+  </div>
+
+  <div class="live-widget" id="live-widget">
+    <div class="live-header">
+      <span>Live HR</span>
+      <span id="breath-rate">—</span>
+    </div>
+    <div class="live-chart"><canvas id="live-chart"></canvas></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ==== URL params drive layout + widget visibility ====
+  const params = new URLSearchParams(location.search);
+  const style = params.get('style') || 'bold';          // visual preset (kept loose here)
+  const layout = params.get('layout') || 'col';          // col | row
+  const bg = params.get('bg') || 'transparent';          // transparent | dark
+  const widgets = (params.get('widgets') || 'hr,hrv,live').split(',').map(s => s.trim());
+
+  document.body.classList.add('bg-' + bg);
+  document.body.classList.add('layout-' + layout);
+  if (widgets.includes('hr')) document.body.classList.add('show-hr');
+  if (widgets.includes('hrv')) document.body.classList.add('show-hrv');
+  if (widgets.includes('live')) document.body.classList.add('show-live');
+
+  // ==== Chart for live HR trace ====
+  let liveChart = null;
+  if (widgets.includes('live')) {
+    const ctx = document.getElementById('live-chart').getContext('2d');
+    liveChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [{
+          label: 'iHR', data: [],
+          borderColor: '#B8D97E',
+          backgroundColor: 'rgba(184,217,126,0.12)',
+          tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { type: 'linear', display: false, min: 0, max: 45 },
+          y: { display: false, grace: '12%' },
+        },
+      },
+    });
+  }
+
+  // ==== Stage helpers ====
+  function applyStage(el, stage) {
+    el.classList.remove('stage-low', 'stage-normal', 'stage-elevated', 'stage-high', 'stage-critical');
+    el.classList.add(stage || 'stage-normal');
+  }
+  function setPips(container, stage) {
+    const stageIndex = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 }[stage] || 2;
+    container.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('active', i < stageIndex));
+  }
+
+  // ==== BroadcastChannel listener ====
+  // Main live-app tab posts messages to this channel on every beat.
+  // Separate-tab overlay window subscribes here. Works across any two tabs/windows
+  // on the same origin in the same browser — no server, no OAuth, no latency.
+  const channel = new BroadcastChannel('hr-monitor-broadcast');
+  let lastTick = 0;
+
+  channel.addEventListener('message', (ev) => {
+    const msg = ev.data;
+    if (!msg || msg.type !== 'tick') return;
+    lastTick = Date.now();
+    document.body.classList.add('connected');
+
+    // HR widget
+    const hrEl = document.getElementById('hr-value');
+    hrEl.textContent = msg.hr != null ? msg.hr : '—';
+    const hrWidget = document.getElementById('hr-widget');
+    applyStage(hrWidget, msg.hrStage);
+    setPips(document.getElementById('hr-pips'), msg.hrStage);
+
+    // HRV widget
+    const hrvEl = document.getElementById('hrv-value');
+    hrvEl.textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
+    const hrvWidget = document.getElementById('hrv-widget');
+    applyStage(hrvWidget, msg.rmssdStage);
+    setPips(document.getElementById('hrv-pips'), msg.rmssdStage);
+
+    // Palp chip
+    const palpChip = document.getElementById('palp-chip');
+    if (msg.palpPerMin != null && msg.palpPerMin > 0) {
+      palpChip.classList.add('active');
+      document.getElementById('palp-count').textContent = msg.palpPerMin;
+    } else {
+      palpChip.classList.remove('active');
+    }
+
+    // Breath rate label
+    if (msg.breathRate != null) {
+      document.getElementById('breath-rate').textContent = Math.round(msg.breathRate) + ' br/min';
+    }
+
+    // Live HR chart update
+    if (liveChart && msg.livePoints) {
+      liveChart.data.datasets[0].data = msg.livePoints;
+      liveChart.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
+      liveChart.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
+      try { liveChart.update('none'); } catch(e) {}
+    }
+  });
+
+  // Fade to disconnected if we haven't heard in 15 sec
+  setInterval(() => {
+    if (lastTick > 0 && Date.now() - lastTick > 15000) {
+      document.body.classList.remove('connected');
+    }
+  }, 3000);
+
+  // Request current state on open (the live tab sends a snapshot back if it has one)
+  channel.postMessage({ type: 'request-snapshot' });
+})();
+</script>
+</body>
+</html>

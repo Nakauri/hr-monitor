@@ -78,6 +78,18 @@
     color: var(--text);
   }
   .app-title .accent { color: var(--accent-hr); }
+  .app-nav-cross {
+    padding: 5px 11px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    text-decoration: none;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .app-nav-cross:hover { color: var(--accent-hr); background: rgba(232,152,88,0.08); }
   .view-nav {
     display: flex;
     gap: 2px;
@@ -1340,7 +1352,8 @@
 <body>
 
 <header class="app-bar">
-  <a class="app-title" href="#/index" style="text-decoration: none;">HR Monitor <span class="accent">·</span> Viewer</a>
+  <a class="app-title" href="./index.html" style="text-decoration: none;">HR Monitor <span class="accent">·</span> Viewer</a>
+  <a class="app-nav-cross" href="./hr_monitor.html">← Live monitor</a>
   <nav class="view-nav">
     <a data-view="index" href="#/index">Sessions</a>
     <a data-view="month" href="#/month">Month</a>
