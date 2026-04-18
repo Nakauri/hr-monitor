@@ -986,6 +986,21 @@
   }
   .audio-grid .audio-upload:hover { color: var(--text); border-color: var(--text-dim); border-style: solid; }
   .audio-grid .audio-upload.has-file { border-style: solid; border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
+  /* Custom audio upload pair: "Custom" button + small × remove button. The
+     remove button only appears when a custom file is loaded (toggled in JS). */
+  .audio-upload-pair { display: inline-flex; gap: 4px; align-items: stretch; }
+  .audio-remove {
+    padding: 0 8px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    color: var(--text-faint);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+  }
+  .audio-remove:hover { color: var(--warn-high); border-color: var(--warn-high); border-style: solid; }
   .audio-grid label {
     color: var(--text-dim);
   }
@@ -1597,22 +1612,22 @@
             <label>High HR alert</label>
             <select id="audio-high"></select>
             <button class="audio-test" data-type="high">Test</button>
-            <button class="audio-upload" data-type="high" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
+            <span class="audio-upload-pair"><button class="audio-upload" data-type="high" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="high" title="Remove custom audio and revert to the preset">×</button></span>
 
             <label>Low HR alert</label>
             <select id="audio-low"></select>
             <button class="audio-test" data-type="low">Test</button>
-            <button class="audio-upload" data-type="low" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
+            <span class="audio-upload-pair"><button class="audio-upload" data-type="low" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="low" title="Remove custom audio and revert to the preset">×</button></span>
 
             <label>HRV crash</label>
             <select id="audio-crash"></select>
             <button class="audio-test" data-type="crash">Test</button>
-            <button class="audio-upload" data-type="crash" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
+            <span class="audio-upload-pair"><button class="audio-upload" data-type="crash" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="crash" title="Remove custom audio and revert to the preset">×</button></span>
 
             <label>Palpitations</label>
             <select id="audio-palp"></select>
             <button class="audio-test" data-type="palp">Test</button>
-            <button class="audio-upload" data-type="palp" title="Upload a custom audio file (mp3, wav, ogg)">Upload</button>
+            <span class="audio-upload-pair"><button class="audio-upload" data-type="palp" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="palp" title="Remove custom audio and revert to the preset">×</button></span>
 
             <label>Volume</label>
             <input type="range" id="audio-volume" min="0" max="100" value="15" />
@@ -2049,13 +2064,43 @@
       if (entry) {
         btn.classList.add('has-file');
         btn.textContent = '✓ ' + (entry.name.length > 14 ? entry.name.slice(0, 12) + '…' : entry.name);
-        btn.title = 'Click to replace. Right-click to remove and revert to preset.';
+        btn.title = 'Click to replace the uploaded custom audio.';
       } else {
         btn.classList.remove('has-file');
-        btn.textContent = 'Upload';
+        btn.textContent = 'Custom';
         btn.title = 'Upload a custom audio file (mp3, wav, ogg)';
       }
     });
+    // Remove (×) buttons: only visible when a custom file is present for that type.
+    document.querySelectorAll('.audio-remove').forEach(btn => {
+      const t = btn.dataset.type;
+      btn.style.display = all[t] ? 'inline-flex' : 'none';
+    });
+    // Dropdowns: reflect whatever is actually playing. Ensure a "Custom" option
+    // exists and is selected for any type that has an uploaded file.
+    const TYPES = ['high', 'low', 'crash', 'palp'];
+    for (const t of TYPES) {
+      const sel = $('audio-' + t);
+      if (!sel) continue;
+      let customOpt = sel.querySelector('option[value="custom"]');
+      if (all[t]) {
+        if (!customOpt) {
+          customOpt = document.createElement('option');
+          customOpt.value = 'custom';
+          sel.insertBefore(customOpt, sel.firstChild);
+        }
+        customOpt.textContent = 'Custom · ' + (all[t].name.length > 20 ? all[t].name.slice(0, 18) + '…' : all[t].name);
+        sel.value = 'custom';
+        audioConfig[t] = 'custom';
+      } else if (customOpt) {
+        customOpt.remove();
+        if (audioConfig[t] === 'custom') {
+          audioConfig[t] = 'double-beep'; // fall back to a preset
+          sel.value = audioConfig[t];
+        }
+      }
+    }
+    saveAudioConfig();
   }
   function playCustomAudio(type, volume) {
     const entry = getCustomAudioFor(type);
@@ -3602,7 +3647,18 @@
         playSound(presetKey, audioConfig.volume);
       });
     });
-    // Upload custom audio per alert. Left-click uploads; right-click clears.
+    // Custom audio upload + remove buttons. Click "Custom" opens the file
+     // picker; click × removes the custom file and reverts to the preset.
+    document.querySelectorAll('.audio-remove').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const type = btn.dataset.type;
+        if (getCustomAudioFor(type)) {
+          clearCustomAudioFor(type);
+          updateUploadButtonUI();
+        }
+      });
+    });
     document.querySelectorAll('.audio-upload').forEach(btn => {
       btn.addEventListener('click', () => {
         const type = btn.dataset.type;
