@@ -2001,7 +2001,7 @@
     <span>Drive:</span>
     <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
     <button id="drive-signin">Sign in</button>
-    <button class="icon-btn" id="drive-sync" style="display:none" title="Sync sessions from Drive" aria-label="Sync from Drive">
+    <button class="icon-btn" id="drive-sync" style="display:none" title="Sync with Drive (pulls new files down, pushes local files up, mirrors Drive-only files back to the folder)" aria-label="Sync with Drive">
       <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button class="icon-btn" id="drive-signout" style="display:none" title="Sign out of Drive" aria-label="Sign out">
@@ -2163,6 +2163,19 @@
     } catch (e) { return false; }
   }
 
+  // Needed to mirror Drive-only files into the local folder during two-way
+  // sync. Requesting readwrite re-prompts the user if they'd only granted
+  // read; on denial the sync falls back to Drive → IDB only.
+  async function ensureWritePermission() {
+    if (!dirHandle) return false;
+    try {
+      const perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') return true;
+      const req = await dirHandle.requestPermission({ mode: 'readwrite' });
+      return req === 'granted';
+    } catch (e) { return false; }
+  }
+
   function updateFolderUI() {
     const el = document.getElementById('folder-name');
     el.textContent = dirHandle ? (dirHandle.name || 'selected') : '—';
@@ -2246,7 +2259,7 @@
   function setDriveProgress(text) {
     const btn = document.getElementById('drive-sync');
     if (!btn) return;
-    btn.title = text ? ('Sync from Drive. ' + text) : 'Sync sessions from Drive';
+    btn.title = text ? ('Sync with Drive. ' + text) : 'Sync with Drive';
     const isBusy = !!text && /\//.test(text); // "3/10" pattern = actively working
     btn.classList.toggle('spinning', isBusy);
   }
@@ -2436,15 +2449,45 @@
     return await resp.text();
   }
 
-  // Pull down any Drive files whose content isn't cached locally (or whose
-  // modifiedTime has changed since the last cache). Safe to call repeatedly.
+  // Upload a new file (not an update) to the Drive folder. Returns the
+  // server's { id, modifiedTime } so the meta cache can record it without
+  // a follow-up list call.
+  async function driveUploadFile(name, text) {
+    if (!driveAccessToken || !driveFolderId) throw new Error('Drive not signed in');
+    const metadata = { name, parents: [driveFolderId], mimeType: 'text/csv' };
+    const boundary = '-------hrv-viewer-' + Math.random().toString(36).slice(2);
+    const body =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+      `--${boundary}\r\nContent-Type: text/csv\r\n\r\n${text}\r\n--${boundary}--`;
+    const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + driveAccessToken,
+        'Content-Type': 'multipart/related; boundary=' + boundary,
+      },
+      body,
+    });
+    if (!resp.ok) throw new Error('Drive upload ' + resp.status);
+    return await resp.json();
+  }
+
+  // Two-way sync. Reconciles Drive + local folder in both directions:
+  //   Drive → IDB: pull new/updated Drive files into the in-browser cache
+  //   Local → Drive: upload any local files that aren't already in Drive
+  //   Drive → local folder: mirror Drive-only files back into the folder so
+  //                         desktop stays authoritative after phone uploads
+  // The folder-write step only runs if the user has granted readwrite
+  // permission; on denial the first two phases still happen.
   async function driveSync() {
-    if (!driveAccessToken || !driveFolderId) return { added: 0, updated: 0, skipped: 0 };
-    setDriveProgress('listing…');
-    const files = await driveListSessions();
-    let added = 0, updated = 0, skipped = 0, done = 0;
-    const total = files.size;
-    for (const [name, meta] of files) {
+    if (!driveAccessToken || !driveFolderId) {
+      return { pulled: 0, uploaded: 0, written: 0, skipped: 0 };
+    }
+    setDriveProgress('syncing…');
+    const driveFiles = await driveListSessions();
+
+    // Phase 1: Drive → IDB
+    let pulled = 0, skipped = 0, done = 0;
+    for (const [name, meta] of driveFiles) {
       const cachedMeta = driveMetaCache[name];
       const fresh = cachedMeta && cachedMeta.id === meta.id && cachedMeta.modifiedTime === meta.modifiedTime;
       let inStore = false;
@@ -2459,24 +2502,88 @@
           const text = await driveDownloadSession(meta.id);
           await idbSet(name, text, IDB_DRIVE_STORE);
           driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime };
-          // Force re-parse on next loadSessions by invalidating cached summary.
           if (sessionsIndex[name]) delete sessionsIndex[name];
-          if (cachedMeta) updated++; else added++;
-        } catch (e) {
-          console.warn('Drive download failed for', name, e);
-        }
+          pulled++;
+        } catch (e) { console.warn('Drive download failed for', name, e); }
       }
       done++;
-      setDriveProgress(`${done}/${total}`);
+      if (driveFiles.size > 0) setDriveProgress(`pulling ${done}/${driveFiles.size}`);
     }
+
+    // Phase 2: Local → Drive. Enumerate the folder; upload any file Drive
+    // doesn't know about.
+    let uploaded = 0;
+    const localNames = new Set();
+    if (dirHandle) {
+      const canRead = await ensureReadPermission();
+      if (canRead) {
+        try {
+          for await (const entry of dirHandle.values()) {
+            if (entry.kind === 'file' && /^hrv_session_.*\.csv$/.test(entry.name)) {
+              localNames.add(entry.name);
+            }
+          }
+        } catch (e) { console.warn('folder enumerate failed', e); }
+        const toUpload = [];
+        for (const name of localNames) if (!driveFiles.has(name)) toUpload.push(name);
+        for (let i = 0; i < toUpload.length; i++) {
+          const name = toUpload[i];
+          setDriveProgress(`uploading ${i + 1}/${toUpload.length}`);
+          try {
+            const fh = await dirHandle.getFileHandle(name);
+            const file = await fh.getFile();
+            const text = await file.text();
+            const meta = await driveUploadFile(name, text);
+            driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime };
+            await idbSet(name, text, IDB_DRIVE_STORE);
+            uploaded++;
+          } catch (e) { console.warn('upload failed for', name, e); }
+        }
+      }
+    }
+
+    // Phase 3: Drive → local folder. Only if the user lets us write; if they
+    // deny we still have the files in IDB so the viewer renders them.
+    let written = 0;
+    if (dirHandle) {
+      const driveOnly = [];
+      for (const name of driveFiles.keys()) {
+        if (!localNames.has(name)) driveOnly.push(name);
+      }
+      if (driveOnly.length > 0) {
+        const canWrite = await ensureWritePermission();
+        if (canWrite) {
+          for (let i = 0; i < driveOnly.length; i++) {
+            const name = driveOnly[i];
+            setDriveProgress(`writing to folder ${i + 1}/${driveOnly.length}`);
+            try {
+              const text = await idbGet(name, IDB_DRIVE_STORE);
+              if (typeof text !== 'string') continue;
+              const fh = await dirHandle.getFileHandle(name, { create: true });
+              const w = await fh.createWritable();
+              await w.write(text);
+              await w.close();
+              written++;
+            } catch (e) { console.warn('write to folder failed:', name, e); }
+          }
+        }
+      }
+    }
+
     drivePersistMeta();
-    setDriveProgress(total === 0 ? 'no sessions in Drive' : `${added} new · ${updated} updated · ${skipped} already cached`);
-    if (added + updated > 0) {
+    const parts = [];
+    if (pulled) parts.push(`${pulled} pulled`);
+    if (uploaded) parts.push(`${uploaded} uploaded`);
+    if (written) parts.push(`${written} written`);
+    if (!parts.length) parts.push(skipped === 0 ? 'nothing to sync' : 'in sync');
+    setDriveProgress(parts.join(' · '));
+
+    if (pulled + uploaded + written > 0) {
       persistIndex();
       await loadSessions();
       route();
     }
-    return { added, updated, skipped };
+    return { pulled, uploaded, written, skipped };
   }
 
   // Unified session-text reader. Prefers the local folder (if permission
@@ -4316,10 +4423,10 @@
           <span class="summary-stat-label">Warnings</span>
           <span class="summary-stat-value ${s.warnCount ? 'warn' : ''}">${s.warnCount}</span>
         </div>
-        <div class="summary-stat">
-          <span class="summary-stat-label">BLE gaps</span>
-          <span class="summary-stat-value" style="color: ${s.connGaps.length ? 'var(--text-dim)' : 'var(--text-faint)'};">${s.connGaps.length}</span>
-          <span class="summary-stat-unit">${s.gapTotalMin > 0 ? formatDuration(s.gapTotalMin) : '—'}</span>
+        <div class="summary-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable.">
+          <span class="summary-stat-label">Uptime</span>
+          <span class="summary-stat-value" style="color: ${uptimeColor(computeUptimePct(s))};">${computeUptimePct(s) != null ? computeUptimePct(s) : '—'}${computeUptimePct(s) != null ? '<span style="font-size: 14px;">%</span>' : ''}</span>
+          <span class="summary-stat-unit">${s.connGaps.length ? formatDuration(s.gapTotalMin) + ' across ' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
         </div>
         <div class="summary-stat">
           <span class="summary-stat-label">Tachy %</span>
