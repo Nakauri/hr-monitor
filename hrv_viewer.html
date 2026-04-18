@@ -90,6 +90,18 @@
     transition: color 0.15s, background 0.15s;
   }
   .app-nav-cross:hover { color: var(--accent-hr); background: rgba(232,152,88,0.08); }
+  .nav-feedback {
+    color: var(--text-faint);
+    text-decoration: none;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .nav-feedback:hover { color: var(--text-dim); background: var(--bg-input); }
   .view-nav {
     display: flex;
     gap: 2px;
@@ -1391,6 +1403,7 @@
     <span id="folder-name">—</span>
     <button id="folder-pick">Change...</button>
     <button class="export-report-btn" id="export-report" title="Print/save this view as a report">Export report</button>
+    <a class="nav-feedback" href="https://github.com/nakauri/hr-monitor/issues/new?title=Feedback%3A+&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A+Viewer%0A" target="_blank" rel="noopener" title="Open a new GitHub issue — requires a free GitHub account">Send feedback</a>
   </div>
 </header>
 
