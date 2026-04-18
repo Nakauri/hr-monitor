@@ -73,8 +73,11 @@
   }
   .app-nav-link:hover { color: var(--text); background: #141414; }
   .app-nav-link.active { color: var(--text); background: #141414; }
-  #nav-open-overlay { margin-left: auto; color: var(--accent-rmssd); }
-  #nav-open-overlay:hover { color: var(--accent-rmssd); background: rgba(93,202,165,0.08); }
+  .nav-preview { margin-left: auto; color: var(--text-dim); }
+  .nav-preview:hover { color: var(--text); background: #141414; }
+  .nav-copy { color: var(--accent-rmssd); border: 1px solid var(--accent-rmssd); }
+  .nav-copy:hover { color: #0a1a14; background: var(--accent-rmssd); }
+  .nav-copy.copied { background: var(--accent-rmssd); color: #0a1a14; }
 
   #app {
     display: grid;
@@ -879,6 +882,45 @@
     width: auto;
     accent-color: var(--accent-blue);
   }
+  .streaming-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    flex-wrap: wrap;
+  }
+  .streaming-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+    min-width: 96px;
+  }
+  .streaming-key {
+    font-family: 'Consolas', 'Monaco', monospace;
+    background: var(--bg-input);
+    padding: 4px 10px;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 11px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .streaming-status {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 10px;
+    border-radius: 999px;
+    color: var(--text-faint);
+    background: var(--bg-input);
+  }
+  .streaming-status.connecting { color: var(--warn-crash); background: rgba(186,117,23,0.14); }
+  .streaming-status.live { color: var(--accent-rmssd); background: rgba(93,202,165,0.12); }
+  .streaming-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
 
   /* Tabs for Settings */
   .tabs {
@@ -1075,7 +1117,8 @@
   <a class="app-nav-title" href="./index.html">HR Monitor <span style="color: var(--accent-hr);">·</span></a>
   <a class="app-nav-link active" href="./hr_monitor.html">Live monitor</a>
   <a class="app-nav-link" href="./hrv_viewer.html">Viewer</a>
-  <a class="app-nav-link" id="nav-open-overlay" href="#">Open OBS overlay</a>
+  <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
+  <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
 </nav>
 <div id="app">
 
@@ -1207,6 +1250,24 @@
             <label><input type="checkbox" id="toggle-hrv" checked /> HRV (RMSSD)</label>
             <label><input type="checkbox" id="toggle-live-hr" checked /> Live HR trace</label>
             <label><input type="checkbox" id="toggle-inline-trends" checked /> Inline mini trends</label>
+          </div>
+          <div style="height: 18px;"></div>
+          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
+          <div class="streaming-row">
+            <span class="streaming-label">Relay status:</span>
+            <span class="streaming-status" id="relay-status">offline</span>
+          </div>
+          <div class="streaming-row" style="margin-top: 8px;">
+            <span class="streaming-label">Broadcast key:</span>
+            <code class="streaming-key" id="broadcast-key-display">—</code>
+            <button id="regenerate-key" title="Create a new broadcast key (invalidates the old URL)">Regenerate</button>
+          </div>
+          <div class="streaming-row" style="margin-top: 8px;">
+            <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
+          </div>
+          <div style="font-size: 11px; color: var(--text-faint); margin-top: 8px; line-height: 1.4;">
+            Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
+            Works from any device, any browser. Your broadcast key keeps the stream private.
           </div>
         </div>
 
@@ -1906,14 +1967,93 @@
     }
   }
 
-  // Broadcast channel — any OBS overlay window opened from this app picks up HR
-  // data live via BroadcastChannel. Same browser, same origin, no server.
+  // Broadcast channel (same-browser popup) + WebSocket relay (cross-browser, e.g. OBS
+  // Browser Source). Publisher writes to both so every transport works.
   const overlayChannel = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('hr-monitor-broadcast') : null;
   if (overlayChannel) {
     overlayChannel.addEventListener('message', (ev) => {
-      // When an overlay opens it asks for a snapshot — reply with the current tick.
       if (ev.data && ev.data.type === 'request-snapshot' && state.currentHR != null) broadcastTick();
     });
+  }
+
+  // ===== WebSocket relay =====
+  // PartyKit / Cloudflare Workers. Each user gets a unique broadcast key; publisher
+  // and subscriber (the OBS Browser Source) connect to the same room by key. Zero
+  // server-side persistence — messages just fan out and vanish.
+  const RELAY_HOST = 'wss://hr-relay.nakauri.partykit.dev';
+  function getOrCreateBroadcastKey() {
+    let k = localStorage.getItem('hr_monitor_broadcast_key');
+    if (!k) {
+      // 16 hex chars ≈ 64 bits of entropy; collision risk negligible, URL stays short.
+      const bytes = new Uint8Array(8);
+      (crypto || window.msCrypto).getRandomValues(bytes);
+      k = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('hr_monitor_broadcast_key', k);
+    }
+    return k;
+  }
+  function regenerateBroadcastKey() {
+    localStorage.removeItem('hr_monitor_broadcast_key');
+    getOrCreateBroadcastKey();
+    reconnectRelay();
+    updateStreamingUI();
+  }
+  let relaySocket = null;
+  let relayReconnectTimer = null;
+  function reconnectRelay() {
+    if (relaySocket) {
+      try { relaySocket.close(); } catch (e) {}
+      relaySocket = null;
+    }
+    if (relayReconnectTimer) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
+    connectRelay();
+  }
+  function connectRelay() {
+    const key = getOrCreateBroadcastKey();
+    setStreamingStatus('connecting');
+    try {
+      const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key);
+      relaySocket = ws;
+      ws.addEventListener('open', () => setStreamingStatus('live'));
+      ws.addEventListener('close', () => {
+        relaySocket = null;
+        setStreamingStatus('offline');
+        // Reconnect after 5s — Cloudflare hibernates idle connections; we pay for reopens sparingly.
+        relayReconnectTimer = setTimeout(connectRelay, 5000);
+      });
+      ws.addEventListener('error', () => setStreamingStatus('error'));
+    } catch (e) {
+      console.error('Relay connect failed:', e);
+      setStreamingStatus('error');
+      relayReconnectTimer = setTimeout(connectRelay, 5000);
+    }
+  }
+  function publishToRelay(payload) {
+    if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
+    try { relaySocket.send(JSON.stringify(payload)); } catch (e) {}
+  }
+  function setStreamingStatus(state) {
+    const el = $('relay-status');
+    if (!el) return;
+    el.textContent = state;
+    el.className = 'streaming-status ' + (state === 'live' || state === 'connecting' || state === 'error' ? state : '');
+  }
+  function buildObsSourceUrl() {
+    const origin = location.origin + location.pathname.replace(/hr_monitor\.html$/, '');
+    const params = new URLSearchParams();
+    params.set('key', getOrCreateBroadcastKey());
+    params.set('style', localStorage.getItem('hr_monitor_style') || 'bold');
+    params.set('layout', widgetPrefs.layout);
+    params.set('bg', 'transparent');
+    if (!widgetPrefs.showHr) params.set('hide_hr', '1');
+    if (!widgetPrefs.showHrv) params.set('hide_hrv', '1');
+    if (!widgetPrefs.showLiveHr) params.set('hide_live_hr', '1');
+    if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
+    return origin + 'overlay.html?' + params.toString();
+  }
+  function updateStreamingUI() {
+    const keyEl = $('broadcast-key-display');
+    if (keyEl) keyEl.textContent = getOrCreateBroadcastKey();
   }
 
   function broadcastTick() {
@@ -1933,7 +2073,7 @@
     const trendWindow = [Math.max(0, nowMin - 3), Math.max(3, nowMin)];
     const trendHR = state.hrSeries.filter(p => p.t >= cutoff).map(p => ({ x: p.t, y: p.v }));
     const trendRmssd = state.rmssdSeries.filter(p => p.t >= cutoff).map(p => ({ x: p.t, y: p.v }));
-    overlayChannel.postMessage({
+    const tick = {
       type: 'tick',
       t: nowMin,
       hr: state.currentHR,
@@ -1946,7 +2086,9 @@
       trendHR,
       trendRmssd,
       trendWindow,
-    });
+    };
+    overlayChannel.postMessage(tick);
+    publishToRelay(tick);
   }
 
   async function connect() {
@@ -2739,18 +2881,52 @@
     if (openOverlay) {
       openOverlay.addEventListener('click', (ev) => {
         ev.preventDefault();
-        // Pass the live app's FULL current state so the overlay is a true preview.
-        const style = localStorage.getItem('hr_monitor_style') || 'bold';
-        const params = new URLSearchParams();
-        params.set('style', style);
-        params.set('layout', widgetPrefs.layout);
-        params.set('bg', 'transparent');
-        if (!widgetPrefs.showHr) params.set('hide_hr', '1');
-        if (!widgetPrefs.showHrv) params.set('hide_hrv', '1');
-        if (!widgetPrefs.showLiveHr) params.set('hide_live_hr', '1');
-        if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
-        const url = 'overlay.html?' + params.toString();
-        window.open(url, 'hrmonitor_overlay', 'width=420,height=640,menubar=no,toolbar=no,location=no,status=no');
+        // Popup = Window-Capture path. Shares the URL format with the Browser Source
+        // URL so what you see in the popup matches what OBS Browser Source renders.
+        const url = buildObsSourceUrl();
+        // 380x640 matches the main app's overlay-zone column width exactly — so the
+        // popup is a true preview at the same visual size (Chart.js responsive sizing
+        // just fills the container, so wider popup = wider graph).
+        window.open(url, 'hrmonitor_overlay', 'width=380,height=640,menubar=no,toolbar=no,location=no,status=no');
+      });
+    }
+    // Relay: open on load, reconnect on key change
+    connectRelay();
+    updateStreamingUI();
+    // Top-nav "Copy OBS URL" shortcut — copies the same URL as the buried button.
+    const navCopy = $('nav-copy-obs-url');
+    if (navCopy) {
+      navCopy.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        const url = buildObsSourceUrl();
+        try {
+          await navigator.clipboard.writeText(url);
+          navCopy.classList.add('copied');
+          navCopy.textContent = '✓ Copied';
+          setTimeout(() => { navCopy.classList.remove('copied'); navCopy.textContent = 'Copy OBS URL'; }, 2500);
+        } catch (e) {
+          prompt('Copy this URL into OBS → Browser Source:', url);
+        }
+      });
+    }
+    const copyObsBtn = $('copy-obs-url');
+    if (copyObsBtn) {
+      copyObsBtn.addEventListener('click', async () => {
+        const url = buildObsSourceUrl();
+        try {
+          await navigator.clipboard.writeText(url);
+          copyObsBtn.textContent = '✓ Copied — paste into OBS';
+          setTimeout(() => { copyObsBtn.textContent = 'Copy OBS Browser Source URL'; }, 2500);
+        } catch (e) {
+          prompt('Copy this URL into OBS Browser Source:', url);
+        }
+      });
+    }
+    const regenBtn = $('regenerate-key');
+    if (regenBtn) {
+      regenBtn.addEventListener('click', () => {
+        if (!confirm('Regenerate your broadcast key? The old OBS Browser Source URL will stop working.')) return;
+        regenerateBroadcastKey();
       });
     }
     $('connect').addEventListener('click', connect);

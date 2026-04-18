@@ -392,16 +392,18 @@
     },
   });
 
-  // BroadcastChannel listener
-  const channel = new BroadcastChannel('hr-monitor-broadcast');
-  let lastTick = 0;
-  channel.addEventListener('message', (ev) => {
-    const msg = ev.data;
+  // Data arrives via one of two transports:
+  //   - BroadcastChannel: same-browser popup (Window Capture path).
+  //   - WebSocket relay: cross-browser (OBS Browser Source paste-URL path).
+  // Overlay uses whichever is available; if both fire, messages are idempotent.
+  const broadcastKey = params.get('key');
+  const RELAY_HOST = 'wss://hr-relay.nakauri.partykit.dev';
+
+  function handleTick(msg) {
     if (!msg || msg.type !== 'tick') return;
     lastTick = Date.now();
     document.body.classList.add('connected');
 
-    // HR + HRV widgets
     $('hr-big').textContent = msg.hr != null ? msg.hr : '—';
     $('rmssd-big').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
     $('compact-hrv-value').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
@@ -410,7 +412,6 @@
     setPips($('hr-pips'), msg.hrStage);
     setPips($('rmssd-pips'), msg.rmssdStage);
 
-    // Palp chip
     const palpChip = $('palp-chip');
     if (msg.palpPerMin > 0) {
       palpChip.classList.add('active');
@@ -418,24 +419,18 @@
     } else {
       palpChip.classList.remove('active');
     }
-
-    // Breath rate
     if (msg.breathRate != null) $('breath-rate').textContent = Math.round(msg.breathRate) + ' br/min';
 
-    // Live HR trace (both the big rsa chart and the compact inline live trace)
     if (msg.livePoints) {
       rsa.data.datasets[0].data = msg.livePoints;
       rsa.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
       rsa.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
       try { rsa.update('none'); } catch(e) {}
-
       hrLiveTrace.data.datasets[0].data = msg.livePoints;
       hrLiveTrace.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
       hrLiveTrace.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
       try { hrLiveTrace.update('none'); } catch(e) {}
     }
-
-    // 3-min inline mini-charts
     if (msg.trendHR) {
       hrInline.data.datasets[0].data = msg.trendHR;
       if (msg.trendWindow) { hrInline.options.scales.x.min = msg.trendWindow[0]; hrInline.options.scales.x.max = msg.trendWindow[1]; }
@@ -451,15 +446,35 @@
       compactTrend.data.datasets[1].data = msg.trendRmssd;
       try { compactTrend.update('none'); } catch(e) {}
     }
-  });
+  }
+
+  let lastTick = 0;
+
+  // Same-browser path (works when the overlay is a popup window from the live tab)
+  const channel = new BroadcastChannel('hr-monitor-broadcast');
+  channel.addEventListener('message', (ev) => handleTick(ev.data));
+  channel.postMessage({ type: 'request-snapshot' });
+
+  // Cross-browser path via relay (OBS Browser Source uses this)
+  if (broadcastKey) {
+    let ws = null;
+    function connect() {
+      ws = new WebSocket(RELAY_HOST + '/parties/main/' + broadcastKey);
+      ws.addEventListener('message', (ev) => {
+        try { handleTick(JSON.parse(ev.data)); } catch (e) {}
+      });
+      ws.addEventListener('close', () => {
+        ws = null;
+        setTimeout(connect, 5000);
+      });
+    }
+    connect();
+  }
 
   // Fade to disconnected if no ticks for 15 sec
   setInterval(() => {
     if (lastTick > 0 && Date.now() - lastTick > 15000) document.body.classList.remove('connected');
   }, 3000);
-
-  // Ask the live tab to send a snapshot now
-  channel.postMessage({ type: 'request-snapshot' });
 })();
 </script>
 </body>
