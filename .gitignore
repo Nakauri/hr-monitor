@@ -21,5 +21,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Claude session log — local context only, not part of the shipped app
+# Claude local context (not part of the shipped app)
 SESSION_LOG.md
+CLAUDE.md
