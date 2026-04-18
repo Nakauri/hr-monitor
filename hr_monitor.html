@@ -2694,8 +2694,17 @@
 
   function idbOpen() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(IDB_NAME, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      // Version 2 matches the viewer — the viewer added a 'drive-cache' store
+      // for Drive session CSV caching. If the monitor opened at v1 here AFTER
+      // the viewer already upgraded the shared 'hr_monitor_kv' DB to v2, we'd
+      // get a VersionError and every IDB call (including the auto-save folder
+      // handle) silently failed. Keep the two in lockstep.
+      const req = indexedDB.open(IDB_NAME, 2);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+        if (!db.objectStoreNames.contains('drive-cache')) db.createObjectStore('drive-cache');
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
