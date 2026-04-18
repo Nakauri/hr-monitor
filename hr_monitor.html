@@ -104,6 +104,21 @@
     color: var(--accent-rmssd);
     text-decoration: underline;
   }
+  /* Firefox/Safari "watch mode": the preview widget becomes an iframe of
+     overlay.html subscribing to the shared relay key. User sees the live
+     stream from whichever device is recording, even though THIS browser
+     can't pair a strap. */
+  body.watch-mode #overlay-zone {
+    padding: 0;
+    background: #0a0a0a;
+  }
+  .watch-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: #0a0a0a;
+  }
   .nav-copy.copied { background: var(--accent-rmssd); color: #0a1a14; }
   .obs-size-hint {
     font-family: 'Consolas', 'Monaco', monospace;
@@ -1937,6 +1952,42 @@
     updateObsSizeDisplay();
   }
 
+  // Per-tab device identity. Generated once on first broadcast and kept for
+  // the tab's lifetime (sessionStorage, not localStorage — two tabs in the
+  // same browser need distinct IDs so a double-broadcast shows up clearly on
+  // the receiver). The deviceLabel is something human-readable the user can
+  // read in the overlay's warning when two tabs are fighting for the same key.
+  function getDeviceIdentity() {
+    let id = sessionStorage.getItem('hr_monitor_device_id');
+    if (!id) {
+      const bytes = new Uint8Array(3);
+      (crypto || window.msCrypto).getRandomValues(bytes);
+      id = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      sessionStorage.setItem('hr_monitor_device_id', id);
+    }
+    let label = sessionStorage.getItem('hr_monitor_device_label');
+    if (!label) {
+      // Cheap readable label: 'ua-short · id' — enough to tell a phone
+      // Chrome tab apart from a desktop Edge tab.
+      const ua = navigator.userAgent;
+      let name = 'Device';
+      if (/Android/i.test(ua)) name = 'Android';
+      else if (/iPhone|iPad|iPod/i.test(ua)) name = 'iOS';
+      else if (/Windows/i.test(ua)) name = 'Windows';
+      else if (/Mac OS X/i.test(ua)) name = 'Mac';
+      else if (/Linux/i.test(ua)) name = 'Linux';
+      let browser = '';
+      if (/Edg\//.test(ua)) browser = 'Edge';
+      else if (/OPR\/|Opera/.test(ua)) browser = 'Opera';
+      else if (/Firefox/.test(ua)) browser = 'Firefox';
+      else if (/Chrome/.test(ua)) browser = 'Chrome';
+      else if (/Safari/.test(ua)) browser = 'Safari';
+      label = browser ? name + ' ' + browser : name;
+      sessionStorage.setItem('hr_monitor_device_label', label);
+    }
+    return { id, label };
+  }
+
   function broadcastTick() {
     if (!overlayChannel) return;
     const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;
@@ -1956,8 +2007,18 @@
     const trendWindow = [Math.max(0, nowMin - 3), Math.max(3, nowMin)];
     const trendHR = state.hrSeries.filter(p => p.t >= cutoff).map(p => ({ x: p.t, y: p.v }));
     const trendRmssd = smoothSeries(state.rmssdSeries.filter(p => p.t >= cutoff), 10);
+    const dev = getDeviceIdentity();
     const tick = {
       type: 'tick',
+      // Sender identity so receivers can detect two tabs broadcasting to the
+      // same relay key and warn the user before the data gets garbled.
+      senderId: dev.id,
+      senderLabel: dev.label,
+      senderBooted: sessionStorage.getItem('hr_monitor_device_booted') || (() => {
+        const t = Date.now();
+        sessionStorage.setItem('hr_monitor_device_booted', String(t));
+        return t;
+      })(),
       t: nowMin,
       hr: state.currentHR,
       hrStage: getHRStage(state.currentHR),
@@ -3270,6 +3331,23 @@
     } catch(e) {}
   }
 
+  // When the monitor loads in a browser without Web Bluetooth (Firefox,
+  // Safari, iOS) but the user has a broadcast key (shared via Drive or from
+  // a prior Chrome session on this browser), swap the preview widget out for
+  // an overlay.html iframe so the user sees the live stream from whatever
+  // Chrome-capable device is actually recording.
+  function setupFirefoxAutoWatch() {
+    const key = localStorage.getItem('hr_monitor_broadcast_key');
+    if (!key) return;
+    const zone = document.getElementById('overlay-zone');
+    if (!zone) return;
+    // Build the iframe URL with a cache-bust param so a freshly-deployed
+    // overlay.html is picked up on next load rather than reusing a cached one.
+    const src = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark&_v=' + Date.now();
+    zone.innerHTML = '<iframe class="watch-frame" src="' + src + '" title="Live stream"></iframe>';
+    document.body.classList.add('watch-mode');
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     // Reveal the browser-compat banner + disable the connect button when Web
     // Bluetooth is absent (Firefox, Safari, iOS). Anything that isn't pairing-
@@ -3283,6 +3361,11 @@
         connectBtn.disabled = true;
         connectBtn.title = 'Not supported in this browser';
       }
+      // If a broadcast key is known (Drive-synced or left over from a prior
+      // session), replace the preview widget with an iframe of overlay.html
+      // so Firefox users watching another device's stream see the live widget
+      // without having to open overlay.html separately.
+      setupFirefoxAutoWatch();
     }
     initCharts();
     populateAudioDropdowns();
