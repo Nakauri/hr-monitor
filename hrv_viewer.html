@@ -926,20 +926,25 @@
   body.no-autonomic .chart-legend-item[data-type="flush"],
   body.no-autonomic .chart-legend-item[data-type="chills"] { display: none !important; }
 
-  /* Annotation hover tooltip */
+  /* Annotation hover "banner" — pinned to the top-center of the chart canvas
+     so it coexists cleanly with Chart.js's own HR/RMSSD tooltip (which follows
+     the cursor). User wanted both: data at the cursor, category context at the
+     top. */
   #anno-tip {
     position: fixed;
     pointer-events: none;
     z-index: 1000;
-    background: rgba(15,15,15,0.97);
+    background: rgba(15,15,15,0.94);
     color: #d8d8d8;
-    padding: 8px 12px;
+    padding: 6px 12px;
     border: 1px solid #2a2a2a;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
     line-height: 1.4;
-    max-width: 260px;
+    max-width: 440px;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
     display: none;
     box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   }
@@ -4452,28 +4457,21 @@
     hideAnnoTip();
   }
 
-  // Shared enter/leave for chart annotations — drop the highlight line, show the
-  // tooltip, light up the corresponding marker-list row, AND temporarily suppress
-  // Chart.js's own tooltip so the user doesn't see two overlapping tooltips
-  // stacked on top of each other when an annotation covers a data point.
+  // Shared enter/leave for chart annotations. The annotation tooltip now lives
+  // as a banner at the top of the chart (via showAnnoTip), so Chart.js's own
+  // HR/RMSSD data tooltip can keep following the cursor at the same time
+  // without overlap. Previously we suppressed the data tooltip while annotations
+  // were hovered, which hid HR data while the cursor was anywhere inside a
+  // large annotation region like a chills window.
   function annoEnter(t, html, evt) {
     showAnnoTip(html, evt);
     highlightAtTime(t);
     highlightMarkerItemByT(t);
-    if (currentChart && currentChart.options.plugins && currentChart.options.plugins.tooltip) {
-      currentChart.options.plugins.tooltip.enabled = false;
-      try { currentChart.tooltip.setActiveElements([], { x: 0, y: 0 }); } catch (e) {}
-      currentChart.update('none');
-    }
   }
   function annoLeave() {
     hideAnnoTip();
     unhighlightAtTime();
     clearMarkerItemHighlight();
-    if (currentChart && currentChart.options.plugins && currentChart.options.plugins.tooltip) {
-      currentChart.options.plugins.tooltip.enabled = true;
-      currentChart.update('none');
-    }
   }
 
   function nearestY(series, t) {
@@ -4589,17 +4587,26 @@
     }
     return tip;
   }
-  function showAnnoTip(text, evt) {
+  function showAnnoTip(text, _evt) {
     const tip = getAnnoTip();
     tip.innerHTML = text;
     tip.style.display = 'block';
-    // Chart.js annotation plugin wraps DOM events in {native, x, y, ...}
-    const e = evt && evt.native ? evt.native : evt;
-    const cx = (e && e.clientX) || 0;
-    const cy = (e && e.clientY) || 0;
-    const pad = 14;
-    tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, cx + pad) + 'px';
-    tip.style.top = Math.max(8, cy - tip.offsetHeight - 8) + 'px';
+    // Anchor to the chart canvas top as a banner, NOT to the cursor. Chart.js
+    // annotation plugin only fires `enter` once (at the cursor's first touch
+    // on the region), so a cursor-anchored tooltip stays stuck at that entry
+    // point even as the cursor moves. Chart.js's own data tooltip still
+    // follows the cursor and shows HR / RMSSD values — the two don't collide
+    // because this one lives at the top of the chart.
+    const chart = currentChart;
+    const canvas = chart && chart.canvas;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8, rect.left + rect.width / 2 - tip.offsetWidth / 2)) + 'px';
+      tip.style.top = Math.max(8, rect.top + 8) + 'px';
+    } else {
+      tip.style.left = '8px';
+      tip.style.top = '8px';
+    }
   }
   function hideAnnoTip() {
     const tip = document.getElementById('anno-tip');
