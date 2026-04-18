@@ -151,6 +151,14 @@
     color: var(--text-dim);
     letter-spacing: 0.05em;
   }
+  /* fi-group wraps Folder / Drive / Autonomic into atomic units. Flows inline
+     on desktop; stacks as separate row-cards when the mobile menu is open
+     (see body.menu-open rules). */
+  .fi-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
   #folder-name {
     font-family: 'Consolas', 'Monaco', monospace;
     background: var(--bg-input);
@@ -1937,12 +1945,26 @@
       font-size: 12px;
     }
     body.menu-open .folder-info {
+      flex-direction: column;
+      align-items: stretch;
       gap: 8px;
-      padding: 8px;
+      padding: 0;
+      background: transparent;
+      font-size: 12px;
+    }
+    /* Each fi-group is its own row card so the drive logout + sync can't wrap
+       off into a stray line of their own. */
+    body.menu-open .fi-group {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
       background: var(--bg-panel);
       border-radius: 8px;
-      font-size: 11px;
     }
+    /* Drop the vertical "|" separators inside the menu — each row is its own card. */
+    body.menu-open .folder-info > .drive-sep { display: none; }
     #folder-name { max-width: 140px; }
     main { height: auto; min-height: calc(100vh - 110px); }
     .view { padding: 16px 14px; }
@@ -1967,6 +1989,33 @@
     .sessions-grid { grid-template-columns: 1fr; }
     .all-grid { grid-template-columns: 1fr; }
     .all-card.wide { grid-column: auto; }
+    /* Month / Week / Day view headers wrap: title + nav + today compact on
+       one row, metric switch + legend drop to the next row instead of
+       overflowing off-screen. */
+    .cal-header, .day-header {
+      flex-wrap: wrap;
+      gap: 8px;
+      row-gap: 10px;
+      align-items: center;
+    }
+    .cal-title, .day-title {
+      font-size: 15px;
+      min-width: 0;
+      flex: 1 1 auto;
+      letter-spacing: 0.01em;
+    }
+    .cal-nav { flex: 0 0 auto; }
+    .cal-nav button { width: 30px; height: 30px; font-size: 13px; }
+    .cal-today-btn { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; }
+    /* Force metric switch + legend + any extra action onto their own row. */
+    .cal-header .metric-switch,
+    .cal-header .chart-legend,
+    .cal-header .cal-legend-strip,
+    .day-header .metric-switch,
+    .day-header .chart-legend {
+      flex-basis: 100%;
+      order: 10;
+    }
     .cal-grid { gap: 4px; }
     .cal-cell { padding: 6px; border-radius: 8px; border-width: 1px !important; border-left-width: 3px !important; }
     .cal-cell .cal-hr { font-size: 18px; }
@@ -2036,28 +2085,34 @@
     <a id="watch-live-link" class="watch-live-link" href="#" target="_blank" rel="noopener" hidden title="Open the live widget for whatever device is currently recording">Watch live <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   </nav>
   <div class="folder-info">
-    <span class="fsa-only">Folder:</span>
-    <span id="folder-name" class="fsa-only">—</span>
-    <button id="folder-pick" class="fsa-only">Change...</button>
+    <div class="fi-group fi-folder">
+      <span class="fsa-only">Folder:</span>
+      <span id="folder-name" class="fsa-only">—</span>
+      <button id="folder-pick" class="fsa-only">Change...</button>
+    </div>
     <span class="drive-sep fsa-only">|</span>
-    <span>Drive:</span>
-    <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
-    <button id="drive-signin">Sign in</button>
-    <button class="icon-btn" id="drive-sync" style="display:none" title="Sync with Drive (pulls new files down, pushes local files up, mirrors Drive-only files back to the folder)" aria-label="Sync with Drive">
-      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
-    <button class="icon-btn" id="drive-signout" style="display:none" title="Sign out of Drive" aria-label="Sign out">
-      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
+    <div class="fi-group fi-drive">
+      <span>Drive:</span>
+      <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
+      <button id="drive-signin">Sign in</button>
+      <button class="icon-btn" id="drive-sync" style="display:none" title="Sync with Drive (pulls new files down, pushes local files up, mirrors Drive-only files back to the folder)" aria-label="Sync with Drive">
+        <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="icon-btn" id="drive-signout" style="display:none" title="Sign out of Drive" aria-label="Sign out">
+        <svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
     <span class="drive-sep">|</span>
-    <label class="autonomic-toggle" title="When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you are tracking dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.">
-      <input type="checkbox" id="autonomic-toggle" checked />
-      <span>Autonomic analysis</span>
-    </label>
-    <button class="icon-btn" id="viewer-settings-btn" title="Viewer settings (HR shift thresholds, etc.)" aria-label="Viewer settings">
-      <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-    </button>
-    <button class="export-report-btn" id="export-report" title="Print/save this view as a report" style="display:none">Export report</button>
+    <div class="fi-group fi-autonomic">
+      <label class="autonomic-toggle" title="When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you are tracking dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.">
+        <input type="checkbox" id="autonomic-toggle" checked />
+        <span>Autonomic analysis</span>
+      </label>
+      <button class="icon-btn" id="viewer-settings-btn" title="Viewer settings (HR shift thresholds, etc.)" aria-label="Viewer settings">
+        <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="export-report-btn" id="export-report" title="Print/save this view as a report" style="display:none">Export report</button>
+    </div>
     <a class="nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Viewer&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Viewer%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
   </div>
 </header>

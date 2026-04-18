@@ -32,6 +32,14 @@
   body.bg-magenta #overlay-zone { background: #ff00ff; }
   body.bg-black,
   body.bg-black #overlay-zone { background: #000000; }
+  /* Visible backgrounds mean standalone viewing (phone / popup), not an
+     OBS crop. Center the widget in the viewport so it's legible. */
+  body.bg-dark, body.bg-black, body.bg-magenta {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
   /* Zone padding stays 0 — the monitor pins this element to .widget-row's
      size, and padding here would eat the width and clip the HRV column. */
@@ -208,6 +216,11 @@
       z.style.overflow = 'hidden';
     }
   }
+  // Earlier this file used a CSS transform: scale() to fit the widget to the
+  // viewport on phones. That made Chart.js canvases blurry because the bitmap
+  // gets rasterised then stretched. Reverted — widget renders at its natural
+  // size and is centred via the body flex layout. Users who want bigger can
+  // pinch-zoom.
 
   const tintChart = HRWidget.tintChart;
   const hrLiveTrace = HRWidget.createLiveTraceChart($('hr-live-trace').getContext('2d'));
