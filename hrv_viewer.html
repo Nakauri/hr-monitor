@@ -250,6 +250,80 @@
     gap: 16px;
     margin-top: 20px;
   }
+  .index-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 12px;
+  }
+  .index-search {
+    flex: 1 1 220px;
+    min-width: 180px;
+    padding: 6px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .index-control-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .index-control-label input,
+  .index-control-label select {
+    padding: 5px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .index-clear {
+    padding: 5px 12px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .index-clear:hover { color: var(--text); border-color: var(--border-strong); }
+  .index-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin: 20px 0 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .index-pager-btn {
+    padding: 6px 14px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .index-pager-btn:hover:not(:disabled) { border-color: var(--border-strong); }
+  .index-pager-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .index-pager-info { font-variant-numeric: tabular-nums; }
   .session-card {
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -473,6 +547,59 @@
     border-radius: 14px;
     padding: 18px 22px;
     margin-bottom: 20px;
+  }
+  .day-sessions-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 28px 0 4px;
+  }
+  .day-mode-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-panel);
+  }
+  .day-mode-btn {
+    padding: 6px 14px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .day-mode-btn:hover { color: var(--text); }
+  .day-mode-btn.active {
+    background: var(--bg-input);
+    color: var(--text);
+  }
+  .day-mode-btn + .day-mode-btn { border-left: 1px solid var(--border); }
+  .day-stitched-wrap {
+    position: relative;
+    height: 360px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-top: 12px;
+  }
+  .day-stitched-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    pointer-events: none;
   }
   .day-strip-label {
     font-size: 11px;
@@ -2849,11 +2976,51 @@
     else { const es = document.getElementById('empty-state'); if (es) es.style.display = 'none'; }
   }
 
+  // Index view state: sort / filter / pagination. Persisted so the list
+  // remembers the user's setup across re-renders and tab changes.
+  const indexState = {
+    sort: localStorage.getItem('hrv_viewer_index_sort') || 'newest',
+    search: '',
+    dateFrom: '',
+    dateTo: '',
+    page: 0,
+    pageSize: 50,
+  };
+  const SORT_COMPARATORS = {
+    newest:      (a, b) => b.localeCompare(a),
+    oldest:      (a, b) => a.localeCompare(b),
+    longest:     (a, b) => (sessionsIndex[b]?.duration || 0) - (sessionsIndex[a]?.duration || 0),
+    shortest:    (a, b) => (sessionsIndex[a]?.duration || 0) - (sessionsIndex[b]?.duration || 0),
+    'best-hrv':  (a, b) => (sessionsIndex[b]?.rmssdAvg || 0) - (sessionsIndex[a]?.rmssdAvg || 0),
+    'worst-hrv': (a, b) => (sessionsIndex[a]?.rmssdAvg ?? 1e9) - (sessionsIndex[b]?.rmssdAvg ?? 1e9),
+    'best-uptime':  (a, b) => (computeUptimePct(sessionsIndex[b]) ?? -1) - (computeUptimePct(sessionsIndex[a]) ?? -1),
+    'worst-uptime': (a, b) => (computeUptimePct(sessionsIndex[a]) ?? 101) - (computeUptimePct(sessionsIndex[b]) ?? 101),
+  };
+  function applyIndexFilterSort(allFilenames) {
+    let list = allFilenames.slice();
+    if (indexState.dateFrom || indexState.dateTo) {
+      list = list.filter(fn => {
+        const m = parseSessionFilename(fn);
+        const iso = m && m.isoDate;
+        if (!iso) return false;
+        if (indexState.dateFrom && iso < indexState.dateFrom) return false;
+        if (indexState.dateTo && iso > indexState.dateTo) return false;
+        return true;
+      });
+    }
+    if (indexState.search) {
+      const q = indexState.search.toLowerCase();
+      list = list.filter(fn => fn.toLowerCase().includes(q));
+    }
+    list.sort(SORT_COMPARATORS[indexState.sort] || SORT_COMPARATORS.newest);
+    return list;
+  }
+
   // ===== Index / sessions-list view (temporary landing page) =====
   function renderIndex() {
     const el = document.getElementById('view-index');
-    const filenames = Object.keys(sessionsIndex).sort().reverse();
-    if (!filenames.length) {
+    const allFilenames = Object.keys(sessionsIndex);
+    if (!allFilenames.length) {
       el.innerHTML = `
         <div class="stub-panel">
           <div style="font-size: 16px; margin-bottom: 8px;">No sessions yet</div>
@@ -2861,11 +3028,22 @@
         </div>`;
       return;
     }
-    const cards = filenames.map(fn => {
+    const filtered = applyIndexFilterSort(allFilenames);
+    const total = filtered.length;
+    const totalAll = allFilenames.length;
+    const pageSize = indexState.pageSize;
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    if (indexState.page >= pageCount) indexState.page = pageCount - 1;
+    if (indexState.page < 0) indexState.page = 0;
+    const start = indexState.page * pageSize;
+    const pageSlice = filtered.slice(start, start + pageSize);
+
+    const cards = pageSlice.map(fn => {
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
       const dur = formatDuration(s.duration);
       const hrStage = getHRStage(s.hrAvg);
+      const upPct = computeUptimePct(s);
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoDate + ' · ' + meta.isoTime : fn}</div>
@@ -2887,16 +3065,111 @@
               <span class="session-card-stat-label">Warn</span>
               <span class="session-card-stat-value" style="color: ${s.warnCount ? 'var(--warn-crash)' : 'var(--text-faint)'};">${s.warnCount}</span>
             </div>
+            <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable.">
+              <span class="session-card-stat-label">Uptime</span>
+              <span class="session-card-stat-value" style="color: ${uptimeColor(upPct)};">${upPct != null ? upPct + '%' : '—'}</span>
+            </div>
           </div>
         </div>`;
     }).join('');
+
+    const sortOptions = [
+      ['newest', 'Newest first'],
+      ['oldest', 'Oldest first'],
+      ['longest', 'Longest duration'],
+      ['shortest', 'Shortest duration'],
+      ['best-hrv', 'Highest HRV'],
+      ['worst-hrv', 'Lowest HRV'],
+      ['best-uptime', 'Best uptime'],
+      ['worst-uptime', 'Worst uptime'],
+    ].map(([v, l]) => `<option value="${v}"${v === indexState.sort ? ' selected' : ''}>${l}</option>`).join('');
+
+    const showing = total === 0 ? '0' : `${start + 1}–${Math.min(start + pageSize, total)}`;
+    const countLabel = total === totalAll
+      ? `${total} session${total === 1 ? '' : 's'}`
+      : `${total} of ${totalAll}`;
+
+    const pager = pageCount > 1 ? `
+      <div class="index-pager">
+        <button class="index-pager-btn" data-page="prev"${indexState.page === 0 ? ' disabled' : ''}>← Prev</button>
+        <span class="index-pager-info">Page ${indexState.page + 1} of ${pageCount} · showing ${showing}</span>
+        <button class="index-pager-btn" data-page="next"${indexState.page >= pageCount - 1 ? ' disabled' : ''}>Next →</button>
+      </div>` : '';
+
     el.innerHTML = `
-      <div class="section-head">All sessions · ${filenames.length}</div>
-      <div class="sessions-grid">${cards}</div>
+      <div class="section-head">All sessions · ${countLabel}</div>
+      <div class="index-controls">
+        <input type="search" class="index-search" id="index-search" placeholder="Filter by filename…" value="${escape(indexState.search)}">
+        <label class="index-control-label">From <input type="date" id="index-date-from" value="${indexState.dateFrom}"></label>
+        <label class="index-control-label">To <input type="date" id="index-date-to" value="${indexState.dateTo}"></label>
+        <label class="index-control-label">Sort <select id="index-sort">${sortOptions}</select></label>
+        ${(indexState.search || indexState.dateFrom || indexState.dateTo) ? '<button class="index-clear" id="index-clear">Clear</button>' : ''}
+      </div>
+      <div class="sessions-grid">${cards || '<div class="stub-panel">No sessions match these filters.</div>'}</div>
+      ${pager}
     `;
+
     el.querySelectorAll('.session-card').forEach(c => {
       c.addEventListener('click', () => setHash('session/' + c.dataset.filename));
     });
+    const searchEl = document.getElementById('index-search');
+    if (searchEl) {
+      // Debounce search typing so every keystroke doesn't re-render the grid.
+      let t = null;
+      searchEl.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          indexState.search = searchEl.value.trim();
+          indexState.page = 0;
+          renderIndex();
+          // Refocus and restore caret to end since innerHTML replaced the input.
+          const newEl = document.getElementById('index-search');
+          if (newEl) { newEl.focus(); newEl.setSelectionRange(newEl.value.length, newEl.value.length); }
+        }, 180);
+      });
+    }
+    const dateFromEl = document.getElementById('index-date-from');
+    if (dateFromEl) dateFromEl.addEventListener('change', () => {
+      indexState.dateFrom = dateFromEl.value; indexState.page = 0; renderIndex();
+    });
+    const dateToEl = document.getElementById('index-date-to');
+    if (dateToEl) dateToEl.addEventListener('change', () => {
+      indexState.dateTo = dateToEl.value; indexState.page = 0; renderIndex();
+    });
+    const sortEl = document.getElementById('index-sort');
+    if (sortEl) sortEl.addEventListener('change', () => {
+      indexState.sort = sortEl.value;
+      try { localStorage.setItem('hrv_viewer_index_sort', indexState.sort); } catch (e) {}
+      indexState.page = 0;
+      renderIndex();
+    });
+    const clearEl = document.getElementById('index-clear');
+    if (clearEl) clearEl.addEventListener('click', () => {
+      indexState.search = ''; indexState.dateFrom = ''; indexState.dateTo = ''; indexState.page = 0;
+      renderIndex();
+    });
+    el.querySelectorAll('.index-pager-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.page === 'prev') indexState.page = Math.max(0, indexState.page - 1);
+        else indexState.page = Math.min(pageCount - 1, indexState.page + 1);
+        renderIndex();
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }
+
+  // Uptime = % of session time with live HR data. Flags sessions whose
+  // averages are less trustworthy because the strap dropped beats.
+  function computeUptimePct(s) {
+    if (!s || !s.duration) return null;
+    const up = Math.max(0, s.duration - (s.gapTotalMin || 0));
+    return Math.round(100 * up / s.duration);
+  }
+  function uptimeColor(pct) {
+    if (pct == null) return 'var(--text-faint)';
+    if (pct >= 95) return '#B8D97E';
+    if (pct >= 80) return 'var(--text)';
+    return 'var(--warn-crash)';
   }
 
   // ===== Headline metric selector (Month + Week) =====
@@ -3114,6 +3387,94 @@
   }
 
   // ===== Day view: single date, 24-hr strip + session cards =====
+  // Day view mode: 'list' (per-session cards) or 'timeline' (all sessions of
+  // the day stitched into one continuous chart). Persisted per-user.
+  let dayViewMode = localStorage.getItem('hrv_viewer_day_view_mode') || 'list';
+  let dayStitchedChart = null;
+
+  async function renderDayStitched(iso, files) {
+    const canvas = document.getElementById('day-stitched-chart');
+    const loading = document.getElementById('day-stitched-loading');
+    if (!canvas) return;
+    // Pull per-beat HR + RMSSD for every session in parallel. loadFullSession
+    // reads from the local cache (or lazily parses the CSV on first access).
+    const sessionData = await Promise.all(files.map(async fn => {
+      try {
+        const data = await loadFullSession(fn);
+        return { fn, hr: data.hr || [], rmssd: data.rmssd || [] };
+      } catch (e) {
+        console.warn('[day-stitched] failed to load', fn, e);
+        return { fn, hr: [], rmssd: [] };
+      }
+    }));
+    const startOfDay = new Date(iso + 'T00:00:00').getTime();
+    const hrPoints = [];
+    const rmssdPoints = [];
+    let first = true;
+    for (const sess of sessionData) {
+      if (!sess.hr.length && !sess.rmssd.length) continue;
+      // Null separator between sessions so Chart.js breaks the line at gaps
+      // rather than drawing a long horizontal segment across strap-off time.
+      if (!first) {
+        hrPoints.push({ x: NaN, y: NaN });
+        rmssdPoints.push({ x: NaN, y: NaN });
+      }
+      first = false;
+      const downHR = downsample(sess.hr, 400);
+      const downRM = downsample(sess.rmssd, 200);
+      for (const p of downHR) {
+        if (p.ep != null) hrPoints.push({ x: (p.ep - startOfDay) / 3600000, y: p.y });
+      }
+      for (const p of downRM) {
+        if (p.ep != null) rmssdPoints.push({ x: (p.ep - startOfDay) / 3600000, y: p.y });
+      }
+    }
+    if (loading) loading.remove();
+    if (dayStitchedChart) { try { dayStitchedChart.destroy(); } catch (e) {} dayStitchedChart = null; }
+    if (!hrPoints.length && !rmssdPoints.length) {
+      canvas.insertAdjacentHTML('afterend', '<div class="stub-panel" style="margin-top: 16px;">No HR data for these sessions.</div>');
+      return;
+    }
+    dayStitchedChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        datasets: [
+          { label: 'HR', data: hrPoints, borderColor: '#E89858', backgroundColor: 'transparent', yAxisID: 'y', tension: 0.2, pointRadius: 0, borderWidth: 1.3, spanGaps: false },
+          { label: 'RMSSD', data: rmssdPoints, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0.2, pointRadius: 0, borderWidth: 1.2, borderDash: [3, 3], spanGaps: false },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {
+          legend: { labels: { color: '#9a9a9f', font: { size: 11 }, boxWidth: 12 } },
+          tooltip: {
+            mode: 'nearest', intersect: false,
+            callbacks: {
+              title: (items) => {
+                const hr = items[0]?.parsed?.x;
+                if (hr == null) return '';
+                const h = Math.floor(hr), m = Math.round((hr - h) * 60);
+                return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'linear', min: 0, max: 24,
+            ticks: {
+              stepSize: 3, color: '#9a9a9f', font: { size: 10 },
+              callback: v => String(Math.round(v)).padStart(2, '0') + ':00',
+            },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+          y: { position: 'left', ticks: { color: '#E89858', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y1: { position: 'right', ticks: { color: '#5DCAA5', font: { size: 10 } }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
   function renderDay(dateArg) {
     const el = document.getElementById('view-day');
     let iso = /^\d{4}-\d{2}-\d{2}$/.test(dateArg || '') ? dateArg : null;
@@ -3176,7 +3537,8 @@
             <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Palps</span><span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-faint)'};">${s.palpCount}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#8BB4FF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>${autonomicCols}
+            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#8BB4FF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>
+            <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable."><span class="session-card-stat-label">Uptime</span><span class="session-card-stat-value" style="color: ${uptimeColor(computeUptimePct(s))};">${computeUptimePct(s) != null ? computeUptimePct(s) + '%' : '—'}</span></div>${autonomicCols}
           </div>
         </div>`;
     }).join('') : `<div class="stub-panel">No sessions on this date.</div>`;
@@ -3213,9 +3575,29 @@
 
       ${buildAggregateReport('Daily', files)}
 
-      <div class="section-head">Sessions</div>
-      <div class="sessions-grid">${sessionCardsHtml}</div>
+      <div class="day-sessions-head">
+        <div class="section-head" style="margin: 0;">Sessions</div>
+        <div class="day-mode-toggle">
+          <button class="day-mode-btn ${dayViewMode === 'list' ? 'active' : ''}" data-mode="list" title="Show each session as a card">List</button>
+          <button class="day-mode-btn ${dayViewMode === 'timeline' ? 'active' : ''}" data-mode="timeline" title="Stitch every session into one timeline">Timeline</button>
+        </div>
+      </div>
+      ${dayViewMode === 'timeline'
+        ? `<div class="day-stitched-wrap"><canvas id="day-stitched-chart"></canvas><div class="day-stitched-loading" id="day-stitched-loading">Loading sessions…</div></div>`
+        : `<div class="sessions-grid">${sessionCardsHtml}</div>`}
     `;
+
+    if (dayViewMode === 'timeline' && files.length) {
+      renderDayStitched(iso, files).catch(e => console.error('day stitched render failed', e));
+    }
+    el.querySelectorAll('.day-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.mode === dayViewMode) return;
+        dayViewMode = btn.dataset.mode;
+        try { localStorage.setItem('hrv_viewer_day_view_mode', dayViewMode); } catch (e) {}
+        renderDay(dateArg);
+      });
+    });
 
     wireAggregateReport(el);
     // Wire prev/next. If there's only one date with data, just stay.
