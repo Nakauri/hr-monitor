@@ -4443,6 +4443,18 @@
     const isVirtualDay = !!s.__virtualDay;
     const backHref = isVirtualDay ? ('#/day/' + s.__virtualDay) : '#/index';
     const backLabel = isVirtualDay ? ('← ' + s.__virtualDay) : '← All sessions';
+    // Short date format ("18 Apr") fits the big-number KPI style; the year +
+    // time drop into the subtitle so the Date stat reads at the same height
+    // as Duration / Avg HR / HRV etc. For day-timeline sessions we skip the
+    // time because it's always 00:00 and adds noise.
+    const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const dateObj = meta ? meta.date : null;
+    const dateBig = dateObj ? `${dateObj.getDate()} ${MONTHS_SHORT[dateObj.getMonth()]}` : '—';
+    const dateSub = dateObj
+      ? (isVirtualDay
+          ? String(dateObj.getFullYear())
+          : `${dateObj.getFullYear()} · ${meta.isoTime.slice(0, 5)}`)
+      : '';
     el.innerHTML = `
       <div class="session-top-row">
         <a class="back-link" href="${backHref}">${backLabel}</a>
@@ -4455,8 +4467,8 @@
       <div class="summary-bar">
         <div class="summary-stat">
           <span class="summary-stat-label">Date</span>
-          <span class="summary-stat-value" style="font-size: 18px;">${meta ? meta.isoDate : '—'}</span>
-          <span class="summary-stat-unit" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoTime : ''}</span>
+          <span class="summary-stat-value" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${dateBig}</span>
+          <span class="summary-stat-unit">${dateSub}</span>
         </div>
         <div class="summary-stat">
           <span class="summary-stat-label">Duration</span>
