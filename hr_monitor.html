@@ -123,20 +123,16 @@
     overflow: hidden;
   }
   /* Shrink-to-fit preview — container hugs the visible widgets instead of
-     filling the left column. Widget INTERNALS don't shrink (big HR number
-     stays the same size) — only the gap/padding around them is tighter, so
-     showing all widgets produces the same visual as shrink-to-fit OFF. */
+     filling the left column. NOTHING else changes: padding, gap, widget
+     padding, widget width all stay identical to shrink-off. When every widget
+     is visible, shrink-on and shrink-off should render pixel-identical; the
+     toggle only matters when some widgets are hidden, because then the
+     container shrinks down to the remaining content. */
   body.shrink-to-fit #app { grid-template-columns: auto 1fr; }
   body.shrink-to-fit #overlay-zone {
     width: fit-content;
     max-width: 100%;
-    padding: 8px;
-    gap: 8px;
   }
-  /* Compact's grid uses fr units (1.75fr 1fr) which stretch to fill available
-     space. When the overlay-zone has width: fit-content (shrink-to-fit), fr
-     behaves like min-content by default but we want the HR column to still
-     dominate. Nothing to change here as long as widget padding stays normal. */
   /* Horizontal layout: overlay becomes a top banner. Widgets sit side-by-side. */
   body.layout-horizontal #overlay-zone {
     flex-direction: row;
@@ -190,6 +186,9 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 4px;
+    /* Anchor for the absolutely-positioned .conn-indicator so its
+       "reconnecting…" label can appear without pushing the widget wider. */
+    position: relative;
   }
   .header-left {
     display: flex;
@@ -228,12 +227,17 @@
   /* Heart icon that pulses with HR */
   /* Connection indicator — mirrors overlay.html. Green dot when connected,
      grey pulsing dot + "reconnecting…" text when reconnecting, dim grey when
-     disconnected. Drives off body classes conn-live / conn-reconnecting. */
+     disconnected. Drives off body classes conn-live / conn-reconnecting.
+     Position: absolute so the "reconnecting…" label doesn't push the widget
+     wider when it appears — the label floats into the header's right edge. */
   .conn-indicator {
+    position: absolute;
+    top: 0;
+    right: 0;
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-left: auto;
+    pointer-events: none;
   }
   .conn-dot {
     width: 9px;
@@ -424,7 +428,10 @@
     padding: 14px 18px;
     display: grid;
     grid-template-columns: 1.75fr 1fr;
-    grid-template-rows: auto auto auto;
+    /* Fixed row heights so the widget can't grow taller when HRV is toggled
+       off or anything else reflows. Auto rows recalculate based on visible
+       content; explicit heights lock them in. OBS source size stays honest. */
+    grid-template-rows: auto 68px 12px;
     gap: 4px 16px;
     align-items: start;
   }
@@ -1064,6 +1071,18 @@
     min-width: 0;
   }
   .obs-size-value:focus { outline: 1px solid var(--accent-rmssd); }
+  /* Locked state: when shrink-to-fit is ON, the size fields are computed by
+     the app. Dim them so the user understands they're read-only right now. */
+  .obs-size-value.obs-size-locked {
+    color: var(--text-dim);
+    background: #0c0c0c;
+    cursor: not-allowed;
+  }
+  /* Hide the native number-input spinner arrows in both Chromium and Firefox;
+     the box is narrow and the arrows clip into the text. Users use keyboard. */
+  .obs-size-value::-webkit-outer-spin-button,
+  .obs-size-value::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .obs-size-value[type=number] { -moz-appearance: textfield; }
   .obs-size-copy {
     padding: 6px 10px;
     font-size: 11px;
@@ -1470,14 +1489,14 @@
               <div class="obs-size-field">
                 <span class="obs-size-label">Width</span>
                 <div class="obs-size-row">
-                  <input type="text" class="obs-size-value" id="obs-size-w" readonly />
+                  <input type="number" min="160" max="2000" step="1" class="obs-size-value" id="obs-size-w" />
                   <button class="obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
                 </div>
               </div>
               <div class="obs-size-field">
                 <span class="obs-size-label">Height</span>
                 <div class="obs-size-row">
-                  <input type="text" class="obs-size-value" id="obs-size-h" readonly />
+                  <input type="number" min="80" max="2000" step="1" class="obs-size-value" id="obs-size-h" />
                   <button class="obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
                 </div>
               </div>
@@ -2428,15 +2447,30 @@
     if (horizontal) return { w: WIDGET_W * visible + (visible - 1) * gap + padH, h: shrink ? 180 : 210 };
     return { w: WIDGET_W, h };
   }
+  // Update the Source Size fields in the Stream settings panel. When
+  // shrink-to-fit is ON, the fields reflect the auto-computed size and are
+  // read-only. When OFF, they show the user's custom size (falling back to the
+  // computed suggestion on first load) and are editable.
   function updateObsSizeDisplay() {
-    const size = computeObsSize();
+    const size = getEffectiveSize();
     const text = size.w + ' × ' + size.h;
     const hint = $('obs-size-hint');
     if (hint) hint.textContent = text;
     const wEl = $('obs-size-w');
     const hEl = $('obs-size-h');
-    if (wEl) wEl.value = String(size.w);
-    if (hEl) hEl.value = String(size.h);
+    const lockedByShrink = !!widgetPrefs.shrinkToFit;
+    if (wEl) {
+      wEl.value = String(size.w);
+      wEl.readOnly = lockedByShrink;
+      wEl.type = 'number';
+      wEl.classList.toggle('obs-size-locked', lockedByShrink);
+    }
+    if (hEl) {
+      hEl.value = String(size.h);
+      hEl.readOnly = lockedByShrink;
+      hEl.type = 'number';
+      hEl.classList.toggle('obs-size-locked', lockedByShrink);
+    }
   }
   function updateStreamingUI() {
     const keyEl = $('broadcast-key-display');
@@ -2469,6 +2503,9 @@
       rmssd: state.currentRMSSD,
       rmssdStage: getRMSSDStage(state.currentRMSSD),
       palpPerMin: ectopicsPerMinute(nowMin),
+      // Active warning banner state so the OBS overlay shows the same HR / HRV
+      // / palp / crash banner as the monitor. null when no warning is firing.
+      warn: state.currentWarn || null,
       livePoints,
       liveWindow,
       trendHR,
@@ -2486,6 +2523,9 @@
         shrinkToFit: widgetPrefs.shrinkToFit,
         layout: widgetPrefs.layout,
       },
+      // The exact (width, height) the monitor is rendering at. OBS applies the
+      // same inline style so its widget box is pixel-identical to the preview.
+      widgetSize: getEffectiveSize(),
     };
     overlayChannel.postMessage(tick);
     publishToRelay(tick);
@@ -3568,7 +3608,38 @@
     shrinkToFit: false,
     layout: 'vertical',
     broadcast: true,
+    // When shrinkToFit is OFF, these are the literal widget dimensions (the
+    // ground truth). When ON, computeObsSize() overrides them. null = not
+    // yet initialized — getEffectiveSize() will fill from computeObsSize.
+    customWidth: null,
+    customHeight: null,
   };
+
+  // Single source of truth for "how big is the widget box right now?". All
+  // CSS / preview / OBS broadcast reads from here. When shrink-to-fit is ON,
+  // the app decides (based on visible widgets); when OFF, the user decides
+  // (via the Width/Height inputs in Settings → Stream).
+  function getEffectiveSize() {
+    if (widgetPrefs.shrinkToFit) return computeObsSize();
+    const fallback = computeObsSize();
+    return {
+      w: Number.isFinite(widgetPrefs.customWidth)  ? widgetPrefs.customWidth  : fallback.w,
+      h: Number.isFinite(widgetPrefs.customHeight) ? widgetPrefs.customHeight : fallback.h,
+    };
+  }
+  // Apply the effective size to the preview's #overlay-zone as inline CSS.
+  // That becomes the ground truth for DOM layout — contents flow inside a
+  // box with these exact dimensions, chart canvases stabilize, no mid-session
+  // drift. overflow: hidden crops anything that doesn't fit (user picked the
+  // size; we honour it).
+  function applyOverlaySize() {
+    const { w, h } = getEffectiveSize();
+    const zone = $('overlay-zone');
+    if (!zone) return;
+    zone.style.width = w + 'px';
+    zone.style.height = h + 'px';
+    zone.style.overflow = 'hidden';
+  }
 
   function applyWidgetPrefs() {
     const zone = $('overlay-zone');
@@ -3576,8 +3647,6 @@
     zone.classList.toggle('no-hrv', !widgetPrefs.showHrv);
     zone.classList.toggle('no-live-hr', !widgetPrefs.showLiveHr);
     zone.classList.toggle('no-inline-trends', !widgetPrefs.showInlineTrends);
-    // shrink-to-fit applies to <body> rather than #overlay-zone so compact mode
-    // (which sets display: grid on children) doesn't override the width: fit-content.
     document.body.classList.toggle('shrink-to-fit', !!widgetPrefs.shrinkToFit);
     document.body.classList.toggle('layout-horizontal', widgetPrefs.layout === 'horizontal');
     document.querySelectorAll('.layout-btn').forEach(btn => {
@@ -3589,6 +3658,8 @@
     }
     // Apply broadcast toggle: reconnect or disconnect relay as needed.
     if (typeof applyBroadcastPref === 'function') applyBroadcastPref();
+    // Lock the preview to effective dimensions so toggles don't cause drift.
+    applyOverlaySize();
     resizeAllCharts();
     if (typeof updateObsSizeDisplay === 'function') updateObsSizeDisplay();
   }
@@ -3758,6 +3829,24 @@
           target.select();
           prompt('Copy this number into OBS:', val);
         }
+      });
+    });
+    // Width / Height inputs: editable when shrink-to-fit is OFF. Typing a new
+    // value updates widgetPrefs.customWidth/Height, writes the new size onto
+    // the preview via applyOverlaySize, and broadcasts so OBS re-renders.
+    ['obs-size-w', 'obs-size-h'].forEach((id, idx) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener('input', () => {
+        if (widgetPrefs.shrinkToFit) return; // field is read-only in this mode
+        const raw = parseInt(el.value, 10);
+        if (!Number.isFinite(raw)) return;
+        const clamped = Math.max(idx === 0 ? 160 : 80, Math.min(2000, raw));
+        if (idx === 0) widgetPrefs.customWidth = clamped;
+        else widgetPrefs.customHeight = clamped;
+        saveWidgetPrefs();
+        applyOverlaySize();
+        pushPrefsToOverlay();
       });
     });
     $('connect').addEventListener('click', connect);

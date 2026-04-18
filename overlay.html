@@ -53,15 +53,14 @@
     align-items: flex-start;
     gap: 12px;
   }
-  /* Shrink-to-fit: container hugs visible widgets — useful when you've hidden
-     some (only HR, only HRV, etc). Widget INTERNALS don't shrink; only the
-     outer padding/gap tightens. When all widgets are shown, the size is the
-     same as with shrink-to-fit off. */
+  /* Shrink-to-fit: container hugs visible widgets. NOTHING else changes —
+     padding, gap, widget sizes all stay identical. When every widget is on,
+     shrink-on and shrink-off render pixel-identical. The toggle only matters
+     when some widgets are hidden, because that's when the container can
+     collapse down to the remaining content. */
   body.shrink-to-fit #overlay-zone {
     width: fit-content;
     max-width: 100%;
-    padding: 8px;
-    gap: 8px;
   }
 
   .widget, .breath-widget {
@@ -81,6 +80,9 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 4px;
+    /* Anchor for the absolutely-positioned .conn-indicator so its
+       "reconnecting…" label doesn't push the widget wider. */
+    position: relative;
   }
   .header-left { display: flex; align-items: center; gap: 10px; }
   .widget-label {
@@ -154,6 +156,32 @@
     letter-spacing: 0.08em;
   }
   .palp-chip.active { display: inline-flex; }
+
+  /* Warning banner — mirrors the monitor. Hidden by default; fires when a
+     threshold warning is active (HR high/low, HRV crash, palpitations elevated). */
+  .warning-banner {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60%;
+    min-width: 0;
+  }
+  .warning-banner.active { display: inline-flex; }
+  .warning-banner.warn-high   { border-color: #E24B4A; background: rgba(226,75,74,0.14);  color: #E24B4A; }
+  .warning-banner.warn-low    { border-color: #7DB8E8; background: rgba(125,184,232,0.12); color: #7DB8E8; }
+  .warning-banner.warn-crash  { border-color: #BA7517; background: rgba(186,117,23,0.18); color: #F0C75E; }
+  .warning-banner.warn-palp   { border-color: #D76CBA; background: rgba(215,108,186,0.18); color: #D76CBA; }
+  .warning-banner-icon { display: inline-flex; }
+  .warning-banner-icon svg { width: 12px; height: 12px; fill: currentColor; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   .palp-dot {
     width: 6px; height: 6px; border-radius: 50%;
     background: var(--warn-palp);
@@ -173,7 +201,9 @@
     padding: 14px 18px;
     display: grid;
     grid-template-columns: 1.75fr 1fr;
-    grid-template-rows: auto auto auto;
+    /* Fixed row heights (matches hr_monitor.html) so toggling HRV can't cause
+       the widget to grow taller. OBS source size stays locked. */
+    grid-template-rows: auto 68px 12px;
     gap: 4px 16px;
     align-items: start;
   }
@@ -308,13 +338,15 @@
   /* Connection indicator — lives inside the HR widget header, on the right.
      When connected: just a green dot (no text). When reconnecting: grey dot
      plus small "reconnecting…" label next to it. When never connected: grey
-     dot alone. Works for any style preset since the HR widget header exists
-     in all of them. */
+     dot alone. Absolute-positioned so the label never pushes the widget wider. */
   .conn-indicator {
+    position: absolute;
+    top: 0;
+    right: 0;
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-left: auto;
+    pointer-events: none;
   }
   .conn-dot {
     width: 9px;
@@ -363,6 +395,10 @@
         <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         <span class="widget-label">BPM</span>
         <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
+      </div>
+      <div class="warning-banner" id="warning-banner">
+        <span class="warning-banner-icon" id="warning-icon"></span>
+        <span class="warning-banner-text" id="warning-text"></span>
       </div>
       <span class="conn-indicator">
         <span class="conn-text" id="conn-text">reconnecting…</span>
@@ -475,6 +511,31 @@
     container.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('active', i < stageIndex));
   }
 
+  // Warning banner text / icon mapping — kept in lockstep with hr_monitor.html
+  // so the same four warnings render identically here.
+  const WARN_ICONS = {
+    'warn-high':  '<svg viewBox="0 0 24 24"><polyline points="17 11 12 6 7 11"></polyline><polyline points="17 17 12 12 7 17"></polyline></svg>',
+    'warn-low':   '<svg viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 7 12 12 17 7"></polyline></svg>',
+    'warn-crash': '<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+    'warn-palp':  '<svg viewBox="0 0 24 24"><path d="M3 12h4l2-8 4 16 2-8h6"></path></svg>',
+  };
+  const WARN_TEXT = {
+    'warn-high':  'Heart rate high',
+    'warn-low':   'Heart rate low',
+    'warn-crash': 'HRV crashed',
+    'warn-palp':  'Palpitations elevated',
+  };
+  function applyWarningBanner(warnType) {
+    const banner = $('warning-banner');
+    if (!banner) return;
+    banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
+    if (warnType && WARN_TEXT[warnType]) {
+      banner.classList.add(warnType, 'active');
+      $('warning-icon').innerHTML = WARN_ICONS[warnType] || '';
+      $('warning-text').textContent = WARN_TEXT[warnType] || '';
+    }
+  }
+
   // Apply widget-layout prefs received in a tick so the OBS overlay matches
   // whatever the live monitor is showing — no cache refresh needed. Style class
   // lives on #overlay-zone; visibility classes live on <body>. Skipped silently
@@ -485,7 +546,8 @@
     const z = $('overlay-zone');
     const prefs = msg.prefs || null;
     const style = msg.style;
-    const fp = JSON.stringify({ style, prefs });
+    const size = msg.widgetSize || null;
+    const fp = JSON.stringify({ style, prefs, size });
     if (fp === lastPrefsFingerprint) return; // no change; skip DOM churn
     lastPrefsFingerprint = fp;
     if (style && z) {
@@ -501,6 +563,14 @@
       document.body.classList.toggle('no-inline-trends', !prefs.showInlineTrends);
       document.body.classList.toggle('shrink-to-fit', !!prefs.shrinkToFit);
       document.body.classList.toggle('layout-horizontal', prefs.layout === 'horizontal');
+    }
+    // Pin the overlay box to the monitor's effective dimensions so the OBS
+    // source renders at the exact same size the preview shows. overflow:hidden
+    // so any content that doesn't fit is cropped rather than expanding the box.
+    if (size && z && Number.isFinite(size.w) && Number.isFinite(size.h)) {
+      z.style.width = size.w + 'px';
+      z.style.height = size.h + 'px';
+      z.style.overflow = 'hidden';
     }
   }
   function hexToRgba(hex, alpha) {
@@ -622,6 +692,7 @@
     } else {
       palpChip.classList.remove('active');
     }
+    applyWarningBanner(msg.warn);
     if (msg.breathRate != null) $('breath-rate').textContent = Math.round(msg.breathRate) + ' br/min';
 
     if (msg.livePoints) {

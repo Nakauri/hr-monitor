@@ -2645,21 +2645,20 @@
     if (rmssd.length && hr.length) {
       let hrIdx = 0;
       // Pull live user thresholds so quadPct matches whatever the user has
-      // customized in the kebab editor. Cached summaries may lag by one render
+      // customized in the kebab editors. Cached summaries may lag by one render
       // cycle after a threshold change; invalidateQuadrantCache() clears them.
-      const hrThresh = QUADRANT_HR_HIGH;
-      const rmThresh = QUADRANT_HRV_HIGH;
-      const quadCounts = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0 };
+      const t = QUADRANT_THRESH;
+      const quadCounts = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0, 'neutral': 0 };
       for (const p of rmssd) {
         while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].t - p.t) <= Math.abs(hr[hrIdx].t - p.t)) hrIdx++;
         const hrVal = hr[hrIdx].v;
-        const hrHigh = hrVal >= hrThresh;
-        const rmHigh = p.v >= rmThresh;
-        let key;
-        if (!hrHigh && rmHigh) key = 'low-high';
+        const hrLow = hrVal < t.hrLow, hrHigh = hrVal > t.hrHigh;
+        const rmLow = p.v < t.hrvLow,  rmHigh = p.v > t.hrvHigh;
+        let key = 'neutral';
+        if (hrLow && rmHigh) key = 'low-high';
         else if (hrHigh && rmHigh) key = 'high-high';
-        else if (!hrHigh && !rmHigh) key = 'low-low';
-        else key = 'high-low';
+        else if (hrLow && rmLow) key = 'low-low';
+        else if (hrHigh && rmLow) key = 'high-low';
         quadCounts[key]++;
       }
       const total = rmssd.length;
@@ -3586,20 +3585,21 @@
     let hrIdx = 0;
     const rr = data.rmssd;
     const hr = data.hr;
-    const hrThresh = QUADRANT_HR_HIGH;
-    const rmThresh = QUADRANT_HRV_HIGH;
+    const t = QUADRANT_THRESH;
     let cur = null;
     for (const p of rr) {
       // Advance hrIdx to the sample nearest in time
       while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].x - p.x) <= Math.abs(hr[hrIdx].x - p.x)) hrIdx++;
       const hrVal = hr[hrIdx].y;
-      const hrHigh = hrVal >= hrThresh;
-      const rmHigh = p.y >= rmThresh;
-      let key;
-      if (!hrHigh && rmHigh) key = 'low-high';
+      const hrLow = hrVal < t.hrLow, hrHigh = hrVal > t.hrHigh;
+      const rmLow = p.y < t.hrvLow,  rmHigh = p.y > t.hrvHigh;
+      let key = null;
+      if (hrLow && rmHigh) key = 'low-high';
       else if (hrHigh && rmHigh) key = 'high-high';
-      else if (!hrHigh && !rmHigh) key = 'low-low';
-      else key = 'high-low';
+      else if (hrLow && rmLow) key = 'low-low';
+      else if (hrHigh && rmLow) key = 'high-low';
+      // Neutral samples (middle zone) don't render as an overlay band.
+      if (!key) { if (cur) { out[cur.key].push({ start: cur.start, end: cur.end }); cur = null; } continue; }
       if (cur && cur.key === key && p.x - cur.end <= 0.5) {
         cur.end = p.x;
       } else {
@@ -4599,39 +4599,53 @@
     return { 'warn-high': 'HR high', 'warn-low': 'HR low', 'warn-crash': 'HRV crash', 'warn-palp': 'Palpitations' }[type] || type;
   }
 
-  // HR×HRV quadrant thresholds. Two default profiles keyed off the Autonomic
-  // analysis toggle:
-  //   POTS / autonomic-on   → HR 90, HRV 30 (POTS-typical seated baseline sits
-  //                           near 85–95 bpm with lower HRV).
-  //   Typical / autonomic-off → HR 80, HRV 45 (average adult resting HR is
-  //                           60–75 so 80 marks "clearly activated"; HRV 45 is
-  //                           the line between tense and relaxed for most).
-  // User customization always overrides whichever profile is active.
-  const LS_QUADRANT_THRESH = 'hrv_viewer_quadrant_thresh';
-  const QUADRANT_DEFAULT_POTS = { hr: 90, hrv: 30 };
-  const QUADRANT_DEFAULT_TYPICAL = { hr: 80, hrv: 45 };
-  let QUADRANT_HR_HIGH, QUADRANT_HRV_HIGH;
+  // HR×HRV quadrant thresholds. Four bounds (not two) so each quadrant card can
+  // own its defining edges, with a neutral middle zone between them. The zone
+  // between HR_LOW and HR_HIGH, and HRV_LOW and HRV_HIGH, is unclassified — a
+  // session that lands there doesn't match any quadrant, which is honest: it's
+  // "not clearly either way" rather than being forced into a bucket.
+  //
+  //   POTS / autonomic-on default: HR 80–100, HRV 20–35.
+  //     POTS-typical seated HR sits at 85–95, HRV 15–30. Low HR for a POTS
+  //     patient means clearly below their baseline (<80). High HR means well
+  //     above (>100). HRV cuts are similarly shifted down.
+  //   Typical / autonomic-off default: HR 65–85, HRV 30–50.
+  //     Average adult resting HR is 60–75. <65 is "truly at rest", >85 is
+  //     "clearly activated". HRV 30 = lower end of healthy at rest, 50 = clearly
+  //     relaxed.
+  const LS_QUADRANT_THRESH = 'hrv_viewer_quadrant_thresh_v2';
+  const QUADRANT_DEFAULT_POTS    = { hrLow: 80, hrHigh: 100, hrvLow: 20, hrvHigh: 35 };
+  const QUADRANT_DEFAULT_TYPICAL = { hrLow: 65, hrHigh: 85,  hrvLow: 30, hrvHigh: 50 };
+  let QUADRANT_THRESH = {};
   function quadrantDefault() {
     return isAutonomicOn() ? QUADRANT_DEFAULT_POTS : QUADRANT_DEFAULT_TYPICAL;
   }
   function applyQuadrantThresh() {
+    const d = quadrantDefault();
+    QUADRANT_THRESH = Object.assign({}, d);
     try {
       const saved = JSON.parse(localStorage.getItem(LS_QUADRANT_THRESH) || 'null');
-      if (saved && saved.customized && Number.isFinite(saved.hr) && Number.isFinite(saved.hrv)) {
-        QUADRANT_HR_HIGH = saved.hr;
-        QUADRANT_HRV_HIGH = saved.hrv;
-        return;
+      if (saved && saved.customized) {
+        // Merge saved values over defaults, one key at a time — users might
+        // have only customized a subset.
+        for (const k of ['hrLow', 'hrHigh', 'hrvLow', 'hrvHigh']) {
+          if (Number.isFinite(saved[k])) QUADRANT_THRESH[k] = saved[k];
+        }
       }
     } catch (e) {}
-    const d = quadrantDefault();
-    QUADRANT_HR_HIGH = d.hr;
-    QUADRANT_HRV_HIGH = d.hrv;
+    // Safety: HR low must be below HR high, same for HRV, so the middle zone
+    // never inverts. If user's saved values somehow crossed, swap them.
+    if (QUADRANT_THRESH.hrLow >= QUADRANT_THRESH.hrHigh) {
+      [QUADRANT_THRESH.hrLow, QUADRANT_THRESH.hrHigh] = [QUADRANT_THRESH.hrHigh, QUADRANT_THRESH.hrLow];
+    }
+    if (QUADRANT_THRESH.hrvLow >= QUADRANT_THRESH.hrvHigh) {
+      [QUADRANT_THRESH.hrvLow, QUADRANT_THRESH.hrvHigh] = [QUADRANT_THRESH.hrvHigh, QUADRANT_THRESH.hrvLow];
+    }
   }
   applyQuadrantThresh();
-  function saveQuadrantThresh(hr, hrv) {
-    QUADRANT_HR_HIGH = hr;
-    QUADRANT_HRV_HIGH = hrv;
-    try { localStorage.setItem(LS_QUADRANT_THRESH, JSON.stringify({ hr, hrv, customized: true })); } catch (e) {}
+  function saveQuadrantThresh(overrides) {
+    Object.assign(QUADRANT_THRESH, overrides);
+    try { localStorage.setItem(LS_QUADRANT_THRESH, JSON.stringify(Object.assign({ customized: true }, QUADRANT_THRESH))); } catch (e) {}
   }
   function resetQuadrantThresh() {
     try { localStorage.removeItem(LS_QUADRANT_THRESH); } catch (e) {}
@@ -4649,12 +4663,18 @@
   }
 
   function classifyQuadrant(hrAvg, rmssdAvg) {
-    const hrHigh = hrAvg >= QUADRANT_HR_HIGH;
-    const rmssdHigh = rmssdAvg != null && rmssdAvg >= QUADRANT_HRV_HIGH;
-    if (!hrHigh && rmssdHigh) return { key: 'low-high', label: 'Low HR · High HRV', tone: 'Rest or recovery mode. Strong parasympathetic tone.' };
-    if (hrHigh && rmssdHigh) return { key: 'high-high', label: 'High HR · High HRV', tone: 'Post-exertion rebound or regulated arousal.' };
-    if (!hrHigh && !rmssdHigh) return { key: 'low-low', label: 'Low HR · Low HRV', tone: 'Fatigue or under-recovery pattern.' };
-    return { key: 'high-low', label: 'High HR · Low HRV', tone: 'Sympathetic stress. Classic flare or orthostatic pattern.' };
+    const t = QUADRANT_THRESH;
+    const hrLow = hrAvg < t.hrLow;
+    const hrHigh = hrAvg > t.hrHigh;
+    const rmLow = rmssdAvg != null && rmssdAvg < t.hrvLow;
+    const rmHigh = rmssdAvg != null && rmssdAvg > t.hrvHigh;
+    if (hrLow && rmHigh) return { key: 'low-high', label: 'Low HR · High HRV', tone: 'Rest or recovery mode. Strong parasympathetic tone.' };
+    if (hrHigh && rmHigh) return { key: 'high-high', label: 'High HR · High HRV', tone: 'Post-exertion rebound or regulated arousal.' };
+    if (hrLow && rmLow) return { key: 'low-low', label: 'Low HR · Low HRV', tone: 'Fatigue or under-recovery pattern.' };
+    if (hrHigh && rmLow) return { key: 'high-low', label: 'High HR · Low HRV', tone: 'Sympathetic stress. Classic flare or orthostatic pattern.' };
+    // Neutral zone — session sits between the low and high cuts on one or both
+    // axes. Honest "not clearly either way" result instead of forcing a bucket.
+    return { key: 'neutral', label: 'Neutral', tone: 'Session sits in the middle zone. Neither clearly resting nor clearly activated.' };
   }
 
   function renderInterpretation(s) {
@@ -4714,38 +4734,65 @@
     document.querySelectorAll('.interp-kebab').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        openQuadrantThreshEditor(btn);
+        const cell = btn.closest('.interp-cell');
+        if (cell && cell.dataset.quad) openQuadrantThreshEditor(btn, cell.dataset.quad);
       });
     });
   }
 
-  // Renders the small "Default for current mode: HR X · HRV Y" line inside the
-  // popover so the user knows which profile Reset will snap back to.
-  function updateDefaultHint(pop) {
+  // Maps each quadrant corner to the two threshold keys that define it.
+  // Editing "Low HR · High HRV" exposes `hrLow` and `hrvHigh` — the corner the
+  // card represents. Neighbouring cards share some keys (e.g., both low-HR
+  // cards reference `hrLow`), so changing one affects both. The popover
+  // explicitly calls this out.
+  const QUAD_FIELDS = {
+    'low-high':  { hr: 'hrLow',  hrv: 'hrvHigh', hrLabel: 'Low HR ceiling',  hrvLabel: 'High HRV floor',
+                   hrHint: 'HR below this counts as Low.',
+                   hrvHint: 'RMSSD above this counts as High.',
+                   sharedNote: 'HR ceiling is shared with the Low HR · Low HRV card. HRV floor is shared with the High HR · High HRV card.' },
+    'high-high': { hr: 'hrHigh', hrv: 'hrvHigh', hrLabel: 'High HR floor',   hrvLabel: 'High HRV floor',
+                   hrHint: 'HR above this counts as High.',
+                   hrvHint: 'RMSSD above this counts as High.',
+                   sharedNote: 'HR floor is shared with the High HR · Low HRV card. HRV floor is shared with the Low HR · High HRV card.' },
+    'low-low':   { hr: 'hrLow',  hrv: 'hrvLow',  hrLabel: 'Low HR ceiling',  hrvLabel: 'Low HRV ceiling',
+                   hrHint: 'HR below this counts as Low.',
+                   hrvHint: 'RMSSD below this counts as Low.',
+                   sharedNote: 'HR ceiling is shared with the Low HR · High HRV card. HRV ceiling is shared with the High HR · Low HRV card.' },
+    'high-low':  { hr: 'hrHigh', hrv: 'hrvLow',  hrLabel: 'High HR floor',   hrvLabel: 'Low HRV ceiling',
+                   hrHint: 'HR above this counts as High.',
+                   hrvHint: 'RMSSD below this counts as Low.',
+                   sharedNote: 'HR floor is shared with the High HR · High HRV card. HRV ceiling is shared with the Low HR · Low HRV card.' },
+  };
+
+  function updateDefaultHint(pop, quadKey) {
     const hintEl = pop.querySelector('#thresh-default-hint');
     if (!hintEl) return;
     const d = quadrantDefault();
+    const fields = QUAD_FIELDS[quadKey];
     const mode = isAutonomicOn() ? 'autonomic mode (calibrated for POTS)' : 'typical adult mode';
-    hintEl.textContent = `Reset restores the ${mode} default: HR ${d.hr} · HRV ${d.hrv}.`;
+    hintEl.textContent = `Reset restores the ${mode} defaults: ${fields.hrLabel} ${d[fields.hr]}, ${fields.hrvLabel} ${d[fields.hrv]}.`;
   }
 
-  // Threshold editor popover. Lazily created on first open. Anchored just
-  // below-right of whichever kebab was clicked so it feels contextual, but
-  // edits apply globally (all four cells share the same HR / HRV cutoffs).
-  function openQuadrantThreshEditor(anchorBtn) {
+  // Per-card threshold editor popover. Lazily created once; its labels and
+  // bindings are re-written each open based on which quadrant card's kebab
+  // was clicked. Only exposes the TWO thresholds that define that quadrant
+  // corner so the user doesn't have to think about the other two.
+  function openQuadrantThreshEditor(anchorBtn, quadKey) {
+    const fields = QUAD_FIELDS[quadKey];
+    if (!fields) return;
     let pop = document.getElementById('quadrant-thresh-popover');
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'quadrant-thresh-popover';
       pop.innerHTML = `
-        <h4>HR × HRV thresholds</h4>
-        <div class="thresh-blurb">These two cutoffs define every quadrant. Any kebab opens the same editor — all four cards share the lines.</div>
+        <h4 id="thresh-title"></h4>
+        <div class="thresh-blurb" id="thresh-blurb"></div>
         <div class="thresh-row">
-          <label>High HR line<span class="thresh-hint">Sessions at or above this count as activated.</span></label>
+          <label id="thresh-hr-label"></label>
           <input type="number" id="thresh-hr" min="40" max="200" step="1" />
         </div>
         <div class="thresh-row">
-          <label>High HRV line<span class="thresh-hint">RMSSD at or above this counts as relaxed.</span></label>
+          <label id="thresh-hrv-label"></label>
           <input type="number" id="thresh-hrv" min="5" max="200" step="1" />
         </div>
         <div class="thresh-default-hint" id="thresh-default-hint"></div>
@@ -4756,26 +4803,7 @@
         </div>
       `;
       document.body.appendChild(pop);
-      pop.querySelector('#thresh-save').addEventListener('click', () => {
-        let hrVal = parseInt(pop.querySelector('#thresh-hr').value, 10);
-        let hrvVal = parseInt(pop.querySelector('#thresh-hrv').value, 10);
-        if (!Number.isFinite(hrVal) || hrVal < 40 || hrVal > 200) hrVal = QUADRANT_HR_HIGH;
-        if (!Number.isFinite(hrvVal) || hrvVal < 5 || hrvVal > 200) hrvVal = QUADRANT_HRV_HIGH;
-        saveQuadrantThresh(hrVal, hrvVal);
-        invalidateQuadrantCache();
-        pop.classList.remove('open');
-        // Re-render the currently open view so the new thresholds apply.
-        route();
-      });
-      pop.querySelector('#thresh-cancel').addEventListener('click', () => pop.classList.remove('open'));
-      pop.querySelector('#thresh-reset').addEventListener('click', () => {
-        resetQuadrantThresh();
-        pop.querySelector('#thresh-hr').value = QUADRANT_HR_HIGH;
-        pop.querySelector('#thresh-hrv').value = QUADRANT_HRV_HIGH;
-        updateDefaultHint(pop);
-        invalidateQuadrantCache();
-      });
-      // Dismiss on outside click.
+      // Dismiss handlers (wired once, work for every open).
       document.addEventListener('click', (e) => {
         if (!pop.classList.contains('open')) return;
         if (pop.contains(e.target) || e.target.classList.contains('interp-kebab')) return;
@@ -4785,13 +4813,61 @@
         if (e.key === 'Escape' && pop.classList.contains('open')) pop.classList.remove('open');
       });
     }
-    pop.querySelector('#thresh-hr').value = QUADRANT_HR_HIGH;
-    pop.querySelector('#thresh-hrv').value = QUADRANT_HRV_HIGH;
-    updateDefaultHint(pop);
+    // Rebuild labels + bindings for this card's two thresholds.
+    const title = pop.querySelector('#thresh-title');
+    const blurb = pop.querySelector('#thresh-blurb');
+    const hrLabel = pop.querySelector('#thresh-hr-label');
+    const hrvLabel = pop.querySelector('#thresh-hrv-label');
+    const hrInput = pop.querySelector('#thresh-hr');
+    const hrvInput = pop.querySelector('#thresh-hrv');
+    const cardTitleMap = {
+      'low-high':  'Low HR · High HRV',
+      'high-high': 'High HR · High HRV',
+      'low-low':   'Low HR · Low HRV',
+      'high-low':  'High HR · Low HRV',
+    };
+    title.textContent = 'Thresholds · ' + cardTitleMap[quadKey];
+    blurb.textContent = fields.sharedNote;
+    hrLabel.innerHTML = `${fields.hrLabel}<span class="thresh-hint">${fields.hrHint}</span>`;
+    hrvLabel.innerHTML = `${fields.hrvLabel}<span class="thresh-hint">${fields.hrvHint}</span>`;
+    hrInput.value = QUADRANT_THRESH[fields.hr];
+    hrvInput.value = QUADRANT_THRESH[fields.hrv];
+
+    // Clone-and-replace Save / Reset so stale closures from prior opens don't
+    // fire (easier than tracking listener references).
+    const oldSave = pop.querySelector('#thresh-save');
+    const newSave = oldSave.cloneNode(true);
+    oldSave.parentNode.replaceChild(newSave, oldSave);
+    newSave.addEventListener('click', () => {
+      const hrVal = parseInt(hrInput.value, 10);
+      const hrvVal = parseInt(hrvInput.value, 10);
+      const overrides = {};
+      if (Number.isFinite(hrVal) && hrVal >= 40 && hrVal <= 200) overrides[fields.hr] = hrVal;
+      if (Number.isFinite(hrvVal) && hrvVal >= 5 && hrvVal <= 200) overrides[fields.hrv] = hrvVal;
+      saveQuadrantThresh(overrides);
+      applyQuadrantThresh(); // re-run safety swap in case user crossed low/high
+      invalidateQuadrantCache();
+      pop.classList.remove('open');
+      route();
+    });
+    const oldCancel = pop.querySelector('#thresh-cancel');
+    const newCancel = oldCancel.cloneNode(true);
+    oldCancel.parentNode.replaceChild(newCancel, oldCancel);
+    newCancel.addEventListener('click', () => pop.classList.remove('open'));
+    const oldReset = pop.querySelector('#thresh-reset');
+    const newReset = oldReset.cloneNode(true);
+    oldReset.parentNode.replaceChild(newReset, oldReset);
+    newReset.addEventListener('click', () => {
+      resetQuadrantThresh();
+      hrInput.value = QUADRANT_THRESH[fields.hr];
+      hrvInput.value = QUADRANT_THRESH[fields.hrv];
+      updateDefaultHint(pop, quadKey);
+      invalidateQuadrantCache();
+    });
+
+    updateDefaultHint(pop, quadKey);
     const rect = anchorBtn.getBoundingClientRect();
     pop.classList.add('open');
-    // Position: prefer below the kebab, but flip above if it'd overflow the
-    // viewport. Right edge aligned to the kebab.
     const popW = pop.offsetWidth;
     const popH = pop.offsetHeight;
     let left = Math.max(8, rect.right - popW);
