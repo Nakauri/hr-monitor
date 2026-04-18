@@ -2433,11 +2433,13 @@
       livePoints = state.breathBuffer.map(r => ({ x: r.t * 60, y: 60000 / r.rr }));
       liveWindow = [Math.max(0, nowSec - WINDOW), Math.max(WINDOW, nowSec)];
     }
-    // 3-min trend window for inline mini-charts in the overlay
+    // 3-min trend window for inline mini-charts in the overlay. RMSSD gets
+    // the same 10-sample trailing smoother the monitor's compactChart uses,
+    // so the overlay's trend line matches the preview exactly. HR is raw.
     const cutoff = nowMin - 3;
     const trendWindow = [Math.max(0, nowMin - 3), Math.max(3, nowMin)];
     const trendHR = state.hrSeries.filter(p => p.t >= cutoff).map(p => ({ x: p.t, y: p.v }));
-    const trendRmssd = state.rmssdSeries.filter(p => p.t >= cutoff).map(p => ({ x: p.t, y: p.v }));
+    const trendRmssd = smoothSeries(state.rmssdSeries.filter(p => p.t >= cutoff), 10);
     const tick = {
       type: 'tick',
       t: nowMin,
