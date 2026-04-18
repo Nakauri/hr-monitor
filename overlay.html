@@ -6,9 +6,7 @@
 <title>HR Monitor · Overlay</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
-  /* Mirrors the live monitor's overlay zone. One style only (compact), one
-     layout only (vertical). Any CSS change in hr_monitor.html must be reflected
-     here; one day extract shared CSS to a separate file. */
+  /* CSS must stay in sync with hr_monitor.html. */
   :root {
     --bg: #0a0a0a;
     --bg-panel: #0a0a0a;
@@ -31,8 +29,7 @@
     overflow: hidden;
   }
   body.bg-dark { background: var(--bg); }
-  /* Chroma-key backgrounds for the Window-Capture popup path. OBS can key out
-     a solid color; magenta is the classic chroma pick. */
+  /* Chroma-key backgrounds for OBS Window Capture popups. */
   body.bg-magenta,
   body.bg-magenta #overlay-zone { background: #ff00ff; }
   body.bg-black,
@@ -40,10 +37,8 @@
 
   #overlay-zone {
     background: transparent;
-    /* Padding stays 0 in the overlay: the monitor measures .widget-row (no
-       zone padding) and we pin #overlay-zone to that size. Any padding here
-       would eat width and push the HRV column past the card edge. The widget
-       itself carries internal padding, so the card still looks breathable. */
+    /* Padding must be 0: the monitor measures .widget-row (no zone padding)
+       and pins #overlay-zone to that size. Zone padding here would clip HRV. */
     padding: 0;
     display: flex;
     flex-direction: column;
@@ -53,8 +48,6 @@
   }
   body.bg-dark #overlay-zone { background: #000; }
 
-  /* Widgets live inside this row. Only compact layout: one widget, stacks
-     vertically under the warning-slot-above. */
   #overlay-zone .widget-row {
     display: flex;
     flex-direction: column;
@@ -77,6 +70,7 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 0;
+    /* Anchor for the absolutely-positioned .conn-indicator. */
     position: relative;
   }
   .header-left { display: flex; align-items: center; gap: 10px; }
@@ -115,7 +109,7 @@
   .number-row > .big-number { flex: 0 0 auto; }
   .inline-live-trace {
     flex: 1 1 0;
-    min-width: 160px;
+    min-width: 140px;
     position: relative;
     padding: 6px 0 10px;
     height: 68px;
@@ -162,8 +156,7 @@
     box-shadow: 0 0 6px var(--warn-palp);
   }
 
-  /* Warning banner. Fixed width so every banner text renders at the same card
-     width, which keeps the recommended OBS source size stable across warnings. */
+  /* Fixed width so OBS source size stays stable across warning strings. */
   .warning-banner {
     display: none;
     align-items: center;
@@ -193,13 +186,10 @@
   .warning-banner-icon svg { width: 12px; height: 12px; fill: currentColor; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   .warning-banner-text { overflow: hidden; text-overflow: ellipsis; }
 
-  /* Compact widget grid. HR readout left, HRV readout right, combined trend
-     spans full width at bottom. */
   #hr-widget {
     display: grid;
-    grid-template-columns: 1.75fr 1fr;
-    /* Fixed row heights match hr_monitor.html so toggling HRV can't make the
-       widget grow taller. Row 4 (compact-trend) is auto-sized implicitly. */
+    /* Columns hug content so disabling widgets shrinks the card. */
+    grid-template-columns: auto auto;
     grid-template-rows: auto 68px 14px;
     gap: 10px 16px;
     align-items: start;
@@ -239,33 +229,24 @@
     border-top: 1px solid #1f1f1f;
   }
 
-  /* Toggle rules. HR off: hide only the BPM readout (label, icon, big number,
-     palp chip). Keep pips and live trace. HRV off: hide the HRV column and
-     promote HR to full width. Both off: hide the whole widget. */
+  /* HR off hides only the BPM readout. Pips + live trace stay. */
   body.no-hr #hr-widget .widget-label,
   body.no-hr #hr-widget .heart-icon,
   body.no-hr #hr-widget .palp-chip,
   body.no-hr #hr-widget .big-number { display: none !important; }
 
   body.no-hrv .compact-hrv { display: none !important; }
-  body.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
+  body.no-hrv #hr-widget { grid-template-columns: auto !important; }
 
   body.no-hr.no-hrv #hr-widget { display: none !important; }
-
-  /* Live HR trace toggle — only affects the inline trace in the HR column. */
   body.no-live-hr .inline-live-trace { display: none !important; }
-
-  /* Mini trends toggle — only affects the combined HR+RMSSD line at the bottom. */
   body.no-inline-trends .compact-trend { display: none !important; }
-
-  /* Palp chip + warning banner + conn dot each toggleable. */
   body.no-palp-chip .palp-chip,
   body.no-palp-chip #palp-chip { display: none !important; }
   body.no-warning .warning-banner { display: none !important; }
   body.no-conn-dot .conn-indicator { display: none !important; }
 
-  /* Warning-slot-above reserves fixed height above the widget when the user
-     picks "above" placement, so the widget never reflows when a warning fires. */
+  /* Above-placement reserves a fixed slot so the widget never reflows. */
   .warning-slot-above { display: none; }
   body.warning-above .warning-slot-above {
     display: flex;
@@ -277,7 +258,6 @@
   body.warning-above.no-warning .warning-slot-above { display: none !important; }
   body.warning-above .widget-header > .warning-banner { display: none !important; }
 
-  /* Waiting state when no tick has arrived yet. */
   #waiting {
     position: fixed; inset: 0;
     display: flex; align-items: center; justify-content: center;
@@ -290,7 +270,7 @@
   #waiting .hint { font-size: 10px; color: #3a3a3a; }
   body.connected #waiting { display: none; }
 
-  /* Connection indicator (absolute so it never pushes the widget wider). */
+  /* Absolute so the reconnecting label doesn't push the widget wider. */
   .conn-indicator {
     position: absolute;
     top: 0;
@@ -394,9 +374,7 @@
   if (hideInline) document.body.classList.add('no-inline-trends');
   if (params.get('nodot') === '1') document.body.classList.add('no-dot');
 
-  // OBS auto-refresh on deploy. OBS's embedded Chromium caches aggressively so
-  // overlay updates normally require a manual "Refresh cache" click. Instead
-  // we poll the overlay's own ETag every 5 minutes; when it changes we hard-reload.
+  // Hard-reload on ETag change; OBS's Chromium caches aggressively.
   if (params.get('autoreload') !== '0') {
     let lastETag = null;
     async function checkForOverlayUpdate() {
@@ -464,8 +442,6 @@
     }
   }
 
-  // Apply widget-layout prefs received in a tick so the OBS overlay matches
-  // whatever the live monitor is showing — no cache refresh needed.
   let lastPrefsFingerprint = '';
   function applyRemotePrefs(msg) {
     if (!msg) return;
@@ -485,8 +461,6 @@
       document.body.classList.toggle('no-conn-dot', prefs.showConnDot === false);
       document.body.classList.toggle('warning-above', prefs.warningPlacement === 'above');
     }
-    // Pin the overlay box to the monitor's measured dimensions so the OBS
-    // source renders at the exact same size the preview shows.
     if (size && z && Number.isFinite(size.w) && Number.isFinite(size.h)) {
       z.style.width = size.w + 'px';
       z.style.height = size.h + 'px';
@@ -513,9 +487,8 @@
     }
   }
 
-  // Charts. Configs kept in lockstep with hr_monitor.html: monotone
-  // interpolation and borderWidth 1.75 prevent the line from overshooting its
-  // vertical bounds (otherwise the trace bleeds into the pips row below).
+  // Chart configs must stay in lockstep with hr_monitor.html. Monotone +
+  // borderWidth 1.75 stop the line from painting into the pips row.
   const baseOpts = {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: { legend: { display: false }, tooltip: { enabled: false } },
@@ -562,8 +535,7 @@
     $('hr-big').textContent = msg.hr != null ? msg.hr : '—';
     $('compact-hrv-value').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
     applyStage($('hr-widget'), msg.hrStage);
-    // HRV readout inside the HR widget isn't reached by the stage class on
-    // the widget; apply directly so HRV numbers colourize with RMSSD stage.
+    // compact-hrv-value isn't inside #rmssd-widget, so apply its stage directly.
     applyStage($('compact-hrv-value'), msg.rmssdStage);
     setPips($('hr-pips'), msg.hrStage);
 

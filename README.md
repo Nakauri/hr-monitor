@@ -1,35 +1,45 @@
 # HR Monitor
 
-Live heart rate + HRV tracking via Web Bluetooth chest strap, with POTS-aware session review.
+A simple browser app for live heart rate and HRV monitoring from a Bluetooth chest strap. Includes a session viewer for reviewing past recordings, with POTS-aware context.
 
-Two static HTML files, no build step. Opens directly in a modern Chromium browser (Chrome / Edge / Comet).
+Built because commercial HR overlays are either subscription-based or miss autonomic patterns that matter to POTS streamers.
 
-## Files
+## Requirements
 
-- `index.html` – landing page with links to the two apps.
-- `hr_monitor.html` – live monitor. Pairs with a BLE chest strap (standard Heart Rate Service 0x180D), shows real-time HR and RMSSD, fires audio alerts on threshold crossings, auto-saves sessions to a user-picked folder.
-- `hrv_viewer.html` – session browser. Reads CSVs from the same folder. Month / week / day / session / all-time views. Autonomic interpretation, palpitation detection, posture bands, sleep window overlay, printable report export.
+- A Bluetooth chest strap that exposes the standard Heart Rate Service (0x180D) with RR intervals.
+- A Chromium browser (Chrome, Edge, Comet). Web Bluetooth does not work in Safari or Firefox.
 
-## Stack
+Tested with the Coospo H808S. Other straps that implement the standard spec should work but have not been verified.
 
-- Single-file HTML per app, no bundler. Chart.js 4.4 + chartjs-plugin-annotation loaded from CDN.
-- Web Bluetooth API (Chromium-only) for the strap.
-- File System Access API for local save/read. Also supports Google Drive (via OAuth) when deployed to a hosted origin.
-- LocalStorage for user preferences + per-session tags/overrides.
-- No backend. All data is client-side in the user's browser / device.
+## What it does
 
-## Privacy
+**Live monitor** (`hr_monitor.html`)
+- Pairs with the strap and shows real-time BPM, HRV (RMSSD), and a live HR trace.
+- Audio alerts when thresholds are crossed.
+- Auto-saves the session as a CSV to a folder you pick.
+- Optional Google Drive backup.
+- OBS overlay support via a Browser Source URL, with toggles to hide widgets you don't want on stream.
 
-No accounts. No telemetry. Saved session CSVs stay on the user's device (File System Access). The app is free and open.
+**Session viewer** (`hrv_viewer.html`)
+- Reads the CSVs from the same folder.
+- Month, week, day, and single-session views.
+- Daily, weekly, and monthly summary reports.
+- Palpitation detection, autonomic interpretation, HR shift flags.
 
-**When the OBS broadcast feature is used**, live HR readings transit through a Cloudflare-hosted PartyKit relay so that an OBS Browser Source — which runs in a separate browser from the monitor — can receive them. The relay does not persist data; messages exist only long enough to fan out. Access is gated by a random per-user broadcast key stored in the user's browser (anyone with the key can subscribe to that user's stream, so the key should be treated as a secret).
+## Data and privacy
 
-If the broadcast feature isn't used, no data leaves the user's device at all.
+- No accounts, no sign-up, no analytics.
+- Session CSVs stay in the folder you picked. Nothing is uploaded by default.
+- Google Drive backup is opt-in. If signed in, sessions are copied to a Drive folder you choose.
+- OBS broadcast is opt-in. When enabled, live readings pass through a PartyKit relay so an OBS Browser Source in a different process can receive them. The relay does not store messages; it only forwards them to subscribers holding the broadcast key. Anyone with the key can subscribe, so treat it like a password.
+- Turn off broadcast and Drive, and no data leaves the browser.
 
-## Hardware
+## Running it
 
-Tested with Coospo H808S and Polar H10. Any chest strap exposing the standard BLE Heart Rate Measurement characteristic with RR intervals should work.
+The hosted version is at [hr-monitor-topaz.vercel.app](https://hr-monitor-topaz.vercel.app).
 
-## Development snapshot
+To run locally, open `index.html` in Chrome or Edge. No build step, no install.
 
-`_local_snapshot_2026-04-18/` holds a known-good local copy of the files at the point of transition to hosted deployment. Keep as a reference / rollback.
+## Disclaimer
+
+This is not a medical device. It is a visual tool for self-monitoring. Do not use it to diagnose or treat anything. If numbers concern you, talk to a clinician.

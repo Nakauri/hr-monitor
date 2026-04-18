@@ -2117,9 +2117,6 @@
   }
 
   function setDriveProgress(text) {
-    // Progress used to display verbose text in the header ("1 new · 0 updated · 0
-    // already cached"). It's surfaced only via the sync button's tooltip + an
-    // in-progress spin animation now — the header stays compact.
     const btn = document.getElementById('drive-sync');
     if (!btn) return;
     btn.title = text ? ('Sync from Drive. ' + text) : 'Sync sessions from Drive';
@@ -2393,8 +2390,7 @@
     return Array.from(names);
   }
 
-  // ===== Sessions index (lazy parse + localStorage cache) =====
-  // Stored shape: { filename: { summary object } }
+  // Sessions index (lazy parse + localStorage cache): { filename: summary }.
   let sessionsIndex = {};
   let sessionsByDate = {}; // 'YYYY-MM-DD' -> array of filenames
 
@@ -4875,7 +4871,7 @@
   // resets when they move to a different session.
   const LS_INSIGHT_COLLAPSED = 'hrv_viewer_insight_collapsed_v2';
   function isInsightCollapsed() { return true; }
-  function setInsightCollapsed(_collapsed) { /* no-op — intentionally not persisted */ }
+  function setInsightCollapsed(_collapsed) {}
   // One-time cleanup of the old persisted key so stale 'open' state doesn't
   // resurface for existing users who had it set.
   try { localStorage.removeItem(LS_INSIGHT_COLLAPSED); } catch (e) {}
