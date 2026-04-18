@@ -675,6 +675,19 @@
   .autosave-status.writing { color: var(--accent-rmssd); background: rgba(93,202,165,0.1); }
   .autosave-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
   .autosave-status.denied { color: var(--warn-crash); background: rgba(186,117,23,0.14); }
+  .autosave-folder.drive-syncing {
+    color: var(--accent-rmssd);
+    background: rgba(93,202,165,0.1);
+    border: 1px solid rgba(93,202,165,0.3);
+  }
+  .autosave-folder.drive-signedin {
+    color: var(--warn-crash);
+    background: rgba(186,117,23,0.1);
+  }
+  .autosave-folder.drive-error {
+    color: var(--warn-high);
+    background: rgba(226,75,74,0.14);
+  }
   .section {
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -929,6 +942,57 @@
     font-weight: 700;
     min-width: 96px;
   }
+  .obs-size-fields {
+    display: flex;
+    gap: 10px;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+  .obs-size-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 140px;
+  }
+  .obs-size-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+    min-width: 44px;
+  }
+  .obs-size-value {
+    font-family: 'Consolas', 'Monaco', monospace;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    width: 72px;
+    flex: 0 0 auto;
+  }
+  .obs-size-value:focus { outline: 1px solid var(--accent-rmssd); }
+  .obs-size-copy {
+    padding: 6px 10px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 700;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+  }
+  .obs-size-copy:hover { color: var(--text); border-color: var(--border-strong); }
+  .obs-size-copy.copied { color: var(--accent-rmssd); border-color: var(--accent-rmssd); }
   .streaming-key {
     font-family: 'Consolas', 'Monaco', monospace;
     background: var(--bg-input);
@@ -1307,13 +1371,24 @@
           <div class="streaming-row" style="margin-top: 8px;">
             <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
           </div>
-          <div class="streaming-row" style="margin-top: 10px;">
-            <span class="streaming-label">Source size:</span>
-            <code class="streaming-key" id="obs-size-panel" style="font-family: 'Consolas', 'Monaco', monospace;">380 × 560</code>
+          <div class="streaming-row" style="margin-top: 10px; align-items: flex-start;">
+            <span class="streaming-label" style="margin-top: 8px;">Source size:</span>
+            <div class="obs-size-fields">
+              <div class="obs-size-field">
+                <span class="obs-size-label">Width</span>
+                <input type="text" class="obs-size-value" id="obs-size-w" readonly />
+                <button class="obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
+              </div>
+              <div class="obs-size-field">
+                <span class="obs-size-label">Height</span>
+                <input type="text" class="obs-size-value" id="obs-size-h" readonly />
+                <button class="obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
+              </div>
+            </div>
           </div>
           <div style="font-size: 11px; color: var(--text-faint); margin-top: 8px; line-height: 1.4;">
             Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
-            Set <b>Width</b> and <b>Height</b> in the dialog to the values above to avoid empty space.
+            Paste the <b>Width</b> and <b>Height</b> numbers into OBS's matching fields to avoid empty space.
             Dimensions auto-update as you change style / widgets.
           </div>
         </div>
@@ -1385,6 +1460,7 @@
           <div class="stat"><div class="stat-label">Palp / min</div><div class="stat-value" id="palp-rate">0</div></div>
           <div class="stat"><div class="stat-label">Palp total</div><div class="stat-value" id="palp-total">0</div></div>
           <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="warn-count">0</div></div>
+          <div class="stat" title="Fraction of the session where the strap was connected. Drops whenever the strap disconnects and auto-reconnect is in flight."><div class="stat-label">Uptime</div><div class="stat-value" id="uptime-pct">—</div></div>
         </div>
       </div>
     </div>
@@ -1704,6 +1780,29 @@
     const chip = $('palp-chip');
     chip.classList.toggle('active', palpMin > 0);
     $('palp-chip-count').textContent = palpMin;
+    updateUptimeStat(nowMin);
+  }
+
+  // Walk state.connectionEvents (an alternating log of connect/disconnect
+  // timestamps in minutes-since-start) to figure out how much of the session was
+  // actually connected. Any trailing interval runs up to nowMin. Currently
+  // connected ⇒ last event is 'connect'; currently gapped ⇒ last is 'disconnect'.
+  function updateUptimeStat(nowMin) {
+    const el = $('uptime-pct');
+    if (!el) return;
+    if (!state.startTime || nowMin <= 0) { el.textContent = '—'; return; }
+    let connectedMin = 0;
+    let openConnect = null;
+    for (const ev of state.connectionEvents) {
+      if (ev.type === 'connect') {
+        if (openConnect == null) openConnect = ev.t;
+      } else if (ev.type === 'disconnect') {
+        if (openConnect != null) { connectedMin += Math.max(0, ev.t - openConnect); openConnect = null; }
+      }
+    }
+    if (openConnect != null) connectedMin += Math.max(0, nowMin - openConnect);
+    const pct = Math.max(0, Math.min(100, (connectedMin / nowMin) * 100));
+    el.textContent = pct.toFixed(pct >= 99.95 ? 0 : 1) + '%';
   }
 
   function updateSessionTime() {
@@ -2204,9 +2303,11 @@
     const size = computeObsSize();
     const text = size.w + ' × ' + size.h;
     const hint = $('obs-size-hint');
-    const panel = $('obs-size-panel');
     if (hint) hint.textContent = text;
-    if (panel) panel.textContent = text;
+    const wEl = $('obs-size-w');
+    const hEl = $('obs-size-h');
+    if (wEl) wEl.value = String(size.w);
+    if (hEl) hEl.value = String(size.h);
   }
   function updateStreamingUI() {
     const keyEl = $('broadcast-key-display');
@@ -2661,12 +2762,20 @@
     const signIn = $('drive-signin');
     const signOut = $('drive-signout');
     if (!statusEl) return;
+    statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
     if (driveAccessToken) {
-      statusEl.textContent = driveFolderId ? 'syncing to Drive' : 'signed in';
+      if (driveFolderId) {
+        statusEl.textContent = 'syncing to Drive';
+        statusEl.classList.add('drive-syncing');
+      } else {
+        statusEl.textContent = 'signed in';
+        statusEl.classList.add('drive-signedin');
+      }
       signIn.style.display = 'none';
       signOut.style.display = '';
     } else {
       statusEl.textContent = 'not signed in';
+      statusEl.classList.add('drive-idle');
       signIn.style.display = '';
       signOut.style.display = 'none';
     }
@@ -3282,6 +3391,24 @@
         regenerateBroadcastKey();
       });
     }
+    // OBS Browser Source width/height copy buttons.
+    document.querySelectorAll('.obs-size-copy').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const target = document.getElementById(btn.dataset.copy);
+        if (!target) return;
+        const val = target.value;
+        try {
+          await navigator.clipboard.writeText(val);
+          btn.classList.add('copied');
+          const original = btn.textContent;
+          btn.textContent = '✓ ' + val;
+          setTimeout(() => { btn.classList.remove('copied'); btn.textContent = original; }, 1500);
+        } catch (e) {
+          target.select();
+          prompt('Copy this number into OBS:', val);
+        }
+      });
+    });
     $('connect').addEventListener('click', connect);
     $('disconnect').addEventListener('click', disconnect);
     $('autosave-pick').addEventListener('click', pickAutoSaveFolder);

@@ -20,3 +20,6 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude session log — local context only, not part of the shipped app
+SESSION_LOG.md

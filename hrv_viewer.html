@@ -11,6 +11,7 @@
 <link rel="manifest" href='data:application/manifest+json,{"name":"HRV Session Viewer","short_name":"HRV Viewer","start_url":"./hrv_viewer.html","display":"standalone","background_color":"%230a0a0a","theme_color":"%230a0a0a","icons":[{"src":"data:image/svg%2Bxml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 192 192%22%3E%3Crect width=%22192%22 height=%22192%22 fill=%22%230a0a0a%22/%3E%3Cpath d=%22M24 110 L60 110 L75 70 L110 150 L125 110 L170 110%22 fill=%22none%22 stroke=%22%235DCAA5%22 stroke-width=%228%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root {
     --bg: #0a0a0a;
@@ -139,6 +140,37 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .folder-info .drive-sep {
+    color: var(--border-strong);
+    padding: 0 2px;
+  }
+  #drive-status {
+    font-family: 'Consolas', 'Monaco', monospace;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  #drive-status.drive-idle { background: var(--bg-input); color: var(--text-dim); }
+  #drive-status.drive-syncing {
+    color: var(--accent-rmssd);
+    background: rgba(93,202,165,0.1);
+    border: 1px solid rgba(93,202,165,0.3);
+  }
+  #drive-status.drive-signedin {
+    color: var(--warn-crash);
+    background: rgba(186,117,23,0.1);
+  }
+  #drive-status.drive-error {
+    color: var(--warn-high);
+    background: rgba(226,75,74,0.14);
+  }
+  #drive-sync-progress {
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.05em;
   }
 
   /* Main content area */
@@ -556,11 +588,8 @@
     display: grid;
     grid-template-columns: 1fr 340px;
     gap: 22px;
-    flex: 1;
-    min-height: 440px;
-    /* Height is a hard cap, NOT min — keeps the grid row from stretching to fit
-       whatever markers happen to be visible. Anything taller scrolls internally. */
-    max-height: calc(100vh - 320px);
+    /* No flex / max-height — chart panel has its own fixed height now, and the
+       surrounding <main> handles scrolling if total content exceeds viewport. */
     position: relative;
     transition: grid-template-columns 0.22s ease, gap 0.22s ease;
   }
@@ -623,8 +652,7 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
-    overflow: hidden;
-    min-height: 0;
+    min-width: 0;
   }
   .session-sidebar {
     background: var(--bg-panel);
@@ -678,21 +706,22 @@
   .summary-stat-value.warn { color: var(--warn-crash); }
   .summary-stat-value.palp { color: var(--warn-palp); }
 
-  /* Chart container */
+  /* Chart container
+     Fixed height so sibling panels (autonomic interpretation, etc.) expanding
+     or collapsing doesn't reflow the chart. Users on small monitors would
+     otherwise see the chart shrink below a usable size when lower panels open. */
   .chart-panel {
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 20px 22px;
-    flex: 1;
     display: flex;
     flex-direction: column;
-    min-height: 0;
     position: relative;
   }
   .chart-wrap {
-    flex: 1;
-    min-height: 300px;
+    height: min(420px, 50vh);
+    min-height: 280px;
     position: relative;
   }
   .context-wrap {
@@ -797,6 +826,19 @@
     height: 0;
     border-top: 2px dashed var(--accent-rmssd);
     border-radius: 0;
+  }
+  /* Toggleable legend items double as filter controls — clicking one dims/hides
+     that category on the chart and in the marker drawer (single source of truth:
+     activeFilters). Dim + strikethrough signal the "off" state. */
+  .chart-legend-item.toggleable {
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.12s;
+  }
+  .chart-legend-item.toggleable:hover { color: var(--text); }
+  .chart-legend-item.toggleable.off {
+    opacity: 0.35;
+    text-decoration: line-through;
   }
 
   /* Annotation hover tooltip */
@@ -909,17 +951,81 @@
   /* Empty state: faded, not toggleable */
   .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
 
-  /* Summary paragraph */
+  /* Summary report — an accordion of collapsible sections instead of one wall
+     of text. Each section's header is a clickable caret row; body slides away
+     when collapsed. Unbuilt sections (no relevant data) are omitted entirely. */
   .insight-box {
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-left: 3px solid var(--accent-rmssd);
     border-radius: 10px;
-    padding: 16px 20px;
-    font-size: 14.5px;
-    line-height: 1.65;
+    padding: 4px 4px;
+  }
+  .insight-section { border-bottom: 1px solid var(--border); }
+  .insight-section:last-child { border-bottom: 0; }
+  .insight-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
+    transition: background 0.12s;
+  }
+  .insight-section-head:hover { background: rgba(255,255,255,0.02); }
+  .insight-section-head .insight-chevron {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+    transition: transform 0.18s ease;
+  }
+  .insight-section.collapsed .insight-chevron { transform: rotate(-90deg); }
+  .insight-section-count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: none;
+  }
+  .insight-section-body {
+    padding: 2px 20px 14px 40px;
+    font-size: 14px;
+    line-height: 1.6;
     color: var(--text);
   }
+  .insight-section.collapsed .insight-section-body { display: none; }
+  .insight-section-body ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .insight-section-body li {
+    padding: 3px 0;
+    color: var(--text);
+  }
+  .insight-section-body li + li { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 7px; }
+  .insight-section-body .insight-lead { color: var(--text); }
+  .insight-section-body .insight-sub {
+    color: var(--text-dim);
+    font-size: 12.5px;
+    margin-top: 3px;
+  }
+  .insight-empty {
+    padding: 14px 20px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  body.printing .insight-section.collapsed .insight-section-body { display: block !important; }
 
   /* POTS panel */
   .pots-panel {
@@ -996,8 +1102,10 @@
   .filter-chip.type-disconnect.active { border-color: var(--text-dim); color: var(--text-dim); }
   .marker-list {
     overflow-y: auto;
-    flex: 1 1 0;
-    min-height: 0;
+    /* Bounded height so the sidebar doesn't stretch down indefinitely when a
+       session has many markers. Scrolls internally instead. */
+    max-height: 420px;
+    min-height: 80px;
     margin: 0 -6px;
     padding-right: 4px;
   }
@@ -1402,6 +1510,13 @@
     <span>Folder:</span>
     <span id="folder-name">—</span>
     <button id="folder-pick">Change...</button>
+    <span class="drive-sep">|</span>
+    <span>Drive:</span>
+    <span id="drive-status" class="drive-idle">not signed in</span>
+    <button id="drive-signin">Sign in</button>
+    <button id="drive-sync" style="display:none" title="Download any sessions on Drive not present locally">Sync</button>
+    <span id="drive-sync-progress"></span>
+    <button id="drive-signout" style="display:none">Sign out</button>
     <button class="export-report-btn" id="export-report" title="Print/save this view as a report">Export report</button>
     <a class="nav-feedback" href="https://github.com/nakauri/hr-monitor/issues/new?title=Feedback%3A+&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A+Viewer%0A" target="_blank" rel="noopener" title="Open a new GitHub issue — requires a free GitHub account">Send feedback</a>
   </div>
@@ -1410,10 +1525,11 @@
 <main>
   <div id="empty-state">
     <div class="empty-panel">
-      <h2>No sessions folder selected</h2>
-      <p>This viewer reads the CSV files your live HR Monitor auto-saves. Point it at the folder you chose for auto-save.</p>
+      <h2>No sessions yet</h2>
+      <p>This viewer reads the CSV files your live HR Monitor auto-saves. Point it at the folder you chose for auto-save, or sign in with Google Drive to pull sessions synced from another device.</p>
       <button id="empty-pick" class="primary">Pick sessions folder</button>
-      <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically on next load.</div>
+      <button id="empty-drive" style="margin-left:8px">Sign in with Google</button>
+      <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically on next load. Drive sessions are cached in this browser for faster loads.</div>
     </div>
   </div>
 
@@ -1436,6 +1552,8 @@
   const LS_INDEX = 'hrv_viewer_index';
   const LS_TAGS = 'hrv_viewer_tags';
   const LS_THRESH = 'hr_monitor_color_thresholds'; // shared with live app
+  const LS_DRIVE_META = 'hrv_viewer_drive_meta'; // { filename: { id, modifiedTime } }
+  const IDB_DRIVE_STORE = 'drive-cache';         // separate store: filename -> raw CSV text
 
   const STAGE_COLORS = {
     'stage-low': '#7DB8E8',
@@ -1462,28 +1580,50 @@
   // ===== IndexedDB helpers (shared handle with live app) =====
   function idbOpen() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(IDB_NAME, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      const req = indexedDB.open(IDB_NAME, 2);
+      req.onupgradeneeded = (ev) => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+        if (!db.objectStoreNames.contains(IDB_DRIVE_STORE)) db.createObjectStore(IDB_DRIVE_STORE);
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
   }
-  async function idbGet(key) {
+  async function idbGet(key, store = IDB_STORE) {
     const db = await idbOpen();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readonly');
-      const r = tx.objectStore(IDB_STORE).get(key);
+      const tx = db.transaction(store, 'readonly');
+      const r = tx.objectStore(store).get(key);
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
     });
   }
-  async function idbSet(key, value) {
+  async function idbSet(key, value, store = IDB_STORE) {
     const db = await idbOpen();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put(value, key);
+      const tx = db.transaction(store, 'readwrite');
+      tx.objectStore(store).put(value, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbDelete(key, store = IDB_STORE) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readwrite');
+      tx.objectStore(store).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbKeys(store = IDB_STORE) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readonly');
+      const r = tx.objectStore(store).getAllKeys();
+      r.onsuccess = () => resolve(r.result || []);
+      r.onerror = () => reject(r.error);
     });
   }
 
@@ -1530,6 +1670,247 @@
     el.textContent = dirHandle ? (dirHandle.name || 'selected') : '—';
   }
 
+  // ===== Google Drive read integration =====
+  // Mirrors the constants + OAuth flow used in hr_monitor.html (same client ID,
+  // same drive.file scope — the viewer only sees files this app created).
+  const GOOGLE_CLIENT_ID = '103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com';
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  const DRIVE_FOLDER_NAME = 'HR Monitor Sessions';
+
+  let driveTokenClient = null;
+  let driveAccessToken = null;
+  let driveTokenExpiresAt = 0;
+  let driveFolderId = null;
+  let driveFilesByName = new Map(); // filename -> { id, modifiedTime }
+  let driveMetaCache = {};          // persistent companion to IndexedDB text store
+
+  function driveLoadMeta() {
+    try { driveMetaCache = JSON.parse(localStorage.getItem(LS_DRIVE_META) || '{}'); }
+    catch (e) { driveMetaCache = {}; }
+  }
+  function drivePersistMeta() {
+    try { localStorage.setItem(LS_DRIVE_META, JSON.stringify(driveMetaCache)); } catch (e) {}
+  }
+
+  function driveUpdateUI() {
+    const statusEl = document.getElementById('drive-status');
+    const signIn = document.getElementById('drive-signin');
+    const signOut = document.getElementById('drive-signout');
+    const syncBtn = document.getElementById('drive-sync');
+    if (!statusEl) return;
+    statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
+    if (driveAccessToken) {
+      if (driveFolderId) {
+        statusEl.textContent = 'ready';
+        statusEl.classList.add('drive-syncing');
+      } else {
+        statusEl.textContent = 'signed in';
+        statusEl.classList.add('drive-signedin');
+      }
+      signIn.style.display = 'none';
+      signOut.style.display = '';
+      syncBtn.style.display = driveFolderId ? '' : 'none';
+    } else {
+      statusEl.textContent = 'not signed in';
+      statusEl.classList.add('drive-idle');
+      signIn.style.display = '';
+      signOut.style.display = 'none';
+      syncBtn.style.display = 'none';
+    }
+  }
+
+  function setDriveProgress(text) {
+    const el = document.getElementById('drive-sync-progress');
+    if (el) el.textContent = text || '';
+  }
+  function setDriveError(text) {
+    const statusEl = document.getElementById('drive-status');
+    if (!statusEl) return;
+    statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing');
+    statusEl.classList.add('drive-error');
+    statusEl.textContent = text;
+  }
+
+  function initGoogleAuth() {
+    if (!window.google || !google.accounts || !google.accounts.oauth2) {
+      setTimeout(initGoogleAuth, 400);
+      return;
+    }
+    driveTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: async (resp) => {
+        if (resp.error) {
+          console.error('Google OAuth error:', resp);
+          setDriveError('sign-in failed');
+          return;
+        }
+        driveAccessToken = resp.access_token;
+        driveTokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
+        driveUpdateUI();
+        try {
+          await driveEnsureFolder();
+          driveUpdateUI();
+          // Auto-sync once on sign-in so the user sees their Drive sessions
+          // without having to click the Sync button manually.
+          await driveSync();
+        } catch (e) {
+          console.error('Drive init:', e);
+          setDriveError('folder access failed');
+        }
+      },
+    });
+  }
+
+  function driveSignIn() {
+    if (!driveTokenClient) {
+      alert('Google auth still loading. Try again in a second.');
+      return;
+    }
+    driveTokenClient.requestAccessToken({ prompt: '' });
+  }
+
+  function driveSignOut() {
+    if (driveAccessToken) {
+      try { google.accounts.oauth2.revoke(driveAccessToken, () => {}); } catch (e) {}
+    }
+    driveAccessToken = null;
+    driveTokenExpiresAt = 0;
+    driveFolderId = null;
+    driveFilesByName = new Map();
+    driveUpdateUI();
+    setDriveProgress('');
+  }
+
+  async function driveFetch(path, init = {}) {
+    if (!driveAccessToken || Date.now() > driveTokenExpiresAt) {
+      throw new Error('No Drive token — sign in first');
+    }
+    const url = path.startsWith('http') ? path : 'https://www.googleapis.com/drive/v3/' + path;
+    const headers = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
+    return fetch(url, Object.assign({}, init, { headers }));
+  }
+
+  async function driveEnsureFolder() {
+    const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
+    const data = await resp.json();
+    if (data.files && data.files.length) {
+      driveFolderId = data.files[0].id;
+    } else {
+      // Folder doesn't exist yet — viewer won't auto-create it (the live app does).
+      driveFolderId = null;
+    }
+  }
+
+  async function driveListSessions() {
+    if (!driveFolderId) return new Map();
+    const files = new Map();
+    let pageToken = null;
+    do {
+      const q = encodeURIComponent(`'${driveFolderId}' in parents and name contains 'hrv_session' and trashed=false`);
+      const params = 'files?q=' + q + "&fields=files(id,name,modifiedTime),nextPageToken&pageSize=200" +
+        (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+      const resp = await driveFetch(params);
+      const data = await resp.json();
+      for (const f of (data.files || [])) {
+        if (/^hrv_session_.*\.csv$/.test(f.name)) {
+          files.set(f.name, { id: f.id, modifiedTime: f.modifiedTime });
+        }
+      }
+      pageToken = data.nextPageToken || null;
+    } while (pageToken);
+    driveFilesByName = files;
+    return files;
+  }
+
+  async function driveDownloadSession(fileId) {
+    const resp = await driveFetch('files/' + fileId + '?alt=media');
+    if (!resp.ok) throw new Error('Drive download ' + resp.status);
+    return await resp.text();
+  }
+
+  // Pull down any Drive files whose content isn't cached locally (or whose
+  // modifiedTime has changed since the last cache). Safe to call repeatedly.
+  async function driveSync() {
+    if (!driveAccessToken || !driveFolderId) return { added: 0, updated: 0, skipped: 0 };
+    setDriveProgress('listing…');
+    const files = await driveListSessions();
+    let added = 0, updated = 0, skipped = 0, done = 0;
+    const total = files.size;
+    for (const [name, meta] of files) {
+      const cachedMeta = driveMetaCache[name];
+      const fresh = cachedMeta && cachedMeta.id === meta.id && cachedMeta.modifiedTime === meta.modifiedTime;
+      let inStore = false;
+      if (fresh) {
+        const text = await idbGet(name, IDB_DRIVE_STORE);
+        inStore = typeof text === 'string';
+      }
+      if (fresh && inStore) {
+        skipped++;
+      } else {
+        try {
+          const text = await driveDownloadSession(meta.id);
+          await idbSet(name, text, IDB_DRIVE_STORE);
+          driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime };
+          // Force re-parse on next loadSessions by invalidating cached summary.
+          if (sessionsIndex[name]) delete sessionsIndex[name];
+          if (cachedMeta) updated++; else added++;
+        } catch (e) {
+          console.warn('Drive download failed for', name, e);
+        }
+      }
+      done++;
+      setDriveProgress(`${done}/${total}`);
+    }
+    drivePersistMeta();
+    setDriveProgress(total === 0 ? 'no sessions in Drive' : `${added} new · ${updated} updated · ${skipped} already cached`);
+    if (added + updated > 0) {
+      persistIndex();
+      await loadSessions();
+      route();
+    }
+    return { added, updated, skipped };
+  }
+
+  // Unified session-text reader. Prefers the local folder (if permission
+  // granted), then falls back to the Drive IndexedDB cache. Throws if
+  // neither source has the file.
+  async function readSessionText(filename) {
+    if (dirHandle) {
+      try {
+        const fh = await dirHandle.getFileHandle(filename);
+        const file = await fh.getFile();
+        return await file.text();
+      } catch (e) { /* fall through to Drive cache */ }
+    }
+    const cached = await idbGet(filename, IDB_DRIVE_STORE);
+    if (typeof cached === 'string') return cached;
+    throw new Error('Session text not available: ' + filename);
+  }
+
+  // Collect filenames available from either source (local folder + Drive cache).
+  async function collectAvailableSessionFilenames() {
+    const names = new Set();
+    if (dirHandle) {
+      const ok = await ensureReadPermission();
+      if (ok) {
+        try {
+          for await (const entry of dirHandle.values()) {
+            if (entry.kind === 'file' && /^hrv_session_.*\.csv$/.test(entry.name)) names.add(entry.name);
+          }
+        } catch (e) {}
+      }
+    }
+    try {
+      const keys = await idbKeys(IDB_DRIVE_STORE);
+      for (const k of keys) {
+        if (typeof k === 'string' && /^hrv_session_.*\.csv$/.test(k)) names.add(k);
+      }
+    } catch (e) {}
+    return Array.from(names);
+  }
+
   // ===== Sessions index (lazy parse + localStorage cache) =====
   // Stored shape: { filename: { summary object } }
   let sessionsIndex = {};
@@ -1546,11 +1927,18 @@
   }
 
   function parseSessionFilename(fn) {
-    // hrv_session_2026-04-17T14-32-00.csv
+    // hrv_session_2026-04-17T14-32-00.csv — filename timestamps come from
+    // toISOString() in the writer, i.e. UTC. Append 'Z' so Date() parses as UTC,
+    // then getHours()/getMinutes() give local time for display.
     const m = fn.match(/^hrv_session_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})\.csv$/);
     if (m) {
-      const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}`;
-      return { date: new Date(iso), isoDate: m[1], isoTime: `${m[2]}:${m[3]}:${m[4]}`, filename: fn, kind: 'session' };
+      const date = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`);
+      // Recompute isoDate + isoTime in the user's LOCAL timezone so session cards
+      // group under the date the user actually experienced, not UTC date.
+      const pad = n => String(n).padStart(2, '0');
+      const localDate = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      const localTime = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      return { date, isoDate: localDate, isoTime: localTime, filename: fn, kind: 'session' };
     }
     // hrv_daily_2026-04-17.csv — one file per calendar day, starts at local midnight
     const d = fn.match(/^hrv_daily_(\d{4})-(\d{2})-(\d{2})\.csv$/);
@@ -1569,19 +1957,11 @@
   }
 
   async function loadSessions() {
-    if (!dirHandle) return;
-    const ok = await ensureReadPermission();
-    if (!ok) return;
     loadCachedIndex();
+    const filenames = await collectAvailableSessionFilenames();
+    if (filenames.length === 0 && !driveAccessToken) return;
 
-    const filenames = [];
-    for await (const entry of dirHandle.values()) {
-      if (entry.kind === 'file' && /^hrv_session_.*\.csv$/.test(entry.name)) {
-        filenames.push(entry.name);
-      }
-    }
-
-    // Drop cached entries for files that no longer exist
+    // Drop cached entries for files that no longer exist in EITHER source
     for (const k of Object.keys(sessionsIndex)) {
       if (!filenames.includes(k)) delete sessionsIndex[k];
     }
@@ -1619,9 +1999,7 @@
 
   async function parseSessionFile(filename) {
     try {
-      const fh = await dirHandle.getFileHandle(filename);
-      const file = await fh.getFile();
-      const text = await file.text();
+      const text = await readSessionText(filename);
       return summarizeCSV(filename, text);
     } catch (e) {
       console.error('Parse failed for', filename, e);
@@ -1902,9 +2280,7 @@
 
   // Full per-beat data (only loaded when rendering session view)
   async function loadFullSession(filename) {
-    const fh = await dirHandle.getFileHandle(filename);
-    const file = await fh.getFile();
-    const text = await file.text();
+    const text = await readSessionText(filename);
     const { rows, header } = parseCSV(text);
     const idx = {};
     header.forEach((h, i) => idx[h.trim()] = i);
@@ -1946,13 +2322,14 @@
   function setHash(path) { location.hash = '#/' + path; }
 
   async function route() {
-    if (!dirHandle) {
-      showOnly('empty-state');
-      return;
-    }
-    // Ensure the sessions index is warm before any view renders.
+    // Ensure the sessions index is warm before any view renders. If neither a
+    // local folder nor any Drive-cached sessions exist, fall through to empty.
     if (Object.keys(sessionsIndex).length === 0) {
       await loadSessions();
+    }
+    if (!dirHandle && Object.keys(sessionsIndex).length === 0) {
+      showOnly('empty-state');
+      return;
     }
     const { view, arg } = parseHash();
     document.querySelectorAll('.view-nav a').forEach(a => {
@@ -2468,9 +2845,7 @@
     const points = [];
     for (const fn of files) {
       try {
-        const fh = await dirHandle.getFileHandle(fn);
-        const file = await fh.getFile();
-        const text = await file.text();
+        const text = await readSessionText(fn);
         const meta = parseSessionFilename(fn);
         const startHr = meta.date.getHours() + meta.date.getMinutes() / 60;
         const { rows, header } = parseCSV(text);
@@ -2896,15 +3271,15 @@
         <div class="session-main">
           <div class="chart-panel">
             <div class="chart-legend">
-              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(232,152,88,0.35); border: 1px solid rgba(232,152,88,0.6);"></span>Warning span</div>
-              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>BLE gap</div>
-              <div class="chart-legend-item"><span class="legend-swatch line"></span>Event marker</div>
-              <div class="chart-legend-item"><span class="legend-swatch dot" style="background: #D76CBA;"></span>Palpitation cluster</div>
-              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(139,180,255,0.2); border: 1px solid rgba(139,180,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
-              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(232,168,88,0.2); border: 1px solid rgba(232,168,88,0.6);"></span>Sympathetic flush</div>
-              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(133,183,235,0.2); border: 1px solid rgba(133,183,235,0.6);"></span>Chills / volatility</div>
-              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(200,168,230,0.15); border: 1px solid rgba(200,168,230,0.4);"></span>Posture</div>
-              <div class="chart-legend-item"><span class="legend-swatch" style="background: rgba(110,140,200,0.15); border: 1px dashed rgba(110,140,200,0.5);"></span>Sleep window</div>
+              <div class="chart-legend-item toggleable" data-type="warning" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,152,88,0.35); border: 1px solid rgba(232,152,88,0.6);"></span>Warning span</div>
+              <div class="chart-legend-item toggleable" data-type="disconnect" title="Click to toggle"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>BLE gap</div>
+              <div class="chart-legend-item toggleable" data-type="event" title="Click to toggle"><span class="legend-swatch line"></span>Event marker</div>
+              <div class="chart-legend-item toggleable" data-type="palp" title="Click to toggle"><span class="legend-swatch dot" style="background: #D76CBA;"></span>Palpitation cluster</div>
+              <div class="chart-legend-item toggleable" data-type="delta" title="Click to toggle"><span class="legend-swatch" style="background: rgba(139,180,255,0.2); border: 1px solid rgba(139,180,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
+              <div class="chart-legend-item toggleable" data-type="flush" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,168,88,0.2); border: 1px solid rgba(232,168,88,0.6);"></span>Sympathetic flush</div>
+              <div class="chart-legend-item toggleable" data-type="chills" title="Click to toggle"><span class="legend-swatch" style="background: rgba(133,183,235,0.2); border: 1px solid rgba(133,183,235,0.6);"></span>Chills / volatility</div>
+              <div class="chart-legend-item toggleable" data-type="posture" title="Click to toggle"><span class="legend-swatch" style="background: rgba(200,168,230,0.15); border: 1px solid rgba(200,168,230,0.4);"></span>Posture</div>
+              <div class="chart-legend-item toggleable" data-type="sleep" title="Click to toggle"><span class="legend-swatch" style="background: rgba(110,140,200,0.15); border: 1px dashed rgba(110,140,200,0.5);"></span>Sleep window</div>
               <div class="chart-legend-item"><span class="legend-swatch dot" style="background: #B8D97E; border: 1px solid #000;"></span>Max / Min HR</div>
               <div class="legend-spacer"></div>
               <button class="legend-reset-zoom hidden" id="reset-zoom">Reset zoom</button>
@@ -3152,55 +3527,146 @@
   }
 
   function renderInsight(s) {
-    const parts = [];
-    parts.push(`Session: ${formatDuration(s.duration)}.`);
-    parts.push(`Avg HR ${s.hrAvg} bpm (min ${s.hrMin.v} @ ${formatDuration(s.hrMin.t)}, max ${s.hrMax.v} @ ${formatDuration(s.hrMax.t)}).`);
-    if (s.rmssdAvg != null) parts.push(`RMSSD avg ${s.rmssdAvg} ms` + (s.rmssdMin ? `, lowest ${Math.round(s.rmssdMin.v)} @ ${formatDuration(s.rmssdMin.t)}.` : '.'));
+    // Build an ordered list of accordion sections. Each entry:
+    //   { key, title, count, lines: [{ text, sub? }] }
+    // Sections with no lines are skipped entirely.
+    const sections = [];
+
+    // 1. Overview — always shown, summarises the session at a glance.
+    {
+      const lines = [];
+      lines.push({ text: `Duration: ${formatDuration(s.duration)}` });
+      lines.push({ text: `Avg HR ${s.hrAvg} bpm`, sub: `min ${s.hrMin.v} @ ${formatDuration(s.hrMin.t)} · max ${s.hrMax.v} @ ${formatDuration(s.hrMax.t)}` });
+      if (s.rmssdAvg != null) {
+        const sub = s.rmssdMin ? `lowest ${Math.round(s.rmssdMin.v)} ms @ ${formatDuration(s.rmssdMin.t)}` : '';
+        lines.push({ text: `Avg RMSSD ${s.rmssdAvg} ms`, sub });
+      }
+      if (s.tachyPct > 20) lines.push({ text: `${s.tachyPct}% of session in tachycardia`, sub: 'HR > 100 bpm' });
+      sections.push({ key: 'overview', title: 'Overview', lines });
+    }
+
+    // 2. Palpitations
     if (s.palpCount > 0) {
+      const lines = [];
       const clusterText = s.palpClusters.length === 1
         ? `1 cluster @ ${formatDuration(s.palpClusters[0].start)}`
         : `${s.palpClusters.length} clusters`;
-      parts.push(`${s.palpCount} ectopic beats detected (${clusterText}).`);
+      lines.push({ text: `${s.palpCount} ectopic beat${s.palpCount === 1 ? '' : 's'}`, sub: clusterText });
+      sections.push({ key: 'palps', title: 'Palpitations', count: s.palpCount, lines });
     }
+
+    // 3. HR shifts (tilt-test style fast rises/drops)
     if (s.hrDeltas && s.hrDeltas.length > 0) {
       const rises = s.hrDeltas.filter(d => d.direction === 'rise');
       const drops = s.hrDeltas.filter(d => d.direction === 'drop');
       const biggest = s.hrDeltas.reduce((a, b) => Math.abs(b.delta) > Math.abs(a.delta) ? b : a);
-      parts.push(`${s.hrDeltas.length} sudden HR shift${s.hrDeltas.length === 1 ? '' : 's'} detected (${rises.length} rise / ${drops.length} drop). Biggest: ${biggest.direction === 'rise' ? '↑' : '↓'}${Math.abs(biggest.delta)} bpm @ ${formatDuration(biggest.start)}.`);
+      const arrow = biggest.direction === 'rise' ? '↑' : '↓';
+      sections.push({
+        key: 'shifts',
+        title: 'HR shifts',
+        count: s.hrDeltas.length,
+        lines: [
+          { text: `${rises.length} rise · ${drops.length} drop`, sub: '≥20 bpm over ≤10 min' },
+          { text: `Biggest: ${arrow}${Math.abs(biggest.delta)} bpm`, sub: `@ ${formatDuration(biggest.start)}` },
+        ],
+      });
     }
+
+    // 4. Sympathetic flushes
     if (s.flushes && s.flushes.length > 0) {
-      parts.push(`${s.flushes.length} sympathetic flush${s.flushes.length === 1 ? '' : 'es'} detected (fast HR spike with concurrent HRV drop — classic cold-flush / sympathetic-burst signature).`);
+      sections.push({
+        key: 'flushes',
+        title: 'Sympathetic flushes',
+        count: s.flushes.length,
+        lines: [
+          { text: `${s.flushes.length} fast HR spike${s.flushes.length === 1 ? '' : 's'} with concurrent HRV drop`, sub: 'Classic cold-flush / sympathetic-burst signature' },
+        ],
+      });
     }
+
+    // 5. Chills / volatility
     if (s.chillsWindows && s.chillsWindows.length > 0) {
       const total = s.chillsWindows.reduce((x, c) => x + (c.end - c.start), 0);
-      parts.push(`${s.chillsWindows.length} chills signature window${s.chillsWindows.length === 1 ? '' : 's'} (${formatDuration(total)} of HR volatility ≥2.5× baseline — possible shivering EMG artifact or autonomic storm).`);
+      sections.push({
+        key: 'chills',
+        title: 'Chills signatures',
+        count: s.chillsWindows.length,
+        lines: [
+          { text: `${formatDuration(total)} of HR volatility ≥2.5× baseline`, sub: 'Possible shivering EMG artifact or autonomic storm' },
+        ],
+      });
     }
-    const sleepForInsight = getEffectiveSleepWindows(s);
-    if (sleepForInsight && sleepForInsight.length) {
-      const w = sleepForInsight[0];
-      parts.push(`Sleep window detected: ${formatDuration(w.end - w.start)} starting at ${formatDuration(w.start)} (low HR + high HRV).`);
-    }
-    const postureForInsight = getEffectivePostureSpans(s);
-    if (postureForInsight && postureForInsight.length) {
-      const durByPos = { lying: 0, sitting: 0, standing: 0 };
-      for (const p of postureForInsight) durByPos[p.posture] = (durByPos[p.posture] || 0) + (p.end - p.start);
-      const parts2 = [];
-      if (durByPos.lying > 0) parts2.push(`${formatDuration(durByPos.lying)} lying`);
-      if (durByPos.sitting > 0) parts2.push(`${formatDuration(durByPos.sitting)} sitting`);
-      if (durByPos.standing > 0) parts2.push(`${formatDuration(durByPos.standing)} standing`);
-      if (parts2.length) parts.push(`Posture time: ${parts2.join(', ')}.`);
-    }
-    if (s.warnCount > 0) {
-      const types = Array.from(new Set(s.warnSegs.map(w => w.type))).join(', ');
-      parts.push(`${s.warnCount} warning ${s.warnCount === 1 ? 'segment' : 'segments'} (${types}).`);
-    }
-    if (s.connGaps.length > 0) {
-      const longest = s.connGaps.reduce((a, b) => (b.end - b.start) > (a.end - a.start) ? b : a);
-      parts.push(`${s.connGaps.length} connection ${s.connGaps.length === 1 ? 'gap' : 'gaps'} (longest ${formatDuration(longest.end - longest.start)}).`);
-    }
-    if (s.tachyPct > 20) parts.push(`${s.tachyPct}% of session in tachycardia (HR > 100).`);
 
-    document.getElementById('insight-text').textContent = parts.join(' ');
+    // 6. Posture & sleep
+    {
+      const lines = [];
+      const sleepForInsight = getEffectiveSleepWindows(s);
+      if (sleepForInsight && sleepForInsight.length) {
+        const w = sleepForInsight[0];
+        lines.push({ text: `Sleep window · ${formatDuration(w.end - w.start)}`, sub: `starts @ ${formatDuration(w.start)} (low HR + high HRV)` });
+      }
+      const postureForInsight = getEffectivePostureSpans(s);
+      if (postureForInsight && postureForInsight.length) {
+        const durByPos = { lying: 0, sitting: 0, standing: 0 };
+        for (const p of postureForInsight) durByPos[p.posture] = (durByPos[p.posture] || 0) + (p.end - p.start);
+        const parts2 = [];
+        if (durByPos.lying > 0) parts2.push(`${formatDuration(durByPos.lying)} lying`);
+        if (durByPos.sitting > 0) parts2.push(`${formatDuration(durByPos.sitting)} sitting`);
+        if (durByPos.standing > 0) parts2.push(`${formatDuration(durByPos.standing)} standing`);
+        if (parts2.length) lines.push({ text: 'Posture', sub: parts2.join(' · ') });
+      }
+      if (lines.length) sections.push({ key: 'posture', title: 'Posture & sleep', lines });
+    }
+
+    // 7. Connection & warnings
+    {
+      const lines = [];
+      if (s.warnCount > 0) {
+        const types = Array.from(new Set(s.warnSegs.map(w => w.type))).join(', ');
+        lines.push({ text: `${s.warnCount} warning ${s.warnCount === 1 ? 'segment' : 'segments'}`, sub: types });
+      }
+      if (s.connGaps.length > 0) {
+        const longest = s.connGaps.reduce((a, b) => (b.end - b.start) > (a.end - a.start) ? b : a);
+        lines.push({ text: `${s.connGaps.length} BLE ${s.connGaps.length === 1 ? 'gap' : 'gaps'}`, sub: `longest ${formatDuration(longest.end - longest.start)}` });
+      }
+      if (lines.length) sections.push({ key: 'connection', title: 'Connection & warnings', lines });
+    }
+
+    const chevron = `<svg class="insight-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
+    const remembered = getCollapsedInsightSections();
+    const html = sections.map(sec => {
+      const collapsed = !!remembered[sec.key];
+      const countHtml = sec.count != null ? `<span class="insight-section-count">${sec.count}</span>` : '';
+      const bodyHtml = sec.lines.map(l => `<li><div class="insight-lead">${escape(l.text)}</div>${l.sub ? `<div class="insight-sub">${escape(l.sub)}</div>` : ''}</li>`).join('');
+      return `<div class="insight-section${collapsed ? ' collapsed' : ''}" data-key="${sec.key}">
+        <div class="insight-section-head">${chevron}<span>${escape(sec.title)}</span>${countHtml}</div>
+        <div class="insight-section-body"><ul>${bodyHtml}</ul></div>
+      </div>`;
+    }).join('') || '<div class="insight-empty">Nothing notable detected in this session.</div>';
+
+    const box = document.getElementById('insight-text');
+    box.innerHTML = html;
+    box.querySelectorAll('.insight-section').forEach(sec => {
+      const head = sec.querySelector('.insight-section-head');
+      head.addEventListener('click', () => {
+        sec.classList.toggle('collapsed');
+        rememberCollapsedInsightSection(sec.dataset.key, sec.classList.contains('collapsed'));
+      });
+    });
+  }
+
+  // Persist per-section collapsed state across session navigations. Uses plain
+  // localStorage (shared across all sessions — each section kind collapses/expands
+  // the same way everywhere). Small, fixed key set so there's no growth concern.
+  const LS_INSIGHT_COLLAPSED = 'hrv_viewer_insight_collapsed';
+  function getCollapsedInsightSections() {
+    try { return JSON.parse(localStorage.getItem(LS_INSIGHT_COLLAPSED) || '{}'); }
+    catch (e) { return {}; }
+  }
+  function rememberCollapsedInsightSection(key, collapsed) {
+    const map = getCollapsedInsightSections();
+    if (collapsed) map[key] = true; else delete map[key];
+    try { localStorage.setItem(LS_INSIGHT_COLLAPSED, JSON.stringify(map)); } catch (e) {}
   }
 
   function renderMarkerList(s) {
@@ -3428,18 +3894,41 @@
     if (tip) tip.style.display = 'none';
   }
 
-  function wireFilterChips() {
-    document.querySelectorAll('.filter-chip').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const t = chip.dataset.type;
-        activeFilters[t] = !activeFilters[t];
-        chip.classList.toggle('active', activeFilters[t]);
-        if (currentSummary) {
-          renderMarkerList(currentSummary);
-          drawSessionChart(currentSummary, currentData);
-        }
-      });
+  // Reflect activeFilters state onto every UI element that represents a filter
+  // (marker chips + toggleable legend items). Called after any filter change OR
+  // after renderSession rebuilds the DOM, so the UI and state can't drift apart.
+  function syncFilterUI() {
+    document.querySelectorAll('.filter-chip[data-type]').forEach(chip => {
+      const on = !!activeFilters[chip.dataset.type];
+      chip.classList.toggle('active', on);
     });
+    document.querySelectorAll('.chart-legend-item.toggleable[data-type]').forEach(item => {
+      const on = !!activeFilters[item.dataset.type];
+      item.classList.toggle('off', !on);
+    });
+  }
+
+  function setFilter(type, on) {
+    if (!(type in activeFilters)) return;
+    activeFilters[type] = !!on;
+    syncFilterUI();
+    if (currentSummary) {
+      renderMarkerList(currentSummary);
+      drawSessionChart(currentSummary, currentData);
+    }
+  }
+
+  function wireFilterChips() {
+    // Chips in the marker drawer.
+    document.querySelectorAll('.filter-chip[data-type]').forEach(chip => {
+      chip.addEventListener('click', () => setFilter(chip.dataset.type, !activeFilters[chip.dataset.type]));
+    });
+    // Toggleable legend items above the chart — same filters, second UI entry point.
+    document.querySelectorAll('.chart-legend-item.toggleable[data-type]').forEach(item => {
+      item.addEventListener('click', () => setFilter(item.dataset.type, !activeFilters[item.dataset.type]));
+    });
+    // Initial sync so legend dim-state matches activeFilters on first render.
+    syncFilterUI();
   }
 
   function drawSessionChart(s, data) {
@@ -3811,7 +4300,20 @@
       const r = getDataRange();
       brushMin = r.start; brushMax = r.end;
     }
-    renderBrush();
+    // Defer the first render until after layout settles. Called synchronously,
+    // overlay.clientWidth can still be 0 (template just rendered, chart hasn't
+    // measured) — that's what was leaving the right-edge handle at x=0, visually
+    // stacked on top of the left handle until the user interacted.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(renderBrush);
+    });
+    // Keep the brush positions accurate if the viewport resizes or neighbouring
+    // panels expand/collapse — positions are pixel-based off overlay.clientWidth
+    // so any width change invalidates them.
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => renderBrush());
+      ro.observe(overlay);
+    }
 
     overlay.addEventListener('mousedown', (e) => {
       const rect = overlay.getBoundingClientRect();
@@ -3948,6 +4450,9 @@
   // ===== Init =====
   async function init() {
     await restoreFolder();
+    driveLoadMeta();
+    driveUpdateUI();
+    initGoogleAuth();
     if (dirHandle) {
       // Try silent permission check first
       const perm = await dirHandle.queryPermission({ mode: 'read' });
@@ -3955,6 +4460,10 @@
         await loadSessions();
       }
       // If not granted, user will need to click pick / an interaction to re-grant
+    } else {
+      // No local folder — still try loading from Drive cache so the user sees
+      // any previously-synced sessions without needing to pick a folder.
+      await loadSessions();
     }
     // If nothing happens yet, route() will show empty-state
     route();
@@ -3962,6 +4471,12 @@
     window.addEventListener('hashchange', route);
     document.getElementById('folder-pick').addEventListener('click', pickFolder);
     document.getElementById('empty-pick').addEventListener('click', pickFolder);
+    document.getElementById('empty-drive').addEventListener('click', driveSignIn);
+    document.getElementById('drive-signin').addEventListener('click', driveSignIn);
+    document.getElementById('drive-signout').addEventListener('click', driveSignOut);
+    document.getElementById('drive-sync').addEventListener('click', () => {
+      driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
+    });
     document.getElementById('export-report').addEventListener('click', exportReport);
     setupKeyboardNav();
 
