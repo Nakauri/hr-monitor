@@ -1866,6 +1866,10 @@
   ::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
 
   /* ===== MOBILE (≤768px): stacked session layout, taller charts, bigger taps ===== */
+  /* Hamburger is mobile-only; swapped title strings via media query below. */
+  .title-short { display: none; }
+  .mobile-menu-btn { display: none; }
+
   @media (max-width: 768px) {
     /* Desktop locks body to viewport so panes scroll independently. On mobile
        the layout stacks and needs the whole page to scroll. */
@@ -1879,12 +1883,67 @@
       flex-wrap: wrap;
       gap: 10px;
       padding: 10px 14px;
+      position: relative;
     }
-    .app-title { font-size: 13px; }
-    .view-nav { flex-wrap: wrap; width: 100%; order: 3; gap: 0; }
-    .view-nav a { padding: 6px 10px; font-size: 11px; }
-    .folder-info { font-size: 10px; gap: 6px; }
-    #folder-name { max-width: 100px; }
+    .title-full { display: none; }
+    .title-short { display: inline; }
+    .app-title { font-size: 14px; flex: 0 0 auto; }
+    .mobile-menu-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    .mobile-menu-btn:hover { border-color: var(--border-strong); }
+    /* Hide everything but the logo + hamburger until the menu opens. */
+    .app-nav-cross,
+    .view-nav,
+    .folder-info,
+    .nav-feedback {
+      display: none;
+    }
+    /* Menu open: reveal the items as a stacked column below the header. */
+    body.menu-open .app-nav-cross,
+    body.menu-open .view-nav,
+    body.menu-open .folder-info,
+    body.menu-open .nav-feedback {
+      display: flex;
+      width: 100%;
+      flex-basis: 100%;
+      flex-wrap: wrap;
+      order: 10;
+    }
+    body.menu-open .view-nav {
+      flex-direction: column;
+      gap: 4px;
+      background: var(--bg-panel);
+      padding: 8px;
+      border-radius: 8px;
+    }
+    body.menu-open .view-nav a {
+      padding: 10px 12px;
+      font-size: 13px;
+      border-radius: 6px;
+    }
+    body.menu-open .app-nav-cross,
+    body.menu-open .nav-feedback {
+      padding: 10px 12px;
+      font-size: 12px;
+    }
+    body.menu-open .folder-info {
+      gap: 8px;
+      padding: 8px;
+      background: var(--bg-panel);
+      border-radius: 8px;
+      font-size: 11px;
+    }
+    #folder-name { max-width: 140px; }
     main { height: auto; min-height: calc(100vh - 110px); }
     .view { padding: 16px 14px; }
     .session-layout {
@@ -1893,7 +1952,12 @@
       gap: 14px;
     }
     .session-layout.sidebar-collapsed { grid-template-columns: 1fr !important; }
-    .session-sidebar { max-height: 260px; }
+    /* Let the sidebar breathe on mobile — the whole page scrolls so there's
+       no benefit to capping the sidebar. Cap only the marker list internally
+       so it doesn't run longer than the viewport if a session has hundreds
+       of markers. */
+    .session-sidebar { max-height: none; }
+    .session-sidebar .marker-list { max-height: 65vh; min-height: 320px; }
     .sidebar-toggle { display: none; }
     .summary-bar { gap: 14px; padding: 14px; }
     .summary-stat-value { font-size: 22px; }
@@ -1955,7 +2019,13 @@
 <body>
 
 <header class="app-bar">
-  <a class="app-title" href="./index.html" style="text-decoration: none;">HR Monitor <span class="accent">·</span> Viewer</a>
+  <a class="app-title" href="./index.html" style="text-decoration: none;">
+    <span class="title-full">HR Monitor <span class="accent">·</span> Viewer</span>
+    <span class="title-short">Viewer</span>
+  </a>
+  <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu" aria-expanded="false">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+  </button>
   <a class="app-nav-cross" href="./hr_monitor.html">← Live monitor</a>
   <nav class="view-nav">
     <a data-view="index" href="#/index">Sessions</a>
@@ -5456,9 +5526,18 @@
     });
     box.querySelectorAll('.insight-jump').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        e.stopPropagation(); // don't collapse the accordion
+        e.stopPropagation(); // don't collapse the accordion via the wrapping section title
         const t = parseFloat(btn.dataset.t);
         if (isFinite(t) && typeof zoomTo === 'function') zoomTo(t);
+        // Close the report and scroll the chart into view — otherwise on mobile
+        // (and even on desktop in a tall session) the user clicks a moment and
+        // then has to manually scroll back up to see what happened.
+        const report = btn.closest('.insight-box');
+        if (report) report.classList.add('collapsed');
+        const chart = document.querySelector('.chart-wrap');
+        if (chart) {
+          requestAnimationFrame(() => chart.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        }
       });
     });
   }
@@ -6605,6 +6684,22 @@
     document.getElementById('drive-sync').addEventListener('click', () => {
       driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
     });
+    // Mobile hamburger. Toggles body.menu-open which reveals the stacked nav
+    // beneath the logo. Any nav link click closes the menu so it doesn't stay
+    // open after the user picks a view.
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    if (menuBtn) {
+      menuBtn.addEventListener('click', () => {
+        const open = document.body.classList.toggle('menu-open');
+        menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.querySelectorAll('.view-nav a, .app-nav-cross, .nav-feedback, #watch-live-link').forEach(a => {
+        a.addEventListener('click', () => {
+          document.body.classList.remove('menu-open');
+          menuBtn.setAttribute('aria-expanded', 'false');
+        });
+      });
+    }
     applyAutonomicClass();
     document.getElementById('autonomic-toggle').addEventListener('change', (e) => {
       setAutonomicOn(e.target.checked);
