@@ -341,6 +341,13 @@
   /* "Inline mini trends" only affects the tiny mini-chart next to the big HR number,
      NOT the live HR trace (that has its own showLiveHr toggle). */
   #overlay-zone.no-inline-trends .inline-trend { display: none; }
+  /* User-toggleable extras: palp chip, warning banner, and conn dot can all be
+     hidden independently so small OBS sources aren't cluttered. */
+  #overlay-zone.no-palp-chip .palp-chip,
+  #overlay-zone.no-palp-chip #palp-chip { display: none !important; }
+  #overlay-zone.no-warning .warning-banner { display: none !important; }
+  body.no-conn-dot .conn-indicator,
+  #overlay-zone.no-conn-dot .conn-indicator { display: none !important; }
   /* Widget visibility toggles */
   #overlay-zone.no-hr #hr-widget,
   #overlay-zone.no-hrv #rmssd-widget,
@@ -431,8 +438,10 @@
     /* Fixed row heights so the widget can't grow taller when HRV is toggled
        off or anything else reflows. Auto rows recalculate based on visible
        content; explicit heights lock them in. OBS source size stays honest. */
-    grid-template-rows: auto 68px 12px;
-    gap: 4px 16px;
+    grid-template-rows: auto 68px 14px;
+    /* Vertical gap bumped from 4 → 10 so the inline-live-trace canvas can't
+       paint over the pips row below. Horizontal gap stays tight. */
+    gap: 10px 16px;
     align-items: start;
   }
   /* Header spans both columns */
@@ -637,6 +646,23 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
+
+  /* Above-warning slot — used when warningPlacement === 'above'. Reserves a
+     fixed 34px slot above the widget so the widget's own height never changes
+     when a warning fires. Invisible by default; appears when .active. Only
+     visible when body.warning-above class is set. */
+  .warning-slot-above { display: none; }
+  body.warning-above .warning-slot-above {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 34px;
+    padding: 2px 0;
+  }
+  body.warning-above #overlay-zone.no-warning .warning-slot-above { display: none; }
+  body.warning-above .widget-header > .warning-banner,
+  body.warning-above #overlay-zone .widget-header > .warning-banner { display: none !important; }
+  body:not(.warning-above) .warning-slot-above { display: none !important; }
 
   /* Warning banner - fades in when warning active, preserves widget aesthetic */
   .warning-banner {
@@ -1326,6 +1352,14 @@
 
   <!-- LEFT: Overlay zone for OBS cropping -->
   <div id="overlay-zone">
+    <!-- Reserved warning slot (used when warningPlacement === 'above'). Stays
+         transparent until a warning fires so the widget below never reflows. -->
+    <div class="warning-slot-above" id="warning-slot-above">
+      <div class="warning-banner" id="warning-banner-above">
+        <span class="warning-banner-icon" id="warning-icon-above"></span>
+        <span class="warning-banner-text" id="warning-text-above"></span>
+      </div>
+    </div>
     <!-- HR widget -->
     <div class="widget stage-normal" id="hr-widget">
       <div class="widget-header">
@@ -1461,9 +1495,18 @@
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Show widgets</div>
           <div class="widget-toggles">
             <label><input type="checkbox" id="toggle-hr" checked /> Heart rate</label>
-            <label><input type="checkbox" id="toggle-hrv" checked /> HRV (RMSSD)</label>
             <label><input type="checkbox" id="toggle-live-hr" checked /> Live HR trace</label>
+            <label><input type="checkbox" id="toggle-hrv" checked /> HRV (RMSSD)</label>
             <label><input type="checkbox" id="toggle-inline-trends" checked /> Inline mini trends</label>
+            <label><input type="checkbox" id="toggle-palp-chip" checked /> Palpitation chip</label>
+            <label><input type="checkbox" id="toggle-warning" checked /> Warning banner</label>
+            <label class="sub-option" title="Inside: banner sits inside the widget card and only appears when a warning fires. Above: banner has a reserved slot above the widget so the widget itself never reflows."><span style="padding-left: 18px; color: var(--text-dim); font-size: 11px;">Placement</span>
+              <select id="warning-placement" style="margin-left: 8px;">
+                <option value="inside">Inside card</option>
+                <option value="above">Above card (reserved slot)</option>
+              </select>
+            </label>
+            <label><input type="checkbox" id="toggle-conn-dot" checked /> Connection dot</label>
             <label title="Makes the overlay container hug whatever widgets are visible — useful when you only want a small HR or HRV readout in an OBS corner"><input type="checkbox" id="toggle-shrink-to-fit" /> Shrink to fit (hug content)</label>
           </div>
           <div style="height: 18px;"></div>
@@ -2153,12 +2196,19 @@
   };
 
   function showWarningBanner(warnType) {
-    const banner = $('warning-banner');
-    banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
-    if (warnType) {
-      banner.classList.add(warnType, 'active');
-      $('warning-icon').innerHTML = WARN_ICONS[warnType] || '';
-      $('warning-text').textContent = WARN_TEXT[warnType] || '';
+    // Update BOTH the inside-card banner and the above-slot banner. CSS hides
+    // whichever isn't active based on body.warning-above; this keeps JS simple.
+    const banners = [['warning-banner', 'warning-icon', 'warning-text'],
+                     ['warning-banner-above', 'warning-icon-above', 'warning-text-above']];
+    for (const [bId, iId, tId] of banners) {
+      const banner = $(bId);
+      if (!banner) continue;
+      banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
+      if (warnType) {
+        banner.classList.add(warnType, 'active');
+        const icon = $(iId); if (icon) icon.innerHTML = WARN_ICONS[warnType] || '';
+        const text = $(tId); if (text) text.textContent = WARN_TEXT[warnType] || '';
+      }
     }
   }
 
@@ -2418,25 +2468,36 @@
   function computeObsSize() {
     const style = localStorage.getItem('hr_monitor_style') || 'bold';
     const horizontal = widgetPrefs.layout === 'horizontal';
-    const shrink = !!widgetPrefs.shrinkToFit;
-    // Widget width stays 380 regardless of shrink-to-fit — the toggle is about
-    // collapsing EMPTY space around hidden widgets, not resizing visible ones.
-    // Shrink only reduces container padding (16px→8px per side) so there's no
-    // width difference when every widget is shown and nothing can be trimmed.
-    const WIDGET_W = 380;
-    const padV = shrink ? 16 : 32; // 8px top+bottom vs 16px
-    const padH = shrink ? 16 : 32;
-    const gap = shrink ? 8 : 14;
 
+    // Compact widget — measured against the actual rendered layout (14px
+    // overlay padding + widget padding + grid rows with 10px gaps). Values
+    // aim to be tight to content so OBS sources don't show empty space.
+    // With "above" warning placement, add a reserved slot for the banner.
+    const warnSlot = widgetPrefs.warningPlacement === 'above' && widgetPrefs.showWarning ? 34 : 0;
     if (style === 'compact') {
-      // Compact is a single combined widget — its internal grid decides width.
-      if (!widgetPrefs.showHr && !widgetPrefs.showHrv) return { w: 200, h: 80 };
-      // Dedicated compact-with-HRV-only shrink (narrower because HR column gone)
-      if (shrink && !widgetPrefs.showHr) return { w: 220, h: widgetPrefs.showInlineTrends ? 180 : 120 };
-      return { w: WIDGET_W, h: widgetPrefs.showInlineTrends ? 260 : 200 };
+      if (!widgetPrefs.showHr && !widgetPrefs.showHrv) return { w: 200, h: 80 + warnSlot };
+      // HRV-only: just the readout + optional compact-trend
+      if (!widgetPrefs.showHr) {
+        const h = widgetPrefs.showInlineTrends ? 190 : 120;
+        return { w: 220, h: h + warnSlot };
+      }
+      // HR-only: big number + optional live trace + pips + optional compact-trend
+      if (!widgetPrefs.showHrv) {
+        const w = widgetPrefs.showLiveHr ? 340 : 220;
+        const h = widgetPrefs.showInlineTrends ? 230 : 150;
+        return { w, h: h + warnSlot };
+      }
+      // Both HR and HRV — live-trace toggle only shrinks width; inline mini trends only shrinks height
+      const w = widgetPrefs.showLiveHr ? 380 : 300;
+      const h = widgetPrefs.showInlineTrends ? 250 : 160;
+      return { w, h: h + warnSlot };
     }
 
-    // Other styles stack (or row) separate widgets
+    // Other styles stack (or row) separate widgets. Single widget base 380 wide.
+    const WIDGET_W = 380;
+    const padV = 32;
+    const padH = 32;
+    const gap = 14;
     let visible = 0;
     let h = padV;
     if (widgetPrefs.showHr) { h += 180; visible++; }
@@ -2444,7 +2505,7 @@
     if (widgetPrefs.showLiveHr) { h += 130; visible++; }
     if (visible === 0) return { w: 200, h: 80 };
     if (visible > 1) h += (visible - 1) * gap;
-    if (horizontal) return { w: WIDGET_W * visible + (visible - 1) * gap + padH, h: shrink ? 180 : 210 };
+    if (horizontal) return { w: WIDGET_W * visible + (visible - 1) * gap + padH, h: 210 };
     return { w: WIDGET_W, h };
   }
   // Update the Source Size fields in the Stream settings panel. When
@@ -2520,6 +2581,10 @@
         showHrv: widgetPrefs.showHrv,
         showLiveHr: widgetPrefs.showLiveHr,
         showInlineTrends: widgetPrefs.showInlineTrends,
+        showPalpChip: widgetPrefs.showPalpChip,
+        showWarning: widgetPrefs.showWarning,
+        showConnDot: widgetPrefs.showConnDot,
+        warningPlacement: widgetPrefs.warningPlacement || 'inside',
         shrinkToFit: widgetPrefs.shrinkToFit,
         layout: widgetPrefs.layout,
       },
@@ -3605,6 +3670,16 @@
     showHrv: true,
     showLiveHr: true,
     showInlineTrends: true,
+    // Small decorative / status elements that can be turned off so small OBS
+    // sources don't feel cluttered. All default on — matches prior behaviour.
+    showPalpChip: true,
+    showWarning: true,
+    // 'inside' — banner lives inside the widget card, only visible while a
+    // warning fires (current default). 'above' — banner has a reserved slot
+    // above the widget that adds to the OBS source height; transparent when
+    // no warning is firing so the widget never reflows.
+    warningPlacement: 'inside',
+    showConnDot: true,
     shrinkToFit: false,
     layout: 'vertical',
     broadcast: true,
@@ -3647,12 +3722,18 @@
     zone.classList.toggle('no-hrv', !widgetPrefs.showHrv);
     zone.classList.toggle('no-live-hr', !widgetPrefs.showLiveHr);
     zone.classList.toggle('no-inline-trends', !widgetPrefs.showInlineTrends);
+    zone.classList.toggle('no-palp-chip', !widgetPrefs.showPalpChip);
+    zone.classList.toggle('no-warning', !widgetPrefs.showWarning);
+    zone.classList.toggle('no-conn-dot', !widgetPrefs.showConnDot);
+    document.body.classList.toggle('warning-above', widgetPrefs.warningPlacement === 'above');
+    const wpSel = $('warning-placement');
+    if (wpSel) wpSel.value = widgetPrefs.warningPlacement || 'inside';
     document.body.classList.toggle('shrink-to-fit', !!widgetPrefs.shrinkToFit);
     document.body.classList.toggle('layout-horizontal', widgetPrefs.layout === 'horizontal');
     document.querySelectorAll('.layout-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.layout === widgetPrefs.layout);
     });
-    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
+    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggles)) {
       const el = $(id); if (el) el.checked = widgetPrefs[key];
     }
@@ -3904,7 +3985,7 @@
       });
     });
     // Widget visibility toggles
-    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
+    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-shrink-to-fit': 'shrinkToFit', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggleMap)) {
       const el = $(id);
       if (el) el.addEventListener('change', () => {
@@ -3914,6 +3995,13 @@
         pushPrefsToOverlay();
       });
     }
+    const wp = $('warning-placement');
+    if (wp) wp.addEventListener('change', () => {
+      widgetPrefs.warningPlacement = wp.value === 'above' ? 'above' : 'inside';
+      saveWidgetPrefs();
+      applyWidgetPrefs();
+      pushPrefsToOverlay();
+    });
     // Wire up section collapse toggles
     document.querySelectorAll('.section-header').forEach(header => {
       header.addEventListener('click', () => {

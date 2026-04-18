@@ -1075,7 +1075,84 @@
     box-shadow: 0 8px 24px rgba(0,0,0,0.6);
     display: none;
   }
-  #quadrant-thresh-popover.open { display: block; }
+  #quadrant-thresh-popover.open,
+  #viewer-settings-popover.open { display: block; }
+  /* Viewer settings popover shares the threshold-popover styles so everything
+     looks consistent (HR shift detector settings currently live here). */
+  #viewer-settings-popover {
+    position: fixed;
+    z-index: 1001;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 14px 16px;
+    min-width: 280px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    display: none;
+  }
+  #viewer-settings-popover h4 {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  #viewer-settings-popover .thresh-blurb {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.45;
+    margin-bottom: 12px;
+  }
+  #viewer-settings-popover .thresh-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  #viewer-settings-popover label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text);
+  }
+  #viewer-settings-popover label .thresh-hint {
+    display: block;
+    font-size: 11px;
+    color: var(--text-faint);
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  #viewer-settings-popover input[type="number"] {
+    width: 70px;
+    padding: 6px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    text-align: center;
+  }
+  #viewer-settings-popover .thresh-default-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-style: italic;
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+  #viewer-settings-popover .thresh-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    justify-content: flex-end;
+  }
+  #viewer-settings-popover button { padding: 6px 12px; font-size: 12px; }
+  #viewer-settings-popover .thresh-reset {
+    color: var(--text-dim);
+    background: transparent;
+    border-color: transparent;
+    margin-right: auto;
+  }
   #quadrant-thresh-popover h4 {
     margin: 0 0 6px;
     font-size: 11px;
@@ -1797,6 +1874,9 @@
       <input type="checkbox" id="autonomic-toggle" checked />
       <span>Autonomic analysis</span>
     </label>
+    <button class="icon-btn" id="viewer-settings-btn" title="Viewer settings (HR shift thresholds, etc.)" aria-label="Viewer settings">
+      <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    </button>
     <button class="export-report-btn" id="export-report" title="Print/save this view as a report">Export report</button>
     <a class="nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Viewer&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Viewer%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
   </div>
@@ -2594,8 +2674,13 @@
     const chillsWindows = detectChillsWindows(hr, 2.5);
 
     const hrDeltas = [];
-    const DELTA_THRESH = 20;
-    const WIN_MIN = 10;
+    // Thresholds are user-configurable (settings panel). Defaults match the
+    // clinical POTS criterion: ≥30 bpm rise within 10 minutes (of standing).
+    // 20 bpm is a more sensitive non-clinical default if the user prefers to
+    // surface smaller jumps. The 3-bpm "stable" tolerance and 2-minute
+    // cooldown between flags stay fixed — they just de-noise the detector.
+    const DELTA_THRESH = getHrShiftSettings().threshold;
+    const WIN_MIN = getHrShiftSettings().windowMin;
     const COOLDOWN = 2;
     let lastFlagAt = -Infinity;
     for (let i = 1; i < smHR.length; i++) {
@@ -3572,6 +3657,103 @@
     const cb = document.getElementById('autonomic-toggle');
     if (cb) cb.checked = isAutonomicOn();
   }
+
+  // HR shift detector settings — user-configurable. Default matches the POTS
+  // clinical criterion: ≥30 bpm rise within 10 minutes. 20/10 is a more
+  // sensitive non-clinical default if someone wants to surface smaller jumps.
+  const LS_HR_SHIFT = 'hrv_viewer_hr_shift_settings';
+  function getHrShiftSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_HR_SHIFT) || 'null');
+      if (saved && Number.isFinite(saved.threshold) && Number.isFinite(saved.windowMin)) {
+        return { threshold: saved.threshold, windowMin: saved.windowMin };
+      }
+    } catch (e) {}
+    return { threshold: 30, windowMin: 10 };
+  }
+  function setHrShiftSettings(threshold, windowMin) {
+    try { localStorage.setItem(LS_HR_SHIFT, JSON.stringify({ threshold, windowMin })); } catch (e) {}
+  }
+
+  // Viewer-wide settings popover — currently just HR shift threshold + window,
+  // but this is the spot for any future viewer prefs that don't belong in a
+  // per-session editor. Anchored below the gear icon in the app-bar.
+  function openViewerSettings(anchorBtn) {
+    let pop = document.getElementById('viewer-settings-popover');
+    if (!pop) {
+      pop = document.createElement('div');
+      pop.id = 'viewer-settings-popover';
+      pop.innerHTML = `
+        <h4>HR shift detector</h4>
+        <div class="thresh-blurb">A shift is flagged when HR rises or drops by at least this many bpm within the window. POTS clinical criterion is 30 bpm within 10 min of standing; a smaller threshold surfaces more everyday jumps.</div>
+        <div class="thresh-row">
+          <label>Threshold<span class="thresh-hint">bpm change</span></label>
+          <input type="number" id="hrshift-thresh" min="10" max="80" step="1" />
+        </div>
+        <div class="thresh-row">
+          <label>Window<span class="thresh-hint">minutes</span></label>
+          <input type="number" id="hrshift-win" min="2" max="30" step="1" />
+        </div>
+        <div class="thresh-default-hint">Default: 30 bpm / 10 min (POTS clinical criterion).</div>
+        <div class="thresh-actions">
+          <button class="thresh-reset" id="hrshift-reset">Reset to default</button>
+          <button id="hrshift-cancel">Cancel</button>
+          <button class="primary" id="hrshift-save" style="background: var(--accent-rmssd); color: #0a1a14; border-color: var(--accent-rmssd);">Save</button>
+        </div>
+      `;
+      document.body.appendChild(pop);
+      document.addEventListener('click', (e) => {
+        if (!pop.classList.contains('open')) return;
+        if (pop.contains(e.target) || e.target.closest('#viewer-settings-btn')) return;
+        pop.classList.remove('open');
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && pop.classList.contains('open')) pop.classList.remove('open');
+      });
+    }
+    const s = getHrShiftSettings();
+    const thrEl = pop.querySelector('#hrshift-thresh');
+    const winEl = pop.querySelector('#hrshift-win');
+    thrEl.value = s.threshold;
+    winEl.value = s.windowMin;
+    // Clone-and-replace to drop prior listeners.
+    const rebind = (id, fn) => {
+      const old = pop.querySelector('#' + id);
+      const fresh = old.cloneNode(true);
+      old.parentNode.replaceChild(fresh, old);
+      fresh.addEventListener('click', fn);
+      return fresh;
+    };
+    rebind('hrshift-save', () => {
+      let thr = parseInt(thrEl.value, 10);
+      let win = parseInt(winEl.value, 10);
+      if (!Number.isFinite(thr) || thr < 10 || thr > 80) thr = 30;
+      if (!Number.isFinite(win) || win < 2 || win > 30) win = 10;
+      setHrShiftSettings(thr, win);
+      // HR shift data is baked into cached summaries (hrDeltas). Wipe them so
+      // sessions re-parse with the new threshold next time they're opened.
+      for (const fn of Object.keys(sessionsIndex)) {
+        if (sessionsIndex[fn]) sessionsIndex[fn].__incomplete = true;
+      }
+      persistIndex();
+      pop.classList.remove('open');
+      loadSessions().then(() => route());
+    });
+    rebind('hrshift-cancel', () => pop.classList.remove('open'));
+    rebind('hrshift-reset', () => {
+      thrEl.value = 30;
+      winEl.value = 10;
+    });
+    pop.classList.add('open');
+    const rect = anchorBtn.getBoundingClientRect();
+    const popW = pop.offsetWidth;
+    const popH = pop.offsetHeight;
+    let left = Math.max(8, rect.right - popW);
+    let top = rect.bottom + 6;
+    if (top + popH > window.innerHeight - 8) top = Math.max(8, rect.top - popH - 6);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
   let activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
 
   // Walk through paired HR + RMSSD samples, classify each point into a quadrant,
@@ -3662,7 +3844,12 @@
       posture: postureAvail,
       sleep: sleepAvail,
     };
-    activeFilters = Object.assign({}, filterAvailability); // ON iff data available
+    // Default active set: everything available, EXCEPT BLE gaps and HR shifts —
+    // those clutter the chart and users can flip them on when they want to
+    // inspect connection quality or orthostatic-style rises.
+    activeFilters = Object.assign({}, filterAvailability);
+    activeFilters.disconnect = false;
+    activeFilters.delta = false;
     brushMin = null; brushMax = null;
     const meta = parseSessionFilename(filename);
     const dur = formatDuration(s.duration);
@@ -5546,6 +5733,10 @@
       // Re-render the current session (or whatever view is active) so the report,
       // filters, and chart reflect the new setting without a page reload.
       route();
+    });
+    document.getElementById('viewer-settings-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openViewerSettings(e.currentTarget);
     });
     document.getElementById('export-report').addEventListener('click', exportReport);
     setupKeyboardNav();

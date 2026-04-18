@@ -202,9 +202,10 @@
     display: grid;
     grid-template-columns: 1.75fr 1fr;
     /* Fixed row heights (matches hr_monitor.html) so toggling HRV can't cause
-       the widget to grow taller. OBS source size stays locked. */
-    grid-template-rows: auto 68px 12px;
-    gap: 4px 16px;
+       the widget to grow taller. OBS source size stays locked. Row gap bumped
+       to 10 so the live HR trace doesn't paint over the pips below. */
+    grid-template-rows: auto 68px 14px;
+    gap: 10px 16px;
     align-items: start;
   }
   #overlay-zone.style-compact #hr-widget > .widget-header { grid-column: 1 / -1; margin-bottom: 0; }
@@ -294,6 +295,24 @@
   /* "Inline mini trends" only affects the tiny mini-chart next to the big HR
      number. The live HR trace has its own toggle (showLiveHr) — don't lump it in. */
   body.no-inline-trends .inline-trend { display: none; }
+  /* User-toggleable extras — palp chip, warning banner, conn dot. Each can
+     be hidden independently via a settings toggle in the monitor. */
+  body.no-palp-chip .palp-chip,
+  body.no-palp-chip #palp-chip { display: none !important; }
+  body.no-warning .warning-banner { display: none !important; }
+  /* Warning slot above the widget (opt-in via warningPlacement === 'above').
+     Reserves fixed height so the widget never reflows when a warning fires. */
+  .warning-slot-above { display: none; }
+  body.warning-above .warning-slot-above {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 34px;
+    padding: 2px 0;
+  }
+  body.warning-above.no-warning .warning-slot-above { display: none !important; }
+  body.warning-above .widget-header > .warning-banner { display: none !important; }
+  body.no-conn-dot .conn-indicator { display: none !important; }
   /* Compact-mode overrides. Compact uses a single #hr-widget that contains both
      HR (left cell) and HRV (right cell), so the global `body.no-hr { display:none }`
      rule would incorrectly blank the entire widget. These rules hide just the
@@ -389,6 +408,14 @@
 </div>
 
 <div id="overlay-zone" class="style-bold">
+  <!-- Reserved warning slot for warningPlacement === 'above'. Invisible until
+       a warning fires; the widget below never changes height regardless. -->
+  <div class="warning-slot-above" id="warning-slot-above">
+    <div class="warning-banner" id="warning-banner-above">
+      <span class="warning-banner-icon" id="warning-icon-above"></span>
+      <span class="warning-banner-text" id="warning-text-above"></span>
+    </div>
+  </div>
   <div class="widget stage-normal" id="hr-widget">
     <div class="widget-header">
       <div class="header-left">
@@ -526,13 +553,17 @@
     'warn-palp':  'Palpitations elevated',
   };
   function applyWarningBanner(warnType) {
-    const banner = $('warning-banner');
-    if (!banner) return;
-    banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
-    if (warnType && WARN_TEXT[warnType]) {
-      banner.classList.add(warnType, 'active');
-      $('warning-icon').innerHTML = WARN_ICONS[warnType] || '';
-      $('warning-text').textContent = WARN_TEXT[warnType] || '';
+    const banners = [['warning-banner', 'warning-icon', 'warning-text'],
+                     ['warning-banner-above', 'warning-icon-above', 'warning-text-above']];
+    for (const [bId, iId, tId] of banners) {
+      const banner = $(bId);
+      if (!banner) continue;
+      banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
+      if (warnType && WARN_TEXT[warnType]) {
+        banner.classList.add(warnType, 'active');
+        const ic = $(iId); if (ic) ic.innerHTML = WARN_ICONS[warnType] || '';
+        const tx = $(tId); if (tx) tx.textContent = WARN_TEXT[warnType] || '';
+      }
     }
   }
 
@@ -561,6 +592,10 @@
       document.body.classList.toggle('no-hrv', !prefs.showHrv);
       document.body.classList.toggle('no-live-hr', !prefs.showLiveHr);
       document.body.classList.toggle('no-inline-trends', !prefs.showInlineTrends);
+      document.body.classList.toggle('no-palp-chip', prefs.showPalpChip === false);
+      document.body.classList.toggle('no-warning', prefs.showWarning === false);
+      document.body.classList.toggle('no-conn-dot', prefs.showConnDot === false);
+      document.body.classList.toggle('warning-above', prefs.warningPlacement === 'above');
       document.body.classList.toggle('shrink-to-fit', !!prefs.shrinkToFit);
       document.body.classList.toggle('layout-horizontal', prefs.layout === 'horizontal');
     }
@@ -652,14 +687,15 @@
   function handleTick(msg) {
     if (!msg || msg.type !== 'tick') return;
     lastTick = Date.now();
+    // Connected flag ALWAYS goes on the moment a tick arrives. Anything below
+    // that could fail must not prevent "waiting for live app" from dismissing.
     document.body.classList.add('connected');
     setConnState('live');
 
     // Apply live widget-layout prefs pushed from the monitor so toggling HR /
     // HRV / trends / shrink-to-fit in the live app updates the OBS overlay
-    // immediately (no browser-source refresh). If prefs aren't in the tick,
-    // URL-param state set at load time stays in effect.
-    applyRemotePrefs(msg);
+    // immediately. Defensive: a bug in here mustn't break the rest of the tick.
+    try { applyRemotePrefs(msg); } catch (e) { console.warn('applyRemotePrefs failed:', e); }
 
     $('hr-big').textContent = msg.hr != null ? msg.hr : '—';
     $('rmssd-big').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
