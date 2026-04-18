@@ -102,10 +102,11 @@
 
   #app {
     display: grid;
-    /* Preview column auto-sizes to whatever the widget is rendering at (no
-       more 380px hard-cap). Horizontal layout overrides this to a single
-       column with two rows so the widgets become a top banner. */
-    grid-template-columns: auto 1fr;
+    /* Fixed 380px left column for the overlay preview. Wider would let charts
+       run away (responsive Chart.js with no size cap crashes into broken-
+       image canvases); narrower would cramp the widgets. Horizontal layout
+       collapses to a single full-width column with widgets stacked at the top. */
+    grid-template-columns: 380px 1fr;
     height: calc(100vh - 52px);
     gap: 0;
   }
@@ -125,11 +126,12 @@
     border-right: 1px solid var(--border);
     overflow: hidden;
   }
-  /* Overlay preview always sizes to its content; #overlay-zone hugs its
-     widget via fit-content. App-grid column is already `auto` so the left
-     column shrinks to the widget's width. (Previously used !important here,
-     which broke the body.layout-horizontal override.) */
-  #overlay-zone { width: fit-content; max-width: 100%; }
+  /* Overlay-zone fills the left column; the actual widget content is inside
+     .widget-row, which hugs its content. This is what gets measured for the
+     OBS source size (NOT overlay-zone, which includes the "crop zone"
+     visual padding + status text + label at the bottom). */
+  #overlay-zone { width: 100%; }
+  #overlay-zone .widget-row { width: fit-content; max-width: 360px; }
   /* Widget row: all the actual widget cards live inside this. In vertical mode
      it stacks top-down; in horizontal mode it goes left-to-right. The
      warning-slot-above stays OUTSIDE this container so it always sits above
@@ -151,6 +153,20 @@
   body.layout-horizontal #overlay-zone .breath-widget {
     flex: 1 1 0;
     min-width: 0;
+  }
+  /* Horizontal banner: widgets all share the same height via align-items on
+     the row, and HRV's big number matches HR's for visual consistency. Only
+     applies to non-compact styles; compact is already a single combined card. */
+  body.layout-horizontal #overlay-zone:not(.style-compact) .widget-row {
+    align-items: stretch;
+  }
+  body.layout-horizontal #overlay-zone:not(.style-compact) .widget,
+  body.layout-horizontal #overlay-zone:not(.style-compact) .breath-widget {
+    display: flex;
+    flex-direction: column;
+  }
+  body.layout-horizontal #overlay-zone:not(.style-compact) #rmssd-widget .big-number {
+    font-size: 84px;
   }
   body.layout-horizontal #overlay-zone {
     border-right: none;
@@ -321,22 +337,32 @@
     min-width: 0;
     position: relative;
     padding: 6px 0 14px;
+    height: 68px;
+    max-height: 68px;
+    overflow: hidden;
   }
   .inline-trend canvas {
     width: 100% !important;
     height: 100% !important;
+    max-height: 100% !important;
   }
-  /* Compact mode replaces the 3-min inline trend with the live HR trace. */
+  /* Compact mode replaces the 3-min inline trend with the live HR trace.
+     Height is pinned so Chart.js's responsive canvas can't grow past the
+     big-number row and paint into the pips row below. */
   .inline-live-trace {
     display: none;
     flex: 1 1 0;
     min-width: 0;
     position: relative;
     padding: 6px 0 10px;
+    height: 68px;
+    max-height: 68px;
+    overflow: hidden;
   }
   .inline-live-trace canvas {
     width: 100% !important;
     height: 100% !important;
+    max-height: 100% !important;
   }
   /* In Compact, the .number-row itself becomes a grid cell (col 1, row 2) and its
      children (number + live trace) sit side-by-side via the flex rules above. */
@@ -1544,7 +1570,6 @@
                 <option value="above">Above card (reserved slot)</option>
               </select>
             </label>
-            <label><input type="checkbox" id="toggle-conn-dot" checked /> Connection dot</label>
           </div>
           <div style="height: 18px;"></div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
@@ -2655,7 +2680,6 @@
         showInlineTrends: widgetPrefs.showInlineTrends,
         showPalpChip: widgetPrefs.showPalpChip,
         showWarning: widgetPrefs.showWarning,
-        showConnDot: widgetPrefs.showConnDot,
         warningPlacement: widgetPrefs.warningPlacement || 'inside',
         shrinkToFit: true, // always on now
         layout: widgetPrefs.layout,
@@ -3779,7 +3803,6 @@
     // above the widget that adds to the OBS source height; transparent when
     // no warning is firing so the widget never reflows.
     warningPlacement: 'inside',
-    showConnDot: true,
     layout: 'vertical',
     broadcast: true,
     // Measured dimensions of #overlay-zone after each render. Auto-populated
@@ -3799,22 +3822,19 @@
       h: Number.isFinite(widgetPrefs.customHeight) ? widgetPrefs.customHeight : 260,
     };
   }
-  // Measure #overlay-zone after a paint, update widgetPrefs + the size fields,
-  // and broadcast to OBS. Re-runs whenever prefs change or the widget reflows.
+  // Measure .widget-row (the actual widget content) for the OBS source size.
+  // overlay-zone would include the left column's padding + status / crop
+  // labels that AREN'T part of the OBS source, which is why the old numbers
+  // were wildly inflated (e.g. 1094 for a compact card). Remeasured whenever
+  // prefs change or the widget reflows.
   let overlaySizeRaf = null;
   function applyOverlaySize() {
-    const zone = $('overlay-zone');
-    if (!zone) return;
-    // Clear any inline dims so the zone sizes to its children naturally. A
-    // stale inline width/height from a previous toggle would otherwise lock
-    // the measurement to the old size.
-    zone.style.width = '';
-    zone.style.height = '';
-    zone.style.overflow = 'hidden';
+    const row = document.querySelector('#overlay-zone .widget-row');
+    if (!row) return;
     if (overlaySizeRaf) cancelAnimationFrame(overlaySizeRaf);
     overlaySizeRaf = requestAnimationFrame(() => {
       overlaySizeRaf = requestAnimationFrame(() => {
-        const rect = zone.getBoundingClientRect();
+        const rect = row.getBoundingClientRect();
         const w = Math.round(rect.width);
         const h = Math.round(rect.height);
         if (w > 0 && h > 0 && (w !== widgetPrefs.customWidth || h !== widgetPrefs.customHeight)) {
@@ -3831,8 +3851,8 @@
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => applyOverlaySize());
     requestAnimationFrame(() => {
-      const zone = $('overlay-zone');
-      if (zone) ro.observe(zone);
+      const row = document.querySelector('#overlay-zone .widget-row');
+      if (row) ro.observe(row);
     });
   }
 
@@ -3844,7 +3864,6 @@
     zone.classList.toggle('no-inline-trends', !widgetPrefs.showInlineTrends);
     zone.classList.toggle('no-palp-chip', !widgetPrefs.showPalpChip);
     zone.classList.toggle('no-warning', !widgetPrefs.showWarning);
-    zone.classList.toggle('no-conn-dot', !widgetPrefs.showConnDot);
     document.body.classList.toggle('warning-above', widgetPrefs.warningPlacement === 'above');
     const wpSel = $('warning-placement');
     if (wpSel) wpSel.value = widgetPrefs.warningPlacement || 'inside';
@@ -3853,7 +3872,7 @@
     document.querySelectorAll('.layout-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.layout === widgetPrefs.layout);
     });
-    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-broadcast': 'broadcast' };
+    const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggles)) {
       const el = $(id); if (el) el.checked = widgetPrefs[key];
     }
@@ -4087,7 +4106,7 @@
       });
     });
     // Widget visibility toggles
-    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-conn-dot': 'showConnDot', 'toggle-broadcast': 'broadcast' };
+    const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggleMap)) {
       const el = $(id);
       if (el) el.addEventListener('change', () => {
