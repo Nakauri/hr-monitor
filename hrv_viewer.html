@@ -250,59 +250,30 @@
     gap: 16px;
     margin-top: 20px;
   }
+  .index-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+  }
   .index-controls {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    margin-top: 14px;
-    padding: 12px 14px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 12px;
+    gap: 8px;
   }
-  .index-search {
-    flex: 1 1 220px;
-    min-width: 180px;
-    padding: 6px 10px;
+  .index-controls select {
+    padding: 5px 10px;
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text);
     font-size: 12px;
     font-family: inherit;
-  }
-  .index-control-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-dim);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    font-size: 10px;
-    font-weight: 600;
-  }
-  .index-control-label input,
-  .index-control-label select {
-    padding: 5px 8px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 12px;
-    font-family: inherit;
-  }
-  .index-clear {
-    padding: 5px 12px;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    border-radius: 6px;
     cursor: pointer;
-    font-size: 11px;
   }
-  .index-clear:hover { color: var(--text); border-color: var(--border-strong); }
+  .index-controls select:hover { border-color: var(--border-strong); }
   .index-pager {
     display: flex;
     align-items: center;
@@ -2835,16 +2806,21 @@
       else warnSegs.push({ type: w.type, start: w.t, end: w.t });
     }
 
-    // Connection gaps (disconnect -> next connect)
+    // Connection gaps (disconnect -> next connect). For an open gap at end of
+    // session, clamp end to at least start — otherwise a disconnect that fired
+    // AFTER the last HR sample produces a negative "gap" which inflates uptime
+    // past 100%.
     const connGaps = [];
+    const lastHRT = hr.length ? hr[hr.length - 1].t : 0;
     for (let i = 0; i < connections.length; i++) {
       if (connections[i].type === 'disconnect') {
         const next = connections.find((c, j) => j > i && c.type === 'connect');
-        if (next) connGaps.push({ start: connections[i].t, end: next.t });
-        else connGaps.push({ start: connections[i].t, end: hr[hr.length - 1].t }); // open gap
+        const start = connections[i].t;
+        const end = next ? next.t : Math.max(start, lastHRT);
+        connGaps.push({ start, end });
       }
     }
-    const gapTotalMin = connGaps.reduce((s, g) => s + (g.end - g.start), 0);
+    const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
 
     // Resting HR proxy: the LOWEST 5-min rolling mean across the session. Unlike
     // "morning HR" this works for non-24 / odd schedules — it finds the calmest
@@ -3225,13 +3201,11 @@
     else { const es = document.getElementById('empty-state'); if (es) es.style.display = 'none'; }
   }
 
-  // Index view state: sort / filter / pagination. Persisted so the list
-  // remembers the user's setup across re-renders and tab changes.
+  // Index view state: sort + preset date range + pagination. Persisted so the
+  // list remembers the user's setup across re-renders and tab changes.
   const indexState = {
     sort: localStorage.getItem('hrv_viewer_index_sort') || 'newest',
-    search: '',
-    dateFrom: '',
-    dateTo: '',
+    range: localStorage.getItem('hrv_viewer_index_range') || 'all',
     page: 0,
     pageSize: 50,
   };
@@ -3245,21 +3219,35 @@
     'best-uptime':  (a, b) => (computeUptimePct(sessionsIndex[b]) ?? -1) - (computeUptimePct(sessionsIndex[a]) ?? -1),
     'worst-uptime': (a, b) => (computeUptimePct(sessionsIndex[a]) ?? 101) - (computeUptimePct(sessionsIndex[b]) ?? 101),
   };
+  const RANGE_OPTIONS = [
+    ['all', 'All time'],
+    ['7', 'Last 7 days'],
+    ['30', 'Last 30 days'],
+    ['90', 'Last 90 days'],
+    ['365', 'Last year'],
+    ['month', 'This month'],
+  ];
+  function rangeCutoffISO(range) {
+    if (range === 'all' || !range) return null;
+    const now = new Date();
+    if (range === 'month') {
+      const d = new Date(now.getFullYear(), now.getMonth(), 1);
+      return d.toISOString().slice(0, 10);
+    }
+    const days = parseInt(range, 10);
+    if (!isFinite(days)) return null;
+    const d = new Date(now);
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  }
   function applyIndexFilterSort(allFilenames) {
     let list = allFilenames.slice();
-    if (indexState.dateFrom || indexState.dateTo) {
+    const cutoff = rangeCutoffISO(indexState.range);
+    if (cutoff) {
       list = list.filter(fn => {
         const m = parseSessionFilename(fn);
-        const iso = m && m.isoDate;
-        if (!iso) return false;
-        if (indexState.dateFrom && iso < indexState.dateFrom) return false;
-        if (indexState.dateTo && iso > indexState.dateTo) return false;
-        return true;
+        return m && m.isoDate >= cutoff;
       });
-    }
-    if (indexState.search) {
-      const q = indexState.search.toLowerCase();
-      list = list.filter(fn => fn.toLowerCase().includes(q));
     }
     list.sort(SORT_COMPARATORS[indexState.sort] || SORT_COMPARATORS.newest);
     return list;
@@ -3332,6 +3320,9 @@
       ['best-uptime', 'Best uptime'],
       ['worst-uptime', 'Worst uptime'],
     ].map(([v, l]) => `<option value="${v}"${v === indexState.sort ? ' selected' : ''}>${l}</option>`).join('');
+    const rangeOptionsHtml = RANGE_OPTIONS
+      .map(([v, l]) => `<option value="${v}"${v === indexState.range ? ' selected' : ''}>${l}</option>`)
+      .join('');
 
     const showing = total === 0 ? '0' : `${start + 1}–${Math.min(start + pageSize, total)}`;
     const countLabel = total === totalAll
@@ -3346,55 +3337,32 @@
       </div>` : '';
 
     el.innerHTML = `
-      <div class="section-head">All sessions · ${countLabel}</div>
-      <div class="index-controls">
-        <input type="search" class="index-search" id="index-search" placeholder="Filter by filename…" value="${escape(indexState.search)}">
-        <label class="index-control-label">From <input type="date" id="index-date-from" value="${indexState.dateFrom}"></label>
-        <label class="index-control-label">To <input type="date" id="index-date-to" value="${indexState.dateTo}"></label>
-        <label class="index-control-label">Sort <select id="index-sort">${sortOptions}</select></label>
-        ${(indexState.search || indexState.dateFrom || indexState.dateTo) ? '<button class="index-clear" id="index-clear">Clear</button>' : ''}
+      <div class="index-head">
+        <div class="section-head" style="margin: 0;">All sessions · ${countLabel}</div>
+        <div class="index-controls">
+          <select id="index-range" title="Date range">${rangeOptionsHtml}</select>
+          <select id="index-sort" title="Sort order">${sortOptions}</select>
+        </div>
       </div>
-      <div class="sessions-grid">${cards || '<div class="stub-panel">No sessions match these filters.</div>'}</div>
+      <div class="sessions-grid">${cards || '<div class="stub-panel">No sessions in this range.</div>'}</div>
       ${pager}
     `;
 
     el.querySelectorAll('.session-card').forEach(c => {
       c.addEventListener('click', () => setHash('session/' + c.dataset.filename));
     });
-    const searchEl = document.getElementById('index-search');
-    if (searchEl) {
-      // Debounce search typing so every keystroke doesn't re-render the grid.
-      let t = null;
-      searchEl.addEventListener('input', () => {
-        clearTimeout(t);
-        t = setTimeout(() => {
-          indexState.search = searchEl.value.trim();
-          indexState.page = 0;
-          renderIndex();
-          // Refocus and restore caret to end since innerHTML replaced the input.
-          const newEl = document.getElementById('index-search');
-          if (newEl) { newEl.focus(); newEl.setSelectionRange(newEl.value.length, newEl.value.length); }
-        }, 180);
-      });
-    }
-    const dateFromEl = document.getElementById('index-date-from');
-    if (dateFromEl) dateFromEl.addEventListener('change', () => {
-      indexState.dateFrom = dateFromEl.value; indexState.page = 0; renderIndex();
-    });
-    const dateToEl = document.getElementById('index-date-to');
-    if (dateToEl) dateToEl.addEventListener('change', () => {
-      indexState.dateTo = dateToEl.value; indexState.page = 0; renderIndex();
+    const rangeEl = document.getElementById('index-range');
+    if (rangeEl) rangeEl.addEventListener('change', () => {
+      indexState.range = rangeEl.value;
+      try { localStorage.setItem('hrv_viewer_index_range', indexState.range); } catch (e) {}
+      indexState.page = 0;
+      renderIndex();
     });
     const sortEl = document.getElementById('index-sort');
     if (sortEl) sortEl.addEventListener('change', () => {
       indexState.sort = sortEl.value;
       try { localStorage.setItem('hrv_viewer_index_sort', indexState.sort); } catch (e) {}
       indexState.page = 0;
-      renderIndex();
-    });
-    const clearEl = document.getElementById('index-clear');
-    if (clearEl) clearEl.addEventListener('click', () => {
-      indexState.search = ''; indexState.dateFrom = ''; indexState.dateTo = ''; indexState.page = 0;
       renderIndex();
     });
     el.querySelectorAll('.index-pager-btn').forEach(btn => {
@@ -3409,10 +3377,19 @@
 
   // Uptime = % of session time with live HR data. Flags sessions whose
   // averages are less trustworthy because the strap dropped beats.
+  // Cached summaries from earlier builds can carry gaps where end < start
+  // (open gaps past the last HR sample), which produces nonsense uptime like
+  // 226%. Recompute per-gap from connGaps with a floor, and clamp the result.
   function computeUptimePct(s) {
-    if (!s || !s.duration) return null;
-    const up = Math.max(0, s.duration - (s.gapTotalMin || 0));
-    return Math.round(100 * up / s.duration);
+    if (!s || !s.duration || s.duration <= 0) return null;
+    let gap = 0;
+    if (Array.isArray(s.connGaps)) {
+      for (const g of s.connGaps) gap += Math.max(0, (g?.end || 0) - (g?.start || 0));
+    } else {
+      gap = Math.max(0, s.gapTotalMin || 0);
+    }
+    const up = Math.max(0, s.duration - gap);
+    return Math.min(100, Math.round(100 * up / s.duration));
   }
   function uptimeColor(pct) {
     if (pct == null) return 'var(--text-faint)';
