@@ -3037,24 +3037,36 @@
       }
     }));
 
+    // Match the shape loadFullSession returns: {x, y, ep}. The chart code and
+    // several downstream helpers read .x / .y directly; using {t, v} silently
+    // breaks chart rendering (the line never plots because points miss their x).
     const hr = [];
     const rmssd = [];
     for (const sd of loaded) {
       for (const p of sd.hr) {
         if (p.ep == null) continue;
-        const t = (p.ep - startOfDay) / 60000;
-        hr.push({ t, v: p.y, ep: p.ep });
+        const x = (p.ep - startOfDay) / 60000;
+        hr.push({ x, y: p.y, ep: p.ep });
       }
       for (const p of sd.rmssd) {
         if (p.ep == null) continue;
-        const t = (p.ep - startOfDay) / 60000;
-        rmssd.push({ t, v: p.y, ep: p.ep });
+        const x = (p.ep - startOfDay) / 60000;
+        rmssd.push({ x, y: p.y, ep: p.ep });
       }
     }
-    hr.sort((a, b) => a.t - b.t);
-    rmssd.sort((a, b) => a.t - b.t);
+    hr.sort((a, b) => a.x - b.x);
+    rmssd.sort((a, b) => a.x - b.x);
 
     // Walk each session's summary and shift its events into day-minute space.
+    // Each event type has its own time-bearing fields: events use {t},
+    // warnSegs/palpClusters/connGaps/hrDeltas/chillsWindows/postureSpans use
+    // {start, end}, flushes use both {start, end, t}. Missing any field leaves
+    // events clustered at session-relative time and mis-places them on the chart.
+    const shiftBy = (obj, off, keys) => {
+      const r = { ...obj };
+      for (const k of keys) if (typeof r[k] === 'number') r[k] += off;
+      return r;
+    };
     const events = [], warnSegs = [], palpClusters = [], connGaps = [];
     const hrDeltas = [], flushes = [], chillsWindows = [], postureSpans = [];
     let palpCount = 0;
@@ -3063,16 +3075,14 @@
       const meta = parseSessionFilename(fn);
       if (!s || !meta) continue;
       const offset = (meta.date.getTime() - startOfDay) / 60000;
-      const shiftT = (o) => ({ ...o, t: (o.t || 0) + offset });
-      const shiftSE = (o) => ({ ...o, start: (o.start || 0) + offset, end: (o.end || 0) + offset });
-      for (const e of (s.events || [])) events.push(shiftT(e));
-      for (const w of (s.warnSegs || [])) warnSegs.push(shiftSE(w));
-      for (const p of (s.palpClusters || [])) palpClusters.push(shiftSE(p));
-      for (const g of (s.connGaps || [])) connGaps.push(shiftSE(g));
-      for (const d of (s.hrDeltas || [])) hrDeltas.push(shiftT(d));
-      for (const f of (s.flushes || [])) flushes.push(shiftSE(f));
-      for (const c of (s.chillsWindows || [])) chillsWindows.push(shiftSE(c));
-      for (const ps of (s.postureSpans || [])) postureSpans.push(shiftSE(ps));
+      for (const e of (s.events || [])) events.push(shiftBy(e, offset, ['t']));
+      for (const w of (s.warnSegs || [])) warnSegs.push(shiftBy(w, offset, ['start', 'end']));
+      for (const p of (s.palpClusters || [])) palpClusters.push(shiftBy(p, offset, ['start', 'end']));
+      for (const g of (s.connGaps || [])) connGaps.push(shiftBy(g, offset, ['start', 'end']));
+      for (const d of (s.hrDeltas || [])) hrDeltas.push(shiftBy(d, offset, ['start', 'end']));
+      for (const f of (s.flushes || [])) flushes.push(shiftBy(f, offset, ['start', 'end', 't']));
+      for (const c of (s.chillsWindows || [])) chillsWindows.push(shiftBy(c, offset, ['start', 'end']));
+      for (const ps of (s.postureSpans || [])) postureSpans.push(shiftBy(ps, offset, ['start', 'end']));
       palpCount += (s.palpCount || 0);
     }
 
@@ -3091,40 +3101,41 @@
       if (bStart > aEnd + 0.1) connGaps.push({ start: aEnd, end: bStart });
     }
 
-    // Aggregate stats across the whole day.
-    const hrVals = hr.map(p => p.v);
-    const rmssdVals = rmssd.map(p => p.v);
+    // Aggregate stats across the whole day. Data arrays use {x, y, ep}
+    // (loadFullSession shape); summary fields use {t, v} (summarizeCSV
+    // convention consumed by renderSession).
+    const hrVals = hr.map(p => p.y);
+    const rmssdVals = rmssd.map(p => p.y);
     let hrMax = { t: 0, v: 0 }, hrMin = { t: 0, v: Infinity };
     for (const p of hr) {
-      if (p.v > hrMax.v) hrMax = { t: p.t, v: p.v };
-      if (p.v < hrMin.v) hrMin = { t: p.t, v: p.v };
+      if (p.y > hrMax.v) hrMax = { t: p.x, v: p.y };
+      if (p.y < hrMin.v) hrMin = { t: p.x, v: p.y };
     }
     if (!isFinite(hrMin.v)) hrMin = { t: 0, v: 0 };
     let rmssdMax = { t: 0, v: 0 }, rmssdMin = { t: 0, v: Infinity };
     for (const p of rmssd) {
-      if (p.v > rmssdMax.v) rmssdMax = { t: p.t, v: p.v };
-      if (p.v < rmssdMin.v) rmssdMin = { t: p.t, v: p.v };
+      if (p.y > rmssdMax.v) rmssdMax = { t: p.x, v: p.y };
+      if (p.y < rmssdMin.v) rmssdMin = { t: p.x, v: p.y };
     }
     if (!isFinite(rmssdMin.v)) rmssdMin = { t: 0, v: 0 };
 
-    const duration = hr.length ? Math.max(...hr.map(p => p.t)) : 0;
+    const duration = hr.length ? hr[hr.length - 1].x : 0;
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
     const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
     const tachyPct = hrVals.length ? Math.round(hrVals.filter(v => v > 100).length / hrVals.length * 100) : 0;
     const warnCount = warnSegs.length;
 
-    // Quadrant percentages across the whole day, matching summarizeCSV's rule.
     const quadPct = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0 };
     if (rmssd.length && hr.length) {
       const t = QUADRANT_THRESH;
       const quadCounts = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0, 'neutral': 0 };
       let hrIdx = 0;
       for (const p of rmssd) {
-        while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].t - p.t) <= Math.abs(hr[hrIdx].t - p.t)) hrIdx++;
-        const hrVal = hr[hrIdx].v;
+        while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].x - p.x) <= Math.abs(hr[hrIdx].x - p.x)) hrIdx++;
+        const hrVal = hr[hrIdx].y;
         const hrLow = hrVal < t.hrLow, hrHigh = hrVal > t.hrHigh;
-        const rmLow = p.v < t.hrvLow, rmHigh = p.v > t.hrvHigh;
+        const rmLow = p.y < t.hrvLow, rmHigh = p.y > t.hrvHigh;
         let key = 'neutral';
         if (hrLow && rmHigh) key = 'low-high';
         else if (hrHigh && rmHigh) key = 'high-high';
