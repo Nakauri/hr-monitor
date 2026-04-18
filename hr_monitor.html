@@ -127,20 +127,32 @@
      fit-content width. The Source Size fields show measured pixel dims live. */
   #app { grid-template-columns: auto 1fr !important; }
   #overlay-zone { width: fit-content; max-width: 100%; }
-  /* Horizontal layout: overlay becomes a top banner. Widgets sit side-by-side. */
-  body.layout-horizontal #overlay-zone {
+  /* Widget row: all the actual widget cards live inside this. In vertical mode
+     it stacks top-down; in horizontal mode it goes left-to-right. The
+     warning-slot-above stays OUTSIDE this container so it always sits above
+     the widget row regardless of layout. */
+  #overlay-zone .widget-row {
+    display: flex;
+    flex-direction: column;
+    gap: inherit;
+    width: 100%;
+  }
+  /* Horizontal layout: widget-row flips to row, widgets sit side-by-side. The
+     enclosing overlay-zone stays a column so warning-slot keeps its spot. */
+  body.layout-horizontal #overlay-zone .widget-row {
     flex-direction: row;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding: 14px 18px;
-    gap: 14px;
     align-items: flex-start;
-    height: auto;
+    gap: 14px;
   }
   body.layout-horizontal #overlay-zone .widget,
   body.layout-horizontal #overlay-zone .breath-widget {
     flex: 1 1 0;
     min-width: 0;
+  }
+  body.layout-horizontal #overlay-zone {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 14px 18px;
   }
   /* Overlay status and CROP label shrink and wrap at end */
   body.layout-horizontal .overlay-status {
@@ -681,6 +693,7 @@
   .warning-banner.warn-low { border-color: var(--warn-low); background: rgba(125,184,232,0.1); }
   .warning-banner.warn-crash { border-color: var(--warn-crash); background: rgba(226,75,74,0.14); }
   .warning-banner.warn-palp { border-color: var(--warn-palp); background: rgba(215,108,186,0.14); }
+  .warning-banner.status-reconnecting { border-color: #6a6a6a; background: rgba(100,100,100,0.14); }
   .warning-banner-icon {
     width: 14px;
     height: 14px;
@@ -706,6 +719,9 @@
   .warning-banner.warn-crash .warning-banner-text { color: var(--warn-crash); }
   .warning-banner.warn-palp .warning-banner-icon,
   .warning-banner.warn-palp .warning-banner-text { color: var(--warn-palp); }
+  .warning-banner.status-reconnecting .warning-banner-icon,
+  .warning-banner.status-reconnecting .warning-banner-text { color: #b8b8b8; }
+  .warning-banner.status-reconnecting .warning-banner-icon svg { animation: conn-pulse 1.4s ease-in-out infinite; }
   .warning-banner-text {
     font-size: 12px;
     font-weight: 600;
@@ -1366,6 +1382,9 @@
         <span class="warning-banner-text" id="warning-text-above"></span>
       </div>
     </div>
+    <!-- All widgets sit inside this row so horizontal layout flips just the
+         widget row, not the whole overlay (keeps warning-slot above). -->
+    <div class="widget-row">
     <!-- HR widget -->
     <div class="widget stage-normal" id="hr-widget">
       <div class="widget-header">
@@ -1378,12 +1397,6 @@
           <span class="warning-banner-icon" id="warning-icon"></span>
           <span class="warning-banner-text" id="warning-text"></span>
         </div>
-        <!-- Connection indicator — matches the one in the OBS overlay (dot +
-             optional "reconnecting…" label). Keeps preview WYSIWYG. -->
-        <span class="conn-indicator">
-          <span class="conn-text" id="conn-text">reconnecting…</span>
-          <span class="conn-dot" id="conn-dot" title="Connection status"></span>
-        </span>
       </div>
       <div class="number-row">
         <div class="big-number" id="hr-big">—</div>
@@ -1429,6 +1442,7 @@
         <canvas id="rsa-chart"></canvas>
       </div>
     </div>
+    </div><!-- /.widget-row -->
 
     <div class="overlay-status" id="overlay-status">• Not connected</div>
     <div style="flex: 1;"></div>
@@ -1709,6 +1723,7 @@
     currentHR: null,
     currentRMSSD: null,
     currentWarn: null,
+    connState: 'idle', // 'idle' | 'live' | 'reconnecting'
     lastAlertTime: 0,
     lastDataTime: 0,
     audioOn: true,
@@ -2198,21 +2213,31 @@
     'warn-low': 'Heart rate low',
     'warn-crash': 'HRV crashed',
     'warn-palp': 'Palpitations elevated',
+    'status-reconnecting': 'Reconnecting…',
   };
+  WARN_ICONS['status-reconnecting'] = '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>';
 
+  // Unified status banner: conn state takes priority over warnings (if the
+  // strap is reconnecting, showing "HRV crashed" would be misleading — the
+  // sensor has dropped signal, any low-HRV reading is stale). Idle = no
+  // session active → no banner.
   function showWarningBanner(warnType) {
-    // Update BOTH the inside-card banner and the above-slot banner. CSS hides
-    // whichever isn't active based on body.warning-above; this keeps JS simple.
+    state.currentWarn = warnType;
+    let effectiveType = null;
+    if (state.connState === 'reconnecting') effectiveType = 'status-reconnecting';
+    else if (state.connState === 'live') effectiveType = warnType;
+    // Apply to both banner slots (inside-card + above-slot); CSS hides
+    // whichever isn't active based on body.warning-above.
     const banners = [['warning-banner', 'warning-icon', 'warning-text'],
                      ['warning-banner-above', 'warning-icon-above', 'warning-text-above']];
     for (const [bId, iId, tId] of banners) {
       const banner = $(bId);
       if (!banner) continue;
-      banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
-      if (warnType) {
-        banner.classList.add(warnType, 'active');
-        const icon = $(iId); if (icon) icon.innerHTML = WARN_ICONS[warnType] || '';
-        const text = $(tId); if (text) text.textContent = WARN_TEXT[warnType] || '';
+      banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'status-reconnecting', 'active');
+      if (effectiveType) {
+        banner.classList.add(effectiveType, 'active');
+        const icon = $(iId); if (icon) icon.innerHTML = WARN_ICONS[effectiveType] || '';
+        const text = $(tId); if (text) text.textContent = WARN_TEXT[effectiveType] || '';
       }
     }
   }
@@ -2563,6 +2588,9 @@
       // Active warning banner state so the OBS overlay shows the same HR / HRV
       // / palp / crash banner as the monitor. null when no warning is firing.
       warn: state.currentWarn || null,
+      // Strap connection state — folded into the same status-banner slot on
+      // the overlay. 'live' / 'reconnecting' / 'idle'.
+      conn: state.connState || 'idle',
       livePoints,
       liveWindow,
       trendHR,
@@ -2813,12 +2841,18 @@
     setStatus('Disconnected by user.');
   }
 
-  // Drive the body's conn-* class (mirrors overlay.html). 'live' = green dot,
-  // 'reconnecting' = grey pulse + label, 'idle'/anything else = dim grey dot.
-  function setConnState(state) {
+  // Drive the body's conn-* class + update the unified status banner. The
+  // banner folds conn state + warning state together with a priority rule so
+  // there's never two overlapping badges. Disconnected / reconnecting always
+  // wins over warnings (no point showing "HRV crashed" if the strap just
+  // dropped signal).
+  function setConnState(connState) {
+    state.connState = connState;
     document.body.classList.remove('conn-live', 'conn-reconnecting');
-    if (state === 'live') document.body.classList.add('conn-live');
-    else if (state === 'reconnecting') document.body.classList.add('conn-reconnecting');
+    if (connState === 'live') document.body.classList.add('conn-live');
+    else if (connState === 'reconnecting') document.body.classList.add('conn-reconnecting');
+    // Refresh the banner so it reflects the new conn state immediately.
+    showWarningBanner(state.currentWarn);
   }
 
   function resetSession() {
@@ -3637,15 +3671,26 @@
   }
 
   function resizeAllCharts() {
-    requestAnimationFrame(() => {
+    // Chart.js canvases that were inside a display:none container can get stuck
+    // at stale internal dimensions (you see a giant stretched line when the
+    // container reappears). Double-resize + update covers that: first resize
+    // measures the newly-visible container, the second fixes any residual
+    // mismatch after Chart.js has laid out its scales.
+    const resizeOnce = () => {
       try { if (rsaChart) rsaChart.resize(); } catch(e) {}
       try { if (compactChart) compactChart.resize(); } catch(e) {}
       try { if (mainChart) mainChart.resize(); } catch(e) {}
       try { if (hrInlineChart) hrInlineChart.resize(); } catch(e) {}
       try { if (rmssdInlineChart) rmssdInlineChart.resize(); } catch(e) {}
       try { if (hrLiveTraceChart) hrLiveTraceChart.resize(); } catch(e) {}
-      updateCharts();
-      updateBreathing();
+    };
+    requestAnimationFrame(() => {
+      resizeOnce();
+      requestAnimationFrame(() => {
+        resizeOnce();
+        updateCharts();
+        updateBreathing();
+      });
     });
   }
 

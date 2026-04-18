@@ -48,7 +48,15 @@
     gap: 14px;
   }
   body.bg-dark #overlay-zone { background: #000; }
-  body.layout-horizontal #overlay-zone {
+  /* Widgets sit inside this row. Vertical layout stacks; horizontal layout
+     flips to row. The warning-slot-above stays outside and always sits on top. */
+  #overlay-zone .widget-row {
+    display: flex;
+    flex-direction: column;
+    gap: inherit;
+    width: 100%;
+  }
+  body.layout-horizontal #overlay-zone .widget-row {
     flex-direction: row;
     align-items: flex-start;
     gap: 12px;
@@ -180,6 +188,8 @@
   .warning-banner.warn-low    { border-color: #7DB8E8; background: rgba(125,184,232,0.12); color: #7DB8E8; }
   .warning-banner.warn-crash  { border-color: #BA7517; background: rgba(186,117,23,0.18); color: #F0C75E; }
   .warning-banner.warn-palp   { border-color: #D76CBA; background: rgba(215,108,186,0.18); color: #D76CBA; }
+  .warning-banner.status-reconnecting { border-color: #6a6a6a; background: rgba(100,100,100,0.14); color: #b8b8b8; }
+  .warning-banner.status-reconnecting .warning-banner-icon svg { animation: conn-pulse 1.4s ease-in-out infinite; }
   .warning-banner-icon { display: inline-flex; }
   .warning-banner-icon svg { width: 12px; height: 12px; fill: currentColor; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   .palp-dot {
@@ -416,6 +426,9 @@
       <span class="warning-banner-text" id="warning-text-above"></span>
     </div>
   </div>
+  <!-- Widgets sit in a flex container that flips direction for horizontal
+       layout; warning-slot stays above either way. -->
+  <div class="widget-row">
   <div class="widget stage-normal" id="hr-widget">
     <div class="widget-header">
       <div class="header-left">
@@ -427,10 +440,6 @@
         <span class="warning-banner-icon" id="warning-icon"></span>
         <span class="warning-banner-text" id="warning-text"></span>
       </div>
-      <span class="conn-indicator">
-        <span class="conn-text" id="conn-text">reconnecting…</span>
-        <span class="conn-dot" id="conn-dot" title="Connection status"></span>
-      </span>
     </div>
     <div class="number-row">
       <div class="big-number" id="hr-big">—</div>
@@ -465,6 +474,7 @@
     </div>
     <div class="rsa-chart-wrap"><canvas id="rsa-chart"></canvas></div>
   </div>
+  </div><!-- /.widget-row -->
 </div>
 
 <script>
@@ -551,18 +561,26 @@
     'warn-low':   'Heart rate low',
     'warn-crash': 'HRV crashed',
     'warn-palp':  'Palpitations elevated',
+    'status-reconnecting': 'Reconnecting…',
   };
-  function applyWarningBanner(warnType) {
+  WARN_ICONS['status-reconnecting'] = '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>';
+  // Unified status banner — conn state takes priority over warnings. When the
+  // strap is reconnecting, showing any stale HR/HRV warning would be misleading
+  // because the sensor has lost signal. Single slot, single source of truth.
+  function applyStatusBanner(warnType, connState) {
+    let effectiveType = null;
+    if (connState === 'reconnecting') effectiveType = 'status-reconnecting';
+    else if (connState === 'live') effectiveType = warnType;
     const banners = [['warning-banner', 'warning-icon', 'warning-text'],
                      ['warning-banner-above', 'warning-icon-above', 'warning-text-above']];
     for (const [bId, iId, tId] of banners) {
       const banner = $(bId);
       if (!banner) continue;
-      banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'active');
-      if (warnType && WARN_TEXT[warnType]) {
-        banner.classList.add(warnType, 'active');
-        const ic = $(iId); if (ic) ic.innerHTML = WARN_ICONS[warnType] || '';
-        const tx = $(tId); if (tx) tx.textContent = WARN_TEXT[warnType] || '';
+      banner.classList.remove('warn-high', 'warn-low', 'warn-crash', 'warn-palp', 'status-reconnecting', 'active');
+      if (effectiveType && WARN_TEXT[effectiveType]) {
+        banner.classList.add(effectiveType, 'active');
+        const ic = $(iId); if (ic) ic.innerHTML = WARN_ICONS[effectiveType] || '';
+        const tx = $(tId); if (tx) tx.textContent = WARN_TEXT[effectiveType] || '';
       }
     }
   }
@@ -728,7 +746,7 @@
     } else {
       palpChip.classList.remove('active');
     }
-    applyWarningBanner(msg.warn);
+    applyStatusBanner(msg.warn, msg.conn || 'live');
     if (msg.breathRate != null) $('breath-rate').textContent = Math.round(msg.breathRate) + ' br/min';
 
     if (msg.livePoints) {
@@ -781,15 +799,17 @@
     connect();
   }
 
-  // Flip to "reconnecting" after 3 s silence, fall back to disconnected after 15 s.
+  // Flip to "reconnecting" after 3 s of tick silence — lets the overlay show
+  // the reconnecting banner even if the monitor hasn't reported its conn state
+  // yet (e.g., network blip, browser sleep).
   setInterval(() => {
     if (lastTick === 0) return;
     const silent = Date.now() - lastTick;
     if (silent > 15000) {
       document.body.classList.remove('connected');
-      setConnState('reconnecting');
+      applyStatusBanner(null, 'reconnecting');
     } else if (silent > 3000) {
-      setConnState('reconnecting');
+      applyStatusBanner(null, 'reconnecting');
     }
   }, 1500);
 })();
