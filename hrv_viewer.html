@@ -1052,7 +1052,7 @@
   }
   .insight-body { border-top: 1px solid var(--border); }
   .insight-box.collapsed .insight-body { display: none; }
-  .insight-section { padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .insight-section { border-bottom: 1px solid var(--border); }
   .insight-section:last-child { border-bottom: 0; }
   .insight-section-title {
     font-size: 10px;
@@ -1060,11 +1060,27 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--text-dim);
-    margin-bottom: 6px;
+    padding: 10px 18px;
     display: flex;
     align-items: center;
     gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, color 0.12s;
   }
+  .insight-section-title:hover { background: rgba(255,255,255,0.02); color: var(--text); }
+  .insight-section-title .insight-child-chevron {
+    width: 12px;
+    height: 12px;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+  }
+  .insight-section.collapsed .insight-child-chevron { transform: rotate(-90deg); }
   .insight-section-title .insight-count {
     font-size: 11px;
     color: var(--accent-rmssd);
@@ -1073,6 +1089,11 @@
     border-radius: 10px;
     letter-spacing: 0.04em;
   }
+  /* Section body: desc + list. Padded inside the section, hidden when collapsed. */
+  .insight-section-body {
+    padding: 0 18px 12px;
+  }
+  .insight-section.collapsed .insight-section-body { display: none; }
   .insight-section ul {
     margin: 0;
     padding: 0;
@@ -1099,7 +1120,7 @@
     font-size: 12px;
     font-style: italic;
     line-height: 1.55;
-    margin: -2px 0 10px;
+    margin: 0 0 10px;
     max-width: 68ch;
   }
   /* Per-item explanations (what does RMSSD mean, what is tachycardia) — similar
@@ -1638,7 +1659,7 @@
       <span>Autonomic analysis</span>
     </label>
     <button class="export-report-btn" id="export-report" title="Print/save this view as a report">Export report</button>
-    <a class="nav-feedback" href="mailto:nakauri@gmail.com?subject=HR%20Monitor%20feedback%20%E2%80%94%20Viewer" title="Opens your email client — send feedback directly">Send feedback</a>
+    <a class="nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Viewer&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Viewer%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
   </div>
 </header>
 
@@ -3310,6 +3331,7 @@
   let currentContextChart = null;
   let currentSummary = null;
   let currentData = null;
+  let currentFilename = null;
   let currentQuadRanges = null;
   let brushMin = null, brushMax = null;
   let activeFilters = { event: true, warning: true, palp: true, disconnect: true, delta: true, flush: true, chills: true, posture: true, sleep: true };
@@ -3394,6 +3416,7 @@
       return;
     }
     currentSummary = s;
+    currentFilename = filename;
     const data = await loadFullSession(filename);
     currentData = data;
     currentQuadRanges = computeQuadrantRanges(data);
@@ -3928,44 +3951,68 @@
       }
     }
 
-    // 7. Connection & warnings — always descriptive.
-    {
-      const lines = [];
-      if (s.warnCount > 0) {
-        const types = Array.from(new Set(s.warnSegs.map(w => w.type))).join(', ');
-        lines.push({ text: `${s.warnCount} warning ${s.warnCount === 1 ? 'segment' : 'segments'}`, sub: types });
-      }
-      if (s.connGaps.length > 0) {
-        const longest = s.connGaps.reduce((a, b) => (b.end - b.start) > (a.end - a.start) ? b : a);
-        lines.push({
-          text: `${s.connGaps.length} BLE ${s.connGaps.length === 1 ? 'gap' : 'gaps'}`,
-          sub: `longest ${formatDuration(longest.end - longest.start)}`,
-          at: { t: longest.start, label: `jump @ ${formatDuration(longest.start)}` },
-        });
-      }
-      if (lines.length) {
-        sections.push({
-          key: 'connection',
-          title: 'Connection & warnings',
-          desc: 'Warnings fire when HR or HRV crosses the thresholds you set in the live monitor. BLE gaps are moments the strap lost contact — no data collected.',
-          lines,
-        });
-      }
+    // 7. Warnings — physiological: HR/HRV crossed thresholds the user set.
+    if (s.warnCount > 0) {
+      const types = Array.from(new Set(s.warnSegs.map(w => w.type))).join(', ');
+      const lines = [{ text: `${s.warnCount} warning ${s.warnCount === 1 ? 'segment' : 'segments'}`, sub: types }];
+      const earliest = s.warnSegs.reduce((a, b) => a.start <= b.start ? a : b, s.warnSegs[0]);
+      if (earliest) lines.push({
+        text: `First: ${warnLabel(earliest.type)}`,
+        sub: `@ ${formatDuration(earliest.start)} · ${formatDuration(earliest.end - earliest.start)}`,
+        at: { t: earliest.start, label: `jump @ ${formatDuration(earliest.start)}` },
+      });
+      sections.push({
+        key: 'warnings',
+        title: 'Warnings',
+        desc: 'Moments where your HR or HRV crossed a threshold you set in the live monitor — a physiological signal, not a hardware problem.',
+        count: s.warnCount,
+        lines,
+      });
+    }
+
+    // 8. Connection gaps — technical: strap lost contact. Strictly a hardware
+    // concern, kept separate from warnings so it doesn't look like a lumped-in
+    // health event.
+    if (s.connGaps.length > 0) {
+      const longest = s.connGaps.reduce((a, b) => (b.end - b.start) > (a.end - a.start) ? b : a);
+      const total = s.connGaps.reduce((sum, g) => sum + (g.end - g.start), 0);
+      sections.push({
+        key: 'connection',
+        title: 'Connection gaps',
+        desc: 'Short windows where the chest strap lost Bluetooth contact with the app — no HR data was recorded during these stretches. A technical artifact, not a physiological event.',
+        count: s.connGaps.length,
+        lines: [
+          { text: `${s.connGaps.length} gap${s.connGaps.length === 1 ? '' : 's'} · ${formatDuration(total)} total` },
+          {
+            text: `Longest: ${formatDuration(longest.end - longest.start)}`,
+            sub: `@ ${formatDuration(longest.start)}`,
+            at: { t: longest.start, label: `jump @ ${formatDuration(longest.start)}` },
+          },
+        ],
+      });
     }
 
     const chevron = `<svg class="insight-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
 
     // One-line summary shown next to the caret when collapsed — gives a quick
-    // read without needing to expand. Counts non-Overview sections only since
-    // Overview is always present.
-    const notableCount = sections.filter(s => s.key !== 'overview').length;
+    // read without needing to expand. Uses the headline HR metric the user
+    // picked in Month/Week (Rest / Avg / Tachy % / Range) so the same "how do
+    // I read this session at a glance" framing carries across views.
+    const notableCount = sections.filter(sec => sec.key !== 'overview').length;
     const totalPalps = s.palpCount || 0;
     const summaryBits = [];
-    if (s.hrAvg != null) summaryBits.push(`avg ${s.hrAvg} bpm`);
+    const headline = currentFilename ? computeHeadline(headlineMetric, [currentFilename]) : null;
+    if (headline && headline.value != null) {
+      summaryBits.push(`${headline.label.toLowerCase()} ${headline.value}${headline.unit ? ' ' + headline.unit : ''}`);
+    } else if (s.hrAvg != null) {
+      summaryBits.push(`avg ${s.hrAvg} bpm`);
+    }
     if (notableCount > 0) summaryBits.push(`${notableCount} finding${notableCount === 1 ? '' : 's'}`);
     if (totalPalps > 0) summaryBits.push(`${totalPalps} palp${totalPalps === 1 ? '' : 's'}`);
     const summaryText = summaryBits.join(' · ');
 
+    const childChevron = `<svg class="insight-child-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
+    const sectionCollapsed = getCollapsedSections();
     const bodyHtml = sections.length === 0
       ? '<div class="insight-empty">Nothing notable detected in this session.</div>'
       : sections.map(sec => {
@@ -3979,13 +4026,15 @@
             if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
             if (atHtml) subParts.push(atHtml);
             const subHtml = subParts.length ? `<div class="insight-sub">${subParts.join(' · ')}</div>` : '';
-            const whatHtml = l.what ? `<div class="insight-what">${escape(l.what)}</div>` : '';
+            // `what` inline explainers count as autonomic / educational overlay —
+            // hidden when the toggle is OFF so the report becomes pure numbers.
+            const whatHtml = (autonomicOn && l.what) ? `<div class="insight-what">${escape(l.what)}</div>` : '';
             return `<li><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
           }).join('');
-          return `<div class="insight-section" data-key="${sec.key}">
-            <div class="insight-section-title"><span>${escape(sec.title)}</span>${countHtml}</div>
-            ${descHtml}
-            <ul>${listHtml}</ul>
+          const collapsedCls = sectionCollapsed[sec.key] ? ' collapsed' : '';
+          return `<div class="insight-section${collapsedCls}" data-key="${sec.key}">
+            <div class="insight-section-title">${childChevron}<span>${escape(sec.title)}</span>${countHtml}</div>
+            <div class="insight-section-body">${descHtml}<ul>${listHtml}</ul></div>
           </div>`;
         }).join('');
 
@@ -4004,6 +4053,15 @@
       box.classList.toggle('collapsed');
       setInsightCollapsed(box.classList.contains('collapsed'));
     });
+    // Each sub-section is independently collapsible. Clicking its title toggles
+    // the section's `.collapsed` class and persists the per-section state.
+    box.querySelectorAll('.insight-section[data-key]').forEach(sec => {
+      const title = sec.querySelector('.insight-section-title');
+      title.addEventListener('click', () => {
+        sec.classList.toggle('collapsed');
+        setSectionCollapsed(sec.dataset.key, sec.classList.contains('collapsed'));
+      });
+    });
     box.querySelectorAll('.insight-jump').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation(); // don't collapse the accordion
@@ -4011,6 +4069,19 @@
         if (isFinite(t) && typeof zoomTo === 'function') zoomTo(t);
       });
     });
+  }
+
+  // Per-section collapsed state — map of sectionKey -> true. Shared across all
+  // sessions so a user who always-closes e.g. "Connection gaps" stays closed.
+  const LS_INSIGHT_SECTIONS = 'hrv_viewer_insight_sections_collapsed';
+  function getCollapsedSections() {
+    try { return JSON.parse(localStorage.getItem(LS_INSIGHT_SECTIONS) || '{}'); }
+    catch (e) { return {}; }
+  }
+  function setSectionCollapsed(key, collapsed) {
+    const map = getCollapsedSections();
+    if (collapsed) map[key] = true; else delete map[key];
+    try { localStorage.setItem(LS_INSIGHT_SECTIONS, JSON.stringify(map)); } catch (e) {}
   }
 
   // Persist master-caret open/closed state across sessions. Defaults to closed
