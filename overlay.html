@@ -6,9 +6,9 @@
 <title>HR Monitor · Overlay</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
-  /* This file mirrors the live monitor's overlay zone. Kept in sync manually —
-     any change to widget / style / compact / minimal / neon CSS in hr_monitor.html
-     should be reflected here. One day, extract shared CSS to a separate file. */
+  /* Mirrors the live monitor's overlay zone. One style only (compact), one
+     layout only (vertical). Any CSS change in hr_monitor.html must be reflected
+     here; one day extract shared CSS to a separate file. */
   :root {
     --bg: #0a0a0a;
     --bg-panel: #0a0a0a;
@@ -32,9 +32,7 @@
   }
   body.bg-dark { background: var(--bg); }
   /* Chroma-key backgrounds for the Window-Capture popup path. OBS can key out
-     a solid color (magenta = #ff00ff is the classic chroma pick — no skin/cloth
-     tones or UI colors collide with it). Black fallback for users who'd rather
-     composite with an OBS filter. */
+     a solid color; magenta is the classic chroma pick. */
   body.bg-magenta,
   body.bg-magenta #overlay-zone { background: #ff00ff; }
   body.bg-black,
@@ -42,64 +40,39 @@
 
   #overlay-zone {
     background: transparent;
-    padding: 16px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
-  }
-  body.bg-dark #overlay-zone { background: #000; }
-  /* Widgets sit inside this row. Vertical layout stacks; horizontal layout
-     flips to row. The warning-slot-above stays outside and always sits on top. */
-  #overlay-zone .widget-row {
-    display: flex;
-    flex-direction: column;
-    gap: inherit;
-    width: 100%;
-  }
-  body.layout-horizontal #overlay-zone .widget-row {
-    flex-direction: row;
-    align-items: stretch;
-    gap: 12px;
-  }
-  body.layout-horizontal #overlay-zone:not(.style-compact) .widget,
-  body.layout-horizontal #overlay-zone:not(.style-compact) .breath-widget {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  body.layout-horizontal #overlay-zone:not(.style-compact) #rmssd-widget .big-number {
-    font-size: 84px;
-  }
-  /* Shrink-to-fit: container hugs visible widgets. NOTHING else changes —
-     padding, gap, widget sizes all stay identical. When every widget is on,
-     shrink-on and shrink-off render pixel-identical. The toggle only matters
-     when some widgets are hidden, because that's when the container can
-     collapse down to the remaining content. */
-  body.shrink-to-fit #overlay-zone {
+    gap: 0;
     width: fit-content;
     max-width: 100%;
   }
+  body.bg-dark #overlay-zone { background: #000; }
 
-  .widget, .breath-widget {
+  /* Widgets live inside this row. Only compact layout: one widget, stacks
+     vertically under the warning-slot-above. */
+  #overlay-zone .widget-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: 100%;
+  }
+
+  .widget {
     background: #0a0a0a;
     border: 1px solid #1f1f1f;
     border-radius: 16px;
-    padding: 16px 20px;
+    padding: 14px 18px;
     position: relative;
     transition: border-color 0.3s, box-shadow 0.3s;
   }
-  body.layout-horizontal .widget,
-  body.layout-horizontal .breath-widget { flex: 1 1 0; min-width: 0; }
 
   .widget-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 4px;
-    /* Anchor for the absolutely-positioned .conn-indicator so its
-       "reconnecting…" label doesn't push the widget wider. */
+    margin-bottom: 0;
     position: relative;
   }
   .header-left { display: flex; align-items: center; gap: 10px; }
@@ -125,30 +98,33 @@
   .big-number {
     font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
     font-weight: 900;
-    font-size: 110px;
-    line-height: 0.95;
+    font-size: 64px;
+    line-height: 1;
     letter-spacing: -0.04em;
     font-variant-numeric: tabular-nums;
     transition: color 0.4s;
     text-align: left;
-    padding: 4px 0 10px;
+    padding: 0;
   }
-  .big-number.medium { font-size: 78px; padding: 2px 0 8px; }
 
   .number-row { display: flex; align-items: stretch; gap: 14px; }
   .number-row > .big-number { flex: 0 0 auto; }
-  .inline-trend, .inline-live-trace {
-    flex: 1 1 0; min-width: 0; position: relative; padding: 6px 0 14px;
+  .inline-live-trace {
+    flex: 1 1 0;
+    min-width: 160px;
+    position: relative;
+    padding: 6px 0 10px;
+    height: 68px;
+    max-height: 68px;
+    overflow: hidden;
   }
-  .inline-live-trace { display: none; padding: 6px 0 10px; height: 68px; max-height: 68px; overflow: hidden; position: relative; }
-  .inline-live-trace canvas { width: 100% !important; height: 100% !important; max-height: 100% !important; }
-  .inline-trend { height: 68px; max-height: 68px; overflow: hidden; }
-  .inline-trend canvas { width: 100% !important; height: 100% !important; max-height: 100% !important; }
-  .inline-trend canvas, .inline-live-trace canvas {
-    width: 100% !important; height: 100% !important;
+  .inline-live-trace canvas {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
   }
 
-  .pips { display: flex; gap: 6px; height: 6px; }
+  .pips { display: flex; gap: 6px; height: 6px; margin-top: 6px; }
   .pip { flex: 1; background: #1a1a1a; border-radius: 2px; transition: background 0.4s; }
 
   .stage-low { color: #7DB8E8; }
@@ -162,7 +138,6 @@
   .stage-critical { color: #E24B4A; }
   .stage-critical .pip.active { background: #E24B4A; }
 
-  /* Palp chip in HR widget header */
   .palp-chip {
     display: none;
     align-items: center;
@@ -177,12 +152,18 @@
     letter-spacing: 0.08em;
   }
   .palp-chip.active { display: inline-flex; }
+  .palp-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--warn-palp);
+    box-shadow: 0 0 6px var(--warn-palp);
+  }
 
-  /* Warning banner — mirrors the monitor. Hidden by default; fires when a
-     threshold warning is active (HR high/low, HRV crash, palpitations elevated). */
+  /* Warning banner. Fixed width so every banner text renders at the same card
+     width, which keeps the recommended OBS source size stable across warnings. */
   .warning-banner {
     display: none;
     align-items: center;
+    justify-content: flex-start;
     gap: 6px;
     padding: 2px 9px;
     border-radius: 999px;
@@ -193,10 +174,8 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 60%;
-    min-width: 0;
-    /* Right-align inside the widget-header flex row (mirrors hr_monitor.html)
-       so the banner sits consistently in the same spot across monitor and OBS. */
+    width: 150px;
+    min-width: 150px;
     margin-left: auto;
   }
   .warning-banner.active { display: inline-flex; }
@@ -206,52 +185,35 @@
   .warning-banner.warn-palp   { border-color: #D76CBA; background: rgba(215,108,186,0.18); color: #D76CBA; }
   .warning-banner.status-reconnecting { border-color: #6a6a6a; background: rgba(100,100,100,0.14); color: #b8b8b8; }
   .warning-banner.status-reconnecting .warning-banner-icon svg { animation: conn-pulse 1.4s ease-in-out infinite; }
-  .warning-banner-icon { display: inline-flex; }
+  .warning-banner-icon { display: inline-flex; flex-shrink: 0; }
   .warning-banner-icon svg { width: 12px; height: 12px; fill: currentColor; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-  .palp-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--warn-palp);
-    box-shadow: 0 0 6px var(--warn-palp);
-  }
+  .warning-banner-text { overflow: hidden; text-overflow: ellipsis; }
 
-  /* Compact mode combined widget */
-  .compact-hrv, .compact-trend { display: none; }
-  #overlay-zone.style-compact .compact-hrv,
-  #overlay-zone.style-compact .compact-trend { display: flex; }
-  #overlay-zone.style-compact .compact-trend { display: block; }
-
-  #overlay-zone.style-compact { padding: 14px; gap: 0; }
-  #overlay-zone.style-compact #rmssd-widget,
-  #overlay-zone.style-compact .breath-widget { display: none; }
-  #overlay-zone.style-compact #hr-widget {
-    padding: 14px 18px;
+  /* Compact widget grid. HR readout left, HRV readout right, combined trend
+     spans full width at bottom. */
+  #hr-widget {
     display: grid;
     grid-template-columns: 1.75fr 1fr;
-    /* Fixed row heights (matches hr_monitor.html) so toggling HRV can't cause
-       the widget to grow taller. OBS source size stays locked. Row gap bumped
-       to 10 so the live HR trace doesn't paint over the pips below. */
-    grid-template-rows: auto 68px 14px;
+    grid-template-rows: auto auto auto auto;
     gap: 10px 16px;
     align-items: start;
   }
-  #overlay-zone.style-compact #hr-widget > .widget-header { grid-column: 1 / -1; margin-bottom: 0; }
-  #overlay-zone.style-compact #hr-widget .big-number {
-    grid-column: 1; grid-row: 2;
-    font-size: 64px; padding: 0; line-height: 1;
-  }
-  #overlay-zone.style-compact #hr-pips { grid-column: 1; grid-row: 3; margin-top: 6px; }
-  #overlay-zone.style-compact .compact-hrv {
+  #hr-widget > .widget-header { grid-column: 1 / -1; grid-row: 1; }
+  #hr-widget .number-row { grid-column: 1; grid-row: 2; }
+  #hr-widget #hr-pips { grid-column: 1; grid-row: 3; }
+
+  .compact-hrv {
     grid-column: 2; grid-row: 2 / 4;
     display: flex; flex-direction: column;
     justify-content: center; align-items: flex-end;
     border-left: 1px solid #1f1f1f; padding-left: 16px;
   }
-  #overlay-zone.style-compact .compact-hrv-label {
+  .compact-hrv-label {
     font-size: 12px; color: #c8c8c8;
     text-transform: uppercase; letter-spacing: 0.12em;
     font-weight: 700; margin-bottom: 3px;
   }
-  #overlay-zone.style-compact .compact-hrv-value {
+  .compact-hrv-value {
     font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
     font-weight: 900; font-size: 36px;
     line-height: 1;
@@ -259,82 +221,45 @@
     letter-spacing: -0.03em;
     transition: color 0.4s;
   }
-  #overlay-zone.style-compact .compact-hrv-unit {
+  .compact-hrv-unit {
     font-size: 11px; color: #9a9a9a;
     letter-spacing: 0.08em; text-transform: uppercase;
     font-weight: 600; margin-top: 4px;
   }
-  #overlay-zone.style-compact #hr-widget > .compact-trend {
+  #hr-widget > .compact-trend {
     grid-column: 1 / -1; grid-row: 4;
     height: 64px; position: relative;
     margin-top: 12px; padding: 6px 0 4px;
     border-top: 1px solid #1f1f1f;
   }
-  #overlay-zone.style-compact .number-row { grid-column: 1; grid-row: 2; }
-  #overlay-zone.style-compact .inline-trend { display: none; }
-  #overlay-zone.style-compact .inline-live-trace { display: block; }
 
-  /* Minimal */
-  #overlay-zone.style-minimal { padding: 16px; gap: 10px; }
-  #overlay-zone.style-minimal .widget,
-  #overlay-zone.style-minimal .breath-widget { background: transparent; border: none; padding: 8px 12px; }
-  #overlay-zone.style-minimal .widget-label { font-size: 10px; color: #5a5a5a; }
-  #overlay-zone.style-minimal .heart-icon { width: 16px; height: 16px; }
-  #overlay-zone.style-minimal .big-number {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-weight: 300; font-size: 80px; letter-spacing: -0.03em;
-  }
-  #overlay-zone.style-minimal .big-number.medium { font-size: 54px; }
-  #overlay-zone.style-minimal .pips { display: none; }
+  /* Toggle rules. HR off: hide only the BPM readout (label, icon, big number,
+     palp chip). Keep pips and live trace. HRV off: hide the HRV column and
+     promote HR to full width. Both off: hide the whole widget. */
+  body.no-hr #hr-widget .widget-label,
+  body.no-hr #hr-widget .heart-icon,
+  body.no-hr #hr-widget .palp-chip,
+  body.no-hr #hr-widget .big-number { display: none !important; }
 
-  /* Neon */
-  #overlay-zone.style-neon .widget,
-  #overlay-zone.style-neon .breath-widget {
-    background: #050509; border: 1px solid #222238;
-    box-shadow: inset 0 0 20px rgba(100,150,255,0.04);
-  }
-  #overlay-zone.style-neon .widget-label { color: #6a7aa0; }
-  #overlay-zone.style-neon .big-number {
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-weight: 700; font-size: 96px;
-    text-shadow: 0 0 12px currentColor, 0 0 24px currentColor;
-  }
-  #overlay-zone.style-neon .big-number.medium { font-size: 68px; }
-  #overlay-zone.style-neon .heart-icon { filter: drop-shadow(0 0 8px currentColor); }
-  #overlay-zone.style-neon .pip.active { box-shadow: 0 0 8px currentColor; }
+  body.no-hrv .compact-hrv { display: none !important; }
+  body.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
 
-  /* Breath widget */
-  .breath-widget { padding: 14px 18px; }
-  .trend-header {
-    display: flex; justify-content: space-between;
-    align-items: center; margin-bottom: 8px;
-    font-size: 11px; color: #8a8a8a;
-    text-transform: uppercase; letter-spacing: 0.1em;
-    font-weight: 600;
-  }
-  .rsa-chart-wrap { position: relative; height: 90px; padding: 4px 0; }
+  body.no-hr.no-hrv #hr-widget { display: none !important; }
 
-  /* Widget visibility toggles */
-  body.no-hr #hr-widget { display: none; }
-  body.no-hrv #rmssd-widget { display: none; }
-  body.no-live-hr #breath-widget { display: none; }
-  /* "Inline mini trends" only affects the tiny mini-chart next to the big HR
-     number. The live HR trace has its own toggle (showLiveHr) — don't lump it in. */
-  body.no-inline-trends .inline-trend { display: none; }
-  /* Compact-mode visibility toggles parallel to hr_monitor.html:
-     - live HR trace = `.inline-live-trace` (number-row) in compact, so the
-       showLiveHr toggle must hide THAT element, not just `#breath-widget`.
-     - "Inline mini trends" toggle in compact applies to `.compact-trend`
-       (the wide trend line at the bottom). */
-  body.style-compact.no-live-hr #overlay-zone .inline-live-trace { display: none !important; }
-  body.style-compact.no-inline-trends #overlay-zone .compact-trend { display: none !important; }
-  /* User-toggleable extras — palp chip, warning banner, conn dot. Each can
-     be hidden independently via a settings toggle in the monitor. */
+  /* Live HR trace toggle — only affects the inline trace in the HR column. */
+  body.no-live-hr .inline-live-trace { display: none !important; }
+
+  /* Mini trends toggle — only affects the combined HR+RMSSD line at the bottom. */
+  body.no-inline-trends .compact-trend { display: none !important; }
+
+  /* Palp chip + warning banner + conn dot each toggleable. */
   body.no-palp-chip .palp-chip,
   body.no-palp-chip #palp-chip { display: none !important; }
   body.no-warning .warning-banner { display: none !important; }
-  /* Warning slot above the widget (opt-in via warningPlacement === 'above').
-     Reserves fixed height so the widget never reflows when a warning fires. */
+  body.no-conn-dot .conn-indicator { display: none !important; }
+
+  /* Warning-slot-above reserves fixed height above the widget when the user
+     picks "above" placement, so the widget never reflows when a warning fires. */
   .warning-slot-above { display: none; }
   body.warning-above .warning-slot-above {
     display: flex;
@@ -342,39 +267,12 @@
     align-items: center;
     height: 34px;
     padding: 2px 0;
+    margin-bottom: 10px;
   }
   body.warning-above.no-warning .warning-slot-above { display: none !important; }
   body.warning-above .widget-header > .warning-banner { display: none !important; }
-  body.no-conn-dot .conn-indicator { display: none !important; }
-  /* Compact-mode overrides. Compact uses a single #hr-widget that contains both
-     HR (left cell) and HRV (right cell), so the global `body.no-hr { display:none }`
-     rule would incorrectly blank the entire widget. These rules hide just the
-     HR-specific children while keeping HRV visible, and vice versa. If BOTH are
-     toggled off, the whole widget is hidden. */
-  /* HRV off: hide just the HRV readout. Keep .compact-trend visible — it also
-     draws the HR trace, so it's useful even with HRV hidden. */
-  body.style-compact.no-hrv #overlay-zone .compact-hrv { display: none !important; }
-  body.style-compact.no-hrv #overlay-zone #hr-widget { grid-template-columns: 1fr !important; }
-  /* HR off: hide HR-specific children AND promote HRV into the full-width slot so
-     it doesn't end up stranded in the (now empty) right column of a 1-col grid. */
-  body.style-compact.no-hr #overlay-zone #hr-widget { display: grid !important; grid-template-columns: 1fr !important; }
-  body.style-compact.no-hr #overlay-zone #hr-widget .big-number,
-  body.style-compact.no-hr #overlay-zone #hr-widget .widget-label,
-  body.style-compact.no-hr #overlay-zone #hr-widget .heart-icon,
-  body.style-compact.no-hr #overlay-zone #hr-widget .palp-chip,
-  body.style-compact.no-hr #overlay-zone #hr-widget .inline-trend,
-  body.style-compact.no-hr #overlay-zone #hr-widget .inline-live-trace,
-  body.style-compact.no-hr #overlay-zone #hr-widget #hr-pips { display: none !important; }
-  body.style-compact.no-hr #overlay-zone #hr-widget .compact-hrv {
-    grid-column: 1 !important;
-    grid-row: 2 !important;
-    align-items: flex-start !important;
-    border-left: none !important;
-    padding-left: 0 !important;
-  }
-  body.style-compact.no-hr.no-hrv #overlay-zone #hr-widget { display: none !important; }
 
-  /* Waiting state when no data has arrived yet */
+  /* Waiting state when no tick has arrived yet. */
   #waiting {
     position: fixed; inset: 0;
     display: flex; align-items: center; justify-content: center;
@@ -387,10 +285,7 @@
   #waiting .hint { font-size: 10px; color: #3a3a3a; }
   body.connected #waiting { display: none; }
 
-  /* Connection indicator — lives inside the HR widget header, on the right.
-     When connected: just a green dot (no text). When reconnecting: grey dot
-     plus small "reconnecting…" label next to it. When never connected: grey
-     dot alone. Absolute-positioned so the label never pushes the widget wider. */
+  /* Connection indicator (absolute so it never pushes the widget wider). */
   .conn-indicator {
     position: absolute;
     top: 0;
@@ -420,7 +315,6 @@
     background: #5DCAA5;
     box-shadow: 0 0 6px rgba(93,202,165,0.6);
   }
-  /* Reconnecting: keep dot grey, pulse it softly, and show the text. */
   body.conn-reconnecting .conn-dot {
     background: #6a6a6a;
     animation: conn-pulse 1.4s ease-in-out infinite;
@@ -440,64 +334,41 @@
   <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
 </div>
 
-<div id="overlay-zone" class="style-bold">
+<div id="overlay-zone">
   <!-- Reserved warning slot for warningPlacement === 'above'. Invisible until
-       a warning fires; the widget below never changes height regardless. -->
+       a warning fires; the widget below never changes height. -->
   <div class="warning-slot-above" id="warning-slot-above">
     <div class="warning-banner" id="warning-banner-above">
       <span class="warning-banner-icon" id="warning-icon-above"></span>
       <span class="warning-banner-text" id="warning-text-above"></span>
     </div>
   </div>
-  <!-- Widgets sit in a flex container that flips direction for horizontal
-       layout; warning-slot stays above either way. -->
   <div class="widget-row">
-  <div class="widget stage-normal" id="hr-widget">
-    <div class="widget-header">
-      <div class="header-left">
-        <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-        <span class="widget-label">BPM</span>
-        <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
+    <div class="widget stage-normal" id="hr-widget">
+      <div class="widget-header">
+        <div class="header-left">
+          <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+          <span class="widget-label">BPM</span>
+          <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
+        </div>
+        <div class="warning-banner" id="warning-banner">
+          <span class="warning-banner-icon" id="warning-icon"></span>
+          <span class="warning-banner-text" id="warning-text"></span>
+        </div>
       </div>
-      <div class="warning-banner" id="warning-banner">
-        <span class="warning-banner-icon" id="warning-icon"></span>
-        <span class="warning-banner-text" id="warning-text"></span>
+      <div class="number-row">
+        <div class="big-number" id="hr-big">—</div>
+        <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas></div>
       </div>
+      <div class="pips" id="hr-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
+      <div class="compact-hrv" id="compact-hrv">
+        <div class="compact-hrv-label">HRV</div>
+        <div class="compact-hrv-value" id="compact-hrv-value">—</div>
+        <div class="compact-hrv-unit">ms rmssd</div>
+      </div>
+      <div class="compact-trend"><canvas id="compact-chart"></canvas></div>
     </div>
-    <div class="number-row">
-      <div class="big-number" id="hr-big">—</div>
-      <div class="inline-trend"><canvas id="hr-inline-chart"></canvas></div>
-      <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas></div>
-    </div>
-    <div class="pips" id="hr-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
-    <div class="compact-hrv" id="compact-hrv">
-      <div class="compact-hrv-label">HRV</div>
-      <div class="compact-hrv-value" id="compact-hrv-value">—</div>
-      <div class="compact-hrv-unit">ms rmssd</div>
-    </div>
-    <div class="compact-trend"><canvas id="compact-chart"></canvas></div>
   </div>
-
-  <div class="widget stage-normal" id="rmssd-widget">
-    <div class="widget-header">
-      <span class="widget-label">HRV</span>
-      <span style="font-size: 10px; color: #5a5a5a; letter-spacing: 0.1em;">RMSSD MS</span>
-    </div>
-    <div class="number-row">
-      <div class="big-number medium" id="rmssd-big">—</div>
-      <div class="inline-trend"><canvas id="rmssd-inline-chart"></canvas></div>
-    </div>
-    <div class="pips" id="rmssd-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
-  </div>
-
-  <div class="breath-widget" id="breath-widget">
-    <div class="trend-header">
-      <span>Live HR</span>
-      <span id="breath-rate">—</span>
-    </div>
-    <div class="rsa-chart-wrap"><canvas id="rsa-chart"></canvas></div>
-  </div>
-  </div><!-- /.widget-row -->
 </div>
 
 <script>
@@ -505,32 +376,22 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const params = new URLSearchParams(location.search);
-  const style = params.get('style') || 'bold';
-  const layout = params.get('layout') || 'vertical';
   const bg = params.get('bg') || 'transparent';
   const hideHr = params.get('hide_hr') === '1';
   const hideHrv = params.get('hide_hrv') === '1';
   const hideLiveHr = params.get('hide_live_hr') === '1';
   const hideInline = params.get('hide_inline') === '1';
-  const shrinkToFit = params.get('shrink') === '1';
 
   document.body.classList.add('bg-' + bg);
-  document.body.classList.add('style-' + style);
-  if (layout === 'horizontal') document.body.classList.add('layout-horizontal');
   if (hideHr) document.body.classList.add('no-hr');
   if (hideHrv) document.body.classList.add('no-hrv');
   if (hideLiveHr) document.body.classList.add('no-live-hr');
   if (hideInline) document.body.classList.add('no-inline-trends');
-  if (shrinkToFit) document.body.classList.add('shrink-to-fit');
   if (params.get('nodot') === '1') document.body.classList.add('no-dot');
-  const zone = $('overlay-zone');
-  zone.className = '';
-  zone.classList.add('style-' + style);
 
   // OBS auto-refresh on deploy. OBS's embedded Chromium caches aggressively so
   // overlay updates normally require a manual "Refresh cache" click. Instead
-  // we poll the overlay's own ETag every 5 minutes; when it changes (i.e. a
-  // new Vercel deploy happened) we hard-reload ourselves. Opt out via ?autoreload=0.
+  // we poll the overlay's own ETag every 5 minutes; when it changes we hard-reload.
   if (params.get('autoreload') !== '0') {
     let lastETag = null;
     async function checkForOverlayUpdate() {
@@ -538,8 +399,6 @@
         const resp = await fetch(location.pathname, { method: 'HEAD', cache: 'no-store' });
         const et = resp.headers.get('etag') || resp.headers.get('last-modified');
         if (et && lastETag && et !== lastETag) {
-          // New version deployed — reload. Cache-bust query string forces the
-          // browser to fetch the latest HTML instead of reusing its cache.
           const url = new URL(location.href);
           url.searchParams.set('_v', Date.now().toString());
           location.replace(url.toString());
@@ -548,13 +407,10 @@
         if (et) lastETag = et;
       } catch (e) { /* network blip — try again next tick */ }
     }
-    // First check after a short delay so OBS has a chance to settle, then every 5 min.
     setTimeout(checkForOverlayUpdate, 30 * 1000);
     setInterval(checkForOverlayUpdate, 5 * 60 * 1000);
   }
 
-  // Stage helpers — kept in sync with hr_monitor.html. If you update stage colors
-  // there, update them here too (no shared CSS file yet).
   const STAGE_COLORS = {
     'stage-low':      '#7DB8E8',
     'stage-normal':   '#B8D97E',
@@ -571,13 +427,12 @@
     container.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('active', i < stageIndex));
   }
 
-  // Warning banner text / icon mapping — kept in lockstep with hr_monitor.html
-  // so the same four warnings render identically here.
   const WARN_ICONS = {
     'warn-high':  '<svg viewBox="0 0 24 24"><polyline points="17 11 12 6 7 11"></polyline><polyline points="17 17 12 12 7 17"></polyline></svg>',
     'warn-low':   '<svg viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 7 12 12 17 7"></polyline></svg>',
     'warn-crash': '<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
     'warn-palp':  '<svg viewBox="0 0 24 24"><path d="M3 12h4l2-8 4 16 2-8h6"></path></svg>',
+    'status-reconnecting': '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>',
   };
   const WARN_TEXT = {
     'warn-high':  'Heart rate high',
@@ -586,10 +441,6 @@
     'warn-palp':  'Palpitations elevated',
     'status-reconnecting': 'Reconnecting…',
   };
-  WARN_ICONS['status-reconnecting'] = '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>';
-  // Unified status banner — conn state takes priority over warnings. When the
-  // strap is reconnecting, showing any stale HR/HRV warning would be misleading
-  // because the sensor has lost signal. Single slot, single source of truth.
   function applyStatusBanner(warnType, connState) {
     let effectiveType = null;
     if (connState === 'reconnecting') effectiveType = 'status-reconnecting';
@@ -609,25 +460,16 @@
   }
 
   // Apply widget-layout prefs received in a tick so the OBS overlay matches
-  // whatever the live monitor is showing — no cache refresh needed. Style class
-  // lives on #overlay-zone; visibility classes live on <body>. Skipped silently
-  // if the tick doesn't carry prefs (older monitor version).
+  // whatever the live monitor is showing — no cache refresh needed.
   let lastPrefsFingerprint = '';
   function applyRemotePrefs(msg) {
     if (!msg) return;
     const z = $('overlay-zone');
     const prefs = msg.prefs || null;
-    const style = msg.style;
     const size = msg.widgetSize || null;
-    const fp = JSON.stringify({ style, prefs, size });
-    if (fp === lastPrefsFingerprint) return; // no change; skip DOM churn
+    const fp = JSON.stringify({ prefs, size });
+    if (fp === lastPrefsFingerprint) return;
     lastPrefsFingerprint = fp;
-    if (style && z) {
-      z.classList.remove('style-bold', 'style-compact', 'style-minimal', 'style-neon');
-      z.classList.add('style-' + style);
-      document.body.classList.remove('style-bold', 'style-compact', 'style-minimal', 'style-neon');
-      document.body.classList.add('style-' + style);
-    }
     if (prefs) {
       document.body.classList.toggle('no-hr', !prefs.showHr);
       document.body.classList.toggle('no-hrv', !prefs.showHrv);
@@ -637,18 +479,16 @@
       document.body.classList.toggle('no-warning', prefs.showWarning === false);
       document.body.classList.toggle('no-conn-dot', prefs.showConnDot === false);
       document.body.classList.toggle('warning-above', prefs.warningPlacement === 'above');
-      document.body.classList.toggle('shrink-to-fit', !!prefs.shrinkToFit);
-      document.body.classList.toggle('layout-horizontal', prefs.layout === 'horizontal');
     }
-    // Pin the overlay box to the monitor's effective dimensions so the OBS
-    // source renders at the exact same size the preview shows. overflow:hidden
-    // so any content that doesn't fit is cropped rather than expanding the box.
+    // Pin the overlay box to the monitor's measured dimensions so the OBS
+    // source renders at the exact same size the preview shows.
     if (size && z && Number.isFinite(size.w) && Number.isFinite(size.h)) {
       z.style.width = size.w + 'px';
       z.style.height = size.h + 'px';
       z.style.overflow = 'hidden';
     }
   }
+
   function hexToRgba(hex, alpha) {
     const n = parseInt(hex.slice(1), 16);
     return 'rgba(' + ((n >> 16) & 0xff) + ',' + ((n >> 8) & 0xff) + ',' + (n & 0xff) + ',' + alpha + ')';
@@ -668,34 +508,17 @@
     }
   }
 
-  // Charts
+  // Charts. Configs kept in lockstep with hr_monitor.html: monotone
+  // interpolation and borderWidth 1.75 prevent the line from overshooting its
+  // vertical bounds (otherwise the trace bleeds into the pips row below).
   const baseOpts = {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: { legend: { display: false }, tooltip: { enabled: false } },
     scales: { x: { type: 'linear', display: false }, y: { display: false, grace: '8%' } },
   };
-  // Chart configs kept in lockstep with hr_monitor.html: monotone interpolation
-  // prevents the line from overshooting its vertical bounds (which otherwise
-  // makes the trace bleed into the pips row below on responsive resize), and
-  // the thicker 1.75 border visually anchors the stroke so it doesn't smear.
-  const hrInline = new Chart($('hr-inline-chart').getContext('2d'), {
-    type: 'line',
-    data: { datasets: [{ data: [], borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.1)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
-    options: baseOpts,
-  });
-  const rmssdInline = new Chart($('rmssd-inline-chart').getContext('2d'), {
-    type: 'line',
-    data: { datasets: [{ data: [], borderColor: '#5DCAA5', backgroundColor: 'rgba(93,202,165,0.1)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
-    options: baseOpts,
-  });
   const hrLiveTrace = new Chart($('hr-live-trace').getContext('2d'), {
     type: 'line',
     data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.12)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
-    options: { ...baseOpts, scales: { x: { type: 'linear', display: false, min: 0, max: 45 }, y: { display: false, grace: '12%' } } },
-  });
-  const rsa = new Chart($('rsa-chart').getContext('2d'), {
-    type: 'line',
-    data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.1)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
     options: { ...baseOpts, scales: { x: { type: 'linear', display: false, min: 0, max: 45 }, y: { display: false, grace: '12%' } } },
   });
   const compactTrend = new Chart($('compact-chart').getContext('2d'), {
@@ -715,10 +538,6 @@
     },
   });
 
-  // Data arrives via one of two transports:
-  //   - BroadcastChannel: same-browser popup (Window Capture path).
-  //   - WebSocket relay: cross-browser (OBS Browser Source paste-URL path).
-  // Overlay uses whichever is available; if both fire, messages are idempotent.
   const broadcastKey = params.get('key');
   const RELAY_HOST = 'wss://hr-relay.nakauri.partykit.dev';
 
@@ -726,42 +545,25 @@
     document.body.classList.remove('conn-live', 'conn-reconnecting');
     if (state === 'live') document.body.classList.add('conn-live');
     else if (state === 'reconnecting') document.body.classList.add('conn-reconnecting');
-    // default: grey (no class)
   }
 
   function handleTick(msg) {
     if (!msg || msg.type !== 'tick') return;
     lastTick = Date.now();
-    // Connected flag ALWAYS goes on the moment a tick arrives. Anything below
-    // that could fail must not prevent "waiting for live app" from dismissing.
     document.body.classList.add('connected');
     setConnState('live');
-
-    // Apply live widget-layout prefs pushed from the monitor so toggling HR /
-    // HRV / trends / shrink-to-fit in the live app updates the OBS overlay
-    // immediately. Defensive: a bug in here mustn't break the rest of the tick.
     try { applyRemotePrefs(msg); } catch (e) { console.warn('applyRemotePrefs failed:', e); }
 
     $('hr-big').textContent = msg.hr != null ? msg.hr : '—';
-    $('rmssd-big').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
     $('compact-hrv-value').textContent = msg.rmssd != null ? Math.round(msg.rmssd) : '—';
     applyStage($('hr-widget'), msg.hrStage);
-    applyStage($('rmssd-widget'), msg.rmssdStage);
-    // Compact mode shows the HRV readout inside the HR widget (.compact-hrv-value),
-    // which isn't reached by the stage class on #rmssd-widget — apply it directly
-    // so HRV numbers colorize correctly in compact too.
+    // HRV readout inside the HR widget isn't reached by the stage class on
+    // the widget; apply directly so HRV numbers colourize with RMSSD stage.
     applyStage($('compact-hrv-value'), msg.rmssdStage);
     setPips($('hr-pips'), msg.hrStage);
-    setPips($('rmssd-pips'), msg.rmssdStage);
-    // Tint charts to match stage — HR-side charts track the HR stage; RMSSD-side
-    // charts track the RMSSD stage. compactChart keeps its HR dataset synced with
-    // HR stage and leaves RMSSD dataset neutral white (matches hr_monitor.html).
+
     const hrColor = STAGE_COLORS[msg.hrStage || 'stage-normal'];
-    const rmssdColor = STAGE_COLORS[msg.rmssdStage || 'stage-normal'];
-    tintChart(hrInline, hrColor);
     tintChart(hrLiveTrace, hrColor);
-    tintChart(rsa, hrColor);
-    tintChart(rmssdInline, rmssdColor);
     if (compactTrend && compactTrend.data.datasets[0]) {
       compactTrend.data.datasets[0].borderColor = hrColor;
     }
@@ -774,27 +576,12 @@
       palpChip.classList.remove('active');
     }
     applyStatusBanner(msg.warn, msg.conn || 'live');
-    if (msg.breathRate != null) $('breath-rate').textContent = Math.round(msg.breathRate) + ' br/min';
 
     if (msg.livePoints) {
-      rsa.data.datasets[0].data = msg.livePoints;
-      rsa.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
-      rsa.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
-      try { rsa.update('none'); } catch(e) {}
       hrLiveTrace.data.datasets[0].data = msg.livePoints;
       hrLiveTrace.options.scales.x.min = msg.liveWindow ? msg.liveWindow[0] : 0;
       hrLiveTrace.options.scales.x.max = msg.liveWindow ? msg.liveWindow[1] : 45;
       try { hrLiveTrace.update('none'); } catch(e) {}
-    }
-    if (msg.trendHR) {
-      hrInline.data.datasets[0].data = msg.trendHR;
-      if (msg.trendWindow) { hrInline.options.scales.x.min = msg.trendWindow[0]; hrInline.options.scales.x.max = msg.trendWindow[1]; }
-      try { hrInline.update('none'); } catch(e) {}
-    }
-    if (msg.trendRmssd) {
-      rmssdInline.data.datasets[0].data = msg.trendRmssd;
-      if (msg.trendWindow) { rmssdInline.options.scales.x.min = msg.trendWindow[0]; rmssdInline.options.scales.x.max = msg.trendWindow[1]; }
-      try { rmssdInline.update('none'); } catch(e) {}
     }
     if (msg.trendHR && msg.trendRmssd) {
       compactTrend.data.datasets[0].data = msg.trendHR;
@@ -805,12 +592,12 @@
 
   let lastTick = 0;
 
-  // Same-browser path (works when the overlay is a popup window from the live tab)
+  // Same-browser path (overlay popup opened from the monitor tab)
   const channel = new BroadcastChannel('hr-monitor-broadcast');
   channel.addEventListener('message', (ev) => handleTick(ev.data));
   channel.postMessage({ type: 'request-snapshot' });
 
-  // Cross-browser path via relay (OBS Browser Source uses this)
+  // Cross-browser path via relay (OBS Browser Source)
   if (broadcastKey) {
     let ws = null;
     function connect() {
@@ -826,9 +613,8 @@
     connect();
   }
 
-  // Flip to "reconnecting" after 3 s of tick silence — lets the overlay show
-  // the reconnecting banner even if the monitor hasn't reported its conn state
-  // yet (e.g., network blip, browser sleep).
+  // Flip to reconnecting after 3 s of tick silence so the overlay can show
+  // the reconnecting banner even if the monitor hasn't reported conn state.
   setInterval(() => {
     if (lastTick === 0) return;
     const silent = Date.now() - lastTick;

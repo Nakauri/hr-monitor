@@ -103,16 +103,11 @@
   #app {
     display: grid;
     /* Fixed 380px left column for the overlay preview. Wider would let charts
-       run away (responsive Chart.js with no size cap crashes into broken-
-       image canvases); narrower would cramp the widgets. Horizontal layout
-       collapses to a single full-width column with widgets stacked at the top. */
+       run away (responsive Chart.js with no size cap crashes into broken-image
+       canvases); narrower would cramp the widgets. */
     grid-template-columns: 380px 1fr;
     height: calc(100vh - 52px);
     gap: 0;
-  }
-  body.layout-horizontal #app {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
   }
 
 
@@ -132,66 +127,13 @@
      visual padding + status text + label at the bottom). */
   #overlay-zone { width: 100%; }
   #overlay-zone .widget-row { width: fit-content; max-width: 360px; }
-  /* Widget row: all the actual widget cards live inside this. In vertical mode
-     it stacks top-down; in horizontal mode it goes left-to-right. The
-     warning-slot-above stays OUTSIDE this container so it always sits above
-     the widget row regardless of layout. */
+  /* Widget row: the compact HR widget lives inside this. Warning-slot-above
+     stays OUTSIDE this container so it always sits above the widget. */
   #overlay-zone .widget-row {
     display: flex;
     flex-direction: column;
     gap: inherit;
     width: 100%;
-  }
-  /* Horizontal layout: widget-row flips to row, widgets sit side-by-side. The
-     enclosing overlay-zone stays a column so warning-slot keeps its spot. */
-  body.layout-horizontal #overlay-zone .widget-row {
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 14px;
-  }
-  body.layout-horizontal #overlay-zone .widget,
-  body.layout-horizontal #overlay-zone .breath-widget {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  /* Horizontal banner: widgets all share the same height via align-items on
-     the row, and HRV's big number matches HR's for visual consistency. Only
-     applies to non-compact styles; compact is already a single combined card. */
-  body.layout-horizontal #overlay-zone:not(.style-compact) .widget-row {
-    align-items: stretch;
-  }
-  body.layout-horizontal #overlay-zone:not(.style-compact) .widget,
-  body.layout-horizontal #overlay-zone:not(.style-compact) .breath-widget {
-    display: flex;
-    flex-direction: column;
-  }
-  body.layout-horizontal #overlay-zone:not(.style-compact) #rmssd-widget .big-number {
-    font-size: 84px;
-  }
-  body.layout-horizontal #overlay-zone {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding: 14px 18px;
-  }
-  /* Overlay status and CROP label shrink and wrap at end */
-  body.layout-horizontal .overlay-status {
-    align-self: center;
-    padding: 0 10px;
-    flex: 0 0 auto;
-  }
-  body.layout-horizontal #overlay-zone > div[style*="flex: 1"] { display: none; }
-  body.layout-horizontal #overlay-zone > div:last-child { display: none; }
-  /* In horizontal mode the big HR number would be too tall - scale down.
-     Raised-specificity selectors so they win over style-specific sizes below. */
-  body.layout-horizontal #overlay-zone .big-number,
-  body.layout-horizontal #overlay-zone.style-minimal .big-number,
-  body.layout-horizontal #overlay-zone.style-neon .big-number {
-    font-size: 72px;
-  }
-  body.layout-horizontal #overlay-zone .big-number.medium,
-  body.layout-horizontal #overlay-zone.style-minimal .big-number.medium,
-  body.layout-horizontal #overlay-zone.style-neon .big-number.medium {
-    font-size: 54px;
   }
   .widget {
     background: #0a0a0a;
@@ -393,31 +335,22 @@
      the HR-specific children while keeping HRV visible, and vice versa. When
      BOTH are hidden the whole widget disappears. High-specificity selectors
      (two ids + multiple classes) so they beat `.style-compact #hr-widget`. */
-  /* HRV off: hide just the HRV readout. The .compact-trend at the bottom draws
-     BOTH HR and RMSSD so we keep it visible — still useful as an HR trace. */
+  /* HRV off: hide just the HRV column and promote HR to full width. */
   #overlay-zone.style-compact.no-hrv .compact-hrv { display: none !important; }
   #overlay-zone.style-compact.no-hrv #hr-widget { grid-template-columns: 1fr !important; }
-  /* HR off: hide the HR-specific children (big number, pips, heart icon, etc.)
-     AND promote HRV into the full-width slot so it doesn't stay stranded in
-     the right column of a now-empty grid. */
-  #overlay-zone.style-compact.no-hr #hr-widget { display: grid !important; grid-template-columns: 1fr !important; }
+  /* HR off: hide only the BPM readout chrome (label, icon, big number, palp
+     chip). Pips and live trace stay visible — they live in the HR column but
+     still convey useful state; user asked for them to remain. */
   #overlay-zone.style-compact.no-hr #hr-widget .big-number,
   #overlay-zone.style-compact.no-hr #hr-widget .widget-label,
   #overlay-zone.style-compact.no-hr #hr-widget .heart-icon,
-  #overlay-zone.style-compact.no-hr #hr-widget .palp-chip,
-  #overlay-zone.style-compact.no-hr #hr-widget .inline-trend,
-  #overlay-zone.style-compact.no-hr #hr-widget .inline-live-trace,
-  #overlay-zone.style-compact.no-hr #hr-widget #hr-pips { display: none !important; }
-  #overlay-zone.style-compact.no-hr #hr-widget .compact-hrv {
-    grid-column: 1 !important;
-    grid-row: 2 !important;
-    align-items: flex-start !important;
-    border-left: none !important;
-    padding-left: 0 !important;
-  }
+  #overlay-zone.style-compact.no-hr #hr-widget .palp-chip { display: none !important; }
+  /* Both HR + HRV off: hide the whole widget. */
   #overlay-zone.style-compact.no-hr.no-hrv #hr-widget { display: none !important; }
-  #overlay-zone.style-compact.no-live-hr .inline-live-trace { display: none; }
-  #overlay-zone.style-compact.no-inline-trends .compact-trend { display: none; }
+  /* Live HR trace toggle — hides only the inline trace in the HR column. */
+  #overlay-zone.style-compact.no-live-hr .inline-live-trace { display: none !important; }
+  /* Mini trends toggle — hides the combined HR+RMSSD trend at the bottom. */
+  #overlay-zone.style-compact.no-inline-trends .compact-trend { display: none !important; }
   /* Pips indicator row at the bottom */
   .pips {
     display: flex;
@@ -548,72 +481,6 @@
     border-top: 1px solid #1f1f1f;
   }
 
-  /* ===== Widget style: MINIMAL ===== */
-  #overlay-zone.style-minimal {
-    padding: 16px;
-    gap: 10px;
-  }
-  #overlay-zone.style-minimal .widget {
-    background: transparent;
-    border: none;
-    padding: 8px 12px;
-  }
-  #overlay-zone.style-minimal .widget-label {
-    font-size: 10px;
-    color: #5a5a5a;
-  }
-  #overlay-zone.style-minimal .heart-icon {
-    width: 16px;
-    height: 16px;
-  }
-  #overlay-zone.style-minimal .big-number {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-weight: 300;
-    font-size: 80px;
-    letter-spacing: -0.03em;
-  }
-  #overlay-zone.style-minimal .big-number.medium {
-    font-size: 54px;
-  }
-  #overlay-zone.style-minimal .pips {
-    display: none;
-  }
-  #overlay-zone.style-minimal .trend-widget,
-  #overlay-zone.style-minimal .breath-widget {
-    background: transparent;
-    border: none;
-  }
-
-  /* ===== Widget style: NEON ===== */
-  #overlay-zone.style-neon .widget {
-    background: #050509;
-    border: 1px solid #222238;
-    box-shadow: inset 0 0 20px rgba(100,150,255,0.04);
-  }
-  #overlay-zone.style-neon .widget-label {
-    color: #6a7aa0;
-  }
-  #overlay-zone.style-neon .big-number {
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-weight: 700;
-    font-size: 96px;
-    text-shadow: 0 0 12px currentColor, 0 0 24px currentColor;
-  }
-  #overlay-zone.style-neon .big-number.medium {
-    font-size: 68px;
-  }
-  #overlay-zone.style-neon .heart-icon {
-    filter: drop-shadow(0 0 8px currentColor);
-  }
-  #overlay-zone.style-neon .trend-widget,
-  #overlay-zone.style-neon .breath-widget {
-    background: #050509;
-    border-color: #222238;
-    box-shadow: inset 0 0 20px rgba(100,150,255,0.04);
-  }
-  #overlay-zone.style-neon .pip.active {
-    box-shadow: 0 0 8px currentColor;
-  }
   .trend-widget {
     background: #0a0a0a;
     border: 1px solid #1f1f1f;
@@ -699,24 +566,33 @@
   body.warning-above #overlay-zone .widget-header > .warning-banner { display: none !important; }
   body:not(.warning-above) .warning-slot-above { display: none !important; }
 
-  /* Warning banner - fades in when warning active, preserves widget aesthetic */
+  /* Warning banner. Fixed width so every warning renders at the same card
+     width, which keeps the recommended OBS source size stable across warnings
+     and the reconnecting banner (the longest string). */
   .warning-banner {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 6px;
     padding: 3px 10px;
     border: 1px solid transparent;
     border-radius: 999px;
     background: transparent;
-    max-width: 0;
+    width: 150px;
+    min-width: 150px;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
     opacity: 0;
     margin-left: auto;
-    transition: max-width 0.3s ease, opacity 0.25s, border-color 0.3s, background 0.3s, padding 0.3s;
+    transition: opacity 0.25s, border-color 0.3s, background 0.3s;
   }
   .warning-banner.active {
-    max-width: 260px;
     opacity: 1;
+  }
+  .warning-banner-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .warning-banner.warn-high { border-color: var(--warn-high); background: rgba(232,152,88,0.1); }
   .warning-banner.warn-low { border-color: var(--warn-low); background: rgba(125,184,232,0.1); }
@@ -1056,25 +932,6 @@
     width: 100%;
   }
 
-  .style-options {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-  }
-  .style-btn, .layout-btn {
-    padding: 8px 4px;
-    font-size: 12px;
-  }
-  .style-btn.active, .layout-btn.active {
-    background: var(--accent-blue);
-    color: #0a1a2a;
-    border-color: var(--accent-blue);
-    font-weight: 500;
-  }
-  /* Horizontal and vertical layout buttons live in a 2-col grid */
-  .tab-panel[data-tabpanel="widgets"] .style-options {
-    grid-template-columns: 1fr 1fr;
-  }
   .widget-toggles {
     display: flex;
     flex-direction: column;
@@ -1380,15 +1237,6 @@
     /* Prevent iOS input zoom: inputs need ≥16px font */
     input, select, textarea { font-size: 16px !important; }
     button { min-height: 38px; }
-    /* Ensure horizontal layout behaves sensibly on mobile — single column anyway */
-    body.layout-horizontal #app {
-      grid-template-columns: 1fr;
-      grid-template-rows: auto 1fr;
-    }
-    body.layout-horizontal #overlay-zone {
-      flex-direction: column;
-      height: auto;
-    }
   }
 
   @media (max-width: 480px) {
@@ -1536,26 +1384,11 @@
       <div class="section-body">
         <div class="tabs">
           <button class="tab active" data-tab="widgets">Widgets</button>
-          <button class="tab" data-tab="style">Style</button>
           <button class="tab" data-tab="thresholds">Thresholds</button>
           <button class="tab" data-tab="audio">Audio</button>
         </div>
 
-        <div class="tab-panel" data-tabpanel="style">
-          <div class="style-options">
-            <button class="style-btn active" data-style="compact">Compact</button>
-            <button class="style-btn" data-style="bold">Bold</button>
-            <button class="style-btn" data-style="minimal">Minimal</button>
-            <button class="style-btn" data-style="neon">Neon</button>
-          </div>
-        </div>
-
         <div class="tab-panel active" data-tabpanel="widgets">
-          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Layout</div>
-          <div class="style-options" style="margin-bottom: 16px;">
-            <button class="layout-btn active" data-layout="vertical">Vertical (left)</button>
-            <button class="layout-btn" data-layout="horizontal">Horizontal (top)</button>
-          </div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Show widgets</div>
           <div class="widget-toggles">
             <label><input type="checkbox" id="toggle-hr" checked /> Heart rate</label>
@@ -1610,7 +1443,7 @@
           <div style="font-size: 11px; color: var(--text-faint); margin-top: 8px; line-height: 1.4;">
             Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
             Paste the <b>Width</b> and <b>Height</b> numbers into OBS's matching fields to avoid empty space.
-            Dimensions auto-update as you change style / widgets.
+            Dimensions auto-update as you change widget toggles.
           </div>
         </div>
 
@@ -2555,63 +2388,18 @@
     const origin = location.origin + location.pathname.replace(/hr_monitor\.html$/, '');
     const params = new URLSearchParams();
     params.set('key', getOrCreateBroadcastKey());
-    params.set('style', localStorage.getItem('hr_monitor_style') || 'bold');
-    params.set('layout', widgetPrefs.layout);
     params.set('bg', 'transparent');
     if (!widgetPrefs.showHr) params.set('hide_hr', '1');
     if (!widgetPrefs.showHrv) params.set('hide_hrv', '1');
     if (!widgetPrefs.showLiveHr) params.set('hide_live_hr', '1');
     if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
-    // Always shrink-to-content now (it's the only mode). Keep the URL param
-    // for backward compat with older cached overlay.html versions.
-    params.set('shrink', '1');
     return origin + 'overlay.html?' + params.toString();
   }
-  // Compute the recommended OBS Browser Source dimensions from current settings.
-  // Numbers come from the widget's natural layout — if the source is sized smaller,
-  // content clips; if larger, empty space appears (Pulsoid auto-fills height; we don't).
+  // computeObsSize is no longer used — dimensions come from the live measured
+  // size of the widget-row via applyOverlaySize's ResizeObserver (see below).
+  // Kept as a thin shim so any old callers still receive a plausible value.
   function computeObsSize() {
-    const style = localStorage.getItem('hr_monitor_style') || 'bold';
-    const horizontal = widgetPrefs.layout === 'horizontal';
-
-    // Compact widget — measured against the actual rendered layout (14px
-    // overlay padding + widget padding + grid rows with 10px gaps). Values
-    // aim to be tight to content so OBS sources don't show empty space.
-    // With "above" warning placement, add a reserved slot for the banner.
-    const warnSlot = widgetPrefs.warningPlacement === 'above' && widgetPrefs.showWarning ? 34 : 0;
-    if (style === 'compact') {
-      if (!widgetPrefs.showHr && !widgetPrefs.showHrv) return { w: 200, h: 80 + warnSlot };
-      // HRV-only: just the readout + optional compact-trend
-      if (!widgetPrefs.showHr) {
-        const h = widgetPrefs.showInlineTrends ? 190 : 120;
-        return { w: 220, h: h + warnSlot };
-      }
-      // HR-only: big number + optional live trace + pips + optional compact-trend
-      if (!widgetPrefs.showHrv) {
-        const w = widgetPrefs.showLiveHr ? 340 : 220;
-        const h = widgetPrefs.showInlineTrends ? 230 : 150;
-        return { w, h: h + warnSlot };
-      }
-      // Both HR and HRV — live-trace toggle only shrinks width; inline mini trends only shrinks height
-      const w = widgetPrefs.showLiveHr ? 380 : 300;
-      const h = widgetPrefs.showInlineTrends ? 250 : 160;
-      return { w, h: h + warnSlot };
-    }
-
-    // Other styles stack (or row) separate widgets. Single widget base 380 wide.
-    const WIDGET_W = 380;
-    const padV = 32;
-    const padH = 32;
-    const gap = 14;
-    let visible = 0;
-    let h = padV;
-    if (widgetPrefs.showHr) { h += 180; visible++; }
-    if (widgetPrefs.showHrv) { h += 140; visible++; }
-    if (widgetPrefs.showLiveHr) { h += 130; visible++; }
-    if (visible === 0) return { w: 200, h: 80 };
-    if (visible > 1) h += (visible - 1) * gap;
-    if (horizontal) return { w: WIDGET_W * visible + (visible - 1) * gap + padH, h: 210 };
-    return { w: WIDGET_W, h };
+    return getEffectiveSize();
   }
   // Update the Source Size fields in the Stream settings panel. Always show
   // the LIVE measured size — the widget auto-sizes to content so these are
@@ -2670,9 +2458,7 @@
       trendRmssd,
       trendWindow,
       // Live widget-layout prefs so the OBS overlay reflects toggle changes in
-      // real time (no browser-source refresh needed). Mirrored in URL params
-      // too (on initial load) but the tick takes precedence once connected.
-      style: localStorage.getItem('hr_monitor_style') || 'bold',
+      // real time (no browser-source refresh needed).
       prefs: {
         showHr: widgetPrefs.showHr,
         showHrv: widgetPrefs.showHrv,
@@ -2681,8 +2467,6 @@
         showPalpChip: widgetPrefs.showPalpChip,
         showWarning: widgetPrefs.showWarning,
         warningPlacement: widgetPrefs.warningPlacement || 'inside',
-        shrinkToFit: true, // always on now
-        layout: widgetPrefs.layout,
       },
       // The exact (width, height) the monitor is rendering at. OBS applies the
       // same inline style so its widget box is pixel-identical to the preview.
@@ -3732,14 +3516,12 @@
     } catch(e) {}
   }
 
-  function setWidgetStyle(styleName) {
+  // Compact is the only style now. Kept as a no-op function so existing
+  // callers (loadWidgetStyle, etc.) don't need further edits.
+  function setWidgetStyle() {
     const zone = $('overlay-zone');
-    zone.classList.remove('style-bold', 'style-compact', 'style-minimal', 'style-neon');
-    zone.classList.add('style-' + styleName);
-    document.querySelectorAll('.style-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.style === styleName);
-    });
-    try { localStorage.setItem('hr_monitor_style', styleName); } catch(e) {}
+    zone.classList.remove('style-bold', 'style-minimal', 'style-neon');
+    zone.classList.add('style-compact');
     if (typeof updateObsSizeDisplay === 'function') updateObsSizeDisplay();
     resizeAllCharts();
     pushPrefsToOverlay();
@@ -3778,13 +3560,7 @@
   }
 
   function loadWidgetStyle() {
-    // URL ?style=compact|bold|minimal|neon overrides saved prefs (useful for OBS,
-    // where Browser Source has its own isolated localStorage).
-    const params = new URLSearchParams(location.search);
-    const urlStyle = params.get('style');
-    const valid = ['bold', 'compact', 'minimal', 'neon'];
-    const saved = localStorage.getItem('hr_monitor_style') || 'compact';
-    setWidgetStyle(valid.includes(urlStyle) ? urlStyle : saved);
+    setWidgetStyle();
   }
 
   // Widget visibility toggles and layout orientation. Applied as classes on
@@ -3803,7 +3579,6 @@
     // above the widget that adds to the OBS source height; transparent when
     // no warning is firing so the widget never reflows.
     warningPlacement: 'inside',
-    layout: 'vertical',
     broadcast: true,
     // Measured dimensions of #overlay-zone after each render. Auto-populated
     // via ResizeObserver — the widget is always content-sized, and these
@@ -3834,9 +3609,22 @@
     if (overlaySizeRaf) cancelAnimationFrame(overlaySizeRaf);
     overlaySizeRaf = requestAnimationFrame(() => {
       overlaySizeRaf = requestAnimationFrame(() => {
-        const rect = row.getBoundingClientRect();
-        const w = Math.round(rect.width);
-        const h = Math.round(rect.height);
+        const rowRect = row.getBoundingClientRect();
+        let w = Math.round(rowRect.width);
+        let h = Math.round(rowRect.height);
+        // If the warning-slot-above is visible (placement === 'above' and
+        // warnings are on), its height adds to the OBS source's height. We
+        // measure it separately so the recommended size reflects the full
+        // rendered footprint.
+        const above = document.getElementById('warning-slot-above');
+        if (above && widgetPrefs.warningPlacement === 'above' && widgetPrefs.showWarning) {
+          const abRect = above.getBoundingClientRect();
+          const abH = Math.round(abRect.height);
+          if (abH > 0) h += abH;
+          // Width is max of widget row and above slot (usually equal).
+          const abW = Math.round(abRect.width);
+          if (abW > w) w = abW;
+        }
         if (w > 0 && h > 0 && (w !== widgetPrefs.customWidth || h !== widgetPrefs.customHeight)) {
           widgetPrefs.customWidth = w;
           widgetPrefs.customHeight = h;
@@ -3848,11 +3636,15 @@
   }
   // ResizeObserver keeps the measurement live — if the widget reflows (chart
   // renders data, font metrics settle, etc), we catch it and update the fields.
+  // Watching both the widget row AND the above-warning slot so either reflow
+  // retriggers the size calc.
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => applyOverlaySize());
     requestAnimationFrame(() => {
       const row = document.querySelector('#overlay-zone .widget-row');
       if (row) ro.observe(row);
+      const above = document.getElementById('warning-slot-above');
+      if (above) ro.observe(above);
     });
   }
 
@@ -3868,10 +3660,6 @@
     const wpSel = $('warning-placement');
     if (wpSel) wpSel.value = widgetPrefs.warningPlacement || 'inside';
     document.body.classList.add('shrink-to-fit'); // always on — only mode now
-    document.body.classList.toggle('layout-horizontal', widgetPrefs.layout === 'horizontal');
-    document.querySelectorAll('.layout-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.layout === widgetPrefs.layout);
-    });
     const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggles)) {
       const el = $(id); if (el) el.checked = widgetPrefs[key];
@@ -4092,19 +3880,6 @@
     loadWidgetStyle();
     loadWidgetPrefs();
     wireAudioControls();
-    // Style switcher buttons
-    document.querySelectorAll('.style-btn').forEach(btn => {
-      btn.addEventListener('click', () => setWidgetStyle(btn.dataset.style));
-    });
-    // Layout switcher
-    document.querySelectorAll('.layout-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        widgetPrefs.layout = btn.dataset.layout;
-        saveWidgetPrefs();
-        applyWidgetPrefs();
-        pushPrefsToOverlay();
-      });
-    });
     // Widget visibility toggles
     const toggleMap = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggleMap)) {
