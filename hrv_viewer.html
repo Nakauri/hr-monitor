@@ -1077,12 +1077,25 @@
   }
   #quadrant-thresh-popover.open { display: block; }
   #quadrant-thresh-popover h4 {
-    margin: 0 0 10px;
+    margin: 0 0 6px;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-dim);
+  }
+  #quadrant-thresh-popover .thresh-blurb {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.45;
+    margin-bottom: 12px;
+  }
+  #quadrant-thresh-popover .thresh-default-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-style: italic;
+    margin-top: 6px;
+    line-height: 1.4;
   }
   #quadrant-thresh-popover .thresh-row {
     display: flex;
@@ -4586,26 +4599,43 @@
     return { 'warn-high': 'HR high', 'warn-low': 'HR low', 'warn-crash': 'HRV crash', 'warn-palp': 'Palpitations' }[type] || type;
   }
 
-  // HR×HRV quadrant: classify the session's averages into one of four autonomic
-  // states. Thresholds are decoupled from the color-stage thresholds (which the
-  // user may have tuned for alert purposes). Defaults: 80 bpm is the rough line
-  // between truly resting and activated, 35 ms is the line between constrained
-  // and relaxed HRV. User-customizable via the kebab menu on any interp cell;
-  // persisted to localStorage so the same cuts apply across all session views.
+  // HR×HRV quadrant thresholds. Two default profiles keyed off the Autonomic
+  // analysis toggle:
+  //   POTS / autonomic-on   → HR 90, HRV 30 (POTS-typical seated baseline sits
+  //                           near 85–95 bpm with lower HRV).
+  //   Typical / autonomic-off → HR 80, HRV 45 (average adult resting HR is
+  //                           60–75 so 80 marks "clearly activated"; HRV 45 is
+  //                           the line between tense and relaxed for most).
+  // User customization always overrides whichever profile is active.
   const LS_QUADRANT_THRESH = 'hrv_viewer_quadrant_thresh';
-  let QUADRANT_HR_HIGH = 80;
-  let QUADRANT_HRV_HIGH = 35;
-  (function loadQuadrantThresh() {
+  const QUADRANT_DEFAULT_POTS = { hr: 90, hrv: 30 };
+  const QUADRANT_DEFAULT_TYPICAL = { hr: 80, hrv: 45 };
+  let QUADRANT_HR_HIGH, QUADRANT_HRV_HIGH;
+  function quadrantDefault() {
+    return isAutonomicOn() ? QUADRANT_DEFAULT_POTS : QUADRANT_DEFAULT_TYPICAL;
+  }
+  function applyQuadrantThresh() {
     try {
       const saved = JSON.parse(localStorage.getItem(LS_QUADRANT_THRESH) || 'null');
-      if (saved && typeof saved === 'object') {
-        if (Number.isFinite(saved.hr)) QUADRANT_HR_HIGH = saved.hr;
-        if (Number.isFinite(saved.hrv)) QUADRANT_HRV_HIGH = saved.hrv;
+      if (saved && saved.customized && Number.isFinite(saved.hr) && Number.isFinite(saved.hrv)) {
+        QUADRANT_HR_HIGH = saved.hr;
+        QUADRANT_HRV_HIGH = saved.hrv;
+        return;
       }
     } catch (e) {}
-  })();
-  function saveQuadrantThresh() {
-    try { localStorage.setItem(LS_QUADRANT_THRESH, JSON.stringify({ hr: QUADRANT_HR_HIGH, hrv: QUADRANT_HRV_HIGH })); } catch (e) {}
+    const d = quadrantDefault();
+    QUADRANT_HR_HIGH = d.hr;
+    QUADRANT_HRV_HIGH = d.hrv;
+  }
+  applyQuadrantThresh();
+  function saveQuadrantThresh(hr, hrv) {
+    QUADRANT_HR_HIGH = hr;
+    QUADRANT_HRV_HIGH = hrv;
+    try { localStorage.setItem(LS_QUADRANT_THRESH, JSON.stringify({ hr, hrv, customized: true })); } catch (e) {}
+  }
+  function resetQuadrantThresh() {
+    try { localStorage.removeItem(LS_QUADRANT_THRESH); } catch (e) {}
+    applyQuadrantThresh();
   }
   // Stale quadPct entries in the sessions index would otherwise stay at their
   // old threshold assignment until the CSV is re-parsed. Clear them so the
@@ -4689,6 +4719,16 @@
     });
   }
 
+  // Renders the small "Default for current mode: HR X · HRV Y" line inside the
+  // popover so the user knows which profile Reset will snap back to.
+  function updateDefaultHint(pop) {
+    const hintEl = pop.querySelector('#thresh-default-hint');
+    if (!hintEl) return;
+    const d = quadrantDefault();
+    const mode = isAutonomicOn() ? 'autonomic mode (calibrated for POTS)' : 'typical adult mode';
+    hintEl.textContent = `Reset restores the ${mode} default: HR ${d.hr} · HRV ${d.hrv}.`;
+  }
+
   // Threshold editor popover. Lazily created on first open. Anchored just
   // below-right of whichever kebab was clicked so it feels contextual, but
   // edits apply globally (all four cells share the same HR / HRV cutoffs).
@@ -4699,14 +4739,16 @@
       pop.id = 'quadrant-thresh-popover';
       pop.innerHTML = `
         <h4>HR × HRV thresholds</h4>
+        <div class="thresh-blurb">These two cutoffs define every quadrant. Any kebab opens the same editor — all four cards share the lines.</div>
         <div class="thresh-row">
-          <label>High HR line<span class="thresh-hint">Sessions at or above this count as activated. Default 80.</span></label>
+          <label>High HR line<span class="thresh-hint">Sessions at or above this count as activated.</span></label>
           <input type="number" id="thresh-hr" min="40" max="200" step="1" />
         </div>
         <div class="thresh-row">
-          <label>High HRV line<span class="thresh-hint">RMSSD at or above this counts as relaxed. Default 35.</span></label>
+          <label>High HRV line<span class="thresh-hint">RMSSD at or above this counts as relaxed.</span></label>
           <input type="number" id="thresh-hrv" min="5" max="200" step="1" />
         </div>
+        <div class="thresh-default-hint" id="thresh-default-hint"></div>
         <div class="thresh-actions">
           <button class="thresh-reset" id="thresh-reset">Reset to default</button>
           <button id="thresh-cancel">Cancel</button>
@@ -4715,11 +4757,11 @@
       `;
       document.body.appendChild(pop);
       pop.querySelector('#thresh-save').addEventListener('click', () => {
-        const hrVal = parseInt(pop.querySelector('#thresh-hr').value, 10);
-        const hrvVal = parseInt(pop.querySelector('#thresh-hrv').value, 10);
-        if (Number.isFinite(hrVal) && hrVal >= 40 && hrVal <= 200) QUADRANT_HR_HIGH = hrVal;
-        if (Number.isFinite(hrvVal) && hrvVal >= 5 && hrvVal <= 200) QUADRANT_HRV_HIGH = hrvVal;
-        saveQuadrantThresh();
+        let hrVal = parseInt(pop.querySelector('#thresh-hr').value, 10);
+        let hrvVal = parseInt(pop.querySelector('#thresh-hrv').value, 10);
+        if (!Number.isFinite(hrVal) || hrVal < 40 || hrVal > 200) hrVal = QUADRANT_HR_HIGH;
+        if (!Number.isFinite(hrvVal) || hrvVal < 5 || hrvVal > 200) hrvVal = QUADRANT_HRV_HIGH;
+        saveQuadrantThresh(hrVal, hrvVal);
         invalidateQuadrantCache();
         pop.classList.remove('open');
         // Re-render the currently open view so the new thresholds apply.
@@ -4727,8 +4769,11 @@
       });
       pop.querySelector('#thresh-cancel').addEventListener('click', () => pop.classList.remove('open'));
       pop.querySelector('#thresh-reset').addEventListener('click', () => {
-        pop.querySelector('#thresh-hr').value = 80;
-        pop.querySelector('#thresh-hrv').value = 35;
+        resetQuadrantThresh();
+        pop.querySelector('#thresh-hr').value = QUADRANT_HR_HIGH;
+        pop.querySelector('#thresh-hrv').value = QUADRANT_HRV_HIGH;
+        updateDefaultHint(pop);
+        invalidateQuadrantCache();
       });
       // Dismiss on outside click.
       document.addEventListener('click', (e) => {
@@ -4742,6 +4787,7 @@
     }
     pop.querySelector('#thresh-hr').value = QUADRANT_HR_HIGH;
     pop.querySelector('#thresh-hrv').value = QUADRANT_HRV_HIGH;
+    updateDefaultHint(pop);
     const rect = anchorBtn.getBoundingClientRect();
     pop.classList.add('open');
     // Position: prefer below the kebab, but flip above if it'd overflow the
@@ -5417,6 +5463,10 @@
     document.getElementById('autonomic-toggle').addEventListener('change', (e) => {
       setAutonomicOn(e.target.checked);
       applyAutonomicClass();
+      // If user hasn't customized thresholds, switch profile defaults to match
+      // the new mode (POTS vs typical adult). Customized values stay put.
+      applyQuadrantThresh();
+      invalidateQuadrantCache();
       // Re-render the current session (or whatever view is active) so the report,
       // filters, and chart reflect the new setting without a page reload.
       route();
