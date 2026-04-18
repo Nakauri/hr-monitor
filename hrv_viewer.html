@@ -1040,6 +1040,96 @@
   .interp-cell.ok.on .interp-title { color: var(--accent-rmssd); }
   /* Empty state: faded, not toggleable */
   .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
+  /* Kebab (⋮) on each quadrant cell opens the shared threshold editor. All four
+     cards share the same HR / HRV cutoffs, so any kebab reaches the same pair. */
+  .interp-kebab {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-faint);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.08em;
+  }
+  .interp-kebab:hover {
+    color: var(--text);
+    background: rgba(255,255,255,0.08);
+    border-color: var(--border-strong);
+  }
+  #quadrant-thresh-popover {
+    position: fixed;
+    z-index: 1001;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 14px 16px;
+    min-width: 260px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    display: none;
+  }
+  #quadrant-thresh-popover.open { display: block; }
+  #quadrant-thresh-popover h4 {
+    margin: 0 0 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  #quadrant-thresh-popover .thresh-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  #quadrant-thresh-popover label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text);
+  }
+  #quadrant-thresh-popover label .thresh-hint {
+    display: block;
+    font-size: 11px;
+    color: var(--text-faint);
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  #quadrant-thresh-popover input[type="number"] {
+    width: 70px;
+    padding: 6px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    text-align: center;
+  }
+  #quadrant-thresh-popover .thresh-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    justify-content: flex-end;
+  }
+  #quadrant-thresh-popover button {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  #quadrant-thresh-popover .thresh-reset {
+    color: var(--text-dim);
+    background: transparent;
+    border-color: transparent;
+    margin-right: auto;
+  }
+  #quadrant-thresh-popover .thresh-reset:hover { color: var(--text); border-color: var(--border-strong); }
 
   /* Session report — one compact card with a single master caret. Collapsed by
      default so it stays small; expanding shows all sub-sections stacked as
@@ -2541,8 +2631,11 @@
     const quadPct = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0 };
     if (rmssd.length && hr.length) {
       let hrIdx = 0;
-      const hrThresh = 90; // HR normal ceiling (matches colorThresholds.normal default)
-      const rmThresh = 40;
+      // Pull live user thresholds so quadPct matches whatever the user has
+      // customized in the kebab editor. Cached summaries may lag by one render
+      // cycle after a threshold change; invalidateQuadrantCache() clears them.
+      const hrThresh = QUADRANT_HR_HIGH;
+      const rmThresh = QUADRANT_HRV_HIGH;
       const quadCounts = { 'low-high': 0, 'high-high': 0, 'low-low': 0, 'high-low': 0 };
       for (const p of rmssd) {
         while (hrIdx + 1 < hr.length && Math.abs(hr[hrIdx + 1].t - p.t) <= Math.abs(hr[hrIdx].t - p.t)) hrIdx++;
@@ -2914,7 +3007,10 @@
     const title = date.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const files = sessionsByDate[iso] || [];
 
-    // Strip blocks per session, scaled to 24 hours
+    // Strip blocks per session, scaled to 24 hours. Block colour follows the
+    // user's selected headline metric (Rest / Avg / Tachy / Range) so the
+    // strip visually matches the big KPI on each card instead of always
+    // showing HR-stage green.
     const blocksHtml = files.map(fn => {
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
@@ -2923,9 +3019,10 @@
       const durHr = s.duration / 60;
       const left = (startHr / 24) * 100;
       const width = Math.max(0.3, (durHr / 24) * 100);
-      const stage = getHRStage(s.hrAvg);
-      const color = STAGE_COLORS[stage];
-      const tip = `${meta.isoTime} · ${formatDuration(s.duration)} · avg HR ${s.hrAvg}${s.rmssdAvg != null ? ` · HRV ${s.rmssdAvg}` : ''}${s.palpCount ? ` · ${s.palpCount} palp` : ''}`;
+      const head = computeHeadline(headlineMetric, [fn]);
+      const color = head.color || STAGE_COLORS['stage-normal'];
+      const headVal = head.value != null ? (head.value + (head.unit ? ' ' + head.unit : '')) : '—';
+      const tip = `${meta.isoTime} · ${formatDuration(s.duration)} · ${head.label || 'HR'} ${headVal}${s.rmssdAvg != null ? ` · HRV ${s.rmssdAvg}` : ''}${s.palpCount ? ` · ${s.palpCount} palp` : ''}`;
       return `<div class="day-strip-block" data-filename="${encodeURIComponent(fn)}" data-tip="${escape(tip)}" style="left: ${left}%; width: ${width}%; background: ${color};"></div>`;
     }).join('');
 
@@ -3471,11 +3568,13 @@
     const out = { 'low-high': [], 'high-high': [], 'low-low': [], 'high-low': [] };
     if (!data.rmssd.length || !data.hr.length) return out;
     // Iterate RMSSD (coarser sampling) and find nearest HR value for each.
+    // Thresholds match classifyQuadrant / summarizeCSV so quadrant overlays on
+    // the chart align with the percentage numbers in the interpretation panel.
     let hrIdx = 0;
     const rr = data.rmssd;
     const hr = data.hr;
-    const hrThresh = colorThresholds.normal;
-    const rmThresh = 40;
+    const hrThresh = QUADRANT_HR_HIGH;
+    const rmThresh = QUADRANT_HRV_HIGH;
     let cur = null;
     for (const p of rr) {
       // Advance hrIdx to the sample nearest in time
@@ -3630,10 +3729,10 @@
         <div class="interp-body">
           <div class="interp-current" id="interp-current"></div>
           <div class="interp-grid">
-            <div class="interp-cell good" data-quad="low-high"><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good — this is what sleep or vagal training looks like.</div>
-            <div class="interp-cell ok" data-quad="high-high"><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
-            <div class="interp-cell warn" data-quad="low-low"><div class="interp-title">Low HR · Low HRV</div>Fatigue, under-recovery, overtraining, deconditioning. Can also appear in illness. Watch if sustained across days.</div>
-            <div class="interp-cell bad" data-quad="high-low"><div class="interp-title">High HR · Low HRV</div>Sympathetic stress: pain, panic, dehydration, orthostatic strain, acute illness. For POTS, this is the classic orthostatic / flare pattern.</div>
+            <div class="interp-cell good" data-quad="low-high"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
+            <div class="interp-cell ok" data-quad="high-high"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
+            <div class="interp-cell warn" data-quad="low-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">Low HR · Low HRV</div>Fatigue, under-recovery, overtraining, deconditioning. Can also appear in illness. Watch if sustained across days.</div>
+            <div class="interp-cell bad" data-quad="high-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">High HR · Low HRV</div>Sympathetic stress: pain, panic, dehydration, orthostatic strain, acute illness. Classic flare or orthostatic pattern.</div>
           </div>
         </div>
       </div>
@@ -4487,16 +4586,45 @@
     return { 'warn-high': 'HR high', 'warn-low': 'HR low', 'warn-crash': 'HRV crash', 'warn-palp': 'Palpitations' }[type] || type;
   }
 
-  // HR×HRV quadrant: classify the session's averages into one of four autonomic states.
+  // HR×HRV quadrant: classify the session's averages into one of four autonomic
+  // states. Thresholds are decoupled from the color-stage thresholds (which the
+  // user may have tuned for alert purposes). Defaults: 80 bpm is the rough line
+  // between truly resting and activated, 35 ms is the line between constrained
+  // and relaxed HRV. User-customizable via the kebab menu on any interp cell;
+  // persisted to localStorage so the same cuts apply across all session views.
+  const LS_QUADRANT_THRESH = 'hrv_viewer_quadrant_thresh';
+  let QUADRANT_HR_HIGH = 80;
+  let QUADRANT_HRV_HIGH = 35;
+  (function loadQuadrantThresh() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_QUADRANT_THRESH) || 'null');
+      if (saved && typeof saved === 'object') {
+        if (Number.isFinite(saved.hr)) QUADRANT_HR_HIGH = saved.hr;
+        if (Number.isFinite(saved.hrv)) QUADRANT_HRV_HIGH = saved.hrv;
+      }
+    } catch (e) {}
+  })();
+  function saveQuadrantThresh() {
+    try { localStorage.setItem(LS_QUADRANT_THRESH, JSON.stringify({ hr: QUADRANT_HR_HIGH, hrv: QUADRANT_HRV_HIGH })); } catch (e) {}
+  }
+  // Stale quadPct entries in the sessions index would otherwise stay at their
+  // old threshold assignment until the CSV is re-parsed. Clear them so the
+  // next renderSession / renderMonth / etc. recomputes with the new cutoffs.
+  function invalidateQuadrantCache() {
+    for (const fn of Object.keys(sessionsIndex)) {
+      if (sessionsIndex[fn]) delete sessionsIndex[fn].quadPct;
+      if (sessionsIndex[fn]) sessionsIndex[fn].__incomplete = true;
+    }
+    persistIndex();
+  }
+
   function classifyQuadrant(hrAvg, rmssdAvg) {
-    // HR: "high" = above normal ceiling (user-configured); "low" = at/below low ceiling.
-    // Here we just use median-ish thresholds.
-    const hrHigh = hrAvg >= colorThresholds.normal; // 90+
-    const rmssdHigh = rmssdAvg != null && rmssdAvg >= 40; // ~above typical adult resting
+    const hrHigh = hrAvg >= QUADRANT_HR_HIGH;
+    const rmssdHigh = rmssdAvg != null && rmssdAvg >= QUADRANT_HRV_HIGH;
     if (!hrHigh && rmssdHigh) return { key: 'low-high', label: 'Low HR · High HRV', tone: 'Rest or recovery mode. Strong parasympathetic tone.' };
     if (hrHigh && rmssdHigh) return { key: 'high-high', label: 'High HR · High HRV', tone: 'Post-exertion rebound or regulated arousal.' };
-    if (!hrHigh && !rmssdHigh) return { key: 'low-low', label: 'Low HR · Low HRV', tone: 'Fatigue / under-recovery pattern.' };
-    return { key: 'high-low', label: 'High HR · Low HRV', tone: 'Sympathetic stress. Classic flare / orthostatic pattern.' };
+    if (!hrHigh && !rmssdHigh) return { key: 'low-low', label: 'Low HR · Low HRV', tone: 'Fatigue or under-recovery pattern.' };
+    return { key: 'high-low', label: 'High HR · Low HRV', tone: 'Sympathetic stress. Classic flare or orthostatic pattern.' };
   }
 
   function renderInterpretation(s) {
@@ -4542,7 +4670,10 @@
 
   function wireQuadrantToggles() {
     document.querySelectorAll('.interp-cell').forEach(cell => {
-      cell.addEventListener('click', () => {
+      cell.addEventListener('click', (e) => {
+        // Kebab clicks open the threshold editor; don't also fire the quadrant
+        // overlay toggle for the same click.
+        if (e.target.classList.contains('interp-kebab')) return;
         if (cell.classList.contains('empty')) return;
         const key = cell.dataset.quad;
         activeQuadrants[key] = !activeQuadrants[key];
@@ -4550,6 +4681,78 @@
         if (currentSummary && currentData) drawSessionChart(currentSummary, currentData);
       });
     });
+    document.querySelectorAll('.interp-kebab').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openQuadrantThreshEditor(btn);
+      });
+    });
+  }
+
+  // Threshold editor popover. Lazily created on first open. Anchored just
+  // below-right of whichever kebab was clicked so it feels contextual, but
+  // edits apply globally (all four cells share the same HR / HRV cutoffs).
+  function openQuadrantThreshEditor(anchorBtn) {
+    let pop = document.getElementById('quadrant-thresh-popover');
+    if (!pop) {
+      pop = document.createElement('div');
+      pop.id = 'quadrant-thresh-popover';
+      pop.innerHTML = `
+        <h4>HR × HRV thresholds</h4>
+        <div class="thresh-row">
+          <label>High HR line<span class="thresh-hint">Sessions at or above this count as activated. Default 80.</span></label>
+          <input type="number" id="thresh-hr" min="40" max="200" step="1" />
+        </div>
+        <div class="thresh-row">
+          <label>High HRV line<span class="thresh-hint">RMSSD at or above this counts as relaxed. Default 35.</span></label>
+          <input type="number" id="thresh-hrv" min="5" max="200" step="1" />
+        </div>
+        <div class="thresh-actions">
+          <button class="thresh-reset" id="thresh-reset">Reset to default</button>
+          <button id="thresh-cancel">Cancel</button>
+          <button class="primary" id="thresh-save" style="background: var(--accent-rmssd); color: #0a1a14; border-color: var(--accent-rmssd);">Save</button>
+        </div>
+      `;
+      document.body.appendChild(pop);
+      pop.querySelector('#thresh-save').addEventListener('click', () => {
+        const hrVal = parseInt(pop.querySelector('#thresh-hr').value, 10);
+        const hrvVal = parseInt(pop.querySelector('#thresh-hrv').value, 10);
+        if (Number.isFinite(hrVal) && hrVal >= 40 && hrVal <= 200) QUADRANT_HR_HIGH = hrVal;
+        if (Number.isFinite(hrvVal) && hrvVal >= 5 && hrvVal <= 200) QUADRANT_HRV_HIGH = hrvVal;
+        saveQuadrantThresh();
+        invalidateQuadrantCache();
+        pop.classList.remove('open');
+        // Re-render the currently open view so the new thresholds apply.
+        route();
+      });
+      pop.querySelector('#thresh-cancel').addEventListener('click', () => pop.classList.remove('open'));
+      pop.querySelector('#thresh-reset').addEventListener('click', () => {
+        pop.querySelector('#thresh-hr').value = 80;
+        pop.querySelector('#thresh-hrv').value = 35;
+      });
+      // Dismiss on outside click.
+      document.addEventListener('click', (e) => {
+        if (!pop.classList.contains('open')) return;
+        if (pop.contains(e.target) || e.target.classList.contains('interp-kebab')) return;
+        pop.classList.remove('open');
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && pop.classList.contains('open')) pop.classList.remove('open');
+      });
+    }
+    pop.querySelector('#thresh-hr').value = QUADRANT_HR_HIGH;
+    pop.querySelector('#thresh-hrv').value = QUADRANT_HRV_HIGH;
+    const rect = anchorBtn.getBoundingClientRect();
+    pop.classList.add('open');
+    // Position: prefer below the kebab, but flip above if it'd overflow the
+    // viewport. Right edge aligned to the kebab.
+    const popW = pop.offsetWidth;
+    const popH = pop.offsetHeight;
+    let left = Math.max(8, rect.right - popW);
+    let top = rect.bottom + 6;
+    if (top + popH > window.innerHeight - 8) top = Math.max(8, rect.top - popH - 6);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
   }
 
   function wireInterpToggle() {
@@ -4587,25 +4790,27 @@
     }
     return tip;
   }
-  function showAnnoTip(text, _evt) {
+  function showAnnoTip(text, evt) {
     const tip = getAnnoTip();
     tip.innerHTML = text;
     tip.style.display = 'block';
-    // Anchor to the chart canvas top as a banner, NOT to the cursor. Chart.js
-    // annotation plugin only fires `enter` once (at the cursor's first touch
-    // on the region), so a cursor-anchored tooltip stays stuck at that entry
-    // point even as the cursor moves. Chart.js's own data tooltip still
-    // follows the cursor and shows HR / RMSSD values — the two don't collide
-    // because this one lives at the top of the chart.
+    // On the session view (where `currentChart` is live), anchor to the top of
+    // the chart canvas as a banner so it coexists with Chart.js's own data
+    // tooltip at the cursor. Everywhere else (day strip hover, calendar,
+    // sparkline), anchor to the cursor the usual way.
     const chart = currentChart;
     const canvas = chart && chart.canvas;
-    if (canvas) {
+    const isSessionChartContext = !!canvas && document.body.contains(canvas);
+    if (isSessionChartContext) {
       const rect = canvas.getBoundingClientRect();
       tip.style.left = Math.max(8, Math.min(window.innerWidth - tip.offsetWidth - 8, rect.left + rect.width / 2 - tip.offsetWidth / 2)) + 'px';
       tip.style.top = Math.max(8, rect.top + 8) + 'px';
     } else {
-      tip.style.left = '8px';
-      tip.style.top = '8px';
+      const e = evt && evt.native ? evt.native : evt;
+      const cx = (e && e.clientX) || 0;
+      const cy = (e && e.clientY) || 0;
+      tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, cx + 14) + 'px';
+      tip.style.top = Math.max(8, cy - tip.offsetHeight - 8) + 'px';
     }
   }
   function hideAnnoTip() {
