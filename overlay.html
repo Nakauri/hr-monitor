@@ -264,31 +264,47 @@
   body.connected #waiting { display: none; }
 
   /* Connection indicator — lives inside the HR widget header, on the right.
-     Green = live, amber = reconnecting, grey = never connected.
-     Works for any style preset since the HR widget header exists in all of them. */
+     When connected: just a green dot (no text). When reconnecting: grey dot
+     plus small "reconnecting…" label next to it. When never connected: grey
+     dot alone. Works for any style preset since the HR widget header exists
+     in all of them. */
+  .conn-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
   .conn-dot {
     width: 9px;
     height: 9px;
     border-radius: 50%;
     background: #3a3a3a;
-    margin-left: auto;
     flex-shrink: 0;
     transition: background 0.3s, box-shadow 0.3s;
+  }
+  .conn-text {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: #8a8a8a;
+    text-transform: uppercase;
+    font-weight: 600;
+    display: none;
   }
   body.conn-live .conn-dot {
     background: #5DCAA5;
     box-shadow: 0 0 6px rgba(93,202,165,0.6);
   }
+  /* Reconnecting: keep dot grey, pulse it softly, and show the text. */
   body.conn-reconnecting .conn-dot {
-    background: #F0C75E;
-    box-shadow: 0 0 5px rgba(240,199,94,0.5);
+    background: #6a6a6a;
     animation: conn-pulse 1.4s ease-in-out infinite;
   }
+  body.conn-reconnecting .conn-text { display: inline; }
   @keyframes conn-pulse {
-    0%, 100% { opacity: 0.7; }
+    0%, 100% { opacity: 0.55; }
     50% { opacity: 1; }
   }
-  body.no-dot .conn-dot { display: none; }
+  body.no-dot .conn-indicator { display: none; }
 </style>
 </head>
 <body>
@@ -306,7 +322,10 @@
         <span class="widget-label">BPM</span>
         <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
       </div>
-      <span class="conn-dot" id="conn-dot" title="Connection status"></span>
+      <span class="conn-indicator">
+        <span class="conn-text" id="conn-text">reconnecting…</span>
+        <span class="conn-dot" id="conn-dot" title="Connection status"></span>
+      </span>
     </div>
     <div class="number-row">
       <div class="big-number" id="hr-big">—</div>

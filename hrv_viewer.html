@@ -827,6 +827,15 @@
     border-top: 2px dashed var(--accent-rmssd);
     border-radius: 0;
   }
+  /* Vertical solid line — for the Event marker so it's visually distinct from
+     the dashed green horizontal RMSSD line. */
+  .legend-swatch.vline {
+    width: 0;
+    height: 14px;
+    border-left: 2px solid #F7E26B;
+    background: transparent;
+    border-radius: 0;
+  }
   /* Toggleable legend items double as filter controls — clicking one dims/hides
      that category on the chart and in the marker drawer (single source of truth:
      activeFilters). Dim + strikethrough signal the "off" state. */
@@ -839,6 +848,17 @@
   .chart-legend-item.toggleable.off {
     opacity: 0.35;
     text-decoration: line-through;
+  }
+  .chart-legend-item.toggleable.disabled {
+    opacity: 0.22;
+    cursor: not-allowed;
+    text-decoration: none;
+  }
+  .chart-legend-item.toggleable.disabled:hover { color: inherit; }
+  .filter-chip.disabled {
+    opacity: 0.28;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 
   /* Annotation hover tooltip */
@@ -951,19 +971,17 @@
   /* Empty state: faded, not toggleable */
   .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
 
-  /* Summary report — an accordion of collapsible sections instead of one wall
-     of text. Each section's header is a clickable caret row; body slides away
-     when collapsed. Unbuilt sections (no relevant data) are omitted entirely. */
+  /* Session report — one compact card with a single master caret. Collapsed by
+     default so it stays small; expanding shows all sub-sections stacked as
+     static labeled blocks (no per-section carets). */
   .insight-box {
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-left: 3px solid var(--accent-rmssd);
     border-radius: 10px;
-    padding: 4px 4px;
+    overflow: hidden;
   }
-  .insight-section { border-bottom: 1px solid var(--border); }
-  .insight-section:last-child { border-bottom: 0; }
-  .insight-section-head {
+  .insight-master-head {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -977,8 +995,8 @@
     color: var(--text);
     transition: background 0.12s;
   }
-  .insight-section-head:hover { background: rgba(255,255,255,0.02); }
-  .insight-section-head .insight-chevron {
+  .insight-master-head:hover { background: rgba(255,255,255,0.02); }
+  .insight-master-head .insight-chevron {
     width: 14px;
     height: 14px;
     stroke: currentColor;
@@ -988,8 +1006,8 @@
     fill: none;
     transition: transform 0.18s ease;
   }
-  .insight-section.collapsed .insight-chevron { transform: rotate(-90deg); }
-  .insight-section-count {
+  .insight-box.collapsed .insight-chevron { transform: rotate(-90deg); }
+  .insight-master-summary {
     margin-left: auto;
     font-size: 11px;
     color: var(--text-dim);
@@ -997,35 +1015,51 @@
     letter-spacing: 0.05em;
     text-transform: none;
   }
-  .insight-section-body {
-    padding: 2px 20px 14px 40px;
+  .insight-body { border-top: 1px solid var(--border); }
+  .insight-box.collapsed .insight-body { display: none; }
+  .insight-section { padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .insight-section:last-child { border-bottom: 0; }
+  .insight-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .insight-section-title .insight-count {
+    font-size: 11px;
+    color: var(--accent-rmssd);
+    background: rgba(93,202,165,0.12);
+    padding: 1px 7px;
+    border-radius: 10px;
+    letter-spacing: 0.04em;
+  }
+  .insight-section ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
     font-size: 14px;
     line-height: 1.6;
     color: var(--text);
   }
-  .insight-section.collapsed .insight-section-body { display: none; }
-  .insight-section-body ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .insight-section-body li {
-    padding: 3px 0;
-    color: var(--text);
-  }
-  .insight-section-body li + li { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 7px; }
-  .insight-section-body .insight-lead { color: var(--text); }
-  .insight-section-body .insight-sub {
+  .insight-section li { padding: 2px 0; }
+  .insight-section li + li { margin-top: 3px; }
+  .insight-section .insight-sub {
     color: var(--text-dim);
     font-size: 12.5px;
-    margin-top: 3px;
+    margin-top: 2px;
   }
   .insight-empty {
-    padding: 14px 20px;
+    padding: 14px 18px;
     color: var(--text-dim);
     font-size: 13px;
   }
-  body.printing .insight-section.collapsed .insight-section-body { display: block !important; }
+  /* Export reports unconditionally open the body so nothing is hidden in print. */
+  body.printing .insight-box.collapsed .insight-body { display: block !important; }
 
   /* POTS panel */
   .pots-panel {
@@ -1120,10 +1154,16 @@
     border-left: 3px solid transparent;
     line-height: 1.4;
   }
-  .marker-item:hover {
+  .marker-item:hover,
+  .marker-item.chart-hover {
     background: var(--bg-input);
     transform: translateX(2px);
     padding-left: 14px;
+  }
+  /* Distinct outline when the highlight is driven by chart hover (bidirectional
+     sync) — makes it obvious which row the annotation corresponds to. */
+  .marker-item.chart-hover {
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
   }
   .marker-item.type-event { border-left-color: var(--accent-rmssd); }
   .marker-item.type-warning { border-left-color: var(--warn-crash); }
@@ -1676,6 +1716,9 @@
   const GOOGLE_CLIENT_ID = '103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com';
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
   const DRIVE_FOLDER_NAME = 'HR Monitor Sessions';
+  // Shared-token key: BOTH hr_monitor.html and hrv_viewer.html read/write this
+  // so signing into one page carries over to the other until the token expires.
+  const LS_DRIVE_TOKEN = 'hr_monitor_drive_token';
 
   let driveTokenClient = null;
   let driveAccessToken = null;
@@ -1690,6 +1733,26 @@
   }
   function drivePersistMeta() {
     try { localStorage.setItem(LS_DRIVE_META, JSON.stringify(driveMetaCache)); } catch (e) {}
+  }
+
+  function saveDriveTokenToStorage(token, expiresAt) {
+    try { localStorage.setItem(LS_DRIVE_TOKEN, JSON.stringify({ token, expiresAt })); } catch (e) {}
+  }
+  function loadDriveTokenFromStorage() {
+    try {
+      const raw = localStorage.getItem(LS_DRIVE_TOKEN);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.token || !parsed.expiresAt) return null;
+      if (Date.now() > parsed.expiresAt) {
+        localStorage.removeItem(LS_DRIVE_TOKEN);
+        return null;
+      }
+      return parsed;
+    } catch (e) { return null; }
+  }
+  function clearDriveTokenFromStorage() {
+    try { localStorage.removeItem(LS_DRIVE_TOKEN); } catch (e) {}
   }
 
   function driveUpdateUI() {
@@ -1747,6 +1810,7 @@
         }
         driveAccessToken = resp.access_token;
         driveTokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
+        saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
         driveUpdateUI();
         try {
           await driveEnsureFolder();
@@ -1760,7 +1824,38 @@
         }
       },
     });
+    // Restore a shared token from localStorage (written by either page). If the
+    // live monitor signed in 20 minutes ago, this page reuses that token and
+    // skips the OAuth popup entirely.
+    const cached = loadDriveTokenFromStorage();
+    if (cached) {
+      driveAccessToken = cached.token;
+      driveTokenExpiresAt = cached.expiresAt;
+      driveUpdateUI();
+      driveEnsureFolder().then(() => {
+        driveUpdateUI();
+        return driveSync();
+      }).catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
+    }
   }
+  // Cross-tab sync: reflect sign-in / sign-out that happened in another tab.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== LS_DRIVE_TOKEN) return;
+    const cached = loadDriveTokenFromStorage();
+    if (cached) {
+      driveAccessToken = cached.token;
+      driveTokenExpiresAt = cached.expiresAt;
+      driveUpdateUI();
+      if (!driveFolderId) driveEnsureFolder().then(driveUpdateUI).catch(() => {});
+    } else {
+      driveAccessToken = null;
+      driveTokenExpiresAt = 0;
+      driveFolderId = null;
+      driveFilesByName = new Map();
+      driveUpdateUI();
+      setDriveProgress('');
+    }
+  });
 
   function driveSignIn() {
     if (!driveTokenClient) {
@@ -1778,6 +1873,7 @@
     driveTokenExpiresAt = 0;
     driveFolderId = null;
     driveFilesByName = new Map();
+    clearDriveTokenFromStorage();
     driveUpdateUI();
     setDriveProgress('');
   }
@@ -3116,6 +3212,10 @@
   let currentQuadRanges = null;
   let brushMin = null, brushMax = null;
   let activeFilters = { event: true, warning: true, palp: true, disconnect: true, delta: true, flush: true, chills: true, posture: true, sleep: true };
+  // Which filter types the current session actually has data for. Populated in
+  // renderSession. Chips + legend items for unavailable types get a 'disabled'
+  // class (dim, not clickable) since there's nothing to show regardless.
+  let filterAvailability = {};
   let activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
 
   // Walk through paired HR + RMSSD samples, classify each point into a quadrant,
@@ -3179,7 +3279,23 @@
     // Reset toggles + brush state on every new session open so prior values don't
     // carry across (previously caused out-of-range zoom glitches on short sessions).
     activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
-    activeFilters = { event: true, warning: true, palp: true, disconnect: true, delta: true, flush: true, chills: true, posture: true, sleep: true };
+    // Default each filter to ON only when the session has data for it — otherwise
+    // a chip / legend item light up with nothing underneath. Computed below so
+    // the chip render path can read filterAvailability to dim empty ones.
+    const postureAvail = (getEffectivePostureSpans(s) || []).length > 0;
+    const sleepAvail = (getEffectiveSleepWindows(s) || []).length > 0;
+    filterAvailability = {
+      event: (s.events || []).length > 0,
+      warning: (s.warnSegs || []).length > 0,
+      palp: (s.palpClusters || []).length > 0,
+      disconnect: (s.connGaps || []).length > 0,
+      delta: (s.hrDeltas || []).length > 0,
+      flush: (s.flushes || []).length > 0,
+      chills: (s.chillsWindows || []).length > 0,
+      posture: postureAvail,
+      sleep: sleepAvail,
+    };
+    activeFilters = Object.assign({}, filterAvailability); // ON iff data available
     brushMin = null; brushMax = null;
     const meta = parseSessionFilename(filename);
     const dur = formatDuration(s.duration);
@@ -3271,9 +3387,10 @@
         <div class="session-main">
           <div class="chart-panel">
             <div class="chart-legend">
+              <div class="chart-legend-item" title="The solid line on the chart is HR; the dashed green line is RMSSD."><span class="legend-swatch line"></span>RMSSD (dashed)</div>
               <div class="chart-legend-item toggleable" data-type="warning" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,152,88,0.35); border: 1px solid rgba(232,152,88,0.6);"></span>Warning span</div>
               <div class="chart-legend-item toggleable" data-type="disconnect" title="Click to toggle"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>BLE gap</div>
-              <div class="chart-legend-item toggleable" data-type="event" title="Click to toggle"><span class="legend-swatch line"></span>Event marker</div>
+              <div class="chart-legend-item toggleable" data-type="event" title="Click to toggle · manual symptom markers added during a recording"><span class="legend-swatch vline"></span>Event marker</div>
               <div class="chart-legend-item toggleable" data-type="palp" title="Click to toggle"><span class="legend-swatch dot" style="background: #D76CBA;"></span>Palpitation cluster</div>
               <div class="chart-legend-item toggleable" data-type="delta" title="Click to toggle"><span class="legend-swatch" style="background: rgba(139,180,255,0.2); border: 1px solid rgba(139,180,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
               <div class="chart-legend-item toggleable" data-type="flush" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,168,88,0.2); border: 1px solid rgba(232,168,88,0.6);"></span>Sympathetic flush</div>
@@ -3633,40 +3750,58 @@
     }
 
     const chevron = `<svg class="insight-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
-    const remembered = getCollapsedInsightSections();
-    const html = sections.map(sec => {
-      const collapsed = !!remembered[sec.key];
-      const countHtml = sec.count != null ? `<span class="insight-section-count">${sec.count}</span>` : '';
-      const bodyHtml = sec.lines.map(l => `<li><div class="insight-lead">${escape(l.text)}</div>${l.sub ? `<div class="insight-sub">${escape(l.sub)}</div>` : ''}</li>`).join('');
-      return `<div class="insight-section${collapsed ? ' collapsed' : ''}" data-key="${sec.key}">
-        <div class="insight-section-head">${chevron}<span>${escape(sec.title)}</span>${countHtml}</div>
-        <div class="insight-section-body"><ul>${bodyHtml}</ul></div>
-      </div>`;
-    }).join('') || '<div class="insight-empty">Nothing notable detected in this session.</div>';
 
+    // One-line summary shown next to the caret when collapsed — gives a quick
+    // read without needing to expand. Counts non-Overview sections only since
+    // Overview is always present.
+    const notableCount = sections.filter(s => s.key !== 'overview').length;
+    const totalPalps = s.palpCount || 0;
+    const summaryBits = [];
+    if (s.hrAvg != null) summaryBits.push(`avg ${s.hrAvg} bpm`);
+    if (notableCount > 0) summaryBits.push(`${notableCount} finding${notableCount === 1 ? '' : 's'}`);
+    if (totalPalps > 0) summaryBits.push(`${totalPalps} palp${totalPalps === 1 ? '' : 's'}`);
+    const summaryText = summaryBits.join(' · ');
+
+    const bodyHtml = sections.length === 0
+      ? '<div class="insight-empty">Nothing notable detected in this session.</div>'
+      : sections.map(sec => {
+          const countHtml = sec.count != null ? `<span class="insight-count">${sec.count}</span>` : '';
+          const listHtml = sec.lines.map(l =>
+            `<li><div>${escape(l.text)}</div>${l.sub ? `<div class="insight-sub">${escape(l.sub)}</div>` : ''}</li>`
+          ).join('');
+          return `<div class="insight-section">
+            <div class="insight-section-title"><span>${escape(sec.title)}</span>${countHtml}</div>
+            <ul>${listHtml}</ul>
+          </div>`;
+        }).join('');
+
+    const collapsed = isInsightCollapsed();
     const box = document.getElementById('insight-text');
-    box.innerHTML = html;
-    box.querySelectorAll('.insight-section').forEach(sec => {
-      const head = sec.querySelector('.insight-section-head');
-      head.addEventListener('click', () => {
-        sec.classList.toggle('collapsed');
-        rememberCollapsedInsightSection(sec.dataset.key, sec.classList.contains('collapsed'));
-      });
+    box.className = 'insight-box' + (collapsed ? ' collapsed' : '');
+    box.innerHTML = `
+      <div class="insight-master-head">
+        ${chevron}
+        <span>Session report</span>
+        <span class="insight-master-summary">${escape(summaryText)}</span>
+      </div>
+      <div class="insight-body">${bodyHtml}</div>
+    `;
+    box.querySelector('.insight-master-head').addEventListener('click', () => {
+      box.classList.toggle('collapsed');
+      setInsightCollapsed(box.classList.contains('collapsed'));
     });
   }
 
-  // Persist per-section collapsed state across session navigations. Uses plain
-  // localStorage (shared across all sessions — each section kind collapses/expands
-  // the same way everywhere). Small, fixed key set so there's no growth concern.
-  const LS_INSIGHT_COLLAPSED = 'hrv_viewer_insight_collapsed';
-  function getCollapsedInsightSections() {
-    try { return JSON.parse(localStorage.getItem(LS_INSIGHT_COLLAPSED) || '{}'); }
-    catch (e) { return {}; }
+  // Persist master-caret open/closed state across sessions. Defaults to closed
+  // (true) the first time the user sees it, per request — keeps the card tiny.
+  const LS_INSIGHT_COLLAPSED = 'hrv_viewer_insight_collapsed_v2';
+  function isInsightCollapsed() {
+    const v = localStorage.getItem(LS_INSIGHT_COLLAPSED);
+    if (v === null) return true; // closed by default
+    return v === '1';
   }
-  function rememberCollapsedInsightSection(key, collapsed) {
-    const map = getCollapsedInsightSections();
-    if (collapsed) map[key] = true; else delete map[key];
-    try { localStorage.setItem(LS_INSIGHT_COLLAPSED, JSON.stringify(map)); } catch (e) {}
+  function setInsightCollapsed(collapsed) {
+    try { localStorage.setItem(LS_INSIGHT_COLLAPSED, collapsed ? '1' : '0'); } catch (e) {}
   }
 
   function renderMarkerList(s) {
@@ -3724,19 +3859,65 @@
   // Hovering a sidebar marker: drop a bright vertical highlight on the chart at that
   // time and show a tooltip anchored to the chart position (fallback: cursor position
   // if the time is outside the currently brushed-in window).
-  function highlightMarker(t, labelText, tLabel, evt) {
+  // Primitive: drop a white vertical highlight line + dot at time t on the chart.
+  // Used by both marker-list hovers (from the sidebar) and annotation hovers
+  // (from the chart itself) — unified so the visual feedback is consistent.
+  function highlightAtTime(t) {
     if (!currentChart) return;
     const yScale = currentChart.scales.y;
     const yTop = yScale ? yScale.max : 200;
     const yBottom = yScale ? yScale.min : 0;
     const yHR = nearestY(currentData && currentData.hr, t);
-    // Find the HL datasets by label
     const ds = currentChart.data.datasets;
     for (let i = 0; i < ds.length; i++) {
       if (ds[i].label === '_HL_LINE') ds[i].data = [{ x: t, y: yBottom }, { x: t, y: yTop }];
       if (ds[i].label === '_HL_POINT') ds[i].data = [{ x: t, y: yHR }];
     }
     currentChart.update('none');
+  }
+  function unhighlightAtTime() {
+    if (!currentChart) return;
+    const ds = currentChart.data.datasets;
+    for (let i = 0; i < ds.length; i++) {
+      if (ds[i].label === '_HL_LINE' || ds[i].label === '_HL_POINT') ds[i].data = [];
+    }
+    currentChart.update('none');
+  }
+
+  // Bidirectional-sync: find the marker-list row whose data-t is closest to t
+  // (within a small tolerance) and pulse it. Called when the user hovers an
+  // annotation on the chart, so the sidebar row lights up to match.
+  function highlightMarkerItemByT(t) {
+    clearMarkerItemHighlight();
+    const list = document.getElementById('marker-list');
+    if (!list || !isFinite(t)) return;
+    const items = list.querySelectorAll('.marker-item');
+    let best = null, bestDist = Infinity;
+    for (const mi of items) {
+      const mt = parseFloat(mi.dataset.t);
+      if (!isFinite(mt)) continue;
+      const d = Math.abs(mt - t);
+      if (d < bestDist) { best = mi; bestDist = d; }
+    }
+    // Cap: only highlight if within 0.05 min (3 sec). Prevents snapping to a
+    // totally unrelated marker when the chart point has no sidebar counterpart.
+    if (!best || bestDist > 0.05) return;
+    best.classList.add('chart-hover');
+    // Scroll into view only if the row is actually off-screen — avoids jumpy
+    // autoscroll every time the user grazes an annotation.
+    const listRect = list.getBoundingClientRect();
+    const itemRect = best.getBoundingClientRect();
+    if (itemRect.top < listRect.top || itemRect.bottom > listRect.bottom) {
+      best.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+  function clearMarkerItemHighlight() {
+    document.querySelectorAll('.marker-item.chart-hover').forEach(mi => mi.classList.remove('chart-hover'));
+  }
+
+  function highlightMarker(t, labelText, tLabel, evt) {
+    highlightAtTime(t);
+    if (!currentChart) return;
     const xScale = currentChart.scales.x;
     const inView = t >= xScale.min && t <= xScale.max;
     const tip = getAnnoTip();
@@ -3755,13 +3936,23 @@
   }
 
   function unhighlightMarker() {
-    if (!currentChart) return;
-    const ds = currentChart.data.datasets;
-    for (let i = 0; i < ds.length; i++) {
-      if (ds[i].label === '_HL_LINE' || ds[i].label === '_HL_POINT') ds[i].data = [];
-    }
-    currentChart.update('none');
+    unhighlightAtTime();
     hideAnnoTip();
+  }
+
+  // Shared enter/leave for chart annotations — drop the highlight line, show the
+  // tooltip, and light up the corresponding marker-list row. All annotation
+  // `enter:` callbacks route through this so behaviour is identical regardless
+  // of which category the user hovers.
+  function annoEnter(t, html, evt) {
+    showAnnoTip(html, evt);
+    highlightAtTime(t);
+    highlightMarkerItemByT(t);
+  }
+  function annoLeave() {
+    hideAnnoTip();
+    unhighlightAtTime();
+    clearMarkerItemHighlight();
   }
 
   function nearestY(series, t) {
@@ -3894,22 +4085,32 @@
     if (tip) tip.style.display = 'none';
   }
 
-  // Reflect activeFilters state onto every UI element that represents a filter
-  // (marker chips + toggleable legend items). Called after any filter change OR
-  // after renderSession rebuilds the DOM, so the UI and state can't drift apart.
+  // Reflect activeFilters + filterAvailability onto every UI element that
+  // represents a filter. Called after any filter change OR after renderSession
+  // rebuilds the DOM, so the UI and state can't drift apart. Unavailable types
+  // (no data this session) get a 'disabled' class; their clicks are ignored.
   function syncFilterUI() {
     document.querySelectorAll('.filter-chip[data-type]').forEach(chip => {
-      const on = !!activeFilters[chip.dataset.type];
-      chip.classList.toggle('active', on);
+      const t = chip.dataset.type;
+      const avail = !!filterAvailability[t];
+      const on = !!activeFilters[t];
+      chip.classList.toggle('active', on && avail);
+      chip.classList.toggle('disabled', !avail);
+      if (!avail) chip.title = 'No ' + chip.textContent.toLowerCase() + ' detected in this session';
+      else chip.removeAttribute('title');
     });
     document.querySelectorAll('.chart-legend-item.toggleable[data-type]').forEach(item => {
-      const on = !!activeFilters[item.dataset.type];
-      item.classList.toggle('off', !on);
+      const t = item.dataset.type;
+      const avail = !!filterAvailability[t];
+      const on = !!activeFilters[t];
+      item.classList.toggle('off', !on || !avail);
+      item.classList.toggle('disabled', !avail);
     });
   }
 
   function setFilter(type, on) {
     if (!(type in activeFilters)) return;
+    if (!filterAvailability[type]) return; // can't toggle something with no data
     activeFilters[type] = !!on;
     syncFilterUI();
     if (currentSummary) {
@@ -3972,8 +4173,8 @@
             borderColor: color.border,
             borderWidth: 1,
             drawTime: 'beforeDatasetsDraw',
-            enter: (ctx, evt) => showAnnoTip(`<b>${label}</b><br/>${formatDuration(r.start)} → ${formatDuration(r.end)} (${formatDuration(r.end - r.start)})`, evt),
-            leave: hideAnnoTip,
+            enter: (ctx, evt) => annoEnter(r.start, `<b>${label}</b><br/>${formatDuration(r.start)} → ${formatDuration(r.end)} (${formatDuration(r.end - r.start)})`, evt),
+            leave: annoLeave,
           };
         }
       }
@@ -3991,8 +4192,8 @@
           borderColor: 'rgba(232,152,88,0.45)',
           borderWidth: 1,
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => showAnnoTip(`<b>${label}</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${dur})`, evt),
-          leave: hideAnnoTip,
+          enter: (ctx, evt) => annoEnter(w.start, `<b>${label}</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${dur})`, evt),
+          leave: annoLeave,
         };
       }
     }
@@ -4007,8 +4208,8 @@
           borderColor: 'rgba(160,160,160,0.55)',
           borderWidth: 1,
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => showAnnoTip(`<b>BLE connection gap</b><br/>${formatDuration(g.start)} → ${formatDuration(g.end)} (${dur})<br/><span style="color: var(--text-dim);">No HR data during this span.</span>`, evt),
-          leave: hideAnnoTip,
+          enter: (ctx, evt) => annoEnter(g.start, `<b>BLE connection gap</b><br/>${formatDuration(g.start)} → ${formatDuration(g.end)} (${dur})<br/><span style="color: var(--text-dim);">No HR data during this span.</span>`, evt),
+          leave: annoLeave,
         };
       }
     }
@@ -4025,8 +4226,8 @@
           borderColor: color,
           borderWidth: 1,
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => showAnnoTip(`<b>HR shift ${arrow} ${Math.abs(d.delta)} bpm</b><br/>${d.startHR} → ${d.endHR} bpm over ${formatDuration(d.end - d.start)}<br/>${formatDuration(d.start)} → ${formatDuration(d.end)}`, evt),
-          leave: hideAnnoTip,
+          enter: (ctx, evt) => annoEnter(d.start, `<b>HR shift ${arrow} ${Math.abs(d.delta)} bpm</b><br/>${d.startHR} → ${d.endHR} bpm over ${formatDuration(d.end - d.start)}<br/>${formatDuration(d.start)} → ${formatDuration(d.end)}`, evt),
+          leave: annoLeave,
         };
       }
     }
@@ -4038,18 +4239,20 @@
           type: 'line',
           xScaleID: 'x',
           xMin: e.t, xMax: e.t,
-          borderColor: 'rgba(93,202,165,0.75)',
-          borderWidth: 1.5,
-          borderDash: [3, 3],
-          label: { display: true, content: e.label, position: 'start', backgroundColor: 'rgba(93,202,165,0.18)', color: '#B8D97E', font: { size: 11, weight: '600' }, padding: 4 },
-          enter: (ctx, evt) => showAnnoTip(`<b>Event</b><br/>${escape(eLabel)} @ ${eTime}`, evt),
-          leave: hideAnnoTip,
+          borderColor: '#F7E26B',
+          borderWidth: 2,
+          label: { display: true, content: e.label, position: 'start', backgroundColor: 'rgba(247,226,107,0.18)', color: '#F7E26B', font: { size: 11, weight: '600' }, padding: 4 },
+          enter: (ctx, evt) => annoEnter(e.t, `<b>Event</b><br/>${escape(eLabel)} @ ${eTime}`, evt),
+          leave: annoLeave,
         };
       }
     }
     // Auto-detected sympathetic flush (short fast HR spike + concurrent HRV drop)
     if (activeFilters.flush && s.flushes) {
       for (const f of s.flushes) {
+        // markerT aligns with the time the marker-list row uses (f.t), so the
+        // sidebar-row highlight matches when the user hovers the flush band.
+        const markerT = (f.t != null) ? f.t : f.start;
         annotations['flush_' + idCounter++] = {
           type: 'box',
           xScaleID: 'x',
@@ -4058,8 +4261,8 @@
           borderColor: 'rgba(232,168,88,0.6)',
           borderWidth: 1,
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => showAnnoTip(`<b>Sympathetic flush</b><br/>HR +${f.hrDelta} bpm in ${formatDuration(f.end - f.start)}<br/>RMSSD ↓${f.rmssdDropPct}%<br/><span style='color: var(--text-dim);'>Cold flush / sudden arousal signature</span>`, evt),
-          leave: hideAnnoTip,
+          enter: (ctx, evt) => annoEnter(markerT, `<b>Sympathetic flush</b><br/>HR +${f.hrDelta} bpm in ${formatDuration(f.end - f.start)}<br/>RMSSD ↓${f.rmssdDropPct}%<br/><span style='color: var(--text-dim);'>Cold flush / sudden arousal signature</span>`, evt),
+          leave: annoLeave,
         };
       }
     }
@@ -4082,8 +4285,8 @@
           borderColor: c.border,
           borderWidth: 0,
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => showAnnoTip(`<b>Posture: ${sp.posture}</b><br/>${formatDuration(sp.start)} → ${formatDuration(sp.end)} (${formatDuration(sp.end - sp.start)})`, evt),
-          leave: hideAnnoTip,
+          enter: (ctx, evt) => annoEnter(sp.start, `<b>Posture: ${sp.posture}</b><br/>${formatDuration(sp.start)} → ${formatDuration(sp.end)} (${formatDuration(sp.end - sp.start)})`, evt),
+          leave: annoLeave,
         };
       }
     }
@@ -4100,8 +4303,8 @@
           borderWidth: 1,
           borderDash: [4, 4],
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => showAnnoTip(`<b>Sleep window</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${formatDuration(w.end - w.start)})`, evt),
-          leave: hideAnnoTip,
+          enter: (ctx, evt) => annoEnter(w.start, `<b>Sleep window</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${formatDuration(w.end - w.start)})`, evt),
+          leave: annoLeave,
         };
       }
     }
@@ -4116,8 +4319,8 @@
           borderColor: 'rgba(133,183,235,0.6)',
           borderWidth: 1,
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => showAnnoTip(`<b>Chills signature</b><br/>High HR volatility (std ${c.std.toFixed(1)} bpm, ${c.ratio.toFixed(1)}× session baseline)<br/><span style='color: var(--text-dim);'>Possible shivering EMG artifact or autonomic storm</span>`, evt),
-          leave: hideAnnoTip,
+          enter: (ctx, evt) => annoEnter(c.start, `<b>Chills signature</b><br/>High HR volatility (std ${c.std.toFixed(1)} bpm, ${c.ratio.toFixed(1)}× session baseline)<br/><span style='color: var(--text-dim);'>Possible shivering EMG artifact or autonomic storm</span>`, evt),
+          leave: annoLeave,
         };
       }
     }

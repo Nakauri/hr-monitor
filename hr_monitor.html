@@ -2749,6 +2749,9 @@
   const GOOGLE_CLIENT_ID = '103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com';
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'; // per-app isolated
   const DRIVE_FOLDER_NAME = 'HR Monitor Sessions';
+  // Shared-token key: BOTH hr_monitor.html and hrv_viewer.html read/write this
+  // so signing into one page carries over to the other until the token expires.
+  const LS_DRIVE_TOKEN = 'hr_monitor_drive_token';
 
   let driveTokenClient = null;
   let driveAccessToken = null;
@@ -2756,6 +2759,26 @@
   let driveFolderId = null;
   let driveUploadInFlight = null;
   let driveFileIdForSession = null;
+
+  function saveDriveTokenToStorage(token, expiresAt) {
+    try { localStorage.setItem(LS_DRIVE_TOKEN, JSON.stringify({ token, expiresAt })); } catch (e) {}
+  }
+  function loadDriveTokenFromStorage() {
+    try {
+      const raw = localStorage.getItem(LS_DRIVE_TOKEN);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.token || !parsed.expiresAt) return null;
+      if (Date.now() > parsed.expiresAt) {
+        localStorage.removeItem(LS_DRIVE_TOKEN);
+        return null;
+      }
+      return parsed;
+    } catch (e) { return null; }
+  }
+  function clearDriveTokenFromStorage() {
+    try { localStorage.removeItem(LS_DRIVE_TOKEN); } catch (e) {}
+  }
 
   function driveUpdateUI() {
     const statusEl = $('drive-status');
@@ -2803,18 +2826,48 @@
         }
         driveAccessToken = resp.access_token;
         driveTokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
+        saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
         driveUpdateUI();
         driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
       },
     });
+    // Restore a shared token from localStorage (written by either page). Only
+    // tokens still within their expiry window are kept — expired ones get
+    // cleaned up in loadDriveTokenFromStorage.
+    const cached = loadDriveTokenFromStorage();
+    if (cached) {
+      driveAccessToken = cached.token;
+      driveTokenExpiresAt = cached.expiresAt;
+      driveUpdateUI();
+      driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
+    }
   }
+  // Cross-tab sync: if the user signs in/out in one tab, reflect it here.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== LS_DRIVE_TOKEN) return;
+    const cached = loadDriveTokenFromStorage();
+    if (cached) {
+      driveAccessToken = cached.token;
+      driveTokenExpiresAt = cached.expiresAt;
+      driveUpdateUI();
+      if (!driveFolderId) driveEnsureFolder().catch(() => {});
+    } else {
+      driveAccessToken = null;
+      driveTokenExpiresAt = 0;
+      driveFolderId = null;
+      driveFileIdForSession = null;
+      driveUpdateUI();
+    }
+  });
 
   function driveSignIn() {
     if (!driveTokenClient) {
       alert('Google auth still loading. Try again in a second.');
       return;
     }
-    driveTokenClient.requestAccessToken({ prompt: 'consent' });
+    // Empty prompt allows silent re-auth when the user still has a Google
+    // session — they'll only see the consent dialog the first time.
+    driveTokenClient.requestAccessToken({ prompt: '' });
   }
 
   function driveSignOut() {
@@ -2825,6 +2878,7 @@
     driveTokenExpiresAt = 0;
     driveFolderId = null;
     driveFileIdForSession = null;
+    clearDriveTokenFromStorage();
     driveUpdateUI();
   }
 
