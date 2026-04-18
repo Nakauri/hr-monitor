@@ -102,7 +102,10 @@
 
   #app {
     display: grid;
-    grid-template-columns: 380px 1fr;
+    /* Preview column auto-sizes to whatever the widget is rendering at (no
+       more 380px hard-cap). Horizontal layout overrides this to a single
+       column with two rows so the widgets become a top banner. */
+    grid-template-columns: auto 1fr;
     height: calc(100vh - 52px);
     gap: 0;
   }
@@ -122,10 +125,10 @@
     border-right: 1px solid var(--border);
     overflow: hidden;
   }
-  /* Overlay preview always sizes to its content — app-grid column is auto
-     so the preview column hugs the widget, and #overlay-zone itself has
-     fit-content width. The Source Size fields show measured pixel dims live. */
-  #app { grid-template-columns: auto 1fr !important; }
+  /* Overlay preview always sizes to its content; #overlay-zone hugs its
+     widget via fit-content. App-grid column is already `auto` so the left
+     column shrinks to the widget's width. (Previously used !important here,
+     which broke the body.layout-horizontal override.) */
   #overlay-zone { width: fit-content; max-width: 100%; }
   /* Widget row: all the actual widget cards live inside this. In vertical mode
      it stacks top-down; in horizontal mode it goes left-to-right. The
