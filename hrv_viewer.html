@@ -525,7 +525,10 @@
      the grid rows share the remaining viewport height so a fullscreen wide
      window fills top-to-bottom without a big empty stripe below the month. */
   @media (min-width: 1100px) {
-    #view-month {
+    /* :not(.hidden) is load-bearing: `.view.hidden { display: none }` is a
+       class selector and would be overridden by the ID selector below,
+       bleeding the month calendar into day / week / all / sessions views. */
+    #view-month:not(.hidden) {
       display: flex;
       flex-direction: column;
       min-height: calc(100vh - 180px);
