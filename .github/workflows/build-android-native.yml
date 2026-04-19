@@ -1,0 +1,129 @@
+name: Build Native Android APK
+
+# Native Kotlin + Compose build. Parallel to build-android.yml (Capacitor),
+# so the user can keep sideloading the old APK while the native rewrite
+# stabilises. Once native passes the 30-min soak on three devices, this
+# workflow takes over and the Capacitor one is deleted.
+#
+# Source lives under android/ at the repo root — a plain Gradle project,
+# no Capacitor, no WebView.
+#
+# Publishes a rolling "android-native-latest" GitHub Release with the APK
+# at a stable public URL:
+# https://github.com/Nakauri/hr-monitor/releases/download/android-native-latest/hr-monitor-native.apk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-android-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Check for signing secret
+        id: check-signing
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 not set. Falling back to the Android debug keystore. Google Sign-In will fail until a stable keystore is wired."
+          fi
+
+      - name: Decode release keystore
+        if: steps.check-signing.outputs.has_keystore == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/hr-monitor-release.keystore
+          echo "[signing] release keystore written to android/hr-monitor-release.keystore"
+
+      - name: Generate Gradle wrapper
+        working-directory: android
+        run: |
+          # First-run bootstrap. Once we commit gradlew + gradle-wrapper.jar,
+          # this step becomes a no-op. We keep the bootstrap path so CI never
+          # depends on those binaries being in the repo.
+          if [ ! -f gradlew ]; then
+            gradle wrapper --gradle-version 8.11.1
+          fi
+
+      - name: Build release APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: hr-monitor-release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APK + version info
+        run: |
+          mkdir -p release
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n1)
+          cp "$APK_PATH" release/hr-monitor-native.apk
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat > release/version-native.json <<EOF
+          {
+            "sha": "${{ github.sha }}",
+            "shortSha": "$SHORT_SHA",
+            "builtAt": "$BUILD_DATE",
+            "signed": "${{ steps.check-signing.outputs.has_keystore }}",
+            "variant": "native"
+          }
+          EOF
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hr-monitor-native-${{ github.sha }}
+          path: release/hr-monitor-native.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish rolling GitHub Release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-native-latest
+          name: Native Android build (rolling latest)
+          body: |
+            Latest native Android build from `main`.
+
+            Install from your phone's browser:
+            https://github.com/${{ github.repository }}/releases/download/android-native-latest/hr-monitor-native.apk
+
+            Built from commit ${{ github.sha }}.
+            signed: ${{ steps.check-signing.outputs.has_keystore }}
+          files: |
+            release/hr-monitor-native.apk
+            release/version-native.json
+          prerelease: false
+          make_latest: false

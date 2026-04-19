@@ -30,6 +30,20 @@ mobile/sha1.txt
 mobile/keystore-password.txt
 mobile/release/
 
+# Native Android (Kotlin + Compose) build artefacts. android/ is source-
+# of-truth for the native app — keep the source, drop the build tree and
+# signing material.
+android/.gradle/
+android/build/
+android/**/build/
+android/local.properties
+android/*.keystore
+android/*.jks
+android/keystore.properties
+android/captures/
+android/.idea/
+android/.cxx/
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -40,3 +54,7 @@ Thumbs.db
 SESSION_LOG.md
 CLAUDE.md
 TODO.md
+MOBILE_LAUNCH_PLAN.md
+baseline_thresholds_plan.md
+crash.txt
+ectopics.txt
