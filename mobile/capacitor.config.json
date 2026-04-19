@@ -1,0 +1,23 @@
+{
+  "appId": "com.nakauri.hrmonitor",
+  "appName": "HR Monitor",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0a0a0a"
+  },
+  "plugins": {
+    "BluetoothLe": {
+      "displayStrings": {
+        "scanning": "Looking for your heart-rate strap…",
+        "cancel": "Cancel",
+        "availableDevices": "Available devices",
+        "noDeviceFound": "No strap found nearby"
+      }
+    }
+  }
+}

@@ -15,6 +15,18 @@ dist/
 .vite/
 .cache/
 
+# Capacitor Android build artefacts. The android/ project is generated from
+# mobile/package.json + capacitor.config.json, www/ is generated from the
+# repo-root HTMLs by the copy-web script, and any signing material must
+# never hit git.
+mobile/node_modules/
+mobile/www/
+mobile/android/
+mobile/ios/
+mobile/*.keystore
+mobile/*.jks
+mobile/release/
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -24,3 +36,4 @@ Thumbs.db
 # Claude local context (not part of the shipped app)
 SESSION_LOG.md
 CLAUDE.md
+TODO.md

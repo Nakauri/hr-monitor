@@ -1,0 +1,89 @@
+name: Build Android APK
+
+# Build a debug APK of the Capacitor Android wrapper on every push to main
+# (and on demand via workflow_dispatch). The APK is uploaded as a workflow
+# artifact — open the run in GitHub, scroll to the bottom, download the
+# APK onto your phone, and sideload.
+#
+# We regenerate mobile/android/ on every run so the repo stays clean. Any
+# Android-side customizations (manifest edits, res overlays, gradle tweaks)
+# live in mobile/android-overlay/ and are copied on top of the freshly
+# generated project. Keeps the repo free of the ~2-GB Android build tree
+# without losing reproducibility.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hr_monitor.html'
+      - 'overlay.html'
+      - 'hrv_viewer.html'
+      - 'index.html'
+      - 'widget.css'
+      - 'widget.js'
+      - 'mobile/**'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm install
+
+      - name: Copy web files into mobile/www
+        working-directory: mobile
+        run: npm run copy-web
+
+      - name: Generate Android project
+        working-directory: mobile
+        run: npx cap add android
+        # "cap add android" is idempotent-ish: it refuses to overwrite if the
+        # android/ folder already exists. Since we regenerate every run and
+        # the folder isn't checked in, this always runs fresh.
+
+      - name: Apply Android overlay
+        working-directory: mobile
+        run: |
+          if [ -d android-overlay ]; then
+            cp -rv android-overlay/. android/
+            echo "[overlay] applied customizations from mobile/android-overlay/"
+          else
+            echo "[overlay] no overlay directory — using stock Capacitor Android project"
+          fi
+
+      - name: Capacitor sync
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hr-monitor-debug-${{ github.sha }}
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
