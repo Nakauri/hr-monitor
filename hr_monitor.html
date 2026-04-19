@@ -140,7 +140,9 @@
   body.watch-mode [data-section="chart"] .main-chart-wrap,
   body.watch-mode [data-section="events"] .posture-row,
   body.watch-mode [data-section="events"] .marker-input,
-  body.watch-mode [data-section="events"] .events { display: none; }
+  body.watch-mode [data-section="events"] .events,
+  body.watch-mode [data-section="settings"] .tabs,
+  body.watch-mode [data-section="settings"] .tab-panel { display: none; }
   .section-watch-empty { display: none; }
   .nav-copy.copied { background: var(--accent-rmssd); color: #0a1a14; }
   .obs-size-hint {
@@ -1057,6 +1059,7 @@
         <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
       </div>
       <div class="section-body">
+        <div class="section-watch-empty">Only available on the broadcasting device.</div>
         <div class="tabs">
           <button class="tab active" data-tab="widgets">Widgets</button>
           <button class="tab" data-tab="thresholds">Thresholds</button>
@@ -1380,7 +1383,47 @@
       ]},
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { labels: { color: '#9a9a9f', font: { size: 11 }, boxWidth: 12 } } },
+        // Share a single vertical cursor across both datasets: hovering at any
+        // X shows one tooltip with HR, RMSSD, and any palps + events that land
+        // at that timestamp. Avoids the fragmented-hover experience where
+        // each dataset popped its own tooltip.
+        interaction: { mode: 'index', intersect: false, axis: 'x' },
+        plugins: {
+          legend: { labels: { color: '#9a9a9f', font: { size: 11 }, boxWidth: 12 } },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            backgroundColor: 'rgba(10,10,10,0.92)',
+            borderColor: '#2a2a2a',
+            borderWidth: 1,
+            padding: 10,
+            titleColor: '#d8d8d8',
+            bodyColor: '#d8d8d8',
+            callbacks: {
+              title: (items) => {
+                if (!items.length) return '';
+                const mins = items[0].parsed.x;
+                const m = Math.floor(mins);
+                const s = Math.round((mins - m) * 60);
+                return m + ':' + String(s).padStart(2, '0');
+              },
+              afterBody: (items) => {
+                if (!items.length) return [];
+                const xAt = items[0].parsed.x;
+                const extra = [];
+                // Palpitation count in ±5 s window (matches the monitor's
+                // per-minute chip's own window).
+                const palpCount = (state.ectopicEvents || []).filter(e => Math.abs(e.t - xAt) < 5 / 60).length;
+                if (palpCount > 0) extra.push('Palps: ' + palpCount);
+                const matchedEvents = (state.events || []).filter(e => Math.abs(e.t - xAt) < 10 / 60);
+                matchedEvents.forEach(e => extra.push('Event: ' + e.label));
+                const matchedWarns = (state.warnings || []).filter(w => Math.abs(w.t - xAt) < 10 / 60);
+                matchedWarns.forEach(w => extra.push('Warning: ' + w.type));
+                return extra;
+              },
+            },
+          },
+        },
         scales: {
           x: { type: 'linear', title: { display: true, text: 'min', color: '#5a5a60', font: { size: 10 } }, ticks: { color: '#9a9a9f', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
           y: { position: 'left', ticks: { color: '#E88464', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
@@ -1911,6 +1954,10 @@
     getOrCreateBroadcastKey();
     reconnectRelay();
     updateStreamingUI();
+    // Force the watch iframe to rebuild with the new key the next time
+    // watch-mode activates.
+    watchFrameSrc = null;
+    if (typeof updateWatchMode === 'function') updateWatchMode();
   }
   let relaySocket = null;
   let relayReconnectTimer = null;
@@ -1979,8 +2026,8 @@
     setStreamingStatus(state.connState === 'live' ? 'live' : 'ready');
   }
   // Sends a control message regardless of broadcast toggle — used for the
-  // Take over button (tell another device to stop) so even a view-only
-  // Firefox can issue control signals.
+  // Stop session button (tell another device to disconnect) so even a
+  // view-only tab can issue control signals.
   function sendControlMessage(obj) {
     if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
     try { relaySocket.send(JSON.stringify(obj)); } catch (e) {}
@@ -1995,10 +2042,16 @@
       const dev = getDeviceIdentity();
       // Skip ourselves — no point listing our own device.
       if (msg.senderId === dev.id) return;
+      // startedAt is sticky: once we've recorded when a sender first appeared,
+      // keep that. If the sender omits startedAt in subsequent heartbeats the
+      // fallback Date.now() would otherwise reset the "X min" age label to
+      // "just now" on every presence tick.
+      const existing = activeBroadcasters.get(msg.senderId);
+      const startedAt = existing ? existing.startedAt : (msg.startedAt || msg.senderBooted || Date.now());
       activeBroadcasters.set(msg.senderId, {
-        label: msg.senderLabel || 'Unknown',
+        label: msg.senderLabel || (existing && existing.label) || 'Unknown',
         lastAt: Date.now(),
-        startedAt: msg.startedAt || msg.senderBooted || Date.now(),
+        startedAt,
       });
       renderBroadcastersPanel();
     } else if (msg.type === 'presence-end' && msg.senderId) {
@@ -2007,6 +2060,10 @@
       if (activeBroadcasters.delete(msg.senderId)) renderBroadcastersPanel();
     } else if (msg.type === 'control' && msg.action === 'stop') {
       const dev = getDeviceIdentity();
+      // Ignore echoes of our own stop emissions — the relay mirrors every
+      // publish back to every subscriber and we don't want to disconnect
+      // ourselves because someone else handed our control-stop back to us.
+      if (msg.senderId && msg.senderId === dev.id) return;
       if (msg.targetId === dev.id) {
         // Another device just took over. Disconnect and stop publishing.
         widgetPrefs.broadcast = false;
@@ -2023,17 +2080,23 @@
   function startPresenceHeartbeat() {
     if (presenceTimer) clearInterval(presenceTimer);
     presenceTimer = setInterval(() => {
-      // Only heartbeat when actually streaming HR right now. Otherwise a
-      // disconnected desktop keeps appearing as a live broadcaster on the
-      // phone for 15 s after the strap drops, which is confusing.
-      if (!isPublisherLive() || !state.startTime) return;
+      // Emit presence while a session is active AND we're either live or
+      // actively trying to reconnect. Watchers hold the slot open during the
+      // reconnect gap so the watch iframe doesn't flicker off and re-show
+      // the local preview every time the strap bounces.
+      const sessionActive = !!navigator.bluetooth && widgetPrefs.broadcast && !!state.startTime && state.connState !== 'idle';
+      if (!sessionActive) return;
+      if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
       const dev = getDeviceIdentity();
-      publishToRelay({
-        type: 'presence',
-        senderId: dev.id,
-        senderLabel: dev.label,
-        startedAt: state.startTime,
-      });
+      try {
+        relaySocket.send(JSON.stringify({
+          type: 'presence',
+          senderId: dev.id,
+          senderLabel: dev.label,
+          startedAt: state.startTime,
+          connState: state.connState,
+        }));
+      } catch (e) {}
     }, 5000);
   }
   // Clean up stale entries so the list doesn't linger after a broadcaster
@@ -2110,7 +2173,8 @@
   // strap doesn't re-advertise until the remote side has actually dropped.
   // User can press Connect strap manually once the other device releases it.
   function stopRemoteBroadcaster(targetId) {
-    sendControlMessage({ type: 'control', action: 'stop', targetId });
+    const dev = getDeviceIdentity();
+    sendControlMessage({ type: 'control', action: 'stop', targetId, senderId: dev.id });
     activeBroadcasters.delete(targetId);
     renderBroadcastersPanel();
   }
@@ -2132,6 +2196,14 @@
     // Keep the relay socket open either way — we still want to receive presence
     // heartbeats from other devices. Publishing is gated by isPublisherLive().
     if (!relaySocket || relaySocket.readyState === WebSocket.CLOSED) connectRelay();
+    // If the user just flipped broadcast OFF while we were live, emit a
+    // presence-end so other devices drop our row immediately instead of
+    // waiting for the 15-s stale cleanup. setConnState handles this on BLE
+    // drops; the toggle path wouldn't otherwise trigger it.
+    if (!widgetPrefs.broadcast && relaySocket && relaySocket.readyState === WebSocket.OPEN) {
+      const dev = getDeviceIdentity();
+      try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {}
+    }
     refreshRelayStatus();
   }
   function setStreamingStatus(s) {
@@ -2397,8 +2469,16 @@
     if (wakeLock) { try { await wakeLock.release(); } catch (e) {} wakeLock = null; }
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && device && device.gatt && device.gatt.connected && !wakeLock) {
+    if (document.visibilityState !== 'visible') return;
+    // Mobile browsers pause timers and may drop BLE while the tab is
+    // backgrounded. On return: re-acquire the wake lock (it gets released
+    // automatically on hide) and kick the reconnect loop if the strap has
+    // dropped but auto-reconnect is still armed.
+    if (device && device.gatt && device.gatt.connected && !wakeLock) {
       acquireWakeLock();
+    } else if (state.autoReconnect && device && device.gatt && !device.gatt.connected) {
+      setStatus('Tab returned — retrying strap...');
+      if (typeof tryReconnect === 'function') tryReconnect();
     }
   });
 
@@ -2511,9 +2591,10 @@
     // Relay status chip reflects "am I publishing HR right now?", which
     // depends on BLE state. Refresh whenever BLE state changes.
     if (typeof refreshRelayStatus === 'function') refreshRelayStatus();
-    // Tell other subscribers we've stopped producing data so they can drop
-    // us from their Active broadcasts list without waiting for 15-s timeout.
-    if (connState !== 'live' && relaySocket && relaySocket.readyState === WebSocket.OPEN && navigator.bluetooth && widgetPrefs.broadcast) {
+    // Only announce presence-end when we're fully done. Reconnecting is a
+    // transient state — we still want watchers to hold their slot open so
+    // the iframe doesn't flicker off while the strap bounces back.
+    if (connState === 'idle' && relaySocket && relaySocket.readyState === WebSocket.OPEN && navigator.bluetooth && widgetPrefs.broadcast) {
       const dev = getDeviceIdentity();
       try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {}
     }
@@ -2979,6 +3060,9 @@
           localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
           if (typeof reconnectRelay === 'function') reconnectRelay();
           if (typeof updateStreamingUI === 'function') updateStreamingUI();
+          // Invalidate the watch iframe cache so it rebuilds with the new key.
+          watchFrameSrc = null;
+          if (typeof updateWatchMode === 'function') updateWatchMode();
         }
       }
     } else {
@@ -3448,11 +3532,16 @@
       if (frame && desired && watchFrameSrc !== desired) {
         watchFrameSrc = desired;
         frame.src = desired;
-        frame.hidden = false;
       }
+      if (frame) frame.hidden = false;
       document.body.classList.add('watch-mode');
     } else {
       document.body.classList.remove('watch-mode');
+      // Re-hide the iframe so its cached DOM can't flash into view as a second
+      // widget next to the restored local preview — this is what the Comet
+      // screenshot hit when the phone's presence heartbeat stopped during a
+      // reconnecting loop and watch-mode deactivated.
+      if (frame) frame.hidden = true;
     }
   }
 
