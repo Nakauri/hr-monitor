@@ -491,16 +491,11 @@
   }
   button.primary:hover:not(:disabled) { background: #A3C8EF; }
 
-  /* Session toggle: one primary button that flips between Start (green) and
-     Stop (red). Replaces the old Connect / Disconnect / Reset / Export row.
-     Kebab sits to the right and holds the rare actions (Discard, Export). */
-  .session-control-row {
-    display: flex;
-    gap: 8px;
-    align-items: stretch;
-  }
+  /* Session toggle: one full-width primary button that flips between Start
+     (green) and Stop (red). Replaces the old Connect / Disconnect / Reset /
+     Export row. Export CSV lives with the autosave/storage cluster now. */
   .btn-session-toggle {
-    flex: 1;
+    width: 100%;
     font-size: 14px;
     padding: 10px 16px;
     font-weight: 700;
@@ -526,43 +521,6 @@
     color: var(--text-dim);
     border: 1px dashed var(--border-strong);
   }
-
-  .kebab-wrap { position: relative; }
-  .btn-kebab {
-    width: 42px; height: 42px;
-    padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-  }
-  .btn-kebab:hover { border-color: var(--border-strong); color: var(--text); }
-  .kebab-menu {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 6px);
-    min-width: 180px;
-    background: #0a0a0a;
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    padding: 4px;
-    z-index: 100;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  }
-  .kebab-menu button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 8px 12px;
-    background: transparent;
-    border: none;
-    color: var(--text);
-    font-size: 13px;
-    border-radius: 4px;
-  }
-  .kebab-menu button:hover { background: rgba(255,255,255,0.06); }
-  .kebab-menu button:disabled { color: var(--text-faint); cursor: not-allowed; }
-  .kebab-menu button:disabled:hover { background: transparent; }
 
   /* Toggle-switch row: inline label + switch for session-level on/off
      choices (currently: Broadcast to relay). Shared across any future
@@ -625,6 +583,49 @@
     background: var(--accent-rmssd);
   }
   .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
+
+  /* .toggle-row sets display: flex, which without this rule silently wins
+     against the HTML `hidden` attribute. Without this override, the
+     battopt-row was rendering on desktop even though HRMBatteryOpt is
+     never registered there. */
+  .toggle-row[hidden] { display: none; }
+
+  /* Broadcast key row — sits directly under the broadcast toggle so
+     no-sign-in users can see and copy the key that lets other devices /
+     OBS read their session. Head has label + short explanation; controls
+     row has the code + Copy + New buttons. */
+  .broadcast-key-row {
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+    margin-top: 10px;
+  }
+  .broadcast-key-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+  .broadcast-key-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .broadcast-key-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    line-height: 1.4;
+    flex: 1;
+    min-width: 200px;
+  }
+  .broadcast-key-controls {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+  }
 
   /* Nudge animation for the battery-optimisation row when the user taps
      Start session while still optimised. Draws the eye to the row + button
@@ -1191,18 +1192,7 @@
       <div class="section-body">
         <div class="status" id="status">Tap Start session to pair your strap and begin recording.</div>
         <div style="height: 10px;"></div>
-        <div class="session-control-row">
-          <button class="primary btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
-          <div class="kebab-wrap">
-            <button class="btn-kebab" id="session-kebab" aria-haspopup="menu" aria-expanded="false" aria-label="More session actions">
-              <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><circle cx="8" cy="3" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="8" cy="13" r="1.6"/></svg>
-            </button>
-            <div class="kebab-menu" id="session-kebab-menu" role="menu" hidden>
-              <button id="btn-discard" role="menuitem">Discard session data</button>
-              <button id="btn-export" role="menuitem">Export CSV</button>
-            </div>
-          </div>
-        </div>
+        <button class="primary btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
         <div class="battery-display" id="battery-display">Battery: —</div>
         <!-- Broadcast toggle lives here now (was buried in Settings → Widgets)
              — session-level choice belongs next to the Active broadcasts
@@ -1214,9 +1204,20 @@
           </label>
           <div class="toggle-text">
             <div class="toggle-label">Broadcast to relay</div>
-            <div class="toggle-desc" id="broadcast-toggle-desc">Share this session with OBS and other devices on your key.</div>
+            <div class="toggle-desc" id="broadcast-toggle-desc">Share this session with OBS and other devices on your key. No sign-in required.</div>
           </div>
           <span class="streaming-status" id="relay-status">offline</span>
+        </div>
+        <div class="broadcast-key-row">
+          <div class="broadcast-key-head">
+            <span class="broadcast-key-label">Broadcast key</span>
+            <span class="broadcast-key-hint">Paste this on another device or in OBS to read this session.</span>
+          </div>
+          <div class="broadcast-key-controls">
+            <code class="streaming-key" id="broadcast-key-display">—</code>
+            <button id="copy-broadcast-key" title="Copy broadcast key to clipboard">Copy</button>
+            <button id="regenerate-key" title="Create a new broadcast key. Any OBS URL or other device using the old key will stop working.">New</button>
+          </div>
         </div>
         <div class="autosave-row">
           <span class="autosave-label">Auto-save folder:</span>
@@ -1224,6 +1225,7 @@
           <span class="autosave-status" id="autosave-status">idle</span>
           <button id="autosave-pick">Choose...</button>
           <button id="autosave-clear" style="display: none;">Clear</button>
+          <button id="btn-export" title="Download the current session as CSV">Export CSV</button>
         </div>
         <div class="autosave-row">
           <span class="autosave-label">Drive backup:</span>
@@ -1278,10 +1280,8 @@
           </div>
           <div style="height: 18px;"></div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
-          <div class="streaming-row" style="margin-top: 8px;">
-            <span class="streaming-label">Broadcast key:</span>
-            <code class="streaming-key" id="broadcast-key-display">—</code>
-            <button id="regenerate-key" title="Create a new broadcast key (invalidates the old URL)">Regenerate</button>
+          <div style="font-size: 11px; color: var(--text-faint); margin-bottom: 10px; line-height: 1.4;">
+            The URL already embeds your broadcast key. Manage the key itself from Connection > Broadcast key.
           </div>
           <div class="streaming-row" style="margin-top: 8px;">
             <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
@@ -4182,29 +4182,28 @@
     const sessionToggle = $('session-toggle');
     sessionToggle.addEventListener('click', onSessionToggleClick);
     updateSessionToggle();
-    // Kebab menu holds the rare actions that used to be buttons in the row:
-    // mid-session discard (throw away data without saving) and export CSV.
-    const kebabBtn = $('session-kebab');
-    const kebabMenu = $('session-kebab-menu');
-    kebabBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const open = !kebabMenu.hidden;
-      kebabMenu.hidden = open;
-      kebabBtn.setAttribute('aria-expanded', String(!open));
-    });
-    document.addEventListener('click', () => { kebabMenu.hidden = true; kebabBtn.setAttribute('aria-expanded', 'false'); });
-    $('btn-discard').addEventListener('click', () => {
-      kebabMenu.hidden = true;
-      if (!state.startTime) { setStatus('No session to discard.'); return; }
-      if (!confirm('Discard this session? The data will not be saved.')) return;
-      try { if (typeof disconnect === 'function') disconnect(); } catch (e) {}
-      resetSession();
-      setStatus('Session discarded.');
-    });
-    $('btn-export').addEventListener('click', () => {
-      kebabMenu.hidden = true;
-      exportCSV();
-    });
+    // Export CSV sits in the autosave row so it's next to the other storage
+    // controls. No mid-session "discard" action — Stop already finalizes +
+    // clears, and Start is always a fresh recording.
+    $('btn-export').addEventListener('click', exportCSV);
+    // Copy broadcast key for users setting up a second device or pasting
+    // into OBS manually. Brief "Copied!" feedback on the button so the user
+    // sees the action landed without needing a toast.
+    const copyKeyBtn = $('copy-broadcast-key');
+    if (copyKeyBtn) {
+      copyKeyBtn.addEventListener('click', async () => {
+        const key = getOrCreateBroadcastKey();
+        if (!key) return;
+        try {
+          await navigator.clipboard.writeText(key);
+          const original = copyKeyBtn.textContent;
+          copyKeyBtn.textContent = 'Copied!';
+          setTimeout(() => { copyKeyBtn.textContent = original; }, 1200);
+        } catch (e) {
+          setStatus('Copy failed. Long-press the key to select it.', 'error');
+        }
+      });
+    }
     $('autosave-pick').addEventListener('click', pickAutoSaveFolder);
     $('autosave-clear').addEventListener('click', clearAutoSaveFolder);
     restoreAutoSaveFolder();
@@ -4212,7 +4211,6 @@
     initGoogleAuth();
     $('drive-signin').addEventListener('click', driveSignIn);
     $('drive-signout').addEventListener('click', driveSignOut);
-    // (Old Reset / Export buttons removed — actions now live in the kebab.)
     $('add-marker').addEventListener('click', addMarker);
     $('marker-label').addEventListener('keydown', e => { if (e.key === 'Enter') addMarker(); });
     document.querySelectorAll('.posture-btn').forEach(btn => {
