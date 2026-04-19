@@ -43,15 +43,37 @@
   // Contract: returns a Promise<{ accessToken, expiresIn }> on success, or
   // throws with a user-friendly message. Called with no arguments.
   window.__hrMonitorNativeDriveSignIn = async function() {
-    await ensureInit();
-    const user = await GoogleAuth.signIn();
+    try {
+      await ensureInit();
+    } catch (e) {
+      console.error('[drive-auth-native] initialize failed:', e);
+      throw new Error('Google Sign-In init failed: ' + (e && e.message ? e.message : String(e)));
+    }
+    let user;
+    try {
+      user = await GoogleAuth.signIn();
+    } catch (e) {
+      console.error('[drive-auth-native] signIn rejected:', e);
+      // Google's most common native errors. Translate into something actionable.
+      const msg = (e && e.message) ? e.message : String(e);
+      if (/DEVELOPER_ERROR|10/i.test(msg)) {
+        throw new Error('Google rejected this build\'s signature. Check that the keystore SHA-1 is registered with the Android OAuth client in Google Cloud Console.');
+      }
+      if (/NETWORK_ERROR|7/.test(msg)) {
+        throw new Error('Network error contacting Google. Check the phone\'s internet connection.');
+      }
+      if (/SIGN_IN_CANCELLED|12501/.test(msg)) {
+        throw new Error('Sign-in cancelled.');
+      }
+      throw new Error('Google Sign-In failed: ' + msg);
+    }
     if (!user || !user.authentication || !user.authentication.accessToken) {
-      throw new Error('Google sign-in returned no token');
+      throw new Error('Google sign-in returned no access token. Play Services may be missing on this device.');
     }
     return {
       accessToken: user.authentication.accessToken,
-      // The plugin doesn't return an expires_in on the RC. 3600 is the Google
-      // access-token default. Worst case the silent-refresh path kicks in.
+      // The plugin doesn't return expires_in on the RC. 3600 is Google's
+      // default; silent-refresh will bail us out if it's actually shorter.
       expiresIn: 3600,
     };
   };
