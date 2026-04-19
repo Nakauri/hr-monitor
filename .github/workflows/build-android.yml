@@ -1,9 +1,12 @@
 name: Build Android APK
 
 # Build a debug APK of the Capacitor Android wrapper on every push to main
-# (and on demand via workflow_dispatch). The APK is uploaded as a workflow
-# artifact — open the run in GitHub, scroll to the bottom, download the
-# APK onto your phone, and sideload.
+# (and on demand via workflow_dispatch). The APK is:
+#   1. Uploaded as a workflow artifact (zipped — requires GitHub login).
+#   2. Published to a rolling "android-latest" GitHub Release so it's
+#      available at a stable public URL:
+#      https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk
+#      That URL is what index.html's Download for Android button links to.
 #
 # We regenerate mobile/android/ on every run so the repo stays clean. Any
 # Android-side customizations (manifest edits, res overlays, gradle tweaks)
@@ -24,6 +27,10 @@ on:
       - 'mobile/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
+
+# softprops/action-gh-release needs write access to create/update releases.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -80,10 +87,32 @@ jobs:
         working-directory: mobile/android
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Rename APK for release
+        run: |
+          mkdir -p release
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk release/hr-monitor.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: hr-monitor-debug-${{ github.sha }}
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          path: release/hr-monitor.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish rolling GitHub Release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: Android build (rolling latest)
+          body: |
+            Latest Android build from `main`.
+
+            Install from your phone's browser:
+            https://github.com/${{ github.repository }}/releases/latest/download/hr-monitor.apk
+
+            Built from commit ${{ github.sha }}.
+          files: release/hr-monitor.apk
+          prerelease: false
+          make_latest: true

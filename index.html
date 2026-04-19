@@ -80,6 +80,20 @@
     margin-top: 6px;
     line-height: 1.5;
   }
+  .card-title .accent-android { color: #5DCAA5; font-weight: 900; }
+  .card.android .card-title::after {
+    content: 'APK';
+    margin-left: auto;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    background: rgba(93,202,165,0.12);
+    border: 1px solid rgba(93,202,165,0.35);
+    color: var(--accent-rmssd);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+  .card.android .card-title { justify-content: flex-start; }
   .footer {
     margin-top: 28px;
     font-size: 11px;
@@ -100,6 +114,10 @@
       <a class="card" href="./hrv_viewer.html">
         <div class="card-title"><span class="accent-line">∿</span> Session viewer</div>
         <div class="card-desc">Browse saved sessions by month, week, and day. Autonomic interpretation and palpitation detection.</div>
+      </a>
+      <a class="card android" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">
+        <div class="card-title"><span class="accent-android">▶</span> Download for Android</div>
+        <div class="card-desc">Native Android build. Keeps recording while the screen is off or the app is in the background. Sideload the APK; no Play Store. Updated automatically on every push to main.</div>
       </a>
     </div>
     <div class="footer">This is not a medical tool.</div>
