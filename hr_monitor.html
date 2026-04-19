@@ -110,6 +110,17 @@
      body-class toggle, so the normal widget DOM stays intact (early
      iterations replaced overlay-zone.innerHTML and that broke initCharts on
      Firefox reloads). */
+  /* Offline mode hides everything that only matters when syncing or
+     broadcasting: the broadcast toggle, Drive backup row, Active
+     broadcasters panel, OBS-specific nav links. Mode is set inline in a
+     <script> at the top of <body> from ?mode= or localStorage. */
+  body.mode-offline #broadcast-toggle-row,
+  body.mode-offline .broadcasters-panel,
+  body.mode-offline .drive-backup-row,
+  body.mode-offline .nav-preview,
+  body.mode-offline .nav-copy { display: none !important; }
+  body.mode-offline [data-obs-only] { display: none !important; }
+
   body.watch-mode #overlay-zone {
     padding: 0;
     background: #0a0a0a;
@@ -632,18 +643,6 @@
   #autosave-toggle.has-folder { color: var(--warn-high); }
 
 
-  /* Nudge animation for the battery-optimisation row when the user taps
-     Start session while still optimised. Draws the eye to the row + button
-     without popping a blocking modal. Auto-removes after ~3 s. */
-  @keyframes battopt-pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(226,75,74,0); border-color: var(--border); }
-    25%  { box-shadow: 0 0 0 4px rgba(226,75,74,0.18); border-color: var(--warn-high); }
-    100% { box-shadow: 0 0 0 0 rgba(226,75,74,0); border-color: var(--border); }
-  }
-  .battopt-row.battopt-nudge {
-    animation: battopt-pulse 2.6s ease-out 1;
-    border-top-color: var(--warn-high);
-  }
   button.claude {
     background: #d97757;
     color: #fff;
@@ -1087,6 +1086,28 @@
 </style>
 </head>
 <body>
+<script>
+  // Mode: "online" (Drive sync + relay broadcast + multi-device) or "offline"
+  // (local recording only, no sign-in, no broadcast). Chosen at the index
+  // page ("Record online" / "Record locally") and passed via ?mode=. Stored
+  // in localStorage so subsequent loads keep the choice. Applied as a body
+  // class so CSS can hide irrelevant rows without wrapping everything in JS
+  // conditionals. Default is "online" to preserve the existing behaviour
+  // for bookmarked URLs and deep links from the old index.
+  (function () {
+    try {
+      var p = new URLSearchParams(location.search).get('mode');
+      var stored = localStorage.getItem('hr_monitor_mode');
+      var mode = (p === 'online' || p === 'offline') ? p : (stored || 'online');
+      if (p && p !== stored) localStorage.setItem('hr_monitor_mode', mode);
+      document.body.classList.add('mode-' + mode);
+      window.__hrMonitorMode = mode;
+    } catch (e) {
+      document.body.classList.add('mode-online');
+      window.__hrMonitorMode = 'online';
+    }
+  })();
+</script>
 <nav class="app-nav">
   <a class="app-nav-title" href="./index.html" target="_blank" rel="noopener">HR Monitor <span style="color: var(--accent-hr);">·</span></a>
   <a class="app-nav-link active" href="./hr_monitor.html">Live monitor</a>
@@ -1229,7 +1250,7 @@
             </svg>
           </button>
         </div>
-        <div class="autosave-row">
+        <div class="autosave-row drive-backup-row">
           <span class="autosave-label">Drive backup:</span>
           <span class="autosave-folder" id="drive-status">not signed in</span>
           <button id="drive-signin">Sign in with Google</button>
@@ -1280,37 +1301,39 @@
               </select>
             </label>
           </div>
-          <div style="height: 18px;"></div>
-          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
-          <div style="font-size: 11px; color: var(--text-faint); margin-bottom: 10px; line-height: 1.4;">
-            The URL already embeds your broadcast key. Manage the key itself from Connection > Broadcast key.
-          </div>
-          <div class="streaming-row" style="margin-top: 8px;">
-            <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
-          </div>
-          <div class="streaming-row" style="margin-top: 10px; align-items: flex-start;">
-            <span class="streaming-label" style="margin-top: 6px;">Source size:</span>
-            <div class="obs-size-fields">
-              <div class="obs-size-field">
-                <span class="obs-size-label">Width</span>
-                <div class="obs-size-row">
-                  <input type="number" min="160" max="2000" step="1" class="obs-size-value" id="obs-size-w" />
-                  <button class="obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
+          <div data-obs-only>
+            <div style="height: 18px;"></div>
+            <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
+            <div style="font-size: 11px; color: var(--text-faint); margin-bottom: 10px; line-height: 1.4;">
+              The URL already embeds your broadcast key. Switch to online mode on the landing page to use OBS streaming.
+            </div>
+            <div class="streaming-row" style="margin-top: 8px;">
+              <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
+            </div>
+            <div class="streaming-row" style="margin-top: 10px; align-items: flex-start;">
+              <span class="streaming-label" style="margin-top: 6px;">Source size:</span>
+              <div class="obs-size-fields">
+                <div class="obs-size-field">
+                  <span class="obs-size-label">Width</span>
+                  <div class="obs-size-row">
+                    <input type="number" min="160" max="2000" step="1" class="obs-size-value" id="obs-size-w" />
+                    <button class="obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
+                  </div>
                 </div>
-              </div>
-              <div class="obs-size-field">
-                <span class="obs-size-label">Height</span>
-                <div class="obs-size-row">
-                  <input type="number" min="80" max="2000" step="1" class="obs-size-value" id="obs-size-h" />
-                  <button class="obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
+                <div class="obs-size-field">
+                  <span class="obs-size-label">Height</span>
+                  <div class="obs-size-row">
+                    <input type="number" min="80" max="2000" step="1" class="obs-size-value" id="obs-size-h" />
+                    <button class="obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div style="font-size: 11px; color: var(--text-faint); margin-top: 8px; line-height: 1.4;">
-            Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
-            Paste the <b>Width</b> and <b>Height</b> numbers into OBS's matching fields to avoid empty space.
-            Dimensions auto-update as you change widget toggles.
+            <div style="font-size: 11px; color: var(--text-faint); margin-top: 8px; line-height: 1.4;">
+              Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
+              Paste the <b>Width</b> and <b>Height</b> numbers into OBS's matching fields to avoid empty space.
+              Dimensions auto-update as you change widget toggles.
+            </div>
           </div>
         </div>
 
@@ -2590,12 +2613,16 @@
     }
     row.hidden = false;
     const ignoring = await window.HRMBatteryOpt.isIgnoring();
+    // Row now only surfaces when the OS is still optimising the app. Once
+    // the user accepts the prompt that fires on first Start, the row
+    // disappears. If they later revoke permission in Android settings, it
+    // reappears next time refreshBattOpt runs. Settings stay quiet in the
+    // steady state — no green-chip noise.
     if (ignoring === true) {
-      chip.textContent = 'unrestricted';
-      chip.className = 'streaming-status live';
-      desc.textContent = 'This app is exempted from battery optimisation. Sessions keep running with the screen off.';
-      btn.style.display = 'none';
-    } else if (ignoring === false) {
+      row.hidden = true;
+      return;
+    }
+    if (ignoring === false) {
       chip.textContent = 'optimised';
       chip.className = 'streaming-status error';
       desc.textContent = 'Android will pause recording after a few minutes with the screen off. Tap Allow to keep sessions running in the background.';
@@ -2788,26 +2815,24 @@
       updateSessionToggle();
       setStatus('Session stopped.');
     } else {
-      try { await connect(); } catch (e) { /* connect already surfaces errors */ }
-      updateSessionToggle();
-      // If we're on native and still optimised, nudge the battopt row into
-      // the user's attention. No modal, just a brief pulse + scroll into
-      // view so they notice the Allow button.
+      // Silent permission chain. On native, if battery optimisation is
+      // still on, fire the system request BEFORE connect so the dialog
+      // appears with a clear "why did this pop up" context — the user just
+      // tapped Start. Chaining it after connect means the dialog competes
+      // for focus with the BLE picker, which is worse UX. Non-blocking on
+      // the Android side: we don't await user decision, just kick it off.
       if (window.HRMBatteryOpt && window.HRMBatteryOpt.isAvailable) {
         try {
           const ign = await window.HRMBatteryOpt.isIgnoring();
           if (ign === false) {
-            const row = document.getElementById('battopt-row');
-            if (row) {
-              row.classList.remove('battopt-nudge');
-              void row.offsetWidth; // restart animation
-              row.classList.add('battopt-nudge');
-              row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              setTimeout(() => row.classList.remove('battopt-nudge'), 2800);
-            }
+            // Fire the system dialog. User's choice is read back by
+            // visibilitychange when the tab regains focus.
+            window.HRMBatteryOpt.request().catch(() => {});
           }
         } catch (e) { /* best-effort, non-fatal */ }
       }
+      try { await connect(); } catch (e) { /* connect already surfaces errors */ }
+      updateSessionToggle();
     }
   }
 
@@ -3966,7 +3991,14 @@
   function loadWidgetPrefs() {
     try {
       const saved = JSON.parse(localStorage.getItem('hr_monitor_widget_prefs') || 'null');
-      if (saved) Object.assign(widgetPrefs, saved);
+      if (saved) {
+        Object.assign(widgetPrefs, saved);
+      } else if (window.__hrMonitorMode === 'online') {
+        // Fresh install on the online mode landing — default broadcast ON
+        // so the user doesn't have to dig through Settings to start sharing
+        // their stream. Offline mode keeps broadcast off (its raison d'être).
+        widgetPrefs.broadcast = true;
+      }
     } catch(e) {}
     applyWidgetPrefs();
   }
