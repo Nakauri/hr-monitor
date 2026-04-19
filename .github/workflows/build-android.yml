@@ -79,12 +79,70 @@ jobs:
             echo "[overlay] no overlay directory — using stock Capacitor Android project"
           fi
 
+      - name: Inject server_client_id into Android strings
+        working-directory: mobile/android
+        run: |
+          # @codetrix-studio/capacitor-google-auth reads server_client_id from
+          # strings.xml at runtime. Inject it if the Capacitor-generated file
+          # doesn't have it already.
+          STRINGS_FILE="app/src/main/res/values/strings.xml"
+          if ! grep -q "server_client_id" "$STRINGS_FILE"; then
+            sed -i 's|</resources>|    <string name="server_client_id">103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com</string>\n</resources>|' "$STRINGS_FILE"
+            echo "[strings] server_client_id injected"
+          fi
+
+      - name: Check for signing secret
+        id: check-signing
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 not set — building with Capacitor debug keystore. Google Sign-In will fail until a stable keystore is configured."
+          fi
+
+      - name: Configure release signing
+        if: steps.check-signing.outputs.has_keystore == 'true'
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          # Write the keystore from the GH secret. Append a signingConfigs
+          # block + apply it to both debug and release buildTypes, so the
+          # APK has a stable SHA-1 that matches what Google Cloud Console
+          # has registered for our Android OAuth client.
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > app/release.keystore
+          cat >> app/build.gradle <<'GRADLE'
+
+android {
+    signingConfigs {
+        release {
+            storeFile file("release.keystore")
+            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.release }
+        release { signingConfig signingConfigs.release }
+    }
+}
+GRADLE
+          echo "[signing] release keystore wired"
+
       - name: Capacitor sync
         working-directory: mobile
         run: npx cap sync android
 
       - name: Build debug APK
         working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Rename APK for release
