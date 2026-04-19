@@ -29,17 +29,31 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
   });
 })();
 
+function dMark(key, val) { try { window[key] = val; } catch (e) {} }
+
 function init(cap) {
-  'use strict';
+  try {
+    'use strict';
+    dMark('__hrMonitorDriveAuthRanInit', true);
+    const platform = cap.getPlatform ? cap.getPlatform() : 'unknown';
+    dMark('__hrMonitorDriveAuthPlatform', platform);
+    const isNative = cap.isNativePlatform && cap.isNativePlatform();
+    dMark('__hrMonitorDriveAuthIsNative', !!isNative);
+    if (!isNative) { console.info('[drive-auth-native] not native, skipping native GoogleAuth.'); return; }
 
-  const isNative = cap.isNativePlatform && cap.isNativePlatform();
-  if (!isNative) { console.info('[drive-auth-native] not native, skipping native GoogleAuth.'); return; }
-
-  const GoogleAuth = cap.registerPlugin('GoogleAuth');
-  if (!GoogleAuth) {
-    console.error('[drive-auth-native] GoogleAuth plugin missing — bail.');
-    return;
-  }
+    let GoogleAuth = null;
+    try {
+      GoogleAuth = cap.registerPlugin('GoogleAuth');
+    } catch (e) {
+      dMark('__hrMonitorDriveAuthLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
+      console.error('[drive-auth-native] registerPlugin threw:', e);
+    }
+    dMark('__hrMonitorDriveAuthGotPlugin', !!GoogleAuth);
+    if (!GoogleAuth) {
+      console.error('[drive-auth-native] GoogleAuth plugin missing — bail.');
+      dMark('__hrMonitorDriveAuthLastError', (window.__hrMonitorDriveAuthLastError || '') + ' / GoogleAuth null after registerPlugin');
+      return;
+    }
 
   // Web OAuth client ID from hr_monitor.html. Used as serverClientId — the
   // plugin's native Google Sign-In SDK uses this to request an access token
@@ -104,5 +118,10 @@ function init(cap) {
     try { await GoogleAuth.signOut(); } catch (e) { console.warn('[drive-auth-native] signOut:', e); }
   };
 
-  console.info('[drive-auth-native] native Google Sign-In override wired.');
+    dMark('__hrMonitorDriveAuthRegistered', true);
+    console.info('[drive-auth-native] native Google Sign-In override wired.');
+  } catch (err) {
+    dMark('__hrMonitorDriveAuthLastError', 'outer: ' + (err && err.message ? err.message : String(err)));
+    console.error('[drive-auth-native] unhandled error in init:', err);
+  }
 }

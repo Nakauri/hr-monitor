@@ -24,30 +24,40 @@ function whenReady(cb) {
   }
 }
 
-whenReady(function() {
-  'use strict';
-  const cap = window.Capacitor;
-  try { window.__hrMonitorBleAdapterCapacitorAvailable = !!cap; } catch (e) {}
-  if (!cap) {
-    console.info('[ble-adapter] no Capacitor bridge — running as web, leaving navigator.bluetooth alone.');
-    return;
-  }
-  const isNative = cap.isNativePlatform && cap.isNativePlatform();
-  if (!isNative) {
-    console.info('[ble-adapter] Capacitor present but not native — skipping BLE patch.');
-    return;
-  }
+function setMark(key, val) { try { window[key] = val; } catch (e) {} }
 
-  let BleClient = null;
+whenReady(function() {
   try {
-    BleClient = cap.registerPlugin('BluetoothLe');
-  } catch (e) {
-    console.error('[ble-adapter] registerPlugin failed:', e);
-  }
-  if (!BleClient) {
-    console.error('[ble-adapter] Capacitor BluetoothLe plugin missing — bail.');
-    return;
-  }
+    'use strict';
+    setMark('__hrMonitorBleAdapterRanInit', true);
+    const cap = window.Capacitor;
+    setMark('__hrMonitorBleAdapterCapacitorAvailable', !!cap);
+    if (!cap) {
+      console.info('[ble-adapter] no Capacitor bridge — running as web, leaving navigator.bluetooth alone.');
+      return;
+    }
+    const platform = cap.getPlatform ? cap.getPlatform() : 'unknown';
+    setMark('__hrMonitorBleAdapterPlatform', platform);
+    const isNative = cap.isNativePlatform && cap.isNativePlatform();
+    setMark('__hrMonitorBleAdapterIsNative', !!isNative);
+    if (!isNative) {
+      console.info('[ble-adapter] Capacitor present but not native — skipping BLE patch.');
+      return;
+    }
+
+    let BleClient = null;
+    try {
+      BleClient = cap.registerPlugin('BluetoothLe');
+    } catch (e) {
+      console.error('[ble-adapter] registerPlugin failed:', e);
+      setMark('__hrMonitorBleAdapterLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
+    }
+    setMark('__hrMonitorBleAdapterGotPlugin', !!BleClient);
+    if (!BleClient) {
+      console.error('[ble-adapter] Capacitor BluetoothLe plugin missing — bail.');
+      setMark('__hrMonitorBleAdapterLastError', (window.__hrMonitorBleAdapterLastError || '') + ' / BleClient null after registerPlugin');
+      return;
+    }
 
   // Numeric shortcodes (0x180D, 0x2A37) → full 128-bit UUID. The plugin
   // requires the full form on Android.
@@ -210,18 +220,21 @@ whenReady(function() {
     async requestDevice(options) { return requestDevice(options); },
     getAvailability: async () => true,
   };
-  try {
-    Object.defineProperty(navigator, 'bluetooth', {
-      value: fakeBluetooth,
-      writable: false,
-      configurable: true,
-    });
-    console.info('[ble-adapter] navigator.bluetooth patched for Capacitor (raw plugin).');
-  } catch (e) {
-    navigator.bluetooth = fakeBluetooth;
-    console.info('[ble-adapter] navigator.bluetooth assigned for Capacitor (raw plugin).');
+    try {
+      Object.defineProperty(navigator, 'bluetooth', {
+        value: fakeBluetooth,
+        writable: false,
+        configurable: true,
+      });
+      console.info('[ble-adapter] navigator.bluetooth patched for Capacitor (raw plugin).');
+    } catch (e) {
+      navigator.bluetooth = fakeBluetooth;
+      console.info('[ble-adapter] navigator.bluetooth assigned for Capacitor (raw plugin).');
+    }
+    try { navigator.bluetooth.__capacitorPatched = true; } catch (e) {}
+    setMark('__hrMonitorBleAdapterPatched', true);
+  } catch (err) {
+    setMark('__hrMonitorBleAdapterLastError', 'outer: ' + (err && err.message ? err.message : String(err)));
+    console.error('[ble-adapter] unhandled error in init:', err);
   }
-  // Marker so diagnostics can confirm the patch actually ran, not just
-  // that navigator.bluetooth is truthy.
-  try { navigator.bluetooth.__capacitorPatched = true; } catch (e) {}
 });
