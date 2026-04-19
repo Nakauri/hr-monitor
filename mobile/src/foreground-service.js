@@ -132,6 +132,14 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
           updateTimer = setInterval(flushPending, 1000);
           fgsMark('__hrMonitorFgsStarted', true);
           log('fgs.startForegroundService resolved');
+          // Acquire our own PARTIAL_WAKE_LOCK. The capawesome plugin declares
+          // the permission but doesn't hold a wake lock, so Android Doze
+          // (Light Idle ~5 min, Deep Doze ~30 min) throttles CPU even with
+          // the FGS up. Non-blocking on failure — session still records, just
+          // may get throttled.
+          if (window.HRMWakeLock && window.HRMWakeLock.isAvailable) {
+            window.HRMWakeLock.acquire().catch(() => {});
+          }
           return true;
         } catch (e) {
           const emsg = e && e.message ? e.message : String(e);
@@ -151,6 +159,12 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
         pendingUpdate = null;
         if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
         fgsMark('__hrMonitorFgsStarted', false);
+        // Release the wake lock so the CPU is free to idle between
+        // sessions. WakeLockPlugin is idempotent on repeated release, safe
+        // to call unconditionally.
+        if (window.HRMWakeLock && window.HRMWakeLock.isAvailable) {
+          window.HRMWakeLock.release().catch(() => {});
+        }
       }
 
       function update(title, body) {

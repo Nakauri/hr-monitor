@@ -108,6 +108,11 @@
       battoptGotPlugin: !!window.__hrMonitorBatteryOptGotPlugin,
       battoptRegistered: !!window.__hrMonitorBatteryOptRegistered,
       battoptLastError: window.__hrMonitorBatteryOptLastError || null,
+      wakeLockLoaded: !!window.__hrMonitorWakeLockLoaded,
+      wakeLockRanInit: !!window.__hrMonitorWakeLockRanInit,
+      wakeLockGotPlugin: !!window.__hrMonitorWakeLockGotPlugin,
+      wakeLockRegistered: !!window.__hrMonitorWakeLockRegistered,
+      wakeLockLastError: window.__hrMonitorWakeLockLastError || null,
       userAgent: navigator.userAgent,
       localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
       driveSignedIn: !!localStorage.getItem('hr_monitor_drive_token'),
@@ -377,6 +382,13 @@
           ['4. registered', yn(d.battoptRegistered), d.isNative ? ok(d.battoptRegistered) : ''],
           ['last error', d.battoptLastError || 'none', d.battoptLastError ? 'err' : 'ok'],
         ])}
+        ${rows('Wake lock (CPU-on during session)', [
+          ['1. script loaded', yn(d.wakeLockLoaded), d.isNative ? ok(d.wakeLockLoaded) : ''],
+          ['2. init ran', yn(d.wakeLockRanInit), d.isNative ? ok(d.wakeLockRanInit) : ''],
+          ['3. got plugin', yn(d.wakeLockGotPlugin), d.isNative ? ok(d.wakeLockGotPlugin) : ''],
+          ['4. registered', yn(d.wakeLockRegistered), d.isNative ? ok(d.wakeLockRegistered) : ''],
+          ['last error', d.wakeLockLastError || 'none', d.wakeLockLastError ? 'err' : 'ok'],
+        ])}
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
@@ -443,6 +455,10 @@
     lines.push('  loaded:   ' + (d.battoptLoaded ? 'yes' : 'no'));
     lines.push('  plugin:   ' + (d.battoptGotPlugin ? 'yes' : 'no'));
     lines.push('  error:    ' + (d.battoptLastError || 'none'));
+    lines.push('WakeLock:');
+    lines.push('  loaded:   ' + (d.wakeLockLoaded ? 'yes' : 'no'));
+    lines.push('  plugin:   ' + (d.wakeLockGotPlugin ? 'yes' : 'no'));
+    lines.push('  error:    ' + (d.wakeLockLastError || 'none'));
     lines.push('Broadcast:  ' + (d.localBroadcastKey ? 'key set' : 'no key'));
     lines.push('User agent: ' + d.userAgent);
     const events = readLog();
