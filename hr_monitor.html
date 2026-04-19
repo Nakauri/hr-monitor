@@ -1291,8 +1291,20 @@
         offset += 2;
       }
     }
+    // Verification aid — append ?debug=1 to the URL and each BLE packet is
+    // logged with raw hex alongside the parsed HR/RR so you can cross-check
+    // against a second tool (Coospo Ride app, Polar Flow, nRF Connect).
+    if (debugBLE) {
+      try {
+        const hex = Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        const ibi = rrs.map(r => r.toFixed(0)).join(', ');
+        console.log('[HR]', { hr, rrs: ibi, bytes: hex, flags: '0x' + flags.toString(16) });
+      } catch (e) {}
+    }
     return { hr, rrs };
   }
+  const debugBLE = new URLSearchParams(location.search).get('debug') === '1';
+  if (debugBLE) console.log('[HR] debug=1 — each BLE notification will be logged with raw hex.');
 
   function computeRMSSD(rrs) {
     if (rrs.length < 2) return null;
@@ -2139,20 +2151,41 @@
       return;
     }
     if (panel) panel.hidden = false;
+    const driveReady = !!driveAccessToken;
     const rows = entries.map(e => {
       const ageMin = Math.max(0, Math.round((now - e.startedAt) / 60000));
       const ageLabel = ageMin < 1 ? 'just now' : (ageMin < 60 ? `${ageMin} min` : `${Math.floor(ageMin / 60)}h ${ageMin % 60}m`);
       const suffix = e.self ? ' (this device)' : '';
+      // Stop session on remote rows depends on the shared relay key. Without
+      // Drive sign-in the control message goes nowhere — disable with a
+      // tooltip that tells the user what to do.
+      const remoteDisabled = !e.self && !driveReady;
+      const btnTitle = remoteDisabled
+        ? 'Sign into Google Drive on both devices so Stop session can reach this device.'
+        : '';
       return `
         <div class="broadcaster-row${e.self ? ' is-self' : ''}" data-id="${e.id}">
           <span class="broadcaster-dot"></span>
           <span class="broadcaster-label">${escapeText(e.label)}${suffix}</span>
           <span class="broadcaster-time">${ageLabel}</span>
-          <button class="broadcaster-takeover" data-id="${e.id}" data-self="${e.self ? '1' : '0'}">Stop session</button>
+          <button class="broadcaster-takeover" data-id="${e.id}" data-self="${e.self ? '1' : '0'}"${remoteDisabled ? ' disabled' : ''} title="${btnTitle}">Stop session</button>
         </div>
       `;
     });
     list.innerHTML = rows.join('');
+    // Persistent hint shown whenever there are remote rows but Drive isn't
+    // signed in, so the user isn't left guessing why Stop session is inert.
+    const hintEl = panel ? panel.querySelector('.broadcasters-hint') : null;
+    if (hintEl) {
+      const hasRemote = entries.some(e => !e.self);
+      if (hasRemote && !driveReady) {
+        hintEl.innerHTML = 'Cross-device Stop session needs Google Drive sign-in on both devices so they share a relay key. <a href="#" id="broadcasters-hint-signin">Sign in</a>.';
+        const link = hintEl.querySelector('#broadcasters-hint-signin');
+        if (link) link.addEventListener('click', (ev) => { ev.preventDefault(); const btn = document.getElementById('drive-signin'); if (btn) btn.click(); });
+      } else {
+        hintEl.textContent = 'Other devices currently broadcasting to your relay key. Stop session tells the remote device to disconnect its strap. Once that happens you can Connect strap here.';
+      }
+    }
     list.querySelectorAll('.broadcaster-takeover').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.dataset.self === '1') stopLocalBroadcast();
@@ -2173,6 +2206,19 @@
   // strap doesn't re-advertise until the remote side has actually dropped.
   // User can press Connect strap manually once the other device releases it.
   function stopRemoteBroadcaster(targetId) {
+    // Stop session sends a control message over the relay to the target's
+    // senderId. It only actually reaches the remote device when both devices
+    // share the same relay key (which is what Google Drive sync guarantees)
+    // and our WebSocket is open. Bail with a clear message instead of
+    // silently failing if either precondition isn't met.
+    if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) {
+      setStatus('Relay is offline. Reconnect or sign into Google Drive and try again.', 'warn');
+      return;
+    }
+    if (!driveAccessToken) {
+      setStatus('Sign into Google Drive on both devices so Stop session can reach the remote device.', 'warn');
+      return;
+    }
     const dev = getDeviceIdentity();
     sendControlMessage({ type: 'control', action: 'stop', targetId, senderId: dev.id });
     activeBroadcasters.delete(targetId);
@@ -2862,6 +2908,9 @@
     const statusEl = $('drive-status');
     const signIn = $('drive-signin');
     const signOut = $('drive-signout');
+    // Rebuild the broadcasters panel so the Drive-sync hint flips in step
+    // with Drive state (sign-in / sign-out).
+    if (typeof renderBroadcastersPanel === 'function') renderBroadcastersPanel();
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
     if (driveAccessToken) {
