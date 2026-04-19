@@ -21,14 +21,14 @@ const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'index.html', 'widget.cs
 const INJECT_TARGET = 'hr_monitor.html';
 
 const SHIM_TAGS = `
-  <!-- Capacitor-only: loaded before page scripts so ble-adapter.js can
-       monkey-patch navigator.bluetooth before hr_monitor.html's BLE code
-       runs, and drive-auth-native.js can register its sign-in override
-       before the Drive Sign In button is wired. Files served from the
-       WebView bundle. -->
+  <!-- Capacitor-only shims loaded before page scripts so they can patch
+       navigator.bluetooth, register the native Drive sign-in override, and
+       attach the foreground-service wrapper before hr_monitor.html's main
+       code runs. Files served from the WebView bundle. -->
   <script src="./capacitor-bootstrap.js"></script>
   <script src="./ble-adapter.js"></script>
   <script src="./drive-auth-native.js"></script>
+  <script src="./foreground-service.js"></script>
 `;
 
 function ensureDir(dir) {
@@ -66,7 +66,7 @@ function copyWithInject(relative) {
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
 // web files so relative paths just work.
 function copyMobileAssets() {
-  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js'];
+  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js'];
   for (const name of assets) {
     const from = path.join(mobileRoot, 'src', name);
     const to = path.join(wwwDir, name);
@@ -90,7 +90,7 @@ function buildOnce() {
 function watch() {
   buildOnce();
   const files = [...PASSTHROUGH, INJECT_TARGET].map(f => path.join(repoRoot, f));
-  const mobileAssets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js'].map(f => path.join(mobileRoot, 'src', f));
+  const mobileAssets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js'].map(f => path.join(mobileRoot, 'src', f));
   const watched = [...files, ...mobileAssets].filter(f => fs.existsSync(f));
   console.log(`[copy-web] watching ${watched.length} files…`);
   let pending = null;
