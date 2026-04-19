@@ -162,7 +162,12 @@
           const shaMatch = body.match(/commit\s+([0-9a-f]{7,40})/i);
           const shortSha = shaMatch ? shaMatch[1].slice(0, 7) : '';
           const signedMatch = body.match(/signed:\s*(true|false)/i);
-          const date = rel.published_at ? new Date(rel.published_at) : null;
+          // Rolling-tag quirk: rel.published_at is frozen at first creation of
+          // android-latest and never bumps. Each asset's updated_at reflects
+          // its actual upload time — read the APK's to get the real build time.
+          const apk = (rel.assets || []).find(a => a.name === 'hr-monitor.apk');
+          const stamp = (apk && apk.updated_at) || rel.updated_at || rel.published_at;
+          const date = stamp ? new Date(stamp) : null;
           const when = date
             ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
               + ' · ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
