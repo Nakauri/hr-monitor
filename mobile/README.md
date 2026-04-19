@@ -57,15 +57,93 @@ APK, you download it on your phone, and sideload.
   both every build.
 - `.github/workflows/build-android.yml`: the CI build.
 
+## One-time setup: Google Sign-In (Drive sync on the APK)
+
+For Drive sign-in to work in the Android build, Google needs to know the
+SHA-1 fingerprint of the keystore your APK is signed with. One-time setup
+with a helper script that does everything except a couple of web-UI clicks:
+
+### Step 1 — run the helper script (once)
+
+Pick whichever shell you have open. Both scripts do exactly the same thing.
+
+Git Bash (or any bash on macOS / Linux):
+```bash
+cd mobile
+bash scripts/setup-signing.sh
+```
+
+Windows PowerShell:
+```powershell
+cd mobile
+powershell -ExecutionPolicy Bypass -File scripts/setup-signing.ps1
+```
+
+Prerequisite: a JDK (for `keytool`). If the script reports "keytool not
+found," install one from PowerShell:
+
+```powershell
+winget install --id EclipseAdoptium.Temurin.21.JDK -e
+```
+
+Close and reopen your terminal after the install, then retry. The scripts
+also look in `C:\Program Files\Eclipse Adoptium`, `C:\Program Files\Java`,
+etc., so you don't strictly have to wait for PATH to update.
+
+The script:
+- generates `mobile/hr-monitor-release.keystore` (gitignored)
+- extracts the SHA-1 into `mobile/sha1.txt`
+- base64-encodes the keystore into `mobile/hr-monitor-release.keystore.b64`
+- prints a copy/paste summary of exactly what to register where
+
+It asks you for two passwords. Use any password you want — just keep them
+in a password manager. The certificate questions (name, organization, etc.)
+can be anything at all; they're just baked into the cert's subject line.
+
+### Step 2 — register the SHA-1 with Google
+
+Go to https://console.cloud.google.com/apis/credentials → your HR Monitor
+project → **Create Credentials** → **OAuth 2.0 Client ID** → **Android**.
+
+- Package name: `com.nakauri.hrmonitor`
+- SHA-1 certificate fingerprint: paste from `mobile/sha1.txt`
+
+Save. Nothing to copy back — Google matches Android builds by package name
++ SHA-1 automatically using the web OAuth client already in the code.
+
+### Step 3 — add the four GitHub secrets
+
+Go to https://github.com/Nakauri/hr-monitor/settings/secrets/actions →
+**New repository secret** four times:
+
+| Name                        | Value                                            |
+|-----------------------------|--------------------------------------------------|
+| `ANDROID_KEYSTORE_BASE64`   | entire contents of `hr-monitor-release.keystore.b64` |
+| `ANDROID_KEYSTORE_PASSWORD` | the store password you chose in step 1           |
+| `ANDROID_KEY_ALIAS`         | `hr-monitor`                                     |
+| `ANDROID_KEY_PASSWORD`      | the key password you chose in step 1             |
+
+### Step 4 — back up the keystore and forget it
+
+Move `mobile/hr-monitor-release.keystore` somewhere safe (password manager,
+backup drive, whatever). It's gitignored so it won't leak through a commit,
+but **if you lose this file, you cannot ever update the installed Android
+app** — users would have to uninstall + reinstall fresh. One-time setup;
+you'll never touch it again once the GitHub secrets are filled in.
+
+Next push to `main` produces a signed APK. Google Sign-In on the phone
+works. The landing page's Download for Android button still serves the
+latest APK from the rolling release.
+
+Until the secrets are set, the workflow falls back to Capacitor's default
+debug keystore. The APK builds and installs, but Google Sign-In fails with
+an "unauthorized_client" / "developer error" message.
+
 ## Future stages (not yet implemented)
 
 - **Stage 4:** Android foreground service with a persistent notification so
   the OS can't kill the app while it's recording. Required for the
   "screen off, walk around for hours" use case.
-- **Stage 5:** Drive OAuth via a system-browser redirect flow (the WebView
-  can't open Google's OAuth popup).
-- **Stage 6:** Release signing + APK artifact. Right now the workflow
-  produces a debug-signed APK — fine for sideload, not for Play Store.
 - **iOS:** same codebase, needs `$99/year` Apple dev program + a Mac. Deferred.
 
 ## Local build, if you ever want it

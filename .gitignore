@@ -24,7 +24,10 @@ mobile/www/
 mobile/android/
 mobile/ios/
 mobile/*.keystore
+mobile/*.keystore.b64
 mobile/*.jks
+mobile/sha1.txt
+mobile/keystore-password.txt
 mobile/release/
 
 # OS / editor

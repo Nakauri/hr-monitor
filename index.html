@@ -86,6 +86,10 @@
     flex-shrink: 0;
   }
   .card.android .card-title svg.card-icon { color: var(--accent-rmssd); }
+  /* When the page is being served inside the installed Android app
+     (Capacitor WebView), hide the Download for Android card — the user
+     obviously already has it. */
+  body.native .card.android { display: none; }
   .footer {
     margin-top: 28px;
     font-size: 11px;
@@ -121,5 +125,14 @@
     </div>
     <div class="footer">This is not a medical tool.</div>
   </div>
+  <script>
+    // Tag the body if we're running inside the Capacitor Android shell so
+    // CSS can hide the "Download for Android" card — they already installed
+    // it, the card is noise.
+    (function() {
+      var isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+      if (isNative) document.body.classList.add('native');
+    })();
+  </script>
 </body>
 </html>
