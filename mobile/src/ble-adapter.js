@@ -45,17 +45,21 @@ whenReady(function() {
       return;
     }
 
-    let BleClient = null;
-    try {
-      BleClient = cap.registerPlugin('BluetoothLe');
-    } catch (e) {
-      console.error('[ble-adapter] registerPlugin failed:', e);
-      setMark('__hrMonitorBleAdapterLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
+    // Try the direct Plugins reference first — that's what Capacitor's
+    // native bridge populates without any JS-side help. registerPlugin
+    // is a JS-module-only API and doesn't exist on window.Capacitor
+    // unless @capacitor/core is imported via ESM, which we don't do.
+    let BleClient = (cap.Plugins && cap.Plugins.BluetoothLe) || null;
+    if (!BleClient && typeof cap.registerPlugin === 'function') {
+      try { BleClient = cap.registerPlugin('BluetoothLe'); }
+      catch (e) {
+        setMark('__hrMonitorBleAdapterLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
+      }
     }
     setMark('__hrMonitorBleAdapterGotPlugin', !!BleClient);
     if (!BleClient) {
       console.error('[ble-adapter] Capacitor BluetoothLe plugin missing — bail.');
-      setMark('__hrMonitorBleAdapterLastError', (window.__hrMonitorBleAdapterLastError || '') + ' / BleClient null after registerPlugin');
+      setMark('__hrMonitorBleAdapterLastError', (window.__hrMonitorBleAdapterLastError || '') + ' / Capacitor.Plugins.BluetoothLe undefined');
       return;
     }
 
