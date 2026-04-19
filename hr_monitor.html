@@ -1300,7 +1300,6 @@
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
           </button>
-          <button id="btn-export" title="Download the current session as CSV">Export CSV</button>
         </div>
         <div class="autosave-row">
           <span class="autosave-label">Drive backup:</span>
@@ -1467,6 +1466,9 @@
           <div class="stat"><div class="stat-label">Palp total</div><div class="stat-value" id="palp-total">0</div></div>
           <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="warn-count">0</div></div>
           <div class="stat" title="Fraction of the session where the strap was connected. Drops whenever the strap disconnects and auto-reconnect is in flight."><div class="stat-label">Uptime</div><div class="stat-value" id="uptime-pct">—</div></div>
+        </div>
+        <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+          <button id="btn-export" title="Download the current session as CSV">Export CSV</button>
         </div>
       </div>
     </div>
@@ -2517,6 +2519,7 @@
     if (entries.length === 0) {
       if (panel) panel.hidden = true;
       list.innerHTML = '';
+      applyRemoteBroadcasterLock(false);
       updateWatchMode();
       return;
     }
@@ -2543,6 +2546,7 @@
     if (hintEl) {
       hintEl.textContent = 'Other devices currently broadcasting to your relay key. Stop session tells the remote device to disconnect its strap. Once that happens you can Start session here.';
     }
+    applyRemoteBroadcasterLock(entries.some(e => !e.self));
     list.querySelectorAll('.broadcaster-takeover').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.dataset.self === '1') stopLocalBroadcast();
@@ -2578,6 +2582,34 @@
   }
   function escapeText(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  }
+
+  // Lock local publisher controls when a REMOTE device is live on our relay
+  // key. Greys Start session + hides the broadcast toggle; we're a reader at
+  // that point, and the user's only path back to publishing is Stop session
+  // on the remote row. Unlocks automatically when the remote goes stale (no
+  // heartbeat for ~15 s) or is explicitly stopped.
+  function applyRemoteBroadcasterLock(locked) {
+    const toggle = document.getElementById('session-toggle');
+    const broadcastRow = document.getElementById('broadcast-toggle-row');
+    const cs = (state && state.connState) || 'idle';
+    // Only lock when we're idle. If the user is already recording, they
+    // outrank the remote and their controls should stay normal — both
+    // devices publishing at once is a visible conflict in the broadcasters
+    // list, not something to silently hide.
+    const shouldLock = locked && cs === 'idle';
+    if (toggle) {
+      if (shouldLock) {
+        toggle.disabled = true;
+        toggle.title = 'Another device is broadcasting on this relay key. Stop it below, or paste a different key.';
+        toggle.textContent = 'Already broadcasting elsewhere';
+      } else {
+        toggle.disabled = !navigator.bluetooth;
+        toggle.title = '';
+        updateSessionToggle();
+      }
+    }
+    if (broadcastRow) broadcastRow.hidden = shouldLock;
   }
 
   // Slow heartbeat. HR ticks only fire while the strap is streaming — if the
@@ -2897,6 +2929,7 @@
   }
 
   async function connect() {
+    if (window.HRMLog) window.HRMLog.event('connect() called');
     if (!navigator.bluetooth) {
       setStatus('Web Bluetooth not supported. Use Chrome, Edge, or Opera.', 'error');
       return;
@@ -3022,10 +3055,15 @@
     // wrapper isn't present there). ignores failure — recording still works
     // in the foreground without the service.
     if (window.HRMForegroundService) {
+      if (window.HRMLog) window.HRMLog.event('attach.start calling HRMForegroundService.start', { device: device.name });
       window.HRMForegroundService.start(
         'HR Monitor · ' + (device.name || 'Strap'),
         'Recording. Tap to open.'
-      ).catch(() => {});
+      ).then(ok => {
+        if (window.HRMLog) window.HRMLog.event('attach.HRMForegroundService.start resolved', { ok });
+      }).catch(e => {
+        if (window.HRMLog) window.HRMLog.error('attach.HRMForegroundService.start rejected', e && e.message ? e.message : String(e));
+      });
     }
   }
 
@@ -3512,6 +3550,11 @@
   });
 
   async function driveSignIn() {
+    if (window.HRMLog) window.HRMLog.event('driveSignIn() called', {
+      native: typeof window.__hrMonitorNativeDriveSignIn === 'function',
+      hrConnected: !!(device && device.gatt && device.gatt.connected),
+      broadcasting: (typeof isPublisherLive === 'function' ? isPublisherLive() : false),
+    });
     // Native Android path: delegate to the Capacitor GoogleAuth plugin.
     // The plugin opens Google Play Services Sign-In (account picker), returns
     // an access token with Drive scope, which we plug into the same
@@ -3519,6 +3562,7 @@
     if (typeof window.__hrMonitorNativeDriveSignIn === 'function') {
       try {
         const { accessToken, expiresIn } = await window.__hrMonitorNativeDriveSignIn();
+        if (window.HRMLog) window.HRMLog.event('driveSignIn native succeeded', { expiresIn });
         driveAccessToken = accessToken;
         driveTokenExpiresAt = Date.now() + ((expiresIn || 3600) - 120) * 1000;
         saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
@@ -3526,6 +3570,7 @@
         if (!driveFolderId) driveEnsureFolder().catch(() => {});
       } catch (e) {
         console.error('[native drive] sign-in failed:', e);
+        if (window.HRMLog) window.HRMLog.error('driveSignIn native failed', e && e.message ? e.message : String(e));
         alert('Google sign-in failed: ' + (e && e.message ? e.message : 'unknown error'));
       }
       return;
