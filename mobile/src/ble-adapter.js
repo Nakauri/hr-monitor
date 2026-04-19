@@ -10,17 +10,39 @@
 // (not inline callbacks). We bridge both patterns to the shape Web
 // Bluetooth wants on the JS side.
 
-(function() {
-  'use strict';
+// Wait up to ~3s for window.Capacitor to be injected. Capacitor's bridge
+// loads asynchronously on Android, so <head> scripts that assume it's
+// already there race-condition-bail before the bridge arrives. Poll instead.
+function waitForCapacitor(cb, maxMs) {
+  const start = Date.now();
+  const tick = () => {
+    const cap = window.Capacitor;
+    if (cap && typeof cap.registerPlugin === 'function') return cb(cap);
+    if (Date.now() - start > (maxMs || 3000)) return cb(null);
+    setTimeout(tick, 40);
+  };
+  tick();
+}
 
-  const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-  if (!isNative) return;
+// Mark that this script has at least LOADED, so diagnostics can tell the
+// difference between "script missing from bundle" and "script ran but bailed."
+try { window.__hrMonitorBleAdapterLoaded = true; } catch (e) {}
+waitForCapacitor(function(cap) {
+  'use strict';
+  try { window.__hrMonitorBleAdapterCapacitorAvailable = !!cap; } catch (e) {}
+  if (!cap) {
+    console.info('[ble-adapter] Capacitor bridge never arrived — running as web, leaving navigator.bluetooth alone.');
+    return;
+  }
+  const isNative = cap.isNativePlatform && cap.isNativePlatform();
+  if (!isNative) {
+    console.info('[ble-adapter] Capacitor present but not native — skipping BLE patch.');
+    return;
+  }
 
   let BleClient = null;
   try {
-    if (window.Capacitor && typeof window.Capacitor.registerPlugin === 'function') {
-      BleClient = window.Capacitor.registerPlugin('BluetoothLe');
-    }
+    BleClient = cap.registerPlugin('BluetoothLe');
   } catch (e) {
     console.error('[ble-adapter] registerPlugin failed:', e);
   }
@@ -201,4 +223,7 @@
     navigator.bluetooth = fakeBluetooth;
     console.info('[ble-adapter] navigator.bluetooth assigned for Capacitor (raw plugin).');
   }
-})();
+  // Marker so diagnostics can confirm the patch actually ran, not just
+  // that navigator.bluetooth is truthy.
+  try { navigator.bluetooth.__capacitorPatched = true; } catch (e) {}
+});
