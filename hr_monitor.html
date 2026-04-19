@@ -1309,6 +1309,13 @@
           <span class="streaming-status" id="battopt-status">checking</span>
           <button id="battopt-allow" style="display: none;">Allow</button>
         </div>
+        <div class="toggle-row oem-row" id="oem-row" hidden>
+          <div class="toggle-text">
+            <div class="toggle-label" id="oem-label">Manufacturer settings</div>
+            <div class="toggle-desc" id="oem-desc">Your phone has its own background-app killer on top of Android. Tap Open, then add HR Monitor to the never-sleeping list.</div>
+          </div>
+          <button id="oem-open">Open</button>
+        </div>
         <div class="broadcasters-panel" hidden>
           <div class="broadcasters-head">Active broadcasts</div>
           <div class="broadcasters-list" id="broadcasters-list"></div>
@@ -2694,6 +2701,47 @@
       });
     }
     refreshBattOpt();
+  }
+
+  // OEM-specific background-killer row. Only shown on phones whose vendor
+  // layers its own app-kill policy on top of Android (Samsung / Xiaomi /
+  // Huawei / Oppo / Vivo etc.). HRMOem is set by oem-background.js after
+  // the native plugin reports the manufacturer.
+  function initOemRow() {
+    const row = document.getElementById('oem-row');
+    const btn = document.getElementById('oem-open');
+    const label = document.getElementById('oem-label');
+    const desc = document.getElementById('oem-desc');
+    if (!row || !btn || !label || !desc) return;
+    if (!(window.HRMOem && window.HRMOem.isAvailable && window.HRMOem.hasKnownBackgroundKiller)) {
+      row.hidden = true;
+      return;
+    }
+    row.hidden = false;
+    const mfr = window.HRMOem.manufacturer || window.HRMOem.vendor || 'Manufacturer';
+    label.textContent = mfr + ' background apps';
+    // Tailor the copy to each known vendor so the user knows the exact
+    // screen they're being sent to.
+    const vendor = window.HRMOem.vendor;
+    if (vendor === 'samsung') {
+      desc.textContent = 'Samsung throttles backgrounded apps via Device care. Tap Open, then add HR Monitor to Never sleeping apps.';
+    } else if (vendor === 'xiaomi') {
+      desc.textContent = 'Xiaomi requires apps to be on the Autostart list to keep running. Tap Open, then enable HR Monitor.';
+    } else if (vendor === 'huawei' || vendor === 'honor') {
+      desc.textContent = 'Huawei / Honor gate background apps via Protected / Startup. Tap Open, then add HR Monitor.';
+    } else if (vendor === 'oppo' || vendor === 'realme') {
+      desc.textContent = 'Oppo / Realme require apps to be on the Startup list. Tap Open, then enable HR Monitor.';
+    } else if (vendor === 'vivo') {
+      desc.textContent = 'Vivo manages background app starts explicitly. Tap Open, then enable HR Monitor.';
+    } else {
+      desc.textContent = 'Your phone has its own background-app killer. Tap Open, then allow HR Monitor to run in the background.';
+    }
+    if (btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', () => {
+      if (!(window.HRMOem && window.HRMOem.isAvailable)) return;
+      window.HRMOem.openBackgroundSettings().catch(() => {});
+    });
   }
 
   // Per-tab device identity. Generated once on first broadcast and kept for
@@ -4202,9 +4250,11 @@
     connectRelay();
     startPresenceHeartbeat();
     updateStreamingUI();
-    // Android-only: wire the battery-optimisation row (no-op on web, the
-    // shim isn't registered). Row hides itself when HRMBatteryOpt is absent.
+    // Android-only: wire the battery-optimisation row + the OEM-specific
+    // background-killer row (Samsung / Xiaomi / etc.). Both hide themselves
+    // on web and on Android flavours without the problem.
     if (typeof initBattOptRow === 'function') initBattOptRow();
+    if (typeof initOemRow === 'function') initOemRow();
     // Top-nav "Copy OBS URL" shortcut — copies the same URL as the buried button.
     const navCopy = $('nav-copy-obs-url');
     if (navCopy) {

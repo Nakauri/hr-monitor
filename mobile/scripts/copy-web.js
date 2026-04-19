@@ -31,6 +31,7 @@ const SHIM_TAGS = `
   <script src="./foreground-service.js"></script>
   <script src="./battery-opt.js"></script>
   <script src="./wake-lock.js"></script>
+  <script src="./oem-background.js"></script>
 `;
 
 function ensureDir(dir) {
@@ -92,7 +93,7 @@ function copyWithInject(relative) {
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
 // web files so relative paths just work.
 function copyMobileAssets() {
-  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js'];
+  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'];
   for (const name of assets) {
     const from = path.join(mobileRoot, 'src', name);
     const to = path.join(wwwDir, name);
@@ -116,7 +117,7 @@ function buildOnce() {
 function watch() {
   buildOnce();
   const files = [...PASSTHROUGH, INJECT_TARGET].map(f => path.join(repoRoot, f));
-  const mobileAssets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js'].map(f => path.join(mobileRoot, 'src', f));
+  const mobileAssets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'].map(f => path.join(mobileRoot, 'src', f));
   const watched = [...files, ...mobileAssets].filter(f => fs.existsSync(f));
   console.log(`[copy-web] watching ${watched.length} files…`);
   let pending = null;
