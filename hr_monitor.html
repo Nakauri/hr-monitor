@@ -104,21 +104,44 @@
     color: var(--accent-rmssd);
     text-decoration: underline;
   }
-  /* Firefox/Safari "watch mode": the preview widget becomes an iframe of
-     overlay.html subscribing to the shared relay key. User sees the live
-     stream from whichever device is recording, even though THIS browser
-     can't pair a strap. */
+  /* Watch mode: activates on ANY browser when someone else is broadcasting
+     AND this device isn't recording. Shows overlay.html as an iframe via a
+     body-class toggle, so the normal widget DOM stays intact (early
+     iterations replaced overlay-zone.innerHTML and that broke initCharts on
+     Firefox reloads). */
   body.watch-mode #overlay-zone {
     padding: 0;
     background: #0a0a0a;
   }
+  body.watch-mode #overlay-zone .widget-row,
+  body.watch-mode #overlay-zone .warning-slot-above,
+  body.watch-mode #overlay-zone .overlay-status,
+  body.watch-mode #overlay-zone .crop-label { display: none !important; }
+  body.watch-mode #overlay-zone #watch-frame { display: block; }
   .watch-frame {
     width: 100%;
     height: 100%;
     border: 0;
-    display: block;
     background: #0a0a0a;
+    flex: 1;
   }
+  /* Per-section placeholder shown inside accordion bodies when watching a
+     stream from another device — the stats/chart/events are only populated
+     on the broadcasting machine. */
+  .section-watch-empty {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 8px 2px 2px;
+    line-height: 1.5;
+    letter-spacing: 0.01em;
+  }
+  body.watch-mode .section-watch-empty { display: block; }
+  body.watch-mode [data-section="stats"] .stats-grid,
+  body.watch-mode [data-section="chart"] .main-chart-wrap,
+  body.watch-mode [data-section="events"] .posture-row,
+  body.watch-mode [data-section="events"] .marker-input,
+  body.watch-mode [data-section="events"] .events { display: none; }
+  .section-watch-empty { display: none; }
   .nav-copy.copied { background: var(--accent-rmssd); color: #0a1a14; }
   .obs-size-hint {
     font-family: 'Consolas', 'Monaco', monospace;
@@ -253,20 +276,6 @@
   }
   .battery-display.low { color: #E89858; }
   .battery-display.critical { color: #E24B4A; }
-  /* Shown only in Firefox / Safari / iOS (no Web Bluetooth) when the watch
-     iframe is active. Explains why the stats sections below are empty. */
-  .watch-mode-note {
-    background: rgba(93,202,165,0.08);
-    border: 1px solid rgba(93,202,165,0.35);
-    color: var(--text);
-    padding: 12px 14px;
-    border-radius: 10px;
-    font-size: 13px;
-    line-height: 1.5;
-    margin-bottom: 14px;
-  }
-  body.watch-mode .watch-mode-note { display: block; }
-
   /* Active broadcasters panel: lists other devices currently publishing to
      the same relay key. Populated live by presence heartbeats + tick frames. */
   .broadcasters-panel {
@@ -292,6 +301,10 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 12px;
+  }
+  .broadcaster-row.is-self {
+    border-color: rgba(93,202,165,0.45);
+    background: rgba(93,202,165,0.06);
   }
   .broadcaster-dot {
     width: 8px;
@@ -732,6 +745,8 @@
   }
   .streaming-status.connecting { color: var(--warn-crash); background: rgba(186,117,23,0.14); }
   .streaming-status.live { color: var(--accent-rmssd); background: rgba(93,202,165,0.12); }
+  .streaming-status.ready { color: var(--text-dim); background: rgba(255,255,255,0.04); }
+  .streaming-status.listening { color: var(--text-dim); background: rgba(255,255,255,0.04); }
   .streaming-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
 
   .tabs {
@@ -826,28 +841,6 @@
   .event-time { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .empty { color: var(--text-faint); padding: 8px 0; font-size: 12px; font-style: italic; }
 
-  .claude-response {
-    margin-top: 10px;
-    padding: 12px 14px;
-    background: var(--bg-input);
-    border-left: 3px solid #d97757;
-    border-radius: 4px;
-    font-size: 13px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    max-height: 300px;
-    overflow-y: auto;
-  }
-  .claude-response.error { border-left-color: var(--warn-high); color: var(--warn-high); }
-  .claude-response.empty-state { color: var(--text-faint); font-style: italic; border-left-color: var(--border); }
-
-  .api-key-row {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .api-key-row input { flex: 1; font-family: monospace; font-size: 11px; }
-
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
@@ -933,7 +926,7 @@
   <a class="app-nav-link nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Live%20Monitor&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Live%20Monitor%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
 </nav>
 <div id="browser-compat-banner" hidden>
-  Strap pairing needs Web Bluetooth, which this browser doesn't support. Connect and record from a supported browser. You CAN still watch a stream here from another device. <a href="https://caniuse.com/web-bluetooth" target="_blank" rel="noopener">See supported browsers</a>. To browse past sessions, <a href="./hrv_viewer.html">open the Viewer</a>.
+  Strap pairing needs Web Bluetooth, which this browser doesn't support. Connect and record from a supported browser. You CAN still watch a stream here from another device. <a href="https://caniuse.com/web-bluetooth" target="_blank" rel="noopener">See supported browsers</a>.
 </div>
 <div id="app">
 
@@ -1011,15 +1004,16 @@
 
     <div class="overlay-status" id="overlay-status">• Not connected</div>
     <div style="flex: 1;"></div>
-    <div style="font-size: 9px; color: #3a3a3a; text-align: center; letter-spacing: 0.1em;">CROP TO THIS ZONE</div>
+    <div class="crop-label" style="font-size: 9px; color: #3a3a3a; text-align: center; letter-spacing: 0.1em;">CROP TO THIS ZONE</div>
+    <!-- Sibling iframe shown in watch-mode only (body.watch-mode). Subscribes
+         to the shared relay key so Firefox / Safari / iOS see the stream from
+         whichever device holds the strap. Rest of the widget DOM stays in the
+         tree so Chart.js initialisation doesn't break. -->
+    <iframe id="watch-frame" class="watch-frame" hidden></iframe>
   </div>
 
   <!-- RIGHT: Controls and details -->
   <div id="control-panel">
-
-    <div class="watch-mode-note" hidden>
-      Read-only view. A stream from another device is shown on the left. Full session stats and the scrollable trend are only available on the broadcasting device.
-    </div>
 
     <div class="section" data-section="connection">
       <div class="section-header">
@@ -1052,7 +1046,7 @@
         <div class="broadcasters-panel" hidden>
           <div class="broadcasters-head">Active broadcasts</div>
           <div class="broadcasters-list" id="broadcasters-list"></div>
-          <div class="broadcasters-hint">Other devices currently broadcasting to your relay key. Tap Take over to stop a device and start recording here instead.</div>
+          <div class="broadcasters-hint">Other devices currently broadcasting to your relay key. Stop session tells the remote device to disconnect its strap. Once that happens you can Connect strap here.</div>
         </div>
       </div>
     </div>
@@ -1186,6 +1180,7 @@
         <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
       </div>
       <div class="section-body">
+        <div class="section-watch-empty">Only available on the broadcasting device.</div>
         <div class="stats-grid">
           <div class="stat"><div class="stat-label">Time</div><div class="stat-value" id="session-time">0:00</div></div>
           <div class="stat"><div class="stat-label">Avg HR</div><div class="stat-value" id="avg-hr">—</div></div>
@@ -1206,6 +1201,7 @@
         <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
       </div>
       <div class="section-body">
+        <div class="section-watch-empty">Only available on the broadcasting device.</div>
         <div class="main-chart-wrap"><canvas id="main-chart"></canvas></div>
       </div>
     </div>
@@ -1216,6 +1212,7 @@
         <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
       </div>
       <div class="section-body">
+        <div class="section-watch-empty">Only available on the broadcasting device.</div>
         <div class="posture-row">
           <span class="posture-label">Posture:</span>
           <button class="posture-btn" data-posture="lying">Lying</button>
@@ -1229,26 +1226,6 @@
         </div>
         <div style="height: 8px;"></div>
         <div class="events" id="events"><div class="empty">No events logged yet.</div></div>
-      </div>
-    </div>
-
-    <div class="section" data-section="claude">
-      <div class="section-header">
-        <div class="section-title">Ask Claude about this session</div>
-        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
-      </div>
-      <div class="section-body">
-        <div class="api-key-row">
-          <input type="password" id="api-key" placeholder="sk-ant-... (saved locally in browser)" />
-          <button id="save-key">Save</button>
-        </div>
-        <div style="height: 10px;"></div>
-        <div class="controls">
-          <button class="claude" id="ask-claude">Analyze with API</button>
-          <button id="open-claude-web">Download CSV &amp; ask Claude.ai</button>
-          <button id="clear-response">Clear</button>
-        </div>
-        <div class="claude-response empty-state" id="claude-response">Analyze with API uses your API key (Anthropic console). Download CSV &amp; ask Claude.ai downloads the session, copies a review prompt, and opens a new Claude.ai chat — drag the CSV in and paste the prompt to use your Pro subscription.</div>
       </div>
     </div>
 
@@ -1948,7 +1925,8 @@
   function connectRelay() {
     // Always connect when we have a key so the monitor can SEE other devices'
     // presence heartbeats even when its own broadcast toggle is off. Publishing
-    // is gated inside publishToRelay on broadcast + navigator.bluetooth.
+    // is gated inside publishToRelay on broadcast + navigator.bluetooth + BLE
+    // connection state.
     const key = getOrCreateBroadcastKey();
     if (!key) return;
     setStreamingStatus('connecting');
@@ -1956,10 +1934,9 @@
       const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key);
       relaySocket = ws;
       ws.addEventListener('open', () => {
-        const canPublish = !!navigator.bluetooth && widgetPrefs.broadcast;
-        setStreamingStatus(canPublish ? 'live' : 'listening');
+        refreshRelayStatus();
         // Catch-up tick so OBS sees current state right after (re)connect.
-        if (canPublish) { try { broadcastTick(); } catch (e) {} }
+        if (isPublisherLive()) { try { broadcastTick(); } catch (e) {} }
       });
       ws.addEventListener('message', (ev) => {
         try { handleRelayMessage(JSON.parse(ev.data)); } catch (e) {}
@@ -1976,12 +1953,30 @@
       relayReconnectTimer = setTimeout(connectRelay, 5000);
     }
   }
+  // True when we're actually producing live HR data right now (BLE connected
+  // AND publishing is on). This gates presence / ticks so a disconnected
+  // desktop doesn't keep appearing as a live broadcaster on the phone.
+  function isPublisherLive() {
+    return !!navigator.bluetooth && widgetPrefs.broadcast && state.connState === 'live';
+  }
   function publishToRelay(payload) {
-    // Only publishes when the user is actively broadcasting AND this browser
-    // can produce real tick data. Firefox / Safari / idle tabs stay silent.
-    if (!widgetPrefs.broadcast || !navigator.bluetooth) return;
+    if (!isPublisherLive()) return;
     if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
     try { relaySocket.send(JSON.stringify(payload)); } catch (e) {}
+  }
+  // Recompute the relay status chip based on socket + publisher state.
+  // - offline: WS closed
+  // - connecting: WS opening
+  // - listening: WS open, not a publisher (broadcast off or no Web Bluetooth)
+  // - ready: publisher configured but strap isn't currently streaming
+  // - live: publisher + strap streaming HR right now
+  function refreshRelayStatus() {
+    if (!relaySocket) { setStreamingStatus('offline'); return; }
+    if (relaySocket.readyState === WebSocket.CONNECTING) { setStreamingStatus('connecting'); return; }
+    if (relaySocket.readyState !== WebSocket.OPEN) { setStreamingStatus('offline'); return; }
+    const canPublish = !!navigator.bluetooth && widgetPrefs.broadcast;
+    if (!canPublish) { setStreamingStatus('listening'); return; }
+    setStreamingStatus(state.connState === 'live' ? 'live' : 'ready');
   }
   // Sends a control message regardless of broadcast toggle — used for the
   // Take over button (tell another device to stop) so even a view-only
@@ -2006,6 +2001,10 @@
         startedAt: msg.startedAt || msg.senderBooted || Date.now(),
       });
       renderBroadcastersPanel();
+    } else if (msg.type === 'presence-end' && msg.senderId) {
+      // Sender explicitly announced they stopped producing data. Drop them
+      // from the list immediately instead of waiting for the 15-s timeout.
+      if (activeBroadcasters.delete(msg.senderId)) renderBroadcastersPanel();
     } else if (msg.type === 'control' && msg.action === 'stop') {
       const dev = getDeviceIdentity();
       if (msg.targetId === dev.id) {
@@ -2024,7 +2023,10 @@
   function startPresenceHeartbeat() {
     if (presenceTimer) clearInterval(presenceTimer);
     presenceTimer = setInterval(() => {
-      if (!widgetPrefs.broadcast || !navigator.bluetooth || !state.startTime) return;
+      // Only heartbeat when actually streaming HR right now. Otherwise a
+      // disconnected desktop keeps appearing as a live broadcaster on the
+      // phone for 15 s after the strap drops, which is confusing.
+      if (!isPublisherLive() || !state.startTime) return;
       const dev = getDeviceIdentity();
       publishToRelay({
         type: 'presence',
@@ -2043,48 +2045,74 @@
       if (s.lastAt < cutoff) { activeBroadcasters.delete(id); dirty = true; }
     }
     if (dirty) renderBroadcastersPanel();
+    else updateWatchMode();
   }, 3000);
 
   function renderBroadcastersPanel() {
     const list = document.getElementById('broadcasters-list');
     if (!list) return;
     const panel = list.closest('.broadcasters-panel');
-    if (activeBroadcasters.size === 0) {
+    const dev = getDeviceIdentity();
+    const now = Date.now();
+    // Build a combined list: remote broadcasters + our own session (if we're
+    // actively producing data). User asked to see both so they can spot a
+    // conflict at a glance and hit Stop on either side.
+    const entries = [];
+    if (isPublisherLive() && state.startTime) {
+      entries.push({
+        id: dev.id,
+        label: dev.label,
+        startedAt: state.startTime,
+        self: true,
+      });
+    }
+    for (const [id, s] of activeBroadcasters) {
+      entries.push({ id, label: s.label, startedAt: s.startedAt, self: false });
+    }
+    if (entries.length === 0) {
       if (panel) panel.hidden = true;
       list.innerHTML = '';
+      updateWatchMode();
       return;
     }
     if (panel) panel.hidden = false;
-    const now = Date.now();
-    const rows = [];
-    for (const [id, s] of activeBroadcasters) {
-      const ageMin = Math.max(0, Math.round((now - s.startedAt) / 60000));
+    const rows = entries.map(e => {
+      const ageMin = Math.max(0, Math.round((now - e.startedAt) / 60000));
       const ageLabel = ageMin < 1 ? 'just now' : (ageMin < 60 ? `${ageMin} min` : `${Math.floor(ageMin / 60)}h ${ageMin % 60}m`);
-      rows.push(`
-        <div class="broadcaster-row" data-id="${id}">
+      const suffix = e.self ? ' (this device)' : '';
+      return `
+        <div class="broadcaster-row${e.self ? ' is-self' : ''}" data-id="${e.id}">
           <span class="broadcaster-dot"></span>
-          <span class="broadcaster-label">${escapeText(s.label)}</span>
+          <span class="broadcaster-label">${escapeText(e.label)}${suffix}</span>
           <span class="broadcaster-time">${ageLabel}</span>
-          <button class="broadcaster-takeover" data-id="${id}">Take over</button>
+          <button class="broadcaster-takeover" data-id="${e.id}" data-self="${e.self ? '1' : '0'}">Stop session</button>
         </div>
-      `);
-    }
+      `;
+    });
     list.innerHTML = rows.join('');
     list.querySelectorAll('.broadcaster-takeover').forEach(btn => {
-      btn.addEventListener('click', () => takeOverBroadcaster(btn.dataset.id));
+      btn.addEventListener('click', () => {
+        if (btn.dataset.self === '1') stopLocalBroadcast();
+        else stopRemoteBroadcaster(btn.dataset.id);
+      });
     });
+    updateWatchMode();
   }
-  function takeOverBroadcaster(targetId) {
+  // Stop this device's own broadcast: disconnect BLE, stop publishing.
+  // Leaves the Connect strap button ready so the user can restart anytime.
+  function stopLocalBroadcast() {
+    try { if (typeof disconnect === 'function') disconnect(); } catch (e) {}
+    setStatus('Local broadcast stopped.');
+    renderBroadcastersPanel();
+  }
+  // Tell the remote device to stop broadcasting. We can't automatically pair
+  // the strap here afterwards — BLE is a single-connection protocol and the
+  // strap doesn't re-advertise until the remote side has actually dropped.
+  // User can press Connect strap manually once the other device releases it.
+  function stopRemoteBroadcaster(targetId) {
     sendControlMessage({ type: 'control', action: 'stop', targetId });
     activeBroadcasters.delete(targetId);
     renderBroadcastersPanel();
-    if (navigator.bluetooth && !state.startTime) {
-      // Offer to start a fresh session here. Paired with the same button
-      // click so Web Bluetooth gesture-gating sees this as user-initiated.
-      if (confirm('Stopped the other device. Start recording here now?')) {
-        try { connect(); } catch (e) { console.warn(e); }
-      }
-    }
   }
   function escapeText(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -2095,30 +2123,23 @@
   // anything and OBS would drift out of sync. Every 3 s we fire a tick so
   // OBS stays 1:1 with the monitor's prefs regardless of BLE state.
   setInterval(() => {
-    if (!widgetPrefs.broadcast) return;
+    if (!isPublisherLive()) return;
     try { broadcastTick(); } catch (e) {}
   }, 3000);
   // Called when the broadcast toggle flips. Open or close the relay socket to
   // match — saves bandwidth + privacy when user isn't streaming.
   function applyBroadcastPref() {
-    // Browsers without Web Bluetooth can't possibly produce real tick data,
-    // so don't open the relay as a publisher even if the pref is somehow on.
-    // This prevents Firefox / Safari from showing up as phantom broadcasters
-    // on the overlay's multi-sender warning.
-    const canBroadcast = !!navigator.bluetooth && widgetPrefs.broadcast;
-    if (canBroadcast) {
-      if (!relaySocket || relaySocket.readyState === WebSocket.CLOSED) connectRelay();
-    } else {
-      if (relayReconnectTimer) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
-      if (relaySocket) { try { relaySocket.close(); } catch (e) {} relaySocket = null; }
-      setStreamingStatus('off');
-    }
+    // Keep the relay socket open either way — we still want to receive presence
+    // heartbeats from other devices. Publishing is gated by isPublisherLive().
+    if (!relaySocket || relaySocket.readyState === WebSocket.CLOSED) connectRelay();
+    refreshRelayStatus();
   }
-  function setStreamingStatus(state) {
+  function setStreamingStatus(s) {
     const el = $('relay-status');
     if (!el) return;
-    el.textContent = state;
-    el.className = 'streaming-status ' + (state === 'live' || state === 'connecting' || state === 'error' ? state : '');
+    el.textContent = s;
+    const known = ['live', 'connecting', 'error', 'ready', 'listening'];
+    el.className = 'streaming-status ' + (known.includes(s) ? s : '');
   }
   function buildObsSourceUrl() {
     const origin = location.origin + location.pathname.replace(/hr_monitor\.html$/, '');
@@ -2323,19 +2344,21 @@
         setStatus('Requesting device...');
         // If we know the last-used name, filter the picker to just that device —
         // still shows a chooser (required by spec) but it's a 1-tap confirmation.
+        // Otherwise filter to devices advertising the HR service so the picker
+        // doesn't list phones, keyboards, speakers, and other junk.
         const requestOpts = last && last.name
           ? { filters: [{ name: last.name }], optionalServices: [HR_SERVICE, BATTERY_SERVICE] }
-          : { acceptAllDevices: true, optionalServices: [HR_SERVICE, BATTERY_SERVICE] };
+          : { filters: [{ services: [HR_SERVICE] }], optionalServices: [BATTERY_SERVICE] };
         try {
           device = await navigator.bluetooth.requestDevice(requestOpts);
         } catch (e) {
           // If the filtered request failed (device out of range, renamed, etc.)
-          // fall back to the open picker so the user isn't stuck.
+          // fall back to the HR-service-only picker so the user isn't stuck.
           if (last && last.name) {
             setStatus('Couldn\'t find ' + last.name + ' — picking any strap...');
             device = await navigator.bluetooth.requestDevice({
-              acceptAllDevices: true,
-              optionalServices: [HR_SERVICE, BATTERY_SERVICE],
+              filters: [{ services: [HR_SERVICE] }],
+              optionalServices: [BATTERY_SERVICE],
             });
           } else { throw e; }
         }
@@ -2485,6 +2508,18 @@
     else if (connState === 'reconnecting') document.body.classList.add('conn-reconnecting');
     // Refresh the banner so it reflects the new conn state immediately.
     showWarningBanner(state.currentWarn);
+    // Relay status chip reflects "am I publishing HR right now?", which
+    // depends on BLE state. Refresh whenever BLE state changes.
+    if (typeof refreshRelayStatus === 'function') refreshRelayStatus();
+    // Tell other subscribers we've stopped producing data so they can drop
+    // us from their Active broadcasts list without waiting for 15-s timeout.
+    if (connState !== 'live' && relaySocket && relaySocket.readyState === WebSocket.OPEN && navigator.bluetooth && widgetPrefs.broadcast) {
+      const dev = getDeviceIdentity();
+      try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {}
+    }
+    // Re-render the local broadcasts panel so the self row appears/disappears
+    // as our strap connects / drops.
+    if (typeof renderBroadcastersPanel === 'function') renderBroadcastersPanel();
   }
 
   function resetSession() {
@@ -3052,147 +3087,6 @@
     downloadCSV(buildSessionCSV());
   }
 
-  // Claude API integration
-  function buildSessionSummary() {
-    if (state.hrSeries.length === 0) return null;
-    const hrs = state.hrSeries.map(p => p.v);
-    const rmssds = state.rmssdSeries.map(p => p.v);
-    const elapsed = (Date.now() - state.startTime) / 60000;
-    const avgHr = Math.round(hrs.reduce((a,b) => a+b, 0) / hrs.length);
-    const maxHr = Math.max(...hrs);
-    const minHr = Math.min(...hrs);
-    const avgRmssd = rmssds.length ? Math.round(rmssds.reduce((a,b) => a+b, 0) / rmssds.length) : null;
-    const minRmssd = rmssds.length ? Math.round(Math.min(...rmssds)) : null;
-    const maxRmssd = rmssds.length ? Math.round(Math.max(...rmssds)) : null;
-
-    // Sample data at ~20 points for a compact trend summary
-    const sampleCount = Math.min(20, state.hrSeries.length);
-    const samples = [];
-    for (let i = 0; i < sampleCount; i++) {
-      const idx = Math.floor(i * (state.hrSeries.length - 1) / (sampleCount - 1));
-      const p = state.hrSeries[idx];
-      const rp = state.rmssdSeries.find(r => Math.abs(r.t - p.t) < 0.1);
-      samples.push({ t: p.t.toFixed(1), hr: p.v, rmssd: rp ? Math.round(rp.v) : null });
-    }
-
-    let summary = `HR/HRV monitoring session, ${elapsed.toFixed(1)} minutes elapsed.\n\n`;
-    summary += `Stats:\n`;
-    summary += `- Current HR: ${state.currentHR} bpm, current RMSSD: ${state.currentRMSSD ? Math.round(state.currentRMSSD) : 'n/a'} ms\n`;
-    summary += `- Avg HR: ${avgHr} bpm (range ${minHr}-${maxHr})\n`;
-    if (avgRmssd !== null) summary += `- Avg RMSSD: ${avgRmssd} ms (range ${minRmssd}-${maxRmssd})\n`;
-    summary += `- ${state.ectopicEvents.length} ectopic/palpitation beats detected (>25% RR deviation from running median)\n`;
-    summary += `- ${state.warnings.length} threshold warnings logged\n\n`;
-
-    if (state.events.length > 0) {
-      summary += `Events logged by user:\n`;
-      state.events.forEach(e => {
-        const hrStr = e.hr ? ` at HR ${e.hr}` : '';
-        const rmStr = e.rmssd ? `, RMSSD ${Math.round(e.rmssd)}` : '';
-        summary += `- ${e.t.toFixed(1)}min: "${e.label}"${hrStr}${rmStr}\n`;
-      });
-      summary += '\n';
-    }
-
-    if (state.warnings.length > 0) {
-      summary += `Warnings triggered:\n`;
-      state.warnings.forEach(w => {
-        summary += `- ${w.t.toFixed(1)}min: ${w.type} (HR ${w.hr}, RMSSD ${w.rmssd ? Math.round(w.rmssd) : 'n/a'})\n`;
-      });
-      summary += '\n';
-    }
-
-    summary += `Trend samples (time in min, HR bpm, RMSSD ms):\n`;
-    samples.forEach(s => {
-      summary += `  ${s.t}: HR ${s.hr}, RMSSD ${s.rmssd ?? '—'}\n`;
-    });
-
-    summary += `\nContext: User has POTS (postural orthostatic tachycardia syndrome). Resting HR tends to run 85-95 bpm. Interested in parasympathetic regulation and autonomic stability. Baseline RMSSD typically 20-30ms range.\n\n`;
-    summary += `Please analyze this session. Comment on notable patterns, any meaningful correlations between events and autonomic shifts, and anything that stands out. Be concise and specific — no generic wellness advice.`;
-
-    return summary;
-  }
-
-  async function askClaude() {
-    const apiKey = $('api-key').value.trim();
-    const respEl = $('claude-response');
-    if (!apiKey) {
-      respEl.className = 'claude-response error';
-      respEl.textContent = 'Enter your API key first. Get one at console.anthropic.com.';
-      return;
-    }
-    if (state.hrSeries.length < 10) {
-      respEl.className = 'claude-response error';
-      respEl.textContent = 'Not enough data yet. Let the session run a minute or two first.';
-      return;
-    }
-    const summary = buildSessionSummary();
-    respEl.className = 'claude-response';
-    respEl.textContent = 'Asking Claude...';
-
-    try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-opus-4-5',
-          max_tokens: 1024,
-          messages: [{ role: 'user', content: summary }],
-        }),
-      });
-      const data = await response.json();
-      if (data.error) {
-        respEl.className = 'claude-response error';
-        respEl.textContent = 'Error: ' + data.error.message;
-        return;
-      }
-      const text = data.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
-      respEl.className = 'claude-response';
-      respEl.textContent = text;
-    } catch (e) {
-      respEl.className = 'claude-response error';
-      respEl.textContent = 'Request failed: ' + e.message;
-    }
-  }
-
-  async function openInClaudeWeb() {
-    const respEl = $('claude-response');
-    if (state.hrSeries.length < 10) {
-      respEl.className = 'claude-response error';
-      respEl.textContent = 'Not enough data yet. Let the session run a minute or two first.';
-      return;
-    }
-    const { csv, filename } = buildSessionCSV();
-    downloadCSV({ csv, filename });
-    const prompt = 'Attached is ' + filename + ' — an HR/HRV monitoring session from a chest strap. Columns: time_min, hr_bpm, rmssd_ms, event, warning. I have POTS (resting HR 85-95), baseline RMSSD 20-30ms. Please review this session — call out notable patterns, event correlations, autonomic shifts, anything that stands out. Be concise and specific, no generic wellness advice.';
-    try {
-      await navigator.clipboard.writeText(prompt);
-      respEl.className = 'claude-response';
-      respEl.textContent = 'CSV downloaded: ' + filename + '\nPrompt copied to clipboard.\n\nClaude.ai is opening — drag the CSV from your Downloads folder into the chat, paste (Ctrl+V) to add the review request, and send.';
-    } catch (e) {
-      respEl.className = 'claude-response';
-      respEl.textContent = 'CSV downloaded: ' + filename + '\nCopy failed — paste this into Claude.ai yourself after attaching the CSV:\n\n' + prompt;
-    }
-    window.open('https://claude.ai/new', '_blank', 'noopener');
-  }
-
-  function saveApiKey() {
-    const key = $('api-key').value.trim();
-    if (key) {
-      localStorage.setItem('claude_api_key', key);
-      setStatus('API key saved locally.');
-    }
-  }
-
-  function loadApiKey() {
-    const key = localStorage.getItem('claude_api_key');
-    if (key) $('api-key').value = key;
-  }
-
   function populateAudioDropdowns() {
     const selects = ['audio-high', 'audio-low', 'audio-crash', 'audio-palp'];
     selects.forEach(id => {
@@ -3533,25 +3427,33 @@
     } catch(e) {}
   }
 
-  // When the monitor loads in a browser without Web Bluetooth (Firefox,
-  // Safari, iOS) but the user has a broadcast key (shared via Drive or from
-  // a prior Chrome session on this browser), swap the preview widget out for
-  // an overlay.html iframe so the user sees the live stream from whatever
-  // Chrome-capable device is actually recording.
-  function setupFirefoxAutoWatch() {
-    // applyBroadcastPref already gates the relay on navigator.bluetooth, so no
-    // persistence needed — Firefox simply won't open the publisher socket.
-    const key = localStorage.getItem('hr_monitor_broadcast_key');
-    if (!key) return;
-    const zone = document.getElementById('overlay-zone');
-    if (!zone) return;
-    // Build the iframe URL with a cache-bust param so a freshly-deployed
-    // overlay.html is picked up on next load rather than reusing a cached one.
-    const src = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark&embed=1&_v=' + Date.now();
-    zone.innerHTML = '<iframe class="watch-frame" src="' + src + '" title="Live stream"></iframe>';
-    document.body.classList.add('watch-mode');
-    const note = document.querySelector('.watch-mode-note');
-    if (note) note.hidden = false;
+  // Watch mode: activates on any browser when someone else is actively
+  // broadcasting AND this device isn't recording. Shows an iframe of
+  // overlay.html on top of the normal preview widget (toggled via a body
+  // class so the widget DOM stays intact — early iterations replaced
+  // overlay-zone.innerHTML and that broke initCharts on Firefox).
+  let watchFrameSrc = null;
+  function updateWatchMode() {
+    const hasOtherBroadcaster = activeBroadcasters.size > 0;
+    // Watch mode kicks in whenever someone else is broadcasting AND we aren't
+    // currently live on the strap. We deliberately key on connState, not
+    // state.startTime — a session whose strap has just dropped shouldn't keep
+    // its own (now-stale) preview instead of showing the live remote stream.
+    const weAreLive = state.connState === 'live';
+    const shouldWatch = hasOtherBroadcaster && !weAreLive;
+    const frame = document.getElementById('watch-frame');
+    if (shouldWatch) {
+      const key = localStorage.getItem('hr_monitor_broadcast_key');
+      const desired = key ? ('./overlay.html?key=' + encodeURIComponent(key) + '&bg=dark&embed=1') : null;
+      if (frame && desired && watchFrameSrc !== desired) {
+        watchFrameSrc = desired;
+        frame.src = desired;
+        frame.hidden = false;
+      }
+      document.body.classList.add('watch-mode');
+    } else {
+      document.body.classList.remove('watch-mode');
+    }
   }
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -3567,12 +3469,11 @@
         connectBtn.disabled = true;
         connectBtn.title = 'Not supported in this browser';
       }
-      // If a broadcast key is known (Drive-synced or left over from a prior
-      // session), replace the preview widget with an iframe of overlay.html
-      // so Firefox users watching another device's stream see the live widget
-      // without having to open overlay.html separately.
-      setupFirefoxAutoWatch();
     }
+    // Evaluate watch mode once on load. updateWatchMode re-runs from
+    // handleRelayMessage and the stale-cleanup interval as broadcasters come
+    // and go, so this just primes the initial state.
+    updateWatchMode();
     initCharts();
     populateAudioDropdowns();
     // Open a popup window OBS can Window-Capture cleanly. The popup receives
@@ -3680,15 +3581,6 @@
         }
       });
     });
-    $('ask-claude').addEventListener('click', askClaude);
-    $('open-claude-web').addEventListener('click', openInClaudeWeb);
-    $('clear-response').addEventListener('click', () => {
-      const r = $('claude-response');
-      r.className = 'claude-response empty-state';
-      r.textContent = "Claude's response will appear here.";
-    });
-    $('save-key').addEventListener('click', saveApiKey);
-    loadApiKey();
     loadSectionStates();
     loadAudioConfig();
     loadWidgetStyle();

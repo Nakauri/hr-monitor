@@ -40,6 +40,13 @@
     align-items: center;
     justify-content: center;
   }
+  /* embed=1 is set by the monitor's Firefox auto-watch iframe; anchor to the
+     top instead of the centre so the widget sits where the user expects
+     (the top of the preview pane, not floating mid-pane). */
+  body.embed {
+    align-items: flex-start;
+    padding-top: 12px;
+  }
 
   /* Zone padding stays 0 — the monitor pins this element to .widget-row's
      size, and padding here would eat the width and clip the HRV column. */
@@ -146,6 +153,7 @@
   const hideInline = params.get('hide_inline') === '1';
 
   document.body.classList.add('bg-' + bg);
+  if (params.get('embed') === '1') document.body.classList.add('embed');
   if (hideHr) document.body.classList.add('no-hr');
   if (hideHrv) document.body.classList.add('no-hrv');
   if (hideLiveHr) document.body.classList.add('no-live-hr');
@@ -234,9 +242,18 @@
       document.body.classList.toggle('warning-above', prefs.warningPlacement === 'above');
     }
     if (size && z && Number.isFinite(size.w) && Number.isFinite(size.h)) {
-      z.style.width = size.w + 'px';
-      z.style.height = size.h + 'px';
-      z.style.overflow = 'hidden';
+      // In embed mode the iframe viewport — not the broadcasting device — decides
+      // the display size. Forcing the sender's pixel dims here would overflow
+      // narrow phones when the host is a 500-px desktop measurement.
+      if (document.body.classList.contains('embed')) {
+        z.style.width = '';
+        z.style.height = '';
+        z.style.overflow = '';
+      } else {
+        z.style.width = size.w + 'px';
+        z.style.height = size.h + 'px';
+        z.style.overflow = 'hidden';
+      }
     }
   }
   // Earlier this file used a CSS transform: scale() to fit the widget to the
