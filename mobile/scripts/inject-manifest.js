@@ -43,6 +43,20 @@ if (!/REQUEST_IGNORE_BATTERY_OPTIMIZATIONS/.test(xml)) {
   console.log('[inject-manifest] added REQUEST_IGNORE_BATTERY_OPTIMIZATIONS');
 }
 
+// Inject WAKE_LOCK. The capawesome foreground-service plugin grabs a wake
+// lock internally to keep the service CPU-active; without this permission
+// it throws SecurityException at startForegroundService() time and the
+// notification never shows. Symptom when missing: "neither user N nor
+// current process as android.permission.WAKE_LOCK" in fgs last error.
+if (!/android\.permission\.WAKE_LOCK/.test(xml)) {
+  xml = xml.replace(
+    /<\/manifest>\s*$/,
+    '    <uses-permission android:name="android.permission.WAKE_LOCK" />\n</manifest>\n'
+  );
+  changed = true;
+  console.log('[inject-manifest] added WAKE_LOCK');
+}
+
 // Inject a service-type override for the capawesome FGS plugin's service.
 // Plugin ships AndroidForegroundService; we override the type to connectedDevice.
 if (!/AndroidForegroundService[\s\S]{0,400}connectedDevice/.test(xml)) {
