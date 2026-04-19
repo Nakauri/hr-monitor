@@ -507,7 +507,14 @@
     color: #0a1a14;
     border-color: var(--accent-rmssd);
   }
-  .btn-session-toggle[data-state="idle"]:hover:not(:disabled) { filter: brightness(1.1); }
+  /* Re-assert bg + border on hover so the generic `button:hover` rule can't
+     paint the button dark grey between the state colour and the brightness
+     filter taking effect. */
+  .btn-session-toggle[data-state="idle"]:hover:not(:disabled) {
+    background: var(--accent-rmssd);
+    border-color: var(--accent-rmssd);
+    filter: brightness(1.1);
+  }
   .btn-session-toggle[data-state="recording"],
   .btn-session-toggle[data-state="reconnecting"] {
     background: var(--warn-high);
@@ -515,11 +522,19 @@
     border-color: var(--warn-high);
   }
   .btn-session-toggle[data-state="recording"]:hover:not(:disabled),
-  .btn-session-toggle[data-state="reconnecting"]:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-session-toggle[data-state="reconnecting"]:hover:not(:disabled) {
+    background: var(--warn-high);
+    border-color: var(--warn-high);
+    filter: brightness(1.1);
+  }
   .btn-session-toggle[data-state="connecting"] {
     background: transparent;
     color: var(--text-dim);
     border: 1px dashed var(--border-strong);
+  }
+  .btn-session-toggle[data-state="connecting"]:hover:not(:disabled) {
+    background: transparent;
+    border-color: var(--border-strong);
   }
 
   /* Toggle-switch row: inline label + switch for session-level on/off
@@ -589,6 +604,32 @@
      battopt-row was rendering on desktop even though HRMBatteryOpt is
      never registered there. */
   .toggle-row[hidden] { display: none; }
+
+  /* Compact icon button. One shared style for anywhere we want a small
+     square action (currently: the autosave folder toggle). */
+  button.icon-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+  }
+  button.icon-btn svg {
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    fill: none;
+    transition: transform 0.2s ease, color 0.15s;
+  }
+  button.icon-btn:hover:not(:disabled) svg { color: var(--text); }
+
+  /* Single autosave action: plus when no folder is set, rotates 45deg to
+     become an × when a folder is set. Click handler decides which action
+     to run by reading the .has-folder class. */
+  #autosave-toggle.has-folder .icon-plus { transform: rotate(45deg); }
+  #autosave-toggle.has-folder { color: var(--warn-high); }
 
   /* Broadcast key row — sits directly under the broadcast toggle so
      no-sign-in users can see and copy the key that lets other devices /
@@ -1192,7 +1233,7 @@
       <div class="section-body">
         <div class="status" id="status">Tap Start session to pair your strap and begin recording.</div>
         <div style="height: 10px;"></div>
-        <button class="primary btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
+        <button class="btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
         <div class="battery-display" id="battery-display">Battery: —</div>
         <!-- Broadcast toggle lives here now (was buried in Settings → Widgets)
              — session-level choice belongs next to the Active broadcasts
@@ -1223,8 +1264,12 @@
           <span class="autosave-label">Auto-save folder:</span>
           <span class="autosave-folder" id="autosave-folder-name">none</span>
           <span class="autosave-status" id="autosave-status">idle</span>
-          <button id="autosave-pick">Choose...</button>
-          <button id="autosave-clear" style="display: none;">Clear</button>
+          <button id="autosave-toggle" class="icon-btn" title="Choose a folder to auto-save sessions">
+            <svg class="icon-plus" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
           <button id="btn-export" title="Download the current session as CSV">Export CSV</button>
         </div>
         <div class="autosave-row">
@@ -2446,40 +2491,27 @@
       return;
     }
     if (panel) panel.hidden = false;
-    const driveReady = !!driveAccessToken;
     const rows = entries.map(e => {
       const ageMin = Math.max(0, Math.round((now - e.startedAt) / 60000));
       const ageLabel = ageMin < 1 ? 'just now' : (ageMin < 60 ? `${ageMin} min` : `${Math.floor(ageMin / 60)}h ${ageMin % 60}m`);
       const suffix = e.self ? ' (this device)' : '';
-      // Stop session on remote rows depends on the shared relay key. Without
-      // Drive sign-in the control message goes nowhere — disable with a
-      // tooltip that tells the user what to do.
-      const remoteDisabled = !e.self && !driveReady;
-      const btnTitle = remoteDisabled
-        ? 'Sign into Google Drive on both devices so Stop session can reach this device.'
-        : '';
+      // Seeing a remote in this list means their presence heartbeat reached
+      // us on our relay key. They're already on the same key, so a Stop
+      // session control message over the same relay will reach them. No
+      // Drive sign-in or extra handshake needed.
       return `
         <div class="broadcaster-row${e.self ? ' is-self' : ''}" data-id="${e.id}">
           <span class="broadcaster-dot"></span>
           <span class="broadcaster-label">${escapeText(e.label)}${suffix}</span>
           <span class="broadcaster-time">${ageLabel}</span>
-          <button class="broadcaster-takeover" data-id="${e.id}" data-self="${e.self ? '1' : '0'}"${remoteDisabled ? ' disabled' : ''} title="${btnTitle}">Stop session</button>
+          <button class="broadcaster-takeover" data-id="${e.id}" data-self="${e.self ? '1' : '0'}">Stop session</button>
         </div>
       `;
     });
     list.innerHTML = rows.join('');
-    // Persistent hint shown whenever there are remote rows but Drive isn't
-    // signed in, so the user isn't left guessing why Stop session is inert.
     const hintEl = panel ? panel.querySelector('.broadcasters-hint') : null;
     if (hintEl) {
-      const hasRemote = entries.some(e => !e.self);
-      if (hasRemote && !driveReady) {
-        hintEl.innerHTML = 'Cross-device Stop session needs Google Drive sign-in on both devices so they share a relay key. <a href="#" id="broadcasters-hint-signin">Sign in</a>.';
-        const link = hintEl.querySelector('#broadcasters-hint-signin');
-        if (link) link.addEventListener('click', (ev) => { ev.preventDefault(); const btn = document.getElementById('drive-signin'); if (btn) btn.click(); });
-      } else {
-        hintEl.textContent = 'Other devices currently broadcasting to your relay key. Stop session tells the remote device to disconnect its strap. Once that happens you can Connect strap here.';
-      }
+      hintEl.textContent = 'Other devices currently broadcasting to your relay key. Stop session tells the remote device to disconnect its strap. Once that happens you can Start session here.';
     }
     list.querySelectorAll('.broadcaster-takeover').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -2501,17 +2533,12 @@
   // strap doesn't re-advertise until the remote side has actually dropped.
   // User can press Connect strap manually once the other device releases it.
   function stopRemoteBroadcaster(targetId) {
-    // Stop session sends a control message over the relay to the target's
-    // senderId. It only actually reaches the remote device when both devices
-    // share the same relay key (which is what Google Drive sync guarantees)
-    // and our WebSocket is open. Bail with a clear message instead of
-    // silently failing if either precondition isn't met.
+    // Sends a control message over the relay to the target's senderId.
+    // Reaches them because their presence heartbeat arrived on this relay
+    // key (that's how they ended up in the list). Only fails if our own
+    // WebSocket has dropped.
     if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) {
-      setStatus('Relay is offline. Reconnect or sign into Google Drive and try again.', 'warn');
-      return;
-    }
-    if (!driveAccessToken) {
-      setStatus('Sign into Google Drive on both devices so Stop session can reach the remote device.', 'warn');
+      setStatus('Relay is offline. Try again in a moment.', 'warn');
       return;
     }
     const dev = getDeviceIdentity();
@@ -3217,13 +3244,19 @@
 
   function updateAutoSaveUI() {
     const nameEl = $('autosave-folder-name');
-    const clearBtn = $('autosave-clear');
+    const toggleBtn = $('autosave-toggle');
     if (autoSaveDirHandle) {
       nameEl.textContent = autoSaveDirHandle.name || 'selected';
-      clearBtn.style.display = '';
+      if (toggleBtn) {
+        toggleBtn.classList.add('has-folder');
+        toggleBtn.title = 'Clear the auto-save folder';
+      }
     } else {
       nameEl.textContent = 'none';
-      clearBtn.style.display = 'none';
+      if (toggleBtn) {
+        toggleBtn.classList.remove('has-folder');
+        toggleBtn.title = 'Choose a folder to auto-save sessions';
+      }
       setAutoSaveStatus('', '');
     }
   }
@@ -4204,8 +4237,12 @@
         }
       });
     }
-    $('autosave-pick').addEventListener('click', pickAutoSaveFolder);
-    $('autosave-clear').addEventListener('click', clearAutoSaveFolder);
+    // One button, two states. Plus icon when no folder is set (click to
+    // choose), rotates 45deg to × when a folder is saved (click to clear).
+    $('autosave-toggle').addEventListener('click', () => {
+      if (autoSaveDirHandle) clearAutoSaveFolder();
+      else pickAutoSaveFolder();
+    });
     restoreAutoSaveFolder();
     // Google Drive sign-in wiring
     initGoogleAuth();
