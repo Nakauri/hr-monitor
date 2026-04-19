@@ -113,6 +113,14 @@
       wakeLockGotPlugin: !!window.__hrMonitorWakeLockGotPlugin,
       wakeLockRegistered: !!window.__hrMonitorWakeLockRegistered,
       wakeLockLastError: window.__hrMonitorWakeLockLastError || null,
+      oemLoaded: !!window.__hrMonitorOemLoaded,
+      oemRanInit: !!window.__hrMonitorOemRanInit,
+      oemGotPlugin: !!window.__hrMonitorOemGotPlugin,
+      oemRegistered: !!window.__hrMonitorOemRegistered,
+      oemVendor: (window.HRMOem && window.HRMOem.vendor) || null,
+      oemManufacturer: (window.HRMOem && window.HRMOem.manufacturer) || null,
+      oemHasKnownKiller: !!(window.HRMOem && window.HRMOem.hasKnownBackgroundKiller),
+      oemLastError: window.__hrMonitorOemLastError || null,
       userAgent: navigator.userAgent,
       localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
       driveSignedIn: !!localStorage.getItem('hr_monitor_drive_token'),
@@ -388,6 +396,16 @@
           ['3. got plugin', yn(d.wakeLockGotPlugin), d.isNative ? ok(d.wakeLockGotPlugin) : ''],
           ['4. registered', yn(d.wakeLockRegistered), d.isNative ? ok(d.wakeLockRegistered) : ''],
           ['last error', d.wakeLockLastError || 'none', d.wakeLockLastError ? 'err' : 'ok'],
+        ])}
+        ${rows('OEM background killer', [
+          ['1. script loaded', yn(d.oemLoaded), d.isNative ? ok(d.oemLoaded) : ''],
+          ['2. init ran', yn(d.oemRanInit), d.isNative ? ok(d.oemRanInit) : ''],
+          ['3. got plugin', yn(d.oemGotPlugin), d.isNative ? ok(d.oemGotPlugin) : ''],
+          ['4. registered', yn(d.oemRegistered), d.isNative ? ok(d.oemRegistered) : ''],
+          ['manufacturer', d.oemManufacturer || '—'],
+          ['vendor', d.oemVendor || '—'],
+          ['has known killer', yn(d.oemHasKnownKiller), d.oemHasKnownKiller ? 'warn' : 'ok'],
+          ['last error', d.oemLastError || 'none', d.oemLastError ? 'err' : 'ok'],
         ])}
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
