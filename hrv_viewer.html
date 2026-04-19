@@ -6535,10 +6535,15 @@
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        interaction: { mode: 'nearest', intersect: false },
+        // Snap to the vertical column at the cursor (index mode) so a single
+        // tooltip surfaces every series at that timestamp — HR, RMSSD, any
+        // palp cluster or event nearby — instead of separate popups per line.
+        interaction: { mode: 'index', intersect: false, axis: 'x' },
         plugins: {
           legend: { labels: { color: '#b0b0b0', font: { size: 13, weight: '600' }, boxWidth: 14, padding: 12, filter: (item) => item.text !== 'Palp' && !item.text.startsWith('_HL') } },
           tooltip: {
+            mode: 'index',
+            intersect: false,
             callbacks: {
               title: (items) => items.length ? formatDuration(items[0].parsed.x) : '',
               label: (ctx) => {
@@ -6550,7 +6555,27 @@
                 if (ctx.dataset.label === 'HR') return `HR ${Math.round(ctx.parsed.y)} bpm`;
                 if (ctx.dataset.label === 'RMSSD') return `RMSSD ${Math.round(ctx.parsed.y)} ms`;
                 return '';
-              }
+              },
+              afterBody: (items) => {
+                // Pull any session-wide extras (events, warnings) that land
+                // near the hovered timestamp. Palp clusters already appear as
+                // their own dataset so no separate pull is needed.
+                if (!items.length) return [];
+                const xAt = items[0].parsed.x;
+                const extras = [];
+                const d = currentData;
+                if (d && Array.isArray(d.events)) {
+                  d.events
+                    .filter(e => Math.abs((e.t || 0) - xAt) < 10 / 60)
+                    .forEach(e => extras.push('Event: ' + (e.label || '—')));
+                }
+                if (d && Array.isArray(d.warnings)) {
+                  d.warnings
+                    .filter(w => Math.abs((w.t || 0) - xAt) < 10 / 60)
+                    .forEach(w => extras.push('Warning: ' + (w.type || '—')));
+                }
+                return extras;
+              },
             },
             backgroundColor: 'rgba(15,15,15,0.97)',
             borderColor: '#2a2a2a',

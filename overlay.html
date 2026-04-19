@@ -75,7 +75,9 @@
 
   /* Visible banner when >1 device is broadcasting to the same relay key. The
      widget would otherwise just flash as ticks from each sender overwrite
-     each other. */
+     each other. Position: fixed overlays the top in standalone / OBS cases.
+     In embed mode (inside the monitor's watch iframe), fixed positioning
+     would cover the top of the widget — switch to inline flow below it. */
   #multi-sender-banner {
     position: fixed;
     left: 8px;
@@ -92,6 +94,10 @@
     letter-spacing: 0.02em;
     backdrop-filter: blur(4px);
   }
+  body.embed #multi-sender-banner {
+    position: static;
+    margin: 10px 4px 0;
+  }
   #multi-sender-banner b { color: #fff; }
 </style>
 </head>
@@ -101,8 +107,6 @@
   <div>◌ Waiting for live app…</div>
   <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
 </div>
-
-<div id="multi-sender-banner" hidden></div>
 
 <div id="overlay-zone">
   <!-- Reserved warning slot for warningPlacement === 'above'. Invisible until
@@ -140,6 +144,8 @@
     </div>
   </div>
 </div>
+
+<div id="multi-sender-banner" hidden></div>
 
 <script>
 (function() {
