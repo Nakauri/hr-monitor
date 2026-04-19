@@ -108,6 +108,9 @@ whenReady(function() {
     const handlers = new Set();
     let subscribed = false;
     let pluginListener = null;
+    let notificationCount = 0;
+    const LOG = (window.HRMLog && window.HRMLog.event) ? window.HRMLog.event : function () {};
+    const LOG_ERR = (window.HRMLog && window.HRMLog.error) ? window.HRMLog.error : function () {};
 
     return {
       uuid: charUuid,
@@ -116,14 +119,32 @@ whenReady(function() {
         // Notifications arrive as plugin events, NOT as callbacks passed to
         // startNotifications. Event name is:
         //   notification|<deviceId>|<serviceUuid>|<characteristicUuid>
-        // All UUIDs lowercase. Event payload is { value: <base64 bytes> }.
+        // All UUIDs lowercase. Event payload is { value: <hex bytes> }.
         const eventName = 'notification|' + deviceId + '|' + serviceUuid + '|' + charUuid;
+        LOG('ble.startNotifications calling', { char: charUuid });
         pluginListener = await BleClient.addListener(eventName, (ev) => {
-          const dv = b64ToDataView(ev && ev.value);
-          const wrapped = { target: { value: dv } };
-          for (const h of handlers) { try { h(wrapped); } catch (e) { console.warn('[ble-adapter] notification handler threw:', e); } }
+          notificationCount++;
+          // First three ticks + one every 60s after that. Enough to confirm
+          // BLE is alive before a crash, without flooding the buffer.
+          if (notificationCount <= 3 || notificationCount % 60 === 0) {
+            LOG('ble.notification', { n: notificationCount, bytes: ev && ev.value ? ev.value.length / 2 : 0 });
+          }
+          try {
+            const dv = b64ToDataView(ev && ev.value);
+            const wrapped = { target: { value: dv } };
+            for (const h of handlers) {
+              try { h(wrapped); }
+              catch (e) {
+                console.warn('[ble-adapter] notification handler threw:', e);
+                LOG_ERR('ble.handler threw', e && e.message ? e.message : String(e));
+              }
+            }
+          } catch (e) {
+            LOG_ERR('ble.dispatch threw', e && e.message ? e.message : String(e));
+          }
         });
         await BleClient.startNotifications({ deviceId, service: serviceUuid, characteristic: charUuid });
+        LOG('ble.startNotifications resolved');
         subscribed = true;
         return this;
       },
@@ -169,16 +190,33 @@ whenReady(function() {
       get connected() { return connected; },
       async connect() {
         if (connected) return gatt;
+        const LOG = (window.HRMLog && window.HRMLog.event) ? window.HRMLog.event : function () {};
+        const LOG_ERR = (window.HRMLog && window.HRMLog.error) ? window.HRMLog.error : function () {};
         // Plugin fires 'disconnect|<deviceId>' when the device drops.
         const eventName = 'disconnect|' + deviceId;
         try {
           disconnectListener = await BleClient.addListener(eventName, () => {
+            LOG('ble.disconnect event');
             connected = false;
             for (const h of disconnectHandlers) { try { h({ target: device }); } catch (e) {} }
           });
         } catch (e) { /* non-fatal */ }
-        await BleClient.connect({ deviceId });
-        connected = true;
+        LOG('ble.connect calling', { deviceId: String(deviceId).slice(0, 8) });
+        try {
+          await BleClient.connect({ deviceId });
+          connected = true;
+          LOG('ble.connect resolved');
+        } catch (e) {
+          // Leak prevention: plugin listener was registered before connect;
+          // if connect rejected, remove it so we don't stack listeners on
+          // retry.
+          if (disconnectListener && typeof disconnectListener.remove === 'function') {
+            try { await disconnectListener.remove(); } catch (er) {}
+            disconnectListener = null;
+          }
+          LOG_ERR('ble.connect threw', e && e.message ? e.message : String(e));
+          throw e;
+        }
         return gatt;
       },
       async disconnect() {
