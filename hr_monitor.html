@@ -631,66 +631,6 @@
   #autosave-toggle.has-folder .icon-plus { transform: rotate(45deg); }
   #autosave-toggle.has-folder { color: var(--warn-high); }
 
-  /* Broadcast key — collapsed by default. Caret reveals a small panel
-     with the key + Copy/New + a paste field to adopt a key from another
-     device. Row is hidden entirely when Drive is signed in (the sync is
-     automatic in that case). */
-  .broadcast-key-row {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
-  }
-  .broadcast-key-row[hidden] { display: none; }
-  .key-caret {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: transparent;
-    border: none;
-    padding: 4px 0;
-    color: var(--text-dim);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-  .key-caret:hover { color: var(--text); }
-  .key-caret-icon {
-    width: 12px;
-    height: 12px;
-    stroke: currentColor;
-    stroke-width: 2.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    fill: none;
-    transform: rotate(-90deg);
-    transition: transform 0.15s;
-  }
-  .key-caret[aria-expanded="true"] .key-caret-icon { transform: rotate(0deg); }
-  .key-panel {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .key-row {
-    display: flex;
-    align-items: stretch;
-    gap: 6px;
-  }
-  #broadcast-key-input {
-    flex: 1;
-    min-width: 0;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-    color: var(--text);
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 11px;
-  }
-  #broadcast-key-input:focus { outline: 1px solid var(--accent-rmssd); }
 
   /* Nudge animation for the battery-optimisation row when the user taps
      Start session while still optimised. Draws the eye to the row + button
@@ -1273,23 +1213,11 @@
           </div>
           <span class="streaming-status" id="relay-status">offline</span>
         </div>
-        <div class="broadcast-key-row" id="broadcast-key-row">
-          <button class="key-caret" id="key-caret" type="button" aria-expanded="false">
-            <svg class="key-caret-icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
-            <span>Broadcast key</span>
-          </button>
-          <div class="key-panel" id="key-panel" hidden>
-            <div class="key-row">
-              <code class="streaming-key" id="broadcast-key-display">—</code>
-              <button id="copy-broadcast-key" title="Copy key">Copy</button>
-              <button id="regenerate-key" title="Generate a new key. Any device using the old one stops.">New</button>
-            </div>
-            <div class="key-row">
-              <input type="text" id="broadcast-key-input" placeholder="Paste a key from another device" spellcheck="false" autocomplete="off" />
-              <button id="apply-broadcast-key">Apply</button>
-            </div>
-          </div>
-        </div>
+        <!-- Broadcast key itself is intentionally invisible. Cross-device
+             sync is handled by Drive: sign in on both devices and they end
+             up on the same relay room automatically. OBS still works from
+             the URL in Settings → Widgets (URL embeds the key). -->
+        <code id="broadcast-key-display" hidden>—</code>
         <div class="autosave-row">
           <span class="autosave-label">Auto-save folder:</span>
           <span class="autosave-folder" id="autosave-folder-name">none</span>
@@ -2519,7 +2447,6 @@
     if (entries.length === 0) {
       if (panel) panel.hidden = true;
       list.innerHTML = '';
-      applyRemoteBroadcasterLock(false);
       updateWatchMode();
       return;
     }
@@ -2546,7 +2473,6 @@
     if (hintEl) {
       hintEl.textContent = 'Other devices currently broadcasting to your relay key. Stop session tells the remote device to disconnect its strap. Once that happens you can Start session here.';
     }
-    applyRemoteBroadcasterLock(entries.some(e => !e.self));
     list.querySelectorAll('.broadcaster-takeover').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.dataset.self === '1') stopLocalBroadcast();
@@ -2584,33 +2510,6 @@
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
 
-  // Lock local publisher controls when a REMOTE device is live on our relay
-  // key. Greys Start session + hides the broadcast toggle; we're a reader at
-  // that point, and the user's only path back to publishing is Stop session
-  // on the remote row. Unlocks automatically when the remote goes stale (no
-  // heartbeat for ~15 s) or is explicitly stopped.
-  function applyRemoteBroadcasterLock(locked) {
-    const toggle = document.getElementById('session-toggle');
-    const broadcastRow = document.getElementById('broadcast-toggle-row');
-    const cs = (state && state.connState) || 'idle';
-    // Only lock when we're idle. If the user is already recording, they
-    // outrank the remote and their controls should stay normal — both
-    // devices publishing at once is a visible conflict in the broadcasters
-    // list, not something to silently hide.
-    const shouldLock = locked && cs === 'idle';
-    if (toggle) {
-      if (shouldLock) {
-        toggle.disabled = true;
-        toggle.title = 'Another device is broadcasting on this relay key. Stop it below, or paste a different key.';
-        toggle.textContent = 'Already broadcasting elsewhere';
-      } else {
-        toggle.disabled = !navigator.bluetooth;
-        toggle.title = '';
-        updateSessionToggle();
-      }
-    }
-    if (broadcastRow) broadcastRow.hidden = shouldLock;
-  }
 
   // Slow heartbeat. HR ticks only fire while the strap is streaming — if the
   // user toggles widgets while BLE is disconnected, the relay wouldn't see
@@ -3450,11 +3349,6 @@
     // Rebuild the broadcasters panel so state-dependent copy flips in step
     // with Drive state (sign-in / sign-out).
     if (typeof renderBroadcastersPanel === 'function') renderBroadcastersPanel();
-    // Hide the broadcast-key row when Drive is signed in — Drive auto-syncs
-    // the key across devices, so the manual copy/regenerate controls are
-    // redundant. Sign out to see and manage the key directly.
-    const keyRow = document.querySelector('.broadcast-key-row');
-    if (keyRow) keyRow.hidden = !!driveAccessToken;
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
     if (driveAccessToken) {
@@ -4264,47 +4158,10 @@
         }
       });
     }
-    const regenBtn = $('regenerate-key');
-    if (regenBtn) {
-      regenBtn.addEventListener('click', () => {
-        if (!confirm('Generate a new broadcast key? Any other device or OBS URL using the current one stops working.')) return;
-        regenerateBroadcastKey();
-      });
-    }
-    // Caret reveals / hides the key panel (hidden by default).
-    const keyCaret = $('key-caret');
-    const keyPanel = $('key-panel');
-    if (keyCaret && keyPanel) {
-      keyCaret.addEventListener('click', () => {
-        const expanded = keyCaret.getAttribute('aria-expanded') === 'true';
-        keyCaret.setAttribute('aria-expanded', String(!expanded));
-        keyPanel.hidden = expanded;
-      });
-    }
-    // Apply a pasted key — adopts the key from another device so this
-    // monitor joins the same relay room. Basic format check to catch
-    // accidental whitespace or junk paste.
-    const applyKeyBtn = $('apply-broadcast-key');
-    const keyInput = $('broadcast-key-input');
-    if (applyKeyBtn && keyInput) {
-      const apply = () => {
-        const v = (keyInput.value || '').trim();
-        if (!v) return;
-        if (!/^[A-Za-z0-9_-]{6,64}$/.test(v)) {
-          setStatus('Key format looks off. Letters, numbers, dashes only.', 'error');
-          return;
-        }
-        localStorage.setItem('hr_monitor_broadcast_key', v);
-        keyInput.value = '';
-        reconnectRelay();
-        updateStreamingUI();
-        watchFrameSrc = null;
-        if (typeof updateWatchMode === 'function') updateWatchMode();
-        setStatus('Broadcast key updated.');
-      };
-      applyKeyBtn.addEventListener('click', apply);
-      keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
-    }
+    // Broadcast key is intentionally not user-facing. Cross-device sync is
+    // Drive-only; solo users broadcast to OBS via the full URL that already
+    // embeds the key. If a user needs to rotate the key, they clear site
+    // data (rare enough that we don't ship a dedicated button).
     // OBS Browser Source width/height copy buttons.
     document.querySelectorAll('.obs-size-copy').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -4333,24 +4190,6 @@
     // controls. No mid-session "discard" action — Stop already finalizes +
     // clears, and Start is always a fresh recording.
     $('btn-export').addEventListener('click', exportCSV);
-    // Copy broadcast key for users setting up a second device or pasting
-    // into OBS manually. Brief "Copied!" feedback on the button so the user
-    // sees the action landed without needing a toast.
-    const copyKeyBtn = $('copy-broadcast-key');
-    if (copyKeyBtn) {
-      copyKeyBtn.addEventListener('click', async () => {
-        const key = getOrCreateBroadcastKey();
-        if (!key) return;
-        try {
-          await navigator.clipboard.writeText(key);
-          const original = copyKeyBtn.textContent;
-          copyKeyBtn.textContent = 'Copied!';
-          setTimeout(() => { copyKeyBtn.textContent = original; }, 1200);
-        } catch (e) {
-          setStatus('Copy failed. Long-press the key to select it.', 'error');
-        }
-      });
-    }
     // One button, two states. Plus icon when no folder is set (click to
     // choose), rotates 45deg to × when a folder is saved (click to clear).
     $('autosave-toggle').addEventListener('click', () => {
