@@ -380,6 +380,7 @@
   .index-pager-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .index-pager-info { font-variant-numeric: tabular-nums; }
   .session-card {
+    position: relative;
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -391,6 +392,74 @@
     border-color: var(--border-strong);
     transform: translateY(-2px);
     box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+
+  /* Kebab "more actions" button in each session card. Fades in on hover on
+     desktop (keeps cards clean at rest), always visible on mobile / touch
+     devices where there's no hover to reveal it. Opens the .session-card-menu
+     dropdown below. Clicking the kebab OR the menu must not navigate into
+     the session — handlers use stopPropagation. */
+  .session-card-kebab {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    border-radius: 6px;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.12s, color 0.12s;
+  }
+  .session-card:hover .session-card-kebab,
+  .session-card-kebab:focus-visible,
+  .session-card-kebab[aria-expanded="true"] { opacity: 1; }
+  .session-card-kebab:hover {
+    background: rgba(255,255,255,0.06);
+    color: var(--text);
+  }
+  .session-card-kebab svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+  .session-card-menu {
+    position: absolute;
+    top: 40px;
+    right: 8px;
+    min-width: 180px;
+    background: #0a0a0a;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 50;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .session-card-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .session-card-menu button:hover { background: rgba(255,255,255,0.06); }
+  .session-card-menu button.danger { color: var(--warn-high); }
+  .session-card-menu button.danger:hover { background: rgba(226,75,74,0.12); }
+  @media (hover: none), (max-width: 768px) {
+    /* Phones + tablets have no hover, so keep the kebab always visible. */
+    .session-card-kebab { opacity: 1; }
   }
   .session-card-time {
     font-size: 12px;
@@ -2831,6 +2900,137 @@
     return { pulled, uploaded, written, skipped };
   }
 
+  // Kebab + dropdown markup injected into every session-card. Kept in a
+  // helper so the index list and day view stay in sync — any future action
+  // (e.g. "Rename", "Download") lands here once and applies to both.
+  function sessionCardActions(filenameEncoded) {
+    return `
+      <button class="session-card-kebab" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Session actions" data-kebab="${filenameEncoded}">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="8" cy="13" r="1.6"/></svg>
+      </button>
+    `;
+  }
+
+  // Wire up the kebab buttons inside a freshly rendered card grid. Each
+  // kebab builds its menu lazily on first click so the DOM stays light when
+  // many cards render. The menu closes on any outside click or a second
+  // tap on the kebab.
+  function wireSessionCardKebabs(root, opts) {
+    opts = opts || {};
+    const onDeleted = typeof opts.onDeleted === 'function' ? opts.onDeleted : () => {};
+    const kebabs = root.querySelectorAll('.session-card-kebab');
+    kebabs.forEach(kebab => {
+      if (kebab._wired) return;
+      kebab._wired = true;
+      kebab.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const expanded = kebab.getAttribute('aria-expanded') === 'true';
+        closeAllSessionCardMenus();
+        if (expanded) return; // second tap = close
+        const card = kebab.closest('.session-card');
+        if (!card) return;
+        const fn = decodeURIComponent(kebab.dataset.kebab || card.dataset.filename || '');
+        if (!fn) return;
+        const menu = document.createElement('div');
+        menu.className = 'session-card-menu';
+        menu.setAttribute('role', 'menu');
+        menu.innerHTML = `
+          <button type="button" role="menuitem" class="danger" data-action="delete">Delete session</button>
+        `;
+        menu.addEventListener('click', (e) => e.stopPropagation());
+        menu.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+          closeAllSessionCardMenus();
+          const pretty = prettyFilename(fn);
+          if (!confirm('Delete this session?\n\n' + pretty + '\n\nRemoved from this device' + (driveAccessToken ? ' and Google Drive' : '') + '. This cannot be undone.')) return;
+          try {
+            await deleteSession(fn);
+            onDeleted(fn);
+          } catch (e) {
+            alert('Delete failed: ' + (e && e.message ? e.message : 'unknown error'));
+          }
+        });
+        card.appendChild(menu);
+        kebab.setAttribute('aria-expanded', 'true');
+      });
+    });
+  }
+
+  function closeAllSessionCardMenus() {
+    document.querySelectorAll('.session-card-menu').forEach(m => m.remove());
+    document.querySelectorAll('.session-card-kebab[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  }
+  document.addEventListener('click', closeAllSessionCardMenus);
+
+  // Human-readable form for confirm dialogs — "2026-04-19 · 12:40 · 5 min"
+  // beats the raw hrv_session_...csv filename by a mile.
+  function prettyFilename(fn) {
+    try {
+      const meta = parseSessionFilename(fn);
+      if (!meta) return fn;
+      const s = sessionsIndex[fn];
+      const dur = s ? formatDuration(s.duration) : '';
+      return meta.isoDate + ' · ' + meta.isoTime + (dur ? ' · ' + dur : '');
+    } catch (e) { return fn; }
+  }
+
+  // Remove a session from every store it might live in: local folder (via
+  // the File System Access dirHandle), Drive (if signed in and we have a
+  // folder id), the IDB drive-cache copy, and the in-memory + localStorage
+  // sessionsIndex. Also drops any cached full-session parse. Idempotent
+  // per-store: missing in one source is not a failure.
+  async function deleteSession(filename) {
+    const errors = [];
+    // Local folder
+    if (dirHandle) {
+      try {
+        const ok = await ensureWritePermission();
+        if (ok) {
+          try {
+            await dirHandle.removeEntry(filename);
+          } catch (e) {
+            // If the file doesn't exist locally that's fine. Any other
+            // error (permission, locked) we surface to the caller.
+            if (e && e.name !== 'NotFoundError') errors.push('local: ' + (e.message || e.name));
+          }
+        }
+      } catch (e) { errors.push('local perm: ' + (e.message || e.name)); }
+    }
+    // Drive
+    if (driveAccessToken && driveFolderId) {
+      try {
+        const q = encodeURIComponent(`'${driveFolderId}' in parents and name='${filename.replace(/'/g, "\\'")}' and trashed=false`);
+        const find = await driveFetch('files?q=' + q + '&fields=files(id,name)&spaces=drive');
+        if (find.ok) {
+          const data = await find.json();
+          if (data.files && data.files.length) {
+            const id = data.files[0].id;
+            const del = await driveFetch('files/' + id, { method: 'DELETE' });
+            // 204 No Content is the success for DELETE. 404 means someone
+            // already removed it elsewhere — fine.
+            if (!del.ok && del.status !== 204 && del.status !== 404) {
+              errors.push('drive: ' + del.status);
+            }
+          }
+        }
+      } catch (e) { errors.push('drive: ' + (e.message || e.name)); }
+    }
+    // IDB drive-cache copy
+    try { await idbDelete(filename, IDB_DRIVE_STORE); }
+    catch (e) { /* no-op: cache miss is fine */ }
+    // Index + persisted cache
+    try {
+      delete sessionsIndex[filename];
+      localStorage.setItem(LS_INDEX, JSON.stringify(sessionsIndex));
+    } catch (e) {}
+    // Full-parse cache (if any)
+    try {
+      if (typeof _sessionCache !== 'undefined' && _sessionCache instanceof Map) {
+        _sessionCache.delete(filename);
+      }
+    } catch (e) {}
+    if (errors.length) throw new Error(errors.join('; '));
+  }
+
   // Unified session-text reader. Prefers the local folder (if permission
   // granted), then falls back to the Drive IndexedDB cache. Throws if
   // neither source has the file.
@@ -3586,6 +3786,7 @@
       const upPct = computeUptimePct(s);
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
+          ${sessionCardActions(encodeURIComponent(fn))}
           <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoDate + ' · ' + meta.isoTime : fn}</div>
           <div class="session-card-date">${dur} session</div>
           <div class="session-card-stats">
@@ -3654,6 +3855,7 @@
     el.querySelectorAll('.session-card').forEach(c => {
       c.addEventListener('click', () => setHash('session/' + c.dataset.filename));
     });
+    wireSessionCardKebabs(el, { onDeleted: () => renderIndex() });
     const rangeEl = document.getElementById('index-range');
     if (rangeEl) rangeEl.addEventListener('change', () => {
       indexState.range = rangeEl.value;
@@ -3972,6 +4174,7 @@
             <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-faint)'};">${(s.chillsWindows || []).length}</span></div>` : '';
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
+          ${sessionCardActions(encodeURIComponent(fn))}
           <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoTime : fn}</div>
           <div class="session-card-date">${formatDuration(s.duration)} session</div>
           <div class="session-card-stats">
@@ -4071,6 +4274,10 @@
         el.querySelectorAll('.day-strip-block.hovered').forEach(b => b.classList.remove('hovered'));
       });
     });
+    // Day-view card kebab: re-render the day so the deleted card falls out
+    // of the grid. If it was the last one on the day, renderDay shows the
+    // "No sessions on this date" stub.
+    wireSessionCardKebabs(el, { onDeleted: () => renderDay(iso) });
   }
 
   // ===== Week view =====
