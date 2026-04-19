@@ -103,6 +103,31 @@ body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-z
   font-variant-numeric: tabular-nums;
 }
 .palp-chip.active { display: inline-flex; }
+
+/* Contact chip: shows next to BPM when the strap reports it's not in
+   skin contact. Only meaningful on straps whose firmware actually
+   populates the contact-status bits (most Polar, Wahoo, newer Coospo).
+   Driven by body.contact-off from hr_monitor.html's onHRNotification. */
+.contact-chip {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(232,152,88,0.12);
+  border: 1px solid var(--warn-high);
+  color: var(--warn-high);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+body.contact-off .contact-chip { display: inline-flex; }
+.contact-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn-high);
+}
 .palp-dot {
   width: 6px;
   height: 6px;

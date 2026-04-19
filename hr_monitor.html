@@ -968,6 +968,7 @@
           <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
           <span class="widget-label">BPM</span>
           <span class="palp-chip" id="palp-chip" title="Palpitations in last 60 seconds"><span class="palp-dot"></span><span id="palp-chip-count">0</span></span>
+          <span class="contact-chip" id="contact-chip" title="Strap reports it's not in contact with skin"><span class="contact-chip-dot"></span>OFF BODY</span>
         </div>
         <div class="warning-banner" id="warning-banner">
           <span class="warning-banner-icon" id="warning-icon"></span>
@@ -1304,6 +1305,13 @@
   function parseHR(value) {
     const flags = value.getUint8(0);
     const hrFormat16 = flags & 0x01;
+    // Sensor contact spec: bits 1-2 form a 2-bit field.
+    //   0b0x = not supported (treat as "unknown")
+    //   0b10 = supported, NOT in contact
+    //   0b11 = supported, in contact
+    const contactBits = (flags >> 1) & 0x03;
+    const contactSupported = (contactBits & 0x02) !== 0;
+    const contactDetected = contactBits === 0x03;
     const rrPresent = flags & 0x10;
     const energyPresent = flags & 0x08;
     let offset = 1;
@@ -1325,10 +1333,10 @@
       try {
         const hex = Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ');
         const ibi = rrs.map(r => r.toFixed(0)).join(', ');
-        console.log('[HR]', { hr, rrs: ibi, bytes: hex, flags: '0x' + flags.toString(16) });
+        console.log('[HR]', { hr, rrs: ibi, bytes: hex, flags: '0x' + flags.toString(16), contactSupported, contactDetected });
       } catch (e) {}
     }
-    return { hr, rrs };
+    return { hr, rrs, contactSupported, contactDetected };
   }
   const debugBLE = new URLSearchParams(location.search).get('debug') === '1';
   if (debugBLE) console.log('[HR] debug=1 — each BLE notification will be logged with raw hex.');
@@ -1989,10 +1997,26 @@
     // Guard against notifications arriving before startTime is set
     if (state.startTime == null) state.startTime = Date.now();
     const value = event.target.value;
-    const { hr, rrs } = parseHR(value);
+    const { hr, rrs, contactSupported, contactDetected } = parseHR(value);
     const now = (Date.now() - state.startTime) / 60000;
+    // Skin-contact state: only flip classes when the strap actually reports
+    // the field (many don't). Sustained-contact-lost gating could live here
+    // later; for now fire per-tick so a transient bump clears immediately.
+    if (contactSupported) {
+      const contactOff = !contactDetected;
+      if (contactOff !== !!state.contactOff) {
+        state.contactOff = contactOff;
+        document.body.classList.toggle('contact-off', contactOff);
+      }
+    } else if (state.contactOff) {
+      state.contactOff = false;
+      document.body.classList.remove('contact-off');
+    }
     state.currentHR = hr;
     state.lastDataTime = Date.now();
+    // Each confirmed HR notification is proof the link is healthy; clear
+    // the reconnect backoff so the next disconnect starts fresh at 1 s.
+    if (typeof resetReconnectBackoff === 'function') resetReconnectBackoff();
     state.hrSeries.push({ t: now, v: hr });
     if (state.hrSeries.length > 5000) state.hrSeries.shift();
 
@@ -2464,6 +2488,8 @@
       rmssd: state.currentRMSSD,
       rmssdStage: getRMSSDStage(state.currentRMSSD),
       palpPerMin: ectopicsPerMinute(nowMin),
+      // Skin-contact state so the overlay can mirror the "off body" chip.
+      contactOff: !!state.contactOff,
       // Active warning banner state so the OBS overlay shows the same HR / HRV
       // / palp / crash banner as the monitor. null when no warning is firing.
       warn: state.currentWarn || null,
@@ -2632,6 +2658,12 @@
   async function attachConnection() {
     setStatus('Connecting to ' + (device.name || 'device') + '...');
     server = await device.gatt.connect();
+    // Android native: bump to HIGH connection priority for smoother tick
+    // cadence + fewer dropped beats on older phones. No-op on web (the
+    // adapter only exposes this method inside Capacitor).
+    if (server && typeof server._requestConnectionPriority === 'function') {
+      try { await server._requestConnectionPriority('high'); } catch (e) {}
+    }
     const service = await server.getPrimaryService(HR_SERVICE);
     char = await service.getCharacteristic(HR_CHAR);
     await char.startNotifications();
@@ -2688,15 +2720,28 @@
     else if (pct <= 25) el.classList.add('low');
   }
 
+  // Exponential backoff on BLE reconnect. Android in particular throttles
+  // rescans at 5 per 30 s, so hammering with a constant 2 s retry trips
+  // SCAN_FAILED_SCANNING_TOO_FREQUENTLY. Android's own `status=133` is a
+  // transient GATT error that deserves retry, not a hard fail — treated
+  // the same as any other disconnect cause here.
+  let reconnectBackoffMs = 1000;
+  function resetReconnectBackoff() { reconnectBackoffMs = 1000; }
   async function tryReconnect() {
     if (!state.autoReconnect || !device) return;
     if (device.gatt.connected) return;
     try {
       await attachConnection();
       state.lastDataTime = Date.now();
+      resetReconnectBackoff();
     } catch (e) {
-      // Strap still out of range or off - wait and try again.
-      if (state.autoReconnect) setTimeout(tryReconnect, 2000);
+      const msg = (e && e.message) ? e.message : String(e);
+      const is133 = /status[\s:=]*133|GATT_ERROR/i.test(msg);
+      if (is133) console.info('[reconnect] status=133 transient — retrying.');
+      if (state.autoReconnect) {
+        setTimeout(tryReconnect, reconnectBackoffMs);
+        reconnectBackoffMs = Math.min(reconnectBackoffMs * 2, 30000);
+      }
     }
   }
 

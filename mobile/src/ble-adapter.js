@@ -71,17 +71,24 @@ whenReady(function() {
     return `0000${hex}-0000-1000-8000-00805f9b34fb`;
   };
 
-  // Capacitor serializes binary plugin values as base64 when crossing the
-  // JS-native bridge. The Web Bluetooth API hands callers a DataView, so
-  // decode here before passing data up to hr_monitor.html's parseHR.
-  function b64ToDataView(b64) {
-    if (!b64 || typeof b64 !== 'string') return new DataView(new ArrayBuffer(0));
-    const bin = atob(b64);
-    const buf = new ArrayBuffer(bin.length);
+  // @capacitor-community/bluetooth-le serializes binary values across the
+  // native bridge as HEX STRINGS (confirmed from plugin source:
+  // convertValue() calls hexStringToDataView). Previously we assumed
+  // base64, which gave garbage HR readings (30000 bpm etc). Spaces and
+  // other separators sometimes appear; strip them defensively.
+  function hexStringToDataView(hex) {
+    if (!hex || typeof hex !== 'string') return new DataView(new ArrayBuffer(0));
+    const clean = hex.replace(/[^0-9a-fA-F]/g, '');
+    if (clean.length % 2 !== 0) return new DataView(new ArrayBuffer(0));
+    const buf = new ArrayBuffer(clean.length / 2);
     const view = new Uint8Array(buf);
-    for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
+    for (let i = 0; i < clean.length; i += 2) {
+      view[i / 2] = parseInt(clean.substr(i, 2), 16);
+    }
     return new DataView(buf);
   }
+  // Keep the old name as an alias so nothing else breaks if it's referenced.
+  const b64ToDataView = hexStringToDataView;
 
   let bleInitialized = false;
   async function ensureBleReady() {
@@ -185,6 +192,17 @@ whenReady(function() {
       },
       async getPrimaryService(serviceShortOrUuid) {
         return makeService(deviceId, toUuid(serviceShortOrUuid));
+      },
+      // Non-standard extension: let hr_monitor.html ask for HIGH connection
+      // priority after a successful connect. BALANCED is Android's default
+      // (~50-100 ms interval), HIGH is ~11-15 ms — smoother tick cadence on
+      // older phones and under load. Small strap-battery cost is fine for
+      // the duration of a session.
+      async _requestConnectionPriority(priority) {
+        try {
+          await BleClient.requestConnectionPriority({ deviceId, connectionPriority: priority || 'high' });
+          return true;
+        } catch (e) { console.warn('[ble-adapter] requestConnectionPriority failed:', e); return false; }
       },
     };
 
