@@ -43,6 +43,19 @@ if (!/REQUEST_IGNORE_BATTERY_OPTIMIZATIONS/.test(xml)) {
   console.log('[inject-manifest] added REQUEST_IGNORE_BATTERY_OPTIMIZATIONS');
 }
 
+// Inject base FOREGROUND_SERVICE permission. Required on API 28+ for
+// Context.startForegroundService(); without it Android throws
+// SecurityException synchronously. The capawesome plugin declares
+// POST_NOTIFICATIONS but NOT this — consumers add it themselves.
+if (!/uses-permission[^>]*android\.permission\.FOREGROUND_SERVICE"/.test(xml)) {
+  xml = xml.replace(
+    /<\/manifest>\s*$/,
+    '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n</manifest>\n'
+  );
+  changed = true;
+  console.log('[inject-manifest] added FOREGROUND_SERVICE');
+}
+
 // Inject WAKE_LOCK. The capawesome foreground-service plugin grabs a wake
 // lock internally to keep the service CPU-active; without this permission
 // it throws SecurityException at startForegroundService() time and the
@@ -71,20 +84,26 @@ if (!/FOREGROUND_SERVICE_CONNECTED_DEVICE/.test(xml)) {
   console.log('[inject-manifest] added FOREGROUND_SERVICE_CONNECTED_DEVICE');
 }
 
-// Inject a service-type override for the capawesome FGS plugin's service.
-// Plugin ships AndroidForegroundService; we override the type to connectedDevice.
-if (!/AndroidForegroundService[\s\S]{0,400}connectedDevice/.test(xml)) {
-  const serviceOverride = `        <service
+// Declare the FGS service + its notification-action receiver fresh. The
+// capawesome plugin's own AndroidManifest.xml contributes neither — its
+// README explicitly tells consumers to add them. Previously we were doing
+// `tools:replace` on a <service> attribute that never existed in the merged
+// manifest (no-op or merge error). foregroundServiceType="connectedDevice"
+// is ignored on API 28 and honoured on API 29+ (no API 28 issues).
+if (!/AndroidForegroundService/.test(xml)) {
+  const serviceEntry = `        <service
             android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService"
             android:foregroundServiceType="connectedDevice"
-            tools:replace="android:foregroundServiceType"
+            android:exported="false" />
+        <receiver
+            android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver"
             android:exported="false" />\n`;
   if (/<\/application>/.test(xml)) {
-    xml = xml.replace(/<\/application>/, serviceOverride + '    </application>');
+    xml = xml.replace(/<\/application>/, serviceEntry + '    </application>');
     changed = true;
-    console.log('[inject-manifest] added connectedDevice foregroundServiceType override');
+    console.log('[inject-manifest] added <service> + <receiver> for capawesome FGS');
   } else {
-    console.warn('[inject-manifest] no </application> tag — service override skipped');
+    console.warn('[inject-manifest] no </application> tag — FGS service entry skipped');
   }
 }
 

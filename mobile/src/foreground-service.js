@@ -33,13 +33,20 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
       }
 
       const NOTIFICATION_ID = 7701;
-      const SERVICE_TYPE_CONNECTED_DEVICE = 16;
+      // Explicit notification channel. Required on API 26+; creating it up-
+      // front (not lazily inside startForegroundService) avoids a race with
+      // the 5-second "did not call startForeground in time" watchdog on
+      // Samsung OneUI 9 / API 28.
+      const CHANNEL_ID = 'hr_monitor_fgs';
+      let channelCreated = false;
       let started = false;
       let lastTitle = '';
       let lastBody = '';
 
-      // Throttle updateForegroundService to 1 Hz — HR char fires at ~1 Hz
-      // already, hammering NotificationManager any faster is wasted CPU.
+      // Throttle updateForegroundService to 1 Hz. Updates omit smallIcon
+      // (the initial post set it) + smallIcon on every tick would re-resolve
+      // the drawable ID in the plugin, wasted work. silent:true keeps the
+      // notification from buzzing / pinging every second.
       let pendingUpdate = null;
       let updateTimer = null;
       function flushPending() {
@@ -51,9 +58,10 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
         try {
           ForegroundService.updateForegroundService({
             id: NOTIFICATION_ID,
+            notificationChannelId: CHANNEL_ID,
             title,
             body,
-            smallIcon: 'ic_stat_hr',
+            silent: true,
           });
         } catch (e) { console.warn('[fgs] update failed:', e); }
       }
@@ -84,14 +92,39 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
           logErr('fgs.start bailing: notifications denied', permState);
           return false;
         }
+        // Create the channel explicitly before startForegroundService so
+        // Notification.Builder(context, channelId) always finds it. No-op
+        // on API < 26 (plugin handles the version guard).
+        if (!channelCreated) {
+          try {
+            await ForegroundService.createNotificationChannel({
+              id: CHANNEL_ID,
+              name: 'HR Monitor recording',
+              description: 'Keeps the app recording while the screen is off.',
+              importance: 2, // LOW — visible but no sound/vibrate
+            });
+            channelCreated = true;
+            log('fgs.createNotificationChannel resolved', { id: CHANNEL_ID });
+          } catch (e) {
+            const emsg = e && e.message ? e.message : String(e);
+            logErr('fgs.createNotificationChannel threw', emsg);
+          }
+        }
         try {
-          log('fgs.startForegroundService calling', { serviceType: SERVICE_TYPE_CONNECTED_DEVICE });
+          // serviceType is intentionally omitted. The declared attribute in
+          // AndroidManifest.xml (foregroundServiceType="connectedDevice") is
+          // the one that matters on API 29+. Passing serviceType here with a
+          // value the plugin's type enum doesn't recognise (8/Location or
+          // 128/Microphone only) causes issues on newer Android, and is
+          // meaningless on API 28.
+          log('fgs.startForegroundService calling', { channel: CHANNEL_ID });
           await ForegroundService.startForegroundService({
             id: NOTIFICATION_ID,
+            notificationChannelId: CHANNEL_ID,
             title: initialTitle || 'HR Monitor',
             body: initialBody || 'Recording',
             smallIcon: 'ic_stat_hr',
-            serviceType: SERVICE_TYPE_CONNECTED_DEVICE,
+            silent: true,
           });
           started = true;
           lastTitle = initialTitle || 'HR Monitor';
