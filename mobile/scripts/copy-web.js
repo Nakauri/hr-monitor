@@ -35,6 +35,22 @@ function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+// Lines matching this regex are stripped from every HTML copied into the
+// mobile bundle. Currently: Vercel Web Analytics (loaded from an external
+// CDN — doesn't reach cleanly from Capacitor's https://localhost scheme,
+// and we don't want native app installs firing web analytics anyway).
+// If the vendor-injected markup changes, add another pattern here.
+const STRIP_PATTERNS = [
+  /^\s*<!--\s*Vercel Web Analytics[\s\S]*?-->\s*\n?/m,
+  /^\s*<script\s+defer\s+src="https:\/\/cdn\.vercel-insights\.com[^>]*><\/script>\s*\n?/m,
+];
+
+function stripForMobile(html) {
+  let out = html;
+  for (const re of STRIP_PATTERNS) out = out.replace(re, '');
+  return out;
+}
+
 function copyFile(relative) {
   const from = path.join(repoRoot, relative);
   const to = path.join(wwwDir, relative);
@@ -43,8 +59,15 @@ function copyFile(relative) {
     console.warn(`[copy-web] skipping ${relative} (not found at repo root)`);
     return;
   }
-  fs.copyFileSync(from, to);
-  console.log(`[copy-web] ${relative} → www/${relative}`);
+  // Strip analytics from any HTML we copy. Passthrough for non-HTML.
+  if (relative.endsWith('.html')) {
+    const src = fs.readFileSync(from, 'utf8');
+    fs.writeFileSync(to, stripForMobile(src));
+    console.log(`[copy-web] ${relative} → www/${relative} (analytics stripped)`);
+  } else {
+    fs.copyFileSync(from, to);
+    console.log(`[copy-web] ${relative} → www/${relative}`);
+  }
 }
 
 function copyWithInject(relative) {
@@ -56,11 +79,12 @@ function copyWithInject(relative) {
     return;
   }
   let html = fs.readFileSync(from, 'utf8');
+  html = stripForMobile(html);
   if (!/ble-adapter\.js/.test(html)) {
     html = html.replace(/<\/head>/i, `${SHIM_TAGS}</head>`);
   }
   fs.writeFileSync(to, html);
-  console.log(`[copy-web] ${relative} → www/${relative} (shim injected)`);
+  console.log(`[copy-web] ${relative} → www/${relative} (shim injected, analytics stripped)`);
 }
 
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
