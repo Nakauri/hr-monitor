@@ -105,32 +105,16 @@ jobs:
 
       - name: Configure release signing
         if: steps.check-signing.outputs.has_keystore == 'true'
-        working-directory: mobile/android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          # Write the keystore from the GH secret. Append a signingConfigs
-          # block + apply it to both debug and release buildTypes, so the
-          # APK has a stable SHA-1 that matches what Google Cloud Console
-          # has registered for our Android OAuth client.
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > app/release.keystore
-          cat >> app/build.gradle <<'GRADLE'
-
-android {
-    signingConfigs {
-        release {
-            storeFile file("release.keystore")
-            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-            keyAlias System.getenv("ANDROID_KEY_ALIAS")
-            keyPassword System.getenv("ANDROID_KEY_PASSWORD")
-        }
-    }
-    buildTypes {
-        debug { signingConfig signingConfigs.release }
-        release { signingConfig signingConfigs.release }
-    }
-}
-GRADLE
+          # Decode the keystore from the GH secret and append the signing
+          # block to the Capacitor-generated build.gradle. The block itself
+          # lives in mobile/android-overlay/app/signing-append.gradle so the
+          # YAML stays clean (earlier heredoc approach broke YAML parsing
+          # because the Gradle braces dedented below the shell block scalar).
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/app/release.keystore
+          cat mobile/android-overlay/app/signing-append.gradle >> mobile/android/app/build.gradle
           echo "[signing] release keystore wired"
 
       - name: Capacitor sync
@@ -149,6 +133,19 @@ GRADLE
         run: |
           mkdir -p release
           cp mobile/android/app/build/outputs/apk/debug/app-debug.apk release/hr-monitor.apk
+          # Version JSON so index.html can display what APK the Download
+          # button will actually serve — lets users confirm they're pulling
+          # a fresh build without installing first.
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat > release/version.json <<EOF
+          {
+            "sha": "${{ github.sha }}",
+            "shortSha": "$SHORT_SHA",
+            "builtAt": "$BUILD_DATE",
+            "signed": "${{ steps.check-signing.outputs.has_keystore }}"
+          }
+          EOF
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -171,6 +168,8 @@ GRADLE
             https://github.com/${{ github.repository }}/releases/latest/download/hr-monitor.apk
 
             Built from commit ${{ github.sha }}.
-          files: release/hr-monitor.apk
+          files: |
+            release/hr-monitor.apk
+            release/version.json
           prerelease: false
           make_latest: true
