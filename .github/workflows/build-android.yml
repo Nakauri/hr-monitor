@@ -121,6 +121,10 @@ jobs:
         working-directory: mobile
         run: npx cap sync android
 
+      - name: Inject Android manifest additions
+        working-directory: mobile
+        run: node scripts/inject-manifest.js
+
       - name: Build debug APK
         working-directory: mobile/android
         env:

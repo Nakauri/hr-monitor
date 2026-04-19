@@ -81,10 +81,68 @@ function init(cap) {
   // Expose an override that hr_monitor.html's driveSignIn can delegate to.
   // Contract: returns a Promise<{ accessToken, expiresIn }> on success, or
   // throws with a user-friendly message. Called with no arguments.
+  // Paint a branded dark overlay during sign-in so Play Services' legacy
+  // oversized-white-spinner Activity doesn't crash into our dark app. We
+  // can't restyle Google's dialog (it runs in Play Services' process), but
+  // we CAN cover our side cleanly during the transition.
+  function showSignInOverlay() {
+    if (document.getElementById('hrm-signin-overlay')) return;
+    const style = document.createElement('style');
+    style.id = 'hrm-signin-overlay-styles';
+    style.textContent = `
+      #hrm-signin-overlay {
+        position: fixed; inset: 0;
+        background: #0a0a0a;
+        z-index: 20000;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 20px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: #d8d8d8;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      #hrm-signin-overlay.shown { opacity: 1; }
+      #hrm-signin-spinner {
+        width: 44px; height: 44px;
+        border: 3px solid rgba(93,202,165,0.15);
+        border-top-color: #5DCAA5;
+        border-radius: 50%;
+        animation: hrm-spin 0.9s linear infinite;
+      }
+      @keyframes hrm-spin { to { transform: rotate(360deg); } }
+      #hrm-signin-overlay .hrm-signin-label {
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        color: #8a8a8a;
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+    `;
+    document.head.appendChild(style);
+    const overlay = document.createElement('div');
+    overlay.id = 'hrm-signin-overlay';
+    overlay.innerHTML = '<div id="hrm-signin-spinner"></div><div class="hrm-signin-label">Signing in with Google</div>';
+    document.body.appendChild(overlay);
+    // next frame → fade in
+    requestAnimationFrame(() => overlay.classList.add('shown'));
+  }
+  function hideSignInOverlay() {
+    const overlay = document.getElementById('hrm-signin-overlay');
+    const style = document.getElementById('hrm-signin-overlay-styles');
+    if (overlay) {
+      overlay.classList.remove('shown');
+      setTimeout(() => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
+    }
+    if (style && style.parentNode) style.parentNode.removeChild(style);
+  }
+
   window.__hrMonitorNativeDriveSignIn = async function() {
+    showSignInOverlay();
     try {
       await ensureInit();
     } catch (e) {
+      hideSignInOverlay();
       console.error('[drive-auth-native] initialize failed:', e);
       throw new Error('Google Sign-In init failed: ' + (e && e.message ? e.message : String(e)));
     }
@@ -92,8 +150,8 @@ function init(cap) {
     try {
       user = await GoogleAuth.signIn();
     } catch (e) {
+      hideSignInOverlay();
       console.error('[drive-auth-native] signIn rejected:', e);
-      // Google's most common native errors. Translate into something actionable.
       const msg = (e && e.message) ? e.message : String(e);
       if (/DEVELOPER_ERROR|10/i.test(msg)) {
         throw new Error('Google rejected this build\'s signature. Check that the keystore SHA-1 is registered with the Android OAuth client in Google Cloud Console.');
@@ -106,13 +164,12 @@ function init(cap) {
       }
       throw new Error('Google Sign-In failed: ' + msg);
     }
+    hideSignInOverlay();
     if (!user || !user.authentication || !user.authentication.accessToken) {
       throw new Error('Google sign-in returned no access token. Play Services may be missing on this device.');
     }
     return {
       accessToken: user.authentication.accessToken,
-      // The plugin doesn't return expires_in on the RC. 3600 is Google's
-      // default; silent-refresh will bail us out if it's actually shorter.
       expiresIn: 3600,
     };
   };

@@ -1996,6 +1996,15 @@
     state.hrSeries.push({ t: now, v: hr });
     if (state.hrSeries.length > 5000) state.hrSeries.shift();
 
+    // Keep the Android foreground-service notification current. The wrapper
+    // throttles updates to 1 Hz internally; calling every tick is fine.
+    if (window.HRMForegroundService && window.HRMForegroundService.isStarted()) {
+      const mm = Math.floor(now);
+      const ss = String(Math.floor((now - mm) * 60)).padStart(2, '0');
+      const hrvPart = state.currentRMSSD != null ? ' · HRV ' + Math.round(state.currentRMSSD) + 'ms' : '';
+      window.HRMForegroundService.update('HR ' + hr + ' bpm' + hrvPart, 'Recording · ' + mm + ':' + ss);
+    }
+
     if (rrs.length > 0) {
       state.rrBuffer.push(...rrs.map(rr => ({ t: now, rr })));
       const cutoff = now - 1;
@@ -2634,6 +2643,16 @@
     // Battery is best-effort: not every strap exposes it, and a failed read shouldn't
     // block the main HR stream from being usable.
     readBattery().catch(() => {});
+    // Android native: spin up the foreground service so the app keeps
+    // receiving BLE notifications with the screen off. No-op on web (the
+    // wrapper isn't present there). ignores failure — recording still works
+    // in the foreground without the service.
+    if (window.HRMForegroundService) {
+      window.HRMForegroundService.start(
+        'HR Monitor · ' + (device.name || 'Strap'),
+        'Recording. Tap to open.'
+      ).catch(() => {});
+    }
   }
 
   function logConnectionEvent(type) {
@@ -2702,6 +2721,7 @@
     state.autoReconnect = false;
     stopSessionAutoSave();
     releaseWakeLock();
+    if (window.HRMForegroundService) { try { window.HRMForegroundService.stop(); } catch (e) {} }
     if (device && device.gatt.connected) device.gatt.disconnect();
     batteryChar = null;
     $('battery-display').textContent = 'Battery: —';
