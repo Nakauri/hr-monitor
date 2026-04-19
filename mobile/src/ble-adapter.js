@@ -1,11 +1,14 @@
-// ble-adapter.js — monkey-patches `navigator.bluetooth` to point at the
+// ble-adapter.js — monkey-patches `navigator.bluetooth` to proxy to the
 // Capacitor @capacitor-community/bluetooth-le plugin, so hr_monitor.html's
 // existing Web Bluetooth code (requestDevice → gatt.connect → service →
 // characteristic → startNotifications) runs unchanged on Android native.
 //
-// This file is ONLY loaded in the Capacitor build's www/. When the WebView
-// is really a vanilla browser (desktop / Chrome Android as a web page), it
-// detects the absence of Capacitor and leaves `navigator.bluetooth` alone.
+// Important: we grab the plugin via Capacitor.registerPlugin which returns
+// the RAW bridge handle, not the plugin's ESM wrapper. That means every
+// call takes an options object (NOT positional args), binary values cross
+// the bridge as base64 strings, and notifications arrive via addListener
+// (not inline callbacks). We bridge both patterns to the shape Web
+// Bluetooth wants on the JS side.
 
 (function() {
   'use strict';
@@ -13,17 +16,10 @@
   const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   if (!isNative) return;
 
-  // Capacitor 6 hands out plugin handles via registerPlugin(name). The
-  // "@capacitor-community/bluetooth-le" plugin registers under the name
-  // "BluetoothLe". Capacitor.Plugins.BluetoothLe is only populated AFTER
-  // something calls registerPlugin, so we do that here ourselves — reading
-  // it straight off window.Capacitor.Plugins returns undefined.
   let BleClient = null;
   try {
     if (window.Capacitor && typeof window.Capacitor.registerPlugin === 'function') {
       BleClient = window.Capacitor.registerPlugin('BluetoothLe');
-    } else {
-      BleClient = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe;
     }
   } catch (e) {
     console.error('[ble-adapter] registerPlugin failed:', e);
@@ -33,51 +29,76 @@
     return;
   }
 
-  // Heart-rate service + characteristic and battery — these are standard
-  // UUIDs. hr_monitor.html uses numeric shortcodes (0x180D, 0x2A37). The
-  // Capacitor plugin wants full 128-bit UUIDs, so we convert.
+  // Numeric shortcodes (0x180D, 0x2A37) → full 128-bit UUID. The plugin
+  // requires the full form on Android.
   const toUuid = (shortcode) => {
-    if (typeof shortcode === 'string') return shortcode;
+    if (typeof shortcode === 'string') return shortcode.toLowerCase();
     const hex = shortcode.toString(16).padStart(4, '0');
     return `0000${hex}-0000-1000-8000-00805f9b34fb`;
   };
 
-  // Shared initialize + enable flag. Done lazily on first requestDevice so
-  // we don't pop permission dialogs before the user even clicks Connect.
+  // Capacitor serializes binary plugin values as base64 when crossing the
+  // JS-native bridge. The Web Bluetooth API hands callers a DataView, so
+  // decode here before passing data up to hr_monitor.html's parseHR.
+  function b64ToDataView(b64) {
+    if (!b64 || typeof b64 !== 'string') return new DataView(new ArrayBuffer(0));
+    const bin = atob(b64);
+    const buf = new ArrayBuffer(bin.length);
+    const view = new Uint8Array(buf);
+    for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
+    return new DataView(buf);
+  }
+
   let bleInitialized = false;
   async function ensureBleReady() {
     if (bleInitialized) return;
-    await BleClient.initialize({ androidNeverForLocation: true });
-    try { await BleClient.requestEnable(); } catch (e) { /* already enabled */ }
+    try {
+      await BleClient.initialize({ androidNeverForLocation: true });
+    } catch (e) {
+      console.warn('[ble-adapter] initialize warning:', e);
+    }
+    try {
+      await BleClient.requestEnable();
+    } catch (e) { /* bluetooth already enabled, or user cancelled */ }
     bleInitialized = true;
   }
 
-  // Web Bluetooth GATTCharacteristic.addEventListener / removeEventListener
-  // for the 'characteristicvaluechanged' event. Capacitor uses
-  // BleClient.startNotifications(deviceId, service, char, callback) instead.
   function makeCharacteristic(deviceId, serviceUuid, charUuid) {
     const handlers = new Set();
     let subscribed = false;
+    let pluginListener = null;
+
     return {
       uuid: charUuid,
       async startNotifications() {
         if (subscribed) return this;
-        await BleClient.startNotifications(deviceId, serviceUuid, charUuid, (dataView) => {
-          const ev = { target: { value: dataView } };
-          for (const h of handlers) { try { h(ev); } catch (e) { console.warn(e); } }
+        // Notifications arrive as plugin events, NOT as callbacks passed to
+        // startNotifications. Event name is:
+        //   notification|<deviceId>|<serviceUuid>|<characteristicUuid>
+        // All UUIDs lowercase. Event payload is { value: <base64 bytes> }.
+        const eventName = 'notification|' + deviceId + '|' + serviceUuid + '|' + charUuid;
+        pluginListener = await BleClient.addListener(eventName, (ev) => {
+          const dv = b64ToDataView(ev && ev.value);
+          const wrapped = { target: { value: dv } };
+          for (const h of handlers) { try { h(wrapped); } catch (e) { console.warn('[ble-adapter] notification handler threw:', e); } }
         });
+        await BleClient.startNotifications({ deviceId, service: serviceUuid, characteristic: charUuid });
         subscribed = true;
         return this;
       },
       async stopNotifications() {
         if (!subscribed) return this;
-        try { await BleClient.stopNotifications(deviceId, serviceUuid, charUuid); } catch (e) {}
+        try { await BleClient.stopNotifications({ deviceId, service: serviceUuid, characteristic: charUuid }); } catch (e) {}
+        if (pluginListener && typeof pluginListener.remove === 'function') {
+          try { await pluginListener.remove(); } catch (e) {}
+        }
+        pluginListener = null;
         subscribed = false;
         return this;
       },
       async readValue() {
-        const dv = await BleClient.read(deviceId, serviceUuid, charUuid);
-        return dv;
+        const res = await BleClient.read({ deviceId, service: serviceUuid, characteristic: charUuid });
+        return b64ToDataView(res && res.value);
       },
       addEventListener(name, handler) {
         if (name === 'characteristicvaluechanged') handlers.add(handler);
@@ -92,8 +113,7 @@
     return {
       uuid: serviceUuid,
       async getCharacteristic(charShortOrUuid) {
-        const charUuid = toUuid(charShortOrUuid);
-        return makeCharacteristic(deviceId, serviceUuid, charUuid);
+        return makeCharacteristic(deviceId, serviceUuid, toUuid(charShortOrUuid));
       },
     };
   }
@@ -102,26 +122,35 @@
     const disconnectHandlers = new Set();
     const deviceId = info.deviceId;
     let connected = false;
+    let disconnectListener = null;
 
     const gatt = {
       get connected() { return connected; },
       async connect() {
         if (connected) return gatt;
-        await BleClient.connect(deviceId, () => {
-          connected = false;
-          for (const h of disconnectHandlers) { try { h({ target: device }); } catch (e) {} }
-        });
+        // Plugin fires 'disconnect|<deviceId>' when the device drops.
+        const eventName = 'disconnect|' + deviceId;
+        try {
+          disconnectListener = await BleClient.addListener(eventName, () => {
+            connected = false;
+            for (const h of disconnectHandlers) { try { h({ target: device }); } catch (e) {} }
+          });
+        } catch (e) { /* non-fatal */ }
+        await BleClient.connect({ deviceId });
         connected = true;
         return gatt;
       },
-      disconnect() {
+      async disconnect() {
         if (!connected) return;
         connected = false;
-        BleClient.disconnect(deviceId).catch(() => {});
+        if (disconnectListener && typeof disconnectListener.remove === 'function') {
+          try { await disconnectListener.remove(); } catch (e) {}
+          disconnectListener = null;
+        }
+        try { await BleClient.disconnect({ deviceId }); } catch (e) {}
       },
       async getPrimaryService(serviceShortOrUuid) {
-        const serviceUuid = toUuid(serviceShortOrUuid);
-        return makeService(deviceId, serviceUuid);
+        return makeService(deviceId, toUuid(serviceShortOrUuid));
       },
     };
 
@@ -139,8 +168,9 @@
     return device;
   }
 
-  // Web Bluetooth shape: navigator.bluetooth.requestDevice(options) →
-  // BluetoothDevice. Capacitor's equivalent is BleClient.requestDevice.
+  // Web Bluetooth's navigator.bluetooth.requestDevice takes { filters, ... }.
+  // The plugin's requestDevice takes { services, name, namePrefix, ... }.
+  // Flatten filter services into the plugin's services list.
   async function requestDevice(options) {
     await ensureBleReady();
     const services = [];
@@ -149,13 +179,13 @@
         if (f.services) for (const s of f.services) services.push(toUuid(s));
       }
     }
-    const req = { services };
+    const req = {};
+    if (services.length) req.services = services;
+    // Plugin picker UI; resolves with { deviceId, name } when the user picks.
     const result = await BleClient.requestDevice(req);
     return makeDevice(result);
   }
 
-  // Expose only if not already defined (desktop WebView could be Chrome WebView
-  // with native Web Bluetooth — unlikely, but don't trample it).
   const fakeBluetooth = {
     async requestDevice(options) { return requestDevice(options); },
     getAvailability: async () => true,
@@ -166,10 +196,9 @@
       writable: false,
       configurable: true,
     });
-    console.info('[ble-adapter] navigator.bluetooth patched for Capacitor.');
+    console.info('[ble-adapter] navigator.bluetooth patched for Capacitor (raw plugin).');
   } catch (e) {
-    // Read-only on this platform; fallback to assignment where possible.
     navigator.bluetooth = fakeBluetooth;
-    console.info('[ble-adapter] navigator.bluetooth assigned for Capacitor.');
+    console.info('[ble-adapter] navigator.bluetooth assigned for Capacitor (raw plugin).');
   }
 })();

@@ -145,24 +145,36 @@
       if (isNative) document.body.classList.add('native');
     })();
 
-    // Fetch the version.json the Android build workflow publishes alongside
-    // the APK. Surfaces a short SHA + date on the Download card so the user
-    // can tell at a glance whether they've already installed this build.
+    // Surface the latest APK build on the Download card. We hit the GitHub
+    // Releases API (CORS-friendly) instead of the asset download URL
+    // (CORS-blocked — the release-assets host doesn't serve ACAO headers
+    // and redirects through a signed blob) and extract the short SHA from
+    // the release body + the published_at date. Also flags builds that
+    // weren't release-signed (Google Sign-In won't work on those).
     (function() {
       const el = document.getElementById('apk-version');
       if (!el) return;
-      fetch('https://github.com/Nakauri/hr-monitor/releases/latest/download/version.json', { cache: 'no-store' })
+      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/android-latest', { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
-        .then(v => {
-          if (!v || !v.shortSha) return;
-          const date = v.builtAt ? new Date(v.builtAt) : null;
+        .then(rel => {
+          if (!rel) return;
+          const body = rel.body || '';
+          const shaMatch = body.match(/commit\s+([0-9a-f]{7,40})/i);
+          const shortSha = shaMatch ? shaMatch[1].slice(0, 7) : '';
+          const signedMatch = body.match(/signed:\s*(true|false)/i);
+          const date = rel.published_at ? new Date(rel.published_at) : null;
           const when = date
             ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
               + ' · ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
             : '';
-          el.textContent = v.shortSha + (when ? ' · ' + when : '');
+          const parts = [shortSha, when].filter(Boolean);
+          if (parts.length) el.textContent = parts.join(' · ');
+          if (signedMatch && signedMatch[1].toLowerCase() !== 'true') {
+            el.textContent += ' · unsigned';
+            el.style.color = '#E89858';
+          }
           const installed = localStorage.getItem('hr_monitor_installed_apk_sha');
-          if (installed && installed !== v.sha) el.classList.add('fresh');
+          if (shaMatch && installed && installed !== shaMatch[1]) el.classList.add('fresh');
         })
         .catch(() => {});
     })();
