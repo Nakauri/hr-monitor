@@ -195,6 +195,14 @@
   const AVATAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2"/></svg>';
 
   async function mountChip(target) {
+    // Chip is only useful inside the Android APK where shim-load markers,
+    // plugin availability, and FGS / battery state are the truth about
+    // whether the app is actually going to survive backgrounding. On a
+    // desktop browser the "Bluetooth shim" and "Foreground service" rows
+    // would be permanently empty and the chip would be noise.
+    const cap = window.Capacitor;
+    const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+    if (!isNative) return;
     injectStyles();
     const el = typeof target === 'string' ? document.querySelector(target) : target;
     if (!el) return;
