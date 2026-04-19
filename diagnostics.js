@@ -16,6 +16,53 @@
   const REPO = 'Nakauri/hr-monitor';
   let cachedVersion = null;
 
+  // ----- Persistent log buffer ------------------------------------------
+  // Ring buffer of the last 60 entries, persisted to localStorage so a
+  // native Android crash + restart still surfaces the prelude. Anything
+  // routed through HRMLog.* shows up in the diagnostics modal's "Recent
+  // events" section and in the clipboard copy. Plus we hook window.onerror
+  // and onunhandledrejection so uncaught failures land here automatically.
+  const LOG_KEY = 'hrm_log_v1';
+  const LOG_MAX = 60;
+  function readLog() {
+    try { return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }
+    catch (e) { return []; }
+  }
+  function writeLog(arr) {
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(arr)); } catch (e) {}
+  }
+  function appendLog(level, msg, ctx) {
+    const arr = readLog();
+    arr.push({
+      t: Date.now(),
+      level: level,
+      msg: String(msg == null ? '' : msg).slice(0, 500),
+      ctx: ctx == null ? null : (typeof ctx === 'string' ? ctx.slice(0, 200) : ctx),
+    });
+    while (arr.length > LOG_MAX) arr.shift();
+    writeLog(arr);
+  }
+  try {
+    window.addEventListener('error', function (e) {
+      appendLog('error', (e && e.message ? e.message : 'uncaught error') +
+        ' @ ' + (e && e.filename ? e.filename.split('/').pop() : '?') +
+        ':' + (e && e.lineno ? e.lineno : '?'));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      const r = e && e.reason;
+      const rmsg = r && r.message ? r.message : String(r);
+      appendLog('error', 'unhandled rejection: ' + rmsg);
+    });
+  } catch (err) { /* ignore: very old browser */ }
+  window.HRMLog = {
+    error: function (msg, ctx) { appendLog('error', msg, ctx); },
+    warn:  function (msg, ctx) { appendLog('warn', msg, ctx); },
+    info:  function (msg, ctx) { appendLog('info', msg, ctx); },
+    event: function (tag, data) { appendLog('event', tag, data); },
+    drain: function () { return readLog(); },
+    clear: function () { writeLog([]); },
+  };
+
   function detect() {
     const cap = window.Capacitor || null;
     const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
@@ -98,6 +145,20 @@
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
 
+  function formatLogTime(ts) {
+    const d = new Date(ts);
+    const pad = n => String(n).padStart(2, '0');
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  function formatLog(entries) {
+    if (!entries || !entries.length) return '';
+    return entries.map(e => {
+      const level = (e.level || 'info').toUpperCase().padEnd(5);
+      const ctx = e.ctx ? '  ' + (typeof e.ctx === 'string' ? e.ctx : JSON.stringify(e.ctx)) : '';
+      return formatLogTime(e.t) + '  ' + level + '  ' + e.msg + ctx;
+    }).join('\n');
+  }
+
   function injectStyles() {
     if (document.getElementById('hrm-diagnostics-styles')) return;
     const s = document.createElement('style');
@@ -175,6 +236,15 @@
       .hrm-diag-row .v.ok { color: #5DCAA5; }
       .hrm-diag-row .v.warn { color: #F0C75E; }
       .hrm-diag-row .v.err { color: #E24B4A; }
+      .hrm-diag-log {
+        background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 6px;
+        padding: 8px 10px; margin: 0;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 11px; line-height: 1.45;
+        color: #b8b8b8; max-height: 260px; overflow: auto; white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .hrm-diag-log:empty::before { content: 'no events logged yet'; color: #5a5a5a; }
       .hrm-diag-actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
       .hrm-diag-actions button {
         flex: 1; padding: 8px 12px; min-width: 100px;
@@ -202,7 +272,13 @@
     // would be permanently empty and the chip would be noise.
     const cap = window.Capacitor;
     const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
-    if (!isNative) return;
+    if (!isNative) {
+      // Collapse the slot on desktop so the flex-gap from .app-nav + the
+      // slot's margin don't leave a visible blank where the chip used to be.
+      const slot = typeof target === 'string' ? document.querySelector(target) : target;
+      if (slot) slot.style.display = 'none';
+      return;
+    }
     injectStyles();
     const el = typeof target === 'string' ? document.querySelector(target) : target;
     if (!el) return;
@@ -304,8 +380,11 @@
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
+        <div class="hrm-diag-subtitle">Recent events (newest last)</div>
+        <pre class="hrm-diag-log">${esc(formatLog(readLog()))}</pre>
         <div class="hrm-diag-actions">
           <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
+          <button id="hrm-diag-clearlog">Clear events</button>
           <button id="hrm-diag-close">Close</button>
         </div>
       </div>
@@ -324,6 +403,14 @@
         alert('Copy failed. Here is the text to paste:\n\n' + text);
       }
     });
+    const clearBtn = document.getElementById('hrm-diag-clearlog');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        writeLog([]);
+        const pane = document.querySelector('.hrm-diag-log');
+        if (pane) pane.textContent = '';
+      });
+    }
   }
 
   function close() {
@@ -358,6 +445,13 @@
     lines.push('  error:    ' + (d.battoptLastError || 'none'));
     lines.push('Broadcast:  ' + (d.localBroadcastKey ? 'key set' : 'no key'));
     lines.push('User agent: ' + d.userAgent);
+    const events = readLog();
+    if (events.length) {
+      lines.push('');
+      lines.push('Recent events (newest last)');
+      lines.push('---------------------------');
+      lines.push(formatLog(events));
+    }
     return lines.join('\n');
   }
 

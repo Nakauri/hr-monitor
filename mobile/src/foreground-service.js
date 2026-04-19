@@ -58,28 +58,34 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
         } catch (e) { console.warn('[fgs] update failed:', e); }
       }
 
+      const log = (window.HRMLog && window.HRMLog.event) ? window.HRMLog.event : function () {};
+      const logErr = (window.HRMLog && window.HRMLog.error) ? window.HRMLog.error : function () {};
+
       async function start(initialTitle, initialBody) {
+        log('fgs.start called', { started, title: initialTitle });
         if (started) return true;
-        // Gate startForegroundService on POST_NOTIFICATIONS being granted.
-        // If denied, Android 14's watchdog trips ForegroundServiceDidNotStart
-        // InTimeException because the service is considered not-promoted-in-
-        // time when the notification is invisible, and that kills the app on
-        // the main thread outside any JS try/catch.
         let permState = 'unknown';
         try {
           const perm = await ForegroundService.requestPermissions();
           fgsMark('__hrMonitorFgsPermission', perm || 'unknown');
           permState = (perm && (perm.display || perm.notifications || perm.postNotifications)) || 'unknown';
+          log('fgs.requestPermissions ok', { permState, raw: perm });
         } catch (e) {
-          fgsMark('__hrMonitorFgsPermission', 'error: ' + (e && e.message ? e.message : String(e)));
+          const emsg = e && e.message ? e.message : String(e);
+          fgsMark('__hrMonitorFgsPermission', 'error: ' + emsg);
           permState = 'error';
+          logErr('fgs.requestPermissions threw', emsg);
         }
+        // Gate startForegroundService on POST_NOTIFICATIONS being granted.
+        // If denied, Android 14's ForegroundServiceDidNotStartInTimeException
+        // watchdog fires on the main thread outside any JS try/catch.
         if (permState !== 'granted' && permState !== 'unknown') {
           fgsMark('__hrMonitorFgsLastError', 'notifications denied — service not started to avoid Android 14 watchdog');
-          console.warn('[fgs] notifications denied, skipping start to avoid native crash');
+          logErr('fgs.start bailing: notifications denied', permState);
           return false;
         }
         try {
+          log('fgs.startForegroundService calling', { serviceType: SERVICE_TYPE_CONNECTED_DEVICE });
           await ForegroundService.startForegroundService({
             id: NOTIFICATION_ID,
             title: initialTitle || 'HR Monitor',
@@ -92,10 +98,13 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
           lastBody = initialBody || 'Recording';
           updateTimer = setInterval(flushPending, 1000);
           fgsMark('__hrMonitorFgsStarted', true);
+          log('fgs.startForegroundService resolved');
           return true;
         } catch (e) {
+          const emsg = e && e.message ? e.message : String(e);
           console.error('[fgs] start failed:', e);
-          fgsMark('__hrMonitorFgsLastError', 'start: ' + (e && e.message ? e.message : String(e)));
+          fgsMark('__hrMonitorFgsLastError', 'start: ' + emsg);
+          logErr('fgs.startForegroundService threw', emsg);
           return false;
         }
       }
