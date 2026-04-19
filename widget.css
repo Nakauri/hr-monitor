@@ -10,7 +10,14 @@
    desktop / OBS so the widget-row hugs its content (cropping and the OBS
    source-size ResizeObserver both rely on this). 500 px cap stops runaway
    growth; the mobile media query below relaxes to 100% so the widget adapts
-   to a narrow viewport instead of overflowing it. */
+   to a narrow viewport instead of overflowing it.
+
+   --full-widgets-width is set by hr_monitor.html's ResizeObserver whenever
+   every widget is on — it captures the widget's natural "fully populated"
+   width, then uses it as a min-width floor for every other toggle combo so
+   turning widgets off + back on re-inflates the card to its original size
+   (without this, Chart.js canvases inside display:none kept shrunken
+   intrinsic sizes and the live HR trace stayed pinned at a ~thin width). */
 #overlay-zone .widget-row {
   display: flex;
   flex-direction: column;
@@ -18,6 +25,9 @@
   width: fit-content;
   max-width: 500px;
   min-width: 0;
+}
+body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-zone .widget-row {
+  min-width: var(--full-widgets-width, 0);
 }
 
 /* Widget card + grid. auto auto columns so each column hugs content; grid
