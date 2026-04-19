@@ -35,6 +35,22 @@ APK, you download it on your phone, and sideload.
 - `git push`. The CI job runs automatically.
 - Download the new APK on your phone. Reinstall (it updates in place).
 
+## Plugin access pattern (IMPORTANT — read before adding native shims)
+
+Access Capacitor plugins via `Capacitor.Plugins.<Name>`, not `Capacitor.registerPlugin(...)`.
+
+`registerPlugin` is an ES-module API from `@capacitor/core`. Plain `<script>`-tag code (which is what all our shims are) can't import it; `window.Capacitor.registerPlugin` is `undefined` on Android. Capacitor's native bridge populates `Capacitor.Plugins.BluetoothLe`, `.GoogleAuth`, etc. directly — read from there.
+
+```js
+// Do this
+const plugin = (window.Capacitor.Plugins && window.Capacitor.Plugins.SomePlugin) || null;
+
+// Don't do this (will throw `registerPlugin is not a function`)
+const plugin = window.Capacitor.registerPlugin('SomePlugin');
+```
+
+Always defer shim init to DOMContentLoaded — the bridge isn't guaranteed available before then. Use load markers at every phase so diagnostics can point at exactly which step failed.
+
 ## Architecture notes
 
 - `src/ble-adapter.js` is the load-bearing piece. It monkey-patches
