@@ -57,6 +57,20 @@ if (!/android\.permission\.WAKE_LOCK/.test(xml)) {
   console.log('[inject-manifest] added WAKE_LOCK');
 }
 
+// Inject FOREGROUND_SERVICE_CONNECTED_DEVICE. On Android 14 a foreground
+// service declared with foregroundServiceType="connectedDevice" MUST have
+// this permission; without it the OS throws SecurityException on the main
+// thread at startForegroundService() time and kills the app outside any
+// JS try/catch ("HR Monitor keeps stopping").
+if (!/FOREGROUND_SERVICE_CONNECTED_DEVICE/.test(xml)) {
+  xml = xml.replace(
+    /<\/manifest>\s*$/,
+    '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />\n</manifest>\n'
+  );
+  changed = true;
+  console.log('[inject-manifest] added FOREGROUND_SERVICE_CONNECTED_DEVICE');
+}
+
 // Inject a service-type override for the capawesome FGS plugin's service.
 // Plugin ships AndroidForegroundService; we override the type to connectedDevice.
 if (!/AndroidForegroundService[\s\S]{0,400}connectedDevice/.test(xml)) {

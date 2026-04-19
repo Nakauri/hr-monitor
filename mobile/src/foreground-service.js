@@ -60,18 +60,24 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
 
       async function start(initialTitle, initialBody) {
         if (started) return true;
-        // Surface POST_NOTIFICATIONS state. If the user denied it, the OS
-        // silently suppresses the persistent notification and Doze can still
-        // kill the service invisibly. Make it visible via diagnostics.
+        // Gate startForegroundService on POST_NOTIFICATIONS being granted.
+        // If denied, Android 14's watchdog trips ForegroundServiceDidNotStart
+        // InTimeException because the service is considered not-promoted-in-
+        // time when the notification is invisible, and that kills the app on
+        // the main thread outside any JS try/catch.
+        let permState = 'unknown';
         try {
           const perm = await ForegroundService.requestPermissions();
           fgsMark('__hrMonitorFgsPermission', perm || 'unknown');
-          const state = perm && (perm.display || perm.notifications || perm.postNotifications);
-          if (state && state !== 'granted') {
-            fgsMark('__hrMonitorFgsLastError', 'notifications not granted: ' + state);
-          }
+          permState = (perm && (perm.display || perm.notifications || perm.postNotifications)) || 'unknown';
         } catch (e) {
           fgsMark('__hrMonitorFgsPermission', 'error: ' + (e && e.message ? e.message : String(e)));
+          permState = 'error';
+        }
+        if (permState !== 'granted' && permState !== 'unknown') {
+          fgsMark('__hrMonitorFgsLastError', 'notifications denied — service not started to avoid Android 14 watchdog');
+          console.warn('[fgs] notifications denied, skipping start to avoid native crash');
+          return false;
         }
         try {
           await ForegroundService.startForegroundService({
