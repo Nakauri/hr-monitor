@@ -3018,7 +3018,25 @@
     }
   });
 
-  function driveSignIn() {
+  async function driveSignIn() {
+    // Native Android path: delegate to the Capacitor GoogleAuth plugin.
+    // The plugin opens Google Play Services Sign-In (account picker), returns
+    // an access token with Drive scope, which we plug into the same
+    // driveAccessToken state the web path uses.
+    if (typeof window.__hrMonitorNativeDriveSignIn === 'function') {
+      try {
+        const { accessToken, expiresIn } = await window.__hrMonitorNativeDriveSignIn();
+        driveAccessToken = accessToken;
+        driveTokenExpiresAt = Date.now() + ((expiresIn || 3600) - 120) * 1000;
+        saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
+        driveUpdateUI();
+        if (!driveFolderId) driveEnsureFolder().catch(() => {});
+      } catch (e) {
+        console.error('[native drive] sign-in failed:', e);
+        alert('Google sign-in failed: ' + (e && e.message ? e.message : 'unknown error'));
+      }
+      return;
+    }
     if (!driveTokenClient) {
       alert('Google auth still loading. Try again in a second.');
       return;
@@ -3029,7 +3047,9 @@
   }
 
   function driveSignOut() {
-    if (driveAccessToken) {
+    if (typeof window.__hrMonitorNativeDriveSignOut === 'function') {
+      try { window.__hrMonitorNativeDriveSignOut(); } catch (e) {}
+    } else if (driveAccessToken) {
       try { google.accounts.oauth2.revoke(driveAccessToken, () => {}); } catch (e) {}
     }
     driveAccessToken = null;
