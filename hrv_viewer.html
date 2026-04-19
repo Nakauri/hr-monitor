@@ -519,6 +519,19 @@
     min-width: 0;
     overflow: hidden;
   }
+  /* Wide desktop: drop the 1:1 aspect ratio so each cell hugs its content
+     instead of stretching to a square (which, on a 1600-wide monitor divided
+     by 7 columns, gave 220-px-tall cells and forced 10+ scroll actions to see
+     the whole month). Keep a min-height so chips + HR number stay comfortable
+     to read. The square layout is restored below at narrower widths for the
+     touch-friendly mobile view. */
+  @media (min-width: 1100px) {
+    .cal-cell {
+      aspect-ratio: auto;
+      min-height: 120px;
+      max-height: 160px;
+    }
+  }
   .cal-cell.has-sessions { cursor: pointer; }
   .cal-cell.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-strong); }
   .cal-cell.empty-month { opacity: 0.3; pointer-events: none; }
@@ -737,6 +750,12 @@
     height: 44px;
     position: relative;
     margin: 4px 0;
+  }
+  /* Wide desktop: each of the 7 weekday columns is ~200 px wide, so a 44 px
+     sparkline is visually cramped. Let the trace breathe. */
+  @media (min-width: 1100px) {
+    .week-col-spark { height: 72px; }
+    .week-col { min-height: 260px; }
   }
   .week-col-stats { display: flex; gap: 12px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .week-col-stat { display: flex; flex-direction: column; gap: 2px; }
