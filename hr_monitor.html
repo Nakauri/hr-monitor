@@ -490,6 +490,141 @@
     font-weight: 500;
   }
   button.primary:hover:not(:disabled) { background: #A3C8EF; }
+
+  /* Session toggle: one primary button that flips between Start (green) and
+     Stop (red). Replaces the old Connect / Disconnect / Reset / Export row.
+     Kebab sits to the right and holds the rare actions (Discard, Export). */
+  .session-control-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .btn-session-toggle {
+    flex: 1;
+    font-size: 14px;
+    padding: 10px 16px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    min-height: 42px;
+  }
+  .btn-session-toggle[data-state="idle"] {
+    background: var(--accent-rmssd);
+    color: #0a1a14;
+    border-color: var(--accent-rmssd);
+  }
+  .btn-session-toggle[data-state="idle"]:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-session-toggle[data-state="recording"],
+  .btn-session-toggle[data-state="reconnecting"] {
+    background: var(--warn-high);
+    color: #0a0a0a;
+    border-color: var(--warn-high);
+  }
+  .btn-session-toggle[data-state="recording"]:hover:not(:disabled),
+  .btn-session-toggle[data-state="reconnecting"]:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-session-toggle[data-state="connecting"] {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px dashed var(--border-strong);
+  }
+
+  .kebab-wrap { position: relative; }
+  .btn-kebab {
+    width: 42px; height: 42px;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .btn-kebab:hover { border-color: var(--border-strong); color: var(--text); }
+  .kebab-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    min-width: 180px;
+    background: #0a0a0a;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .kebab-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    border-radius: 4px;
+  }
+  .kebab-menu button:hover { background: rgba(255,255,255,0.06); }
+  .kebab-menu button:disabled { color: var(--text-faint); cursor: not-allowed; }
+  .kebab-menu button:disabled:hover { background: transparent; }
+
+  /* Toggle-switch row: inline label + switch for session-level on/off
+     choices (currently: Broadcast to relay). Shared across any future
+     settings we surface as switches rather than checkboxes. */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+    margin-top: 10px;
+  }
+  .toggle-text { flex: 1; min-width: 0; }
+  .toggle-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .toggle-desc {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+  .toggle-switch input {
+    opacity: 0;
+    width: 0; height: 0;
+  }
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #2a2a2a;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    transition: background 0.15s, border-color 0.15s;
+    cursor: pointer;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    background: #8a8a8a;
+    border-radius: 50%;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: rgba(93,202,165,0.25);
+    border-color: var(--accent-rmssd);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+    background: var(--accent-rmssd);
+  }
+  .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
   button.claude {
     background: #d97757;
     color: #fff;
@@ -1041,15 +1176,35 @@
         <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
       </div>
       <div class="section-body">
-        <div class="status" id="status">Click Connect strap to pair.</div>
+        <div class="status" id="status">Tap Start session to pair your strap and begin recording.</div>
         <div style="height: 10px;"></div>
-        <div class="controls">
-          <button class="primary" id="connect">Connect strap</button>
-          <button id="disconnect" disabled>Disconnect</button>
-          <button id="reset">Reset session</button>
-          <button id="export">Export CSV</button>
+        <div class="session-control-row">
+          <button class="primary btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
+          <div class="kebab-wrap">
+            <button class="btn-kebab" id="session-kebab" aria-haspopup="menu" aria-expanded="false" aria-label="More session actions">
+              <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><circle cx="8" cy="3" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="8" cy="13" r="1.6"/></svg>
+            </button>
+            <div class="kebab-menu" id="session-kebab-menu" role="menu" hidden>
+              <button id="btn-discard" role="menuitem">Discard session data</button>
+              <button id="btn-export" role="menuitem">Export CSV</button>
+            </div>
+          </div>
         </div>
         <div class="battery-display" id="battery-display">Battery: —</div>
+        <!-- Broadcast toggle lives here now (was buried in Settings → Widgets)
+             — session-level choice belongs next to the Active broadcasts
+             panel so users see publishing + listening state in one place. -->
+        <div class="toggle-row" id="broadcast-toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-broadcast" />
+            <span class="toggle-slider" aria-hidden="true"></span>
+          </label>
+          <div class="toggle-text">
+            <div class="toggle-label">Broadcast to relay</div>
+            <div class="toggle-desc" id="broadcast-toggle-desc">Share this session with OBS and other devices on your key.</div>
+          </div>
+          <span class="streaming-status" id="relay-status">offline</span>
+        </div>
         <div class="autosave-row">
           <span class="autosave-label">Auto-save folder:</span>
           <span class="autosave-folder" id="autosave-folder-name">none</span>
@@ -1102,13 +1257,6 @@
           </div>
           <div style="height: 18px;"></div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
-          <div class="widget-toggles" style="margin-bottom: 10px;">
-            <label><input type="checkbox" id="toggle-broadcast" checked /> Broadcast live data to relay</label>
-          </div>
-          <div class="streaming-row">
-            <span class="streaming-label">Relay status:</span>
-            <span class="streaming-status" id="relay-status">offline</span>
-          </div>
           <div class="streaming-row" style="margin-top: 8px;">
             <span class="streaming-label">Broadcast key:</span>
             <code class="streaming-key" id="broadcast-key-display">—</code>
@@ -2533,10 +2681,55 @@
     } catch (e) {}
   }
   function updateConnectButtonLabel() {
-    const btn = $('connect');
-    if (!btn || btn.disabled) return;
-    const last = getLastStrap();
-    btn.textContent = last && last.name ? 'Reconnect to ' + last.name : 'Connect strap';
+    // Legacy name — the connect button no longer exists as its own element.
+    // The session-toggle label is computed by updateSessionToggle(), which
+    // uses state.connState + last-strap to pick the right wording.
+    updateSessionToggle();
+  }
+
+  // Session toggle state machine:
+  //   idle (no session)           → green "Start session" / "Reconnect to X"
+  //   connecting (attach in progress) → dashed "Starting…"
+  //   recording (live + data)     → red "Stop session"
+  //   reconnecting (strap dropped)→ red "Stop session" (but mode chip says Reconnecting)
+  function updateSessionToggle() {
+    const btn = document.getElementById('session-toggle');
+    if (!btn) return;
+    if (btn.disabled) {
+      btn.setAttribute('data-state', 'idle');
+      btn.textContent = 'Start session';
+      return;
+    }
+    const cs = state.connState;
+    if (cs === 'live') {
+      btn.setAttribute('data-state', 'recording');
+      btn.textContent = 'Stop session';
+    } else if (cs === 'reconnecting') {
+      btn.setAttribute('data-state', 'reconnecting');
+      btn.textContent = 'Stop session';
+    } else {
+      btn.setAttribute('data-state', 'idle');
+      const last = getLastStrap();
+      btn.textContent = last && last.name ? 'Reconnect to ' + last.name : 'Start session';
+    }
+  }
+
+  // Single handler for the Start/Stop button. Idle → connect(). Recording
+  // or reconnecting → full stop: disconnect + finalize + reset.
+  async function onSessionToggleClick() {
+    const cs = state.connState;
+    if (cs === 'live' || cs === 'reconnecting') {
+      try { await disconnect(); } catch (e) {}
+      // Finalize session state so the next Start is a fresh recording.
+      // Autosave has already been flushing via the tick loop; we just seal
+      // the in-memory session. resetSession also clears the charts.
+      resetSession();
+      updateSessionToggle();
+      setStatus('Session stopped.');
+    } else {
+      try { await connect(); } catch (e) { /* connect already surfaces errors */ }
+      updateSessionToggle();
+    }
   }
 
   // Try to find a previously-paired device without prompting. Requires the
@@ -2613,18 +2806,15 @@
       if (state.startTime === null) state.startTime = Date.now();
       state.lastDataTime = Date.now();
       state.autoReconnect = true;
-      $('connect').disabled = true;
-      $('disconnect').disabled = false;
       await attachConnection();
       saveLastStrap(device);
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
       startSessionAutoSave();
       acquireWakeLock();
+      updateSessionToggle();
     } catch (e) {
       setStatus('Connection failed: ' + e.message, 'error');
-      $('connect').disabled = false;
-      $('disconnect').disabled = true;
-      updateConnectButtonLabel();
+      updateSessionToggle();
     }
   }
 
@@ -2754,12 +2944,10 @@
       setConnState('reconnecting');
       tryReconnect();
     } else {
-      setStatus('Device disconnected. Click Connect strap to reconnect.');
+      setStatus('Device disconnected. Tap Start session to reconnect.');
       $('overlay-status').textContent = '• DISCONNECTED';
       setConnState('idle');
-      $('connect').disabled = false;
-      $('disconnect').disabled = true;
-      updateConnectButtonLabel();
+      updateSessionToggle();
     }
   }
 
@@ -2774,10 +2962,8 @@
     $('battery-display').classList.remove('low', 'critical');
     $('overlay-status').textContent = '• DISCONNECTED';
     setConnState('idle');
-    $('connect').disabled = false;
-    $('disconnect').disabled = true;
-    updateConnectButtonLabel();
-    setStatus('Disconnected by user.');
+    updateSessionToggle();
+    setStatus('Session stopped.');
   }
 
   // Drive the body's conn-* class + update the unified status banner. The
@@ -3802,10 +3988,10 @@
     if (!navigator.bluetooth) {
       const banner = document.getElementById('browser-compat-banner');
       if (banner) banner.hidden = false;
-      const connectBtn = document.getElementById('connect');
-      if (connectBtn) {
-        connectBtn.disabled = true;
-        connectBtn.title = 'Not supported in this browser';
+      const sessionBtn = document.getElementById('session-toggle');
+      if (sessionBtn) {
+        sessionBtn.disabled = true;
+        sessionBtn.title = 'Strap pairing not supported in this browser';
       }
     }
     // Evaluate watch mode once on load. updateWatchMode re-runs from
@@ -3893,9 +4079,35 @@
         }
       });
     });
-    $('connect').addEventListener('click', connect);
-    updateConnectButtonLabel();
-    $('disconnect').addEventListener('click', disconnect);
+    // Start / Stop session — single primary toggle. Start = pair the strap +
+    // begin recording. Stop = disconnect + finalize + clear the session so
+    // the next Start is a fresh recording. Replaces the old three-button row.
+    const sessionToggle = $('session-toggle');
+    sessionToggle.addEventListener('click', onSessionToggleClick);
+    updateSessionToggle();
+    // Kebab menu holds the rare actions that used to be buttons in the row:
+    // mid-session discard (throw away data without saving) and export CSV.
+    const kebabBtn = $('session-kebab');
+    const kebabMenu = $('session-kebab-menu');
+    kebabBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = !kebabMenu.hidden;
+      kebabMenu.hidden = open;
+      kebabBtn.setAttribute('aria-expanded', String(!open));
+    });
+    document.addEventListener('click', () => { kebabMenu.hidden = true; kebabBtn.setAttribute('aria-expanded', 'false'); });
+    $('btn-discard').addEventListener('click', () => {
+      kebabMenu.hidden = true;
+      if (!state.startTime) { setStatus('No session to discard.'); return; }
+      if (!confirm('Discard this session? The data will not be saved.')) return;
+      try { if (typeof disconnect === 'function') disconnect(); } catch (e) {}
+      resetSession();
+      setStatus('Session discarded.');
+    });
+    $('btn-export').addEventListener('click', () => {
+      kebabMenu.hidden = true;
+      exportCSV();
+    });
     $('autosave-pick').addEventListener('click', pickAutoSaveFolder);
     $('autosave-clear').addEventListener('click', clearAutoSaveFolder);
     restoreAutoSaveFolder();
@@ -3903,8 +4115,7 @@
     initGoogleAuth();
     $('drive-signin').addEventListener('click', driveSignIn);
     $('drive-signout').addEventListener('click', driveSignOut);
-    $('reset').addEventListener('click', resetSession);
-    $('export').addEventListener('click', exportCSV);
+    // (Old Reset / Export buttons removed — actions now live in the kebab.)
     $('add-marker').addEventListener('click', addMarker);
     $('marker-label').addEventListener('keydown', e => { if (e.key === 'Enter') addMarker(); });
     document.querySelectorAll('.posture-btn').forEach(btn => {
