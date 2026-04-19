@@ -33,8 +33,11 @@
       blePresent,
       bleWeb: webBluetooth,
       bleAdapterPatched: bleAdapter,
+      bleAdapterLoaded: !!window.__hrMonitorBleAdapterLoaded,
+      bleAdapterSawCapacitor: !!window.__hrMonitorBleAdapterCapacitorAvailable,
       bleCapacitorPlugin: blePlugin || bleRegistered,
       driveNativeOverride: nativeDriveSignIn,
+      driveAuthLoaded: !!window.__hrMonitorDriveAuthLoaded,
       userAgent: navigator.userAgent,
       localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
       driveSignedIn: !!localStorage.getItem('hr_monitor_drive_token'),
@@ -231,11 +234,14 @@
           ['Capacitor native', yn(d.isNative), d.isNative ? 'ok' : ''],
         ])}
         ${rows('Bluetooth', [
+          ['ble-adapter.js loaded', yn(d.bleAdapterLoaded), d.isNative ? ok(d.bleAdapterLoaded) : ''],
+          ['ble-adapter saw Capacitor', yn(d.bleAdapterSawCapacitor), d.isNative ? ok(d.bleAdapterSawCapacitor) : ''],
           ['navigator.bluetooth', yn(d.blePresent), ok(d.blePresent)],
           ['Web Bluetooth', yn(d.bleWeb), d.isNative ? '' : ok(d.bleWeb)],
           ['Capacitor BLE plugin', yn(d.bleCapacitorPlugin), d.isNative ? ok(d.bleCapacitorPlugin) : ''],
         ])}
         ${rows('Google Drive', [
+          ['drive-auth-native.js loaded', yn(d.driveAuthLoaded), d.isNative ? ok(d.driveAuthLoaded) : ''],
           ['Native sign-in override', yn(d.driveNativeOverride), d.isNative ? ok(d.driveNativeOverride) : ''],
           ['Currently signed in', yn(d.driveSignedIn), d.driveSignedIn ? 'ok' : 'warn'],
         ])}

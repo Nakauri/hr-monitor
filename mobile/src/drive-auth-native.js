@@ -7,15 +7,29 @@
 // The GSI popup never opens in a WebView, so without this override the Drive
 // Sign In button hangs forever.
 
-(function() {
+// Load marker for diagnostics: "did this script run at all?"
+try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
+
+// Wait for the Capacitor bridge before registering the plugin. <head>
+// scripts race with the bridge injection on Android; polling handles it.
+(function waitForCap() {
+  const start = Date.now();
+  const tick = () => {
+    const cap = window.Capacitor;
+    if (cap && typeof cap.registerPlugin === 'function') return init(cap);
+    if (Date.now() - start > 3000) { console.info('[drive-auth-native] Capacitor bridge never arrived — running as web.'); return; }
+    setTimeout(tick, 40);
+  };
+  tick();
+})();
+
+function init(cap) {
   'use strict';
 
-  const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-  if (!isNative) return;
+  const isNative = cap.isNativePlatform && cap.isNativePlatform();
+  if (!isNative) { console.info('[drive-auth-native] not native, skipping native GoogleAuth.'); return; }
 
-  const GoogleAuth = window.Capacitor && window.Capacitor.registerPlugin
-    ? window.Capacitor.registerPlugin('GoogleAuth')
-    : null;
+  const GoogleAuth = cap.registerPlugin('GoogleAuth');
   if (!GoogleAuth) {
     console.error('[drive-auth-native] GoogleAuth plugin missing — bail.');
     return;
@@ -85,4 +99,4 @@
   };
 
   console.info('[drive-auth-native] native Google Sign-In override wired.');
-})();
+}
