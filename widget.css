@@ -6,13 +6,18 @@
    Colour vars (--warn-high, --warn-low, --warn-crash, --warn-palp) are
    declared by each page. */
 
-/* Container that holds the widget card. */
+/* Container that holds the widget card. width: fit-content is load-bearing on
+   desktop / OBS so the widget-row hugs its content (cropping and the OBS
+   source-size ResizeObserver both rely on this). 500 px cap stops runaway
+   growth; the mobile media query below relaxes to 100% so the widget adapts
+   to a narrow viewport instead of overflowing it. */
 #overlay-zone .widget-row {
   display: flex;
   flex-direction: column;
   gap: inherit;
   width: fit-content;
   max-width: 500px;
+  min-width: 0;
 }
 
 /* Widget card + grid. auto auto columns so each column hugs content; grid
@@ -159,23 +164,23 @@ body.conn-reconnecting .conn-text { display: inline; }
   flex: 0 0 auto;
 }
 /* min-width 140 so live trace reads as a line when visible; when hidden the
-   whole element drops out of flow and column 1 collapses to big-number. */
+   whole element drops out of flow and column 1 collapses to big-number.
+   min-width: 0 keeps the canvas's intrinsic HTML width attribute from
+   propagating up and locking the grid wide after a toggle. */
 #hr-widget .inline-live-trace {
   flex: 1 1 0;
-  min-width: 140px;
+  flex-basis: 140px;
+  min-width: 0;
   position: relative;
   padding: 6px 0 10px;
   height: 68px;
   max-height: 68px;
   overflow: hidden;
 }
-/* Absolute position so Chart.js can't write a width attribute that makes the
-   canvas contribute to its parent's max-content and lock the card wide. */
 #hr-widget .inline-live-trace canvas {
-  position: absolute !important;
-  inset: 6px 0 10px !important;
-  width: auto !important;
-  height: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
 }
 
 #hr-widget #hr-pips {
@@ -259,10 +264,9 @@ body.conn-reconnecting .conn-text { display: inline; }
   overflow: hidden;
 }
 #hr-widget > .compact-trend canvas {
-  position: absolute !important;
-  inset: 6px 0 4px !important;
-  width: auto !important;
-  height: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
 }
 
 /* Warning banner. In-card width is fixed so the card size is stable across
@@ -401,3 +405,33 @@ body.no-hr.no-hrv.no-live-hr.no-inline-trends #hr-widget { display: none !import
 
 body.no-live-hr #hr-widget .inline-live-trace { display: none !important; }
 body.no-inline-trends #hr-widget > .compact-trend { display: none !important; }
+
+/* ===== Narrow viewport (≤480px, e.g. phones) =====
+   The widget's max-content width on desktop is ~380px (big-number + 140 px
+   live trace + HRV column). On a 375 or 390-wide phone, content-sized grid
+   columns overflow the viewport. Switch col 1 to minmax(0, 1fr) so the HR
+   column shrinks with available width, and drop the big-number font size a
+   notch so 3-digit readouts still fit. */
+@media (max-width: 480px) {
+  #overlay-zone .widget-row {
+    width: 100%;
+    max-width: 100%;
+  }
+  #hr-widget {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding: 12px 14px;
+  }
+  #hr-widget .big-number { font-size: 56px; }
+  #hr-widget .number-row { gap: 10px; min-width: 0; }
+  #hr-widget .inline-live-trace {
+    flex-basis: 0;
+    height: 56px;
+    max-height: 56px;
+  }
+  #hr-widget .compact-hrv {
+    padding-left: 12px;
+  }
+  #hr-widget .compact-hrv-value { font-size: 30px; }
+  #hr-widget > .compact-trend { height: 56px; }
+}
