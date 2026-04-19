@@ -14,7 +14,7 @@ const mobileRoot = path.resolve(__dirname, '..');
 const wwwDir = path.join(mobileRoot, 'www');
 
 // Files copied as-is.
-const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'index.html', 'widget.css', 'widget.js', 'diagnostics.js'];
+const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'index.html', 'widget.css', 'widget.js', 'diagnostics.js', 'settings.js'];
 // hr_monitor.html gets the ble-adapter + capacitor-core shims injected just
 // before the closing </head> so navigator.bluetooth is patched before any
 // page script touches it.
