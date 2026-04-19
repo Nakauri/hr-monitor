@@ -3423,6 +3423,11 @@
   // Measure .widget-row, not #overlay-zone: the zone includes the crop-guide
   // padding and label that aren't part of the OBS source.
   let overlaySizeRaf = null;
+  // True when every widget is visible right now. Used to snapshot the "full"
+  // width so later toggle cycles can restore to that size cleanly.
+  function allWidgetsVisible() {
+    return !!widgetPrefs.showHr && !!widgetPrefs.showHrv && !!widgetPrefs.showLiveHr && !!widgetPrefs.showInlineTrends;
+  }
   function applyOverlaySize() {
     const row = document.querySelector('#overlay-zone .widget-row');
     if (!row) return;
@@ -3440,6 +3445,19 @@
           if (abH > 0) h += abH;
           const abW = Math.round(abRect.width);
           if (abW > w) w = abW;
+        }
+        // Snapshot the natural width when every widget is visible, so turning
+        // widgets off and back on inflates the card back to where it was
+        // instead of leaving the HR live trace stuck at a post-shrink size.
+        if (allWidgetsVisible() && w > 0) {
+          const prevFull = widgetPrefs.fullWidgetsWidth;
+          if (w !== prevFull) {
+            widgetPrefs.fullWidgetsWidth = w;
+            saveWidgetPrefs();
+          }
+          document.documentElement.style.setProperty('--full-widgets-width', w + 'px');
+        } else if (Number.isFinite(widgetPrefs.fullWidgetsWidth)) {
+          document.documentElement.style.setProperty('--full-widgets-width', widgetPrefs.fullWidgetsWidth + 'px');
         }
         if (w > 0 && h > 0 && (w !== widgetPrefs.customWidth || h !== widgetPrefs.customHeight)) {
           widgetPrefs.customWidth = w;
@@ -3745,6 +3763,11 @@
         widgetPrefs[key] = el.checked;
         saveWidgetPrefs();
         applyWidgetPrefs();
+        // Chart canvases that were inside a display:none container during
+        // the previous layout keep stale intrinsic sizes; without this the
+        // live HR trace stays pinned at its shrunken width after an
+        // off → on cycle.
+        resizeAllCharts();
         pushPrefsToOverlay();
       });
     }
