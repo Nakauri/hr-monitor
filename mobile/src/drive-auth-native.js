@@ -10,17 +10,23 @@
 // Load marker for diagnostics: "did this script run at all?"
 try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
 
-// Wait for the Capacitor bridge before registering the plugin. <head>
-// scripts race with the bridge injection on Android; polling handles it.
-(function waitForCap() {
-  const start = Date.now();
-  const tick = () => {
+// Defer until DOMContentLoaded so Capacitor's bridge is guaranteed present.
+// Running from <head> means our listener registers before the main page's,
+// so by the time hr_monitor.html's init code asks for the native override,
+// it's already installed on window.
+(function () {
+  function whenReady(cb) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', cb, { once: true });
+    } else {
+      cb();
+    }
+  }
+  whenReady(function () {
     const cap = window.Capacitor;
-    if (cap && typeof cap.registerPlugin === 'function') return init(cap);
-    if (Date.now() - start > 3000) { console.info('[drive-auth-native] Capacitor bridge never arrived — running as web.'); return; }
-    setTimeout(tick, 40);
-  };
-  tick();
+    if (cap && typeof cap.registerPlugin === 'function') init(cap);
+    else console.info('[drive-auth-native] no Capacitor bridge — running as web.');
+  });
 })();
 
 function init(cap) {

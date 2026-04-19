@@ -10,28 +10,26 @@
 // (not inline callbacks). We bridge both patterns to the shape Web
 // Bluetooth wants on the JS side.
 
-// Wait up to ~3s for window.Capacitor to be injected. Capacitor's bridge
-// loads asynchronously on Android, so <head> scripts that assume it's
-// already there race-condition-bail before the bridge arrives. Poll instead.
-function waitForCapacitor(cb, maxMs) {
-  const start = Date.now();
-  const tick = () => {
-    const cap = window.Capacitor;
-    if (cap && typeof cap.registerPlugin === 'function') return cb(cap);
-    if (Date.now() - start > (maxMs || 3000)) return cb(null);
-    setTimeout(tick, 40);
-  };
-  tick();
+// Defer patching until DOMContentLoaded. Capacitor's bridge is guaranteed
+// to be on window by then. We're registered from <head> so our listener
+// fires before the main page's listener in hr_monitor.html — by the time
+// that code checks navigator.bluetooth, our patch is in place.
+try { window.__hrMonitorBleAdapterLoaded = true; } catch (e) {}
+
+function whenReady(cb) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', cb, { once: true });
+  } else {
+    cb();
+  }
 }
 
-// Mark that this script has at least LOADED, so diagnostics can tell the
-// difference between "script missing from bundle" and "script ran but bailed."
-try { window.__hrMonitorBleAdapterLoaded = true; } catch (e) {}
-waitForCapacitor(function(cap) {
+whenReady(function() {
   'use strict';
+  const cap = window.Capacitor;
   try { window.__hrMonitorBleAdapterCapacitorAvailable = !!cap; } catch (e) {}
   if (!cap) {
-    console.info('[ble-adapter] Capacitor bridge never arrived — running as web, leaving navigator.bluetooth alone.');
+    console.info('[ble-adapter] no Capacitor bridge — running as web, leaving navigator.bluetooth alone.');
     return;
   }
   const isNative = cap.isNativePlatform && cap.isNativePlatform();
