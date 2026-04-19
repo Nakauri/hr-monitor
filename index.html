@@ -80,20 +80,12 @@
     margin-top: 6px;
     line-height: 1.5;
   }
-  .card-title .accent-android { color: #5DCAA5; font-weight: 900; }
-  .card.android .card-title::after {
-    content: 'APK';
-    margin-left: auto;
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    background: rgba(93,202,165,0.12);
-    border: 1px solid rgba(93,202,165,0.35);
-    color: var(--accent-rmssd);
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-weight: 700;
+  .card-title svg.card-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
   }
-  .card.android .card-title { justify-content: flex-start; }
+  .card.android .card-title svg.card-icon { color: var(--accent-rmssd); }
   .footer {
     margin-top: 28px;
     font-size: 11px;
@@ -116,8 +108,15 @@
         <div class="card-desc">Browse saved sessions by month, week, and day. Autonomic interpretation and palpitation detection.</div>
       </a>
       <a class="card android" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">
-        <div class="card-title"><span class="accent-android">▶</span> Download for Android</div>
-        <div class="card-desc">Native Android build. Keeps recording while the screen is off or the app is in the background. Sideload the APK; no Play Store. Updated automatically on every push to main.</div>
+        <div class="card-title">
+          <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"></path>
+            <path d="M7 10l5 5 5-5"></path>
+            <path d="M5 21h14"></path>
+          </svg>
+          Download for Android
+        </div>
+        <div class="card-desc">Can continue recording while the screen is off or the app is in the background.</div>
       </a>
     </div>
     <div class="footer">This is not a medical tool.</div>
