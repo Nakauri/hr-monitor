@@ -40,13 +40,30 @@
     align-items: center;
     justify-content: center;
   }
-  /* embed=1 is set by the monitor's Firefox auto-watch iframe; anchor to the
-     top instead of the centre so the widget sits where the user expects
-     (the top of the preview pane, not floating mid-pane). */
+  /* embed=1 is set by the monitor's watch-mode iframe; anchor to the top so
+     the widget sits exactly where the broadcasting card would — i.e. at the
+     top of the overlay pane, not floating mid-pane. */
   body.embed {
     align-items: flex-start;
-    padding-top: 12px;
+    padding-top: 0;
   }
+  body.embed #overlay-zone {
+    padding: 14px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  /* Parallel of hr_monitor.html's #overlay-status badge: same position, same
+     styling, just different text. Hidden unless embed=1. */
+  .reading-broadcast {
+    display: none;
+    font-size: 10px;
+    color: #5a5a5a;
+    text-align: center;
+    padding: 6px 4px 0;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  body.embed .reading-broadcast { display: block; }
 
   /* Zone padding stays 0 — the monitor pins this element to .widget-row's
      size, and padding here would eat the width and clip the HRV column. */
@@ -143,6 +160,11 @@
       <div class="compact-trend"><canvas id="compact-chart"></canvas></div>
     </div>
   </div>
+  <!-- Mirrors the monitor's "• LIVE · 808S" badge but for the read-only
+       embed: indicates we're reading another device's broadcast + who it's
+       from. Hidden outside embed mode so OBS and standalone overlay popups
+       don't show it. -->
+  <div class="reading-broadcast" id="reading-broadcast">• READING BROADCAST</div>
 </div>
 
 <div id="multi-sender-banner" hidden></div>
@@ -318,6 +340,14 @@
     lastTick = Date.now();
     noteSender(msg);
     updateMultiSenderBanner();
+    // Stamp the embed-only "READING BROADCAST · {sender}" label with whoever's
+    // ticks we're looking at. Only visible in embed mode (see CSS); in OBS and
+    // standalone overlay popups the element stays display:none.
+    const rb = $('reading-broadcast');
+    if (rb) {
+      const label = (msg.senderLabel || '').toString().trim();
+      rb.textContent = label ? ('• READING BROADCAST · ' + label.toUpperCase()) : '• READING BROADCAST';
+    }
     document.body.classList.add('connected');
     setConnState('live');
     try { applyRemotePrefs(msg); } catch (e) { console.warn('applyRemotePrefs failed:', e); }

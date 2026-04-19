@@ -113,17 +113,25 @@
     padding: 0;
     background: #0a0a0a;
   }
+  .overlay-spacer { flex: 1; }
   body.watch-mode #overlay-zone .widget-row,
   body.watch-mode #overlay-zone .warning-slot-above,
   body.watch-mode #overlay-zone .overlay-status,
+  body.watch-mode #overlay-zone .overlay-spacer,
   body.watch-mode #overlay-zone .crop-label { display: none !important; }
   body.watch-mode #overlay-zone #watch-frame { display: block; }
   .watch-frame {
     width: 100%;
-    height: 100%;
+    /* Fixed height large enough for the full compact widget (BPM row +
+       pips + HRV column + compact trend + READING BROADCAST badge). On
+       desktop overlay-zone is tall enough that flex:1 would also work, but
+       mobile + Firefox have auto-height parents — an iframe there with
+       flex:1 collapses to content, and "content" of an iframe is 0 until
+       something grows it. Fixed height avoids both cases. */
     border: 0;
     background: #0a0a0a;
-    flex: 1;
+    min-height: 280px;
+    height: 100%;
   }
   /* Per-section placeholder shown inside accordion bodies when watching a
      stream from another device — the stats/chart/events are only populated
@@ -1005,7 +1013,7 @@
     </div><!-- /.widget-row -->
 
     <div class="overlay-status" id="overlay-status">• Not connected</div>
-    <div style="flex: 1;"></div>
+    <div class="overlay-spacer"></div>
     <div class="crop-label" style="font-size: 9px; color: #3a3a3a; text-align: center; letter-spacing: 0.1em;">CROP TO THIS ZONE</div>
     <!-- Sibling iframe shown in watch-mode only (body.watch-mode). Subscribes
          to the shared relay key so Firefox / Safari / iOS see the stream from
