@@ -1050,12 +1050,21 @@
       height: auto;
       min-height: 100vh;
     }
+    /* Pin the widget preview at the top of the viewport on mobile so the
+       live metrics stay visible while the user scrolls through the section
+       accordion below. Sticky positions relative to the nearest scrolling
+       ancestor — html/body scrolls on mobile (overflow:auto a few rules up)
+       so overlay-zone sticks to the top of the viewport underneath the nav. */
     #overlay-zone {
       flex-direction: column;
       border-right: none;
       border-bottom: 1px solid var(--border);
       padding: 12px;
       max-height: none;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: var(--bg);
     }
     #control-panel {
       padding: 12px 14px;
@@ -1068,7 +1077,43 @@
     .big-number.medium { font-size: 54px; }
     /* Prevent iOS input zoom: inputs need ≥16px font */
     input, select, textarea { font-size: 16px !important; }
-    button { min-height: 38px; }
+    /* 44px minimum tap target (Material / iOS HIG). Desktop-dense buttons
+       are unusable with a thumb — this bumps them up across the board.
+       .icon-btn is exempt because it's already sized for its glyph (e.g.
+       the folder toggle); enlarging it turns a compact affordance into a
+       big empty square. */
+    button:not(.icon-btn) { min-height: 44px; padding: 10px 16px; }
+    /* Primary action buttons get a bit more breathing room + stronger text. */
+    .btn-session-toggle { min-height: 52px; font-size: 15px; }
+    /* Export CSV is a key end-of-session action — full-width on mobile so
+       it's easy to hit after Stop, no aiming at a right-aligned button. */
+    #btn-export {
+      width: 100%;
+      font-weight: 600;
+    }
+    /* Session stats row containing Export — stretch the button. */
+    [data-section="stats"] .section-body > div:last-child {
+      justify-content: stretch !important;
+    }
+    /* Add-marker button wider for thumbs. The input stays flex:1; the button
+       gets a fixed min-width so "Log" isn't a 30px target next to a long
+       input. */
+    .marker-input button { min-width: 88px; padding: 10px 18px; font-weight: 600; }
+    /* Posture selector rebuilt for mobile: drop the redundant "Posture:"
+       label, stretch the three pills across the row with equal shares. */
+    .posture-label { display: none; }
+    .posture-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .posture-btn {
+      padding: 12px 0;
+      font-size: 13px;
+      min-height: 44px;
+    }
+    /* Nav links tapped more often on mobile — bump their vertical bounds. */
+    .app-nav-link { min-height: 36px; display: inline-flex; align-items: center; }
   }
 
   @media (max-width: 480px) {
@@ -1311,7 +1356,6 @@
               <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
             </div>
             <div class="streaming-row" style="margin-top: 10px; align-items: flex-start;">
-              <span class="streaming-label" style="margin-top: 6px;">Source size:</span>
               <div class="obs-size-fields">
                 <div class="obs-size-field">
                   <span class="obs-size-label">Width</span>
@@ -4338,10 +4382,21 @@
 
   function loadSectionStates() {
     try {
-      const states = JSON.parse(localStorage.getItem('hr_monitor_sections') || '{}');
-      Object.entries(states).forEach(([key, collapsed]) => {
-        const section = document.querySelector('.section[data-section="' + key + '"]');
-        if (section && collapsed) section.classList.add('collapsed');
+      const raw = localStorage.getItem('hr_monitor_sections');
+      if (raw) {
+        // Returning user — honour their saved open/closed choices verbatim.
+        const states = JSON.parse(raw);
+        Object.entries(states).forEach(([key, collapsed]) => {
+          const section = document.querySelector('.section[data-section="' + key + '"]');
+          if (section && collapsed) section.classList.add('collapsed');
+        });
+        return;
+      }
+      // Fresh install — default to Connection open, everything else closed.
+      // Cuts the initial wall-of-accordions look (especially on mobile) and
+      // focuses the user on the one action they need first: Start session.
+      document.querySelectorAll('.section[data-section]').forEach(s => {
+        if (s.dataset.section !== 'connection') s.classList.add('collapsed');
       });
     } catch(e) {}
   }
