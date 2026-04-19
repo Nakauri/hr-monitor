@@ -23,8 +23,10 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
     }
   }
   whenReady(function () {
+    // Capacitor's native bridge exposes Capacitor.Plugins without needing
+    // registerPlugin. Only bail if window.Capacitor itself is missing.
     const cap = window.Capacitor;
-    if (cap && typeof cap.registerPlugin === 'function') init(cap);
+    if (cap) init(cap);
     else console.info('[drive-auth-native] no Capacitor bridge — running as web.');
   });
 })();
@@ -41,17 +43,20 @@ function init(cap) {
     dMark('__hrMonitorDriveAuthIsNative', !!isNative);
     if (!isNative) { console.info('[drive-auth-native] not native, skipping native GoogleAuth.'); return; }
 
-    let GoogleAuth = null;
-    try {
-      GoogleAuth = cap.registerPlugin('GoogleAuth');
-    } catch (e) {
-      dMark('__hrMonitorDriveAuthLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
-      console.error('[drive-auth-native] registerPlugin threw:', e);
+    // Prefer the natively-populated Plugins reference over registerPlugin,
+    // which is a JS-module-only API unavailable on window.Capacitor in
+    // script-tag mode. Same pattern as ble-adapter.js.
+    let GoogleAuth = (cap.Plugins && cap.Plugins.GoogleAuth) || null;
+    if (!GoogleAuth && typeof cap.registerPlugin === 'function') {
+      try { GoogleAuth = cap.registerPlugin('GoogleAuth'); }
+      catch (e) {
+        dMark('__hrMonitorDriveAuthLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
+      }
     }
     dMark('__hrMonitorDriveAuthGotPlugin', !!GoogleAuth);
     if (!GoogleAuth) {
       console.error('[drive-auth-native] GoogleAuth plugin missing — bail.');
-      dMark('__hrMonitorDriveAuthLastError', (window.__hrMonitorDriveAuthLastError || '') + ' / GoogleAuth null after registerPlugin');
+      dMark('__hrMonitorDriveAuthLastError', (window.__hrMonitorDriveAuthLastError || '') + ' / Capacitor.Plugins.GoogleAuth undefined');
       return;
     }
 
