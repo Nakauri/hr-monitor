@@ -49,6 +49,18 @@
       driveAuthGotPlugin: !!window.__hrMonitorDriveAuthGotPlugin,
       driveAuthRegistered: !!window.__hrMonitorDriveAuthRegistered,
       driveAuthLastError: window.__hrMonitorDriveAuthLastError || null,
+      fgsLoaded: !!window.__hrMonitorFgsLoaded,
+      fgsRanInit: !!window.__hrMonitorFgsRanInit,
+      fgsGotPlugin: !!window.__hrMonitorFgsGotPlugin,
+      fgsRegistered: !!window.__hrMonitorFgsRegistered,
+      fgsStarted: !!window.__hrMonitorFgsStarted,
+      fgsPermission: window.__hrMonitorFgsPermission || null,
+      fgsLastError: window.__hrMonitorFgsLastError || null,
+      battoptLoaded: !!window.__hrMonitorBatteryOptLoaded,
+      battoptRanInit: !!window.__hrMonitorBatteryOptRanInit,
+      battoptGotPlugin: !!window.__hrMonitorBatteryOptGotPlugin,
+      battoptRegistered: !!window.__hrMonitorBatteryOptRegistered,
+      battoptLastError: window.__hrMonitorBatteryOptLastError || null,
       userAgent: navigator.userAgent,
       localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
       driveSignedIn: !!localStorage.getItem('hr_monitor_drive_token'),
@@ -265,6 +277,22 @@
           ['Native sign-in override', yn(d.driveNativeOverride), d.isNative ? ok(d.driveNativeOverride) : ''],
           ['Currently signed in', yn(d.driveSignedIn), d.driveSignedIn ? 'ok' : 'warn'],
         ])}
+        ${rows('Foreground service (Android background recording)', [
+          ['1. script loaded', yn(d.fgsLoaded), d.isNative ? ok(d.fgsLoaded) : ''],
+          ['2. init ran', yn(d.fgsRanInit), d.isNative ? ok(d.fgsRanInit) : ''],
+          ['3. got plugin', yn(d.fgsGotPlugin), d.isNative ? ok(d.fgsGotPlugin) : ''],
+          ['4. registered', yn(d.fgsRegistered), d.isNative ? ok(d.fgsRegistered) : ''],
+          ['5. started', yn(d.fgsStarted), d.isNative ? okwarn(d.fgsStarted, true) : ''],
+          ['notification permission', (d.fgsPermission != null ? JSON.stringify(d.fgsPermission) : 'not asked yet'), d.fgsPermission ? 'ok' : 'warn'],
+          ['last error', d.fgsLastError || 'none', d.fgsLastError ? 'err' : 'ok'],
+        ])}
+        ${rows('Battery optimisation', [
+          ['1. script loaded', yn(d.battoptLoaded), d.isNative ? ok(d.battoptLoaded) : ''],
+          ['2. init ran', yn(d.battoptRanInit), d.isNative ? ok(d.battoptRanInit) : ''],
+          ['3. got plugin', yn(d.battoptGotPlugin), d.isNative ? ok(d.battoptGotPlugin) : ''],
+          ['4. registered', yn(d.battoptRegistered), d.isNative ? ok(d.battoptRegistered) : ''],
+          ['last error', d.battoptLastError || 'none', d.battoptLastError ? 'err' : 'ok'],
+        ])}
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
@@ -310,6 +338,16 @@
     lines.push('Drive:');
     lines.push('  native:   ' + (d.driveNativeOverride ? 'override present' : 'not overridden'));
     lines.push('  auth:     ' + (d.driveSignedIn ? 'signed in' : 'not signed in'));
+    lines.push('FGS:');
+    lines.push('  loaded:   ' + (d.fgsLoaded ? 'yes' : 'no'));
+    lines.push('  plugin:   ' + (d.fgsGotPlugin ? 'yes' : 'no'));
+    lines.push('  started:  ' + (d.fgsStarted ? 'yes' : 'no'));
+    lines.push('  notif:    ' + (d.fgsPermission != null ? JSON.stringify(d.fgsPermission) : 'not asked'));
+    lines.push('  error:    ' + (d.fgsLastError || 'none'));
+    lines.push('BattOpt:');
+    lines.push('  loaded:   ' + (d.battoptLoaded ? 'yes' : 'no'));
+    lines.push('  plugin:   ' + (d.battoptGotPlugin ? 'yes' : 'no'));
+    lines.push('  error:    ' + (d.battoptLastError || 'none'));
     lines.push('Broadcast:  ' + (d.localBroadcastKey ? 'key set' : 'no key'));
     lines.push('User agent: ' + d.userAgent);
     return lines.join('\n');

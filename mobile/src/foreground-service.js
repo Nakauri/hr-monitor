@@ -60,9 +60,19 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
 
       async function start(initialTitle, initialBody) {
         if (started) return true;
+        // Surface POST_NOTIFICATIONS state. If the user denied it, the OS
+        // silently suppresses the persistent notification and Doze can still
+        // kill the service invisibly. Make it visible via diagnostics.
         try {
-          await ForegroundService.requestPermissions();
-        } catch (e) { /* already granted or declined, non-fatal */ }
+          const perm = await ForegroundService.requestPermissions();
+          fgsMark('__hrMonitorFgsPermission', perm || 'unknown');
+          const state = perm && (perm.display || perm.notifications || perm.postNotifications);
+          if (state && state !== 'granted') {
+            fgsMark('__hrMonitorFgsLastError', 'notifications not granted: ' + state);
+          }
+        } catch (e) {
+          fgsMark('__hrMonitorFgsPermission', 'error: ' + (e && e.message ? e.message : String(e)));
+        }
         try {
           await ForegroundService.startForegroundService({
             id: NOTIFICATION_ID,

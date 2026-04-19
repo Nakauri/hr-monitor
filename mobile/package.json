@@ -12,6 +12,7 @@
     "@capacitor/android": "^6.1.0",
     "@capacitor/core": "^6.1.0",
     "@capacitor-community/bluetooth-le": "^6.1.0",
+    "@capawesome-team/capacitor-android-battery-optimization": "^6.0.0",
     "@capawesome-team/capacitor-android-foreground-service": "^6.2.0",
     "@codetrix-studio/capacitor-google-auth": "3.4.0-rc.4"
   },

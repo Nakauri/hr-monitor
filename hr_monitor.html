@@ -625,6 +625,19 @@
     background: var(--accent-rmssd);
   }
   .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
+
+  /* Nudge animation for the battery-optimisation row when the user taps
+     Start session while still optimised. Draws the eye to the row + button
+     without popping a blocking modal. Auto-removes after ~3 s. */
+  @keyframes battopt-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(226,75,74,0); border-color: var(--border); }
+    25%  { box-shadow: 0 0 0 4px rgba(226,75,74,0.18); border-color: var(--warn-high); }
+    100% { box-shadow: 0 0 0 0 rgba(226,75,74,0); border-color: var(--border); }
+  }
+  .battopt-row.battopt-nudge {
+    animation: battopt-pulse 2.6s ease-out 1;
+    border-top-color: var(--warn-high);
+  }
   button.claude {
     background: #d97757;
     color: #fff;
@@ -1217,6 +1230,14 @@
           <span class="autosave-folder" id="drive-status">not signed in</span>
           <button id="drive-signin">Sign in with Google</button>
           <button id="drive-signout" style="display: none;">Sign out</button>
+        </div>
+        <div class="toggle-row battopt-row" id="battopt-row" hidden>
+          <div class="toggle-text">
+            <div class="toggle-label">Background recording</div>
+            <div class="toggle-desc" id="battopt-desc">Allow this app to keep recording with the screen off. Without this, Android pauses your session after a few minutes.</div>
+          </div>
+          <span class="streaming-status" id="battopt-status">checking</span>
+          <button id="battopt-allow" style="display: none;">Allow</button>
         </div>
         <div class="broadcasters-panel" hidden>
           <div class="broadcasters-head">Active broadcasts</div>
@@ -2564,6 +2585,58 @@
     updateObsSizeDisplay();
   }
 
+  // Battery-optimisation row (Android native only). The shim is loaded by
+  // copy-web.js and registers window.HRMBatteryOpt on native; absent on web.
+  // Read state on load + when the tab comes back to foreground (user may
+  // have gone to the system dialog and flipped the switch), and offer an
+  // Allow button that fires the system prompt.
+  async function refreshBattOpt() {
+    const row = document.getElementById('battopt-row');
+    const chip = document.getElementById('battopt-status');
+    const desc = document.getElementById('battopt-desc');
+    const btn = document.getElementById('battopt-allow');
+    if (!row || !chip || !desc || !btn) return;
+    if (!(window.HRMBatteryOpt && window.HRMBatteryOpt.isAvailable)) {
+      row.hidden = true;
+      return;
+    }
+    row.hidden = false;
+    const ignoring = await window.HRMBatteryOpt.isIgnoring();
+    if (ignoring === true) {
+      chip.textContent = 'unrestricted';
+      chip.className = 'streaming-status live';
+      desc.textContent = 'This app is exempted from battery optimisation. Sessions keep running with the screen off.';
+      btn.style.display = 'none';
+    } else if (ignoring === false) {
+      chip.textContent = 'optimised';
+      chip.className = 'streaming-status error';
+      desc.textContent = 'Android will pause recording after a few minutes with the screen off. Tap Allow to keep sessions running in the background.';
+      btn.style.display = '';
+    } else {
+      chip.textContent = 'unknown';
+      chip.className = 'streaming-status';
+      desc.textContent = 'Could not read battery optimisation state. Open Android settings if background recording fails.';
+      btn.style.display = '';
+    }
+  }
+
+  function initBattOptRow() {
+    const btn = document.getElementById('battopt-allow');
+    if (btn && !btn._wired) {
+      btn._wired = true;
+      btn.addEventListener('click', async () => {
+        if (!(window.HRMBatteryOpt && window.HRMBatteryOpt.isAvailable)) return;
+        btn.disabled = true;
+        await window.HRMBatteryOpt.request();
+        // The system dialog takes focus away; we re-check once it comes
+        // back via visibilitychange. Also poll after 1.5 s in case the user
+        // dismissed it without leaving the tab visibility state.
+        setTimeout(async () => { await refreshBattOpt(); btn.disabled = false; }, 1500);
+      });
+    }
+    refreshBattOpt();
+  }
+
   // Per-tab device identity. Generated once on first broadcast and kept for
   // the tab's lifetime (sessionStorage, not localStorage — two tabs in the
   // same browser need distinct IDs so a double-broadcast shows up clearly on
@@ -2729,6 +2802,24 @@
     } else {
       try { await connect(); } catch (e) { /* connect already surfaces errors */ }
       updateSessionToggle();
+      // If we're on native and still optimised, nudge the battopt row into
+      // the user's attention. No modal, just a brief pulse + scroll into
+      // view so they notice the Allow button.
+      if (window.HRMBatteryOpt && window.HRMBatteryOpt.isAvailable) {
+        try {
+          const ign = await window.HRMBatteryOpt.isIgnoring();
+          if (ign === false) {
+            const row = document.getElementById('battopt-row');
+            if (row) {
+              row.classList.remove('battopt-nudge');
+              void row.offsetWidth; // restart animation
+              row.classList.add('battopt-nudge');
+              row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              setTimeout(() => row.classList.remove('battopt-nudge'), 2800);
+            }
+          }
+        } catch (e) { /* best-effort, non-fatal */ }
+      }
     }
   }
 
@@ -2844,6 +2935,9 @@
       setStatus('Tab returned — retrying strap...');
       if (typeof tryReconnect === 'function') tryReconnect();
     }
+    // User may have flipped the battery-optimisation switch in system
+    // settings while the tab was hidden. Re-read state so the row updates.
+    if (typeof refreshBattOpt === 'function') refreshBattOpt();
   });
 
   async function attachConnection() {
@@ -4025,6 +4119,9 @@
     connectRelay();
     startPresenceHeartbeat();
     updateStreamingUI();
+    // Android-only: wire the battery-optimisation row (no-op on web, the
+    // shim isn't registered). Row hides itself when HRMBatteryOpt is absent.
+    if (typeof initBattOptRow === 'function') initBattOptRow();
     // Top-nav "Copy OBS URL" shortcut — copies the same URL as the buried button.
     const navCopy = $('nav-copy-obs-url');
     if (navCopy) {
