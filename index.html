@@ -86,8 +86,14 @@
     flex-shrink: 0;
   }
   .card.android .card-title svg.card-icon { color: var(--accent-rmssd); }
+  /* Version line: its own row below the title on every viewport. Older
+     layout put it on the same row as the title with margin-left: auto,
+     which on mobile squished the title + icon together and the chip
+     wrapped awkwardly. A dedicated row reads cleaner at every width. */
   .apk-version {
-    margin-left: auto;
+    display: block;
+    margin-top: 4px;
+    margin-left: 26px; /* align under the title text, past the icon */
     font-size: 10px;
     color: var(--dim);
     font-weight: 500;
@@ -95,11 +101,37 @@
     font-family: 'Consolas', 'Monaco', monospace;
     text-transform: none;
   }
+  .apk-version:empty { display: none; }
   .apk-version.fresh { color: var(--accent-rmssd); }
   /* When the page is being served inside the installed Android app
      (Capacitor WebView), hide the Download for Android card — the user
      obviously already has it. */
   body.native .card.android { display: none; }
+  /* On iOS the APK can't be installed — show the card but muted with a
+     "Android only" tag so the user knows it's not for them. */
+  body.ios-device .card.android {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  body.ios-device .card.android::before {
+    content: 'Android only';
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    background: rgba(255,255,255,0.04);
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  body.ios-device .card.android { position: relative; }
+  /* On Android browsers (non-installed), emphasize the card — this is
+     exactly the install surface for this visitor. */
+  body.android-device .card.android {
+    border-color: rgba(93,202,165,0.28);
+  }
   .footer {
     margin-top: 28px;
     font-size: 11px;
@@ -129,9 +161,9 @@
             <path d="M5 21h14"></path>
           </svg>
           Download for Android
-          <span class="apk-version" id="apk-version"></span>
         </div>
         <div class="card-desc">Can continue recording while the screen is off or the app is in the background.</div>
+        <span class="apk-version" id="apk-version"></span>
       </a>
     </div>
     <div class="footer">This is not a medical tool.</div>
@@ -143,6 +175,12 @@
     (function() {
       var isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
       if (isNative) document.body.classList.add('native');
+      // Rough UA sniff so the Android download card can present itself
+      // differently across devices that can and can't use it. Not perfect
+      // — detection here is cosmetic only, nothing security-sensitive.
+      var ua = navigator.userAgent || '';
+      if (/iPhone|iPad|iPod/i.test(ua)) document.body.classList.add('ios-device');
+      else if (/Android/i.test(ua)) document.body.classList.add('android-device');
     })();
 
     // Surface the latest APK build on the Download card. We hit the GitHub

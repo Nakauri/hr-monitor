@@ -77,32 +77,47 @@
     const s = document.createElement('style');
     s.id = 'hrm-diagnostics-styles';
     s.textContent = `
-      .hrm-version-chip {
+      /* Avatar + version label — tiny, unobtrusive. Avatar is the click
+         target (will become the account menu in Phase D); version label
+         beside it is informational only. Full build details live in the
+         hover tooltip + the diagnostics modal opened on click. */
+      .hrm-user-chip {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 3px 10px;
-        border: 1px solid rgba(255,255,255,0.12);
-        border-radius: 999px;
-        font-size: 10px;
-        letter-spacing: 0.05em;
-        color: var(--text-dim, #8a8a8a);
-        background: rgba(255,255,255,0.02);
+        padding: 0;
+        background: transparent;
+        border: none;
         cursor: pointer;
-        font-family: 'Consolas', 'Monaco', monospace;
         text-decoration: none;
-        transition: border-color 0.15s, color 0.15s;
+        color: inherit;
+        font-family: inherit;
       }
-      .hrm-version-chip:hover {
-        border-color: rgba(93,202,165,0.5);
+      .hrm-user-avatar {
+        width: 28px; height: 28px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: #1a1a1a;
+        border: 1px solid rgba(255,255,255,0.14);
+        color: var(--text-dim, #8a8a8a);
+        transition: border-color 0.15s, color 0.15s, background 0.15s;
+        flex-shrink: 0;
+      }
+      .hrm-user-chip:hover .hrm-user-avatar {
+        border-color: var(--accent-rmssd, #5DCAA5);
         color: var(--accent-rmssd, #5DCAA5);
+        background: #202020;
       }
-      .hrm-version-chip .hrm-dot {
-        width: 6px; height: 6px; border-radius: 50%;
-        background: #5DCAA5; flex-shrink: 0;
+      .hrm-user-avatar svg { width: 16px; height: 16px; }
+      .hrm-user-avatar.fresh { border-color: #F0C75E; color: #F0C75E; }
+      .hrm-version-label {
+        font-size: 9px;
+        letter-spacing: 0.06em;
+        color: var(--text-faint, #5a5a5a);
+        font-family: 'Consolas', 'Monaco', monospace;
+        text-transform: none;
       }
-      .hrm-version-chip.stale .hrm-dot { background: #8a8a8a; }
-      .hrm-version-chip.fresh .hrm-dot { background: #F0C75E; }
+      .hrm-user-chip:hover .hrm-version-label { color: var(--text-dim, #8a8a8a); }
 
       .hrm-diag-overlay {
         position: fixed; inset: 0;
@@ -149,29 +164,35 @@
     document.head.appendChild(s);
   }
 
+  // Generic anonymous-user silhouette. Becomes a real profile picture when
+  // Phase D's Google Sign-In wires up.
+  const AVATAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2"/></svg>';
+
   async function mountChip(target) {
     injectStyles();
     const el = typeof target === 'string' ? document.querySelector(target) : target;
     if (!el) return;
 
     const chip = document.createElement('a');
-    chip.className = 'hrm-version-chip';
+    chip.className = 'hrm-user-chip';
     chip.href = '#';
-    chip.title = 'App version + diagnostics';
-    chip.innerHTML = '<span class="hrm-dot"></span><span class="hrm-version-text">v0.5 · checking…</span>';
+    chip.setAttribute('aria-label', 'Account and app diagnostics');
+    chip.innerHTML = `
+      <span class="hrm-user-avatar">${AVATAR_SVG}</span>
+      <span class="hrm-version-label">v0.5</span>
+    `;
     chip.addEventListener('click', (e) => { e.preventDefault(); open(); });
     el.innerHTML = '';
     el.appendChild(chip);
 
     const v = await fetchVersion();
-    const textEl = chip.querySelector('.hrm-version-text');
+    const avatar = chip.querySelector('.hrm-user-avatar');
     if (v && v.shortSha) {
       const when = v.builtAt ? fmt(v.builtAt) : '';
-      textEl.textContent = 'v0.5 · ' + v.shortSha + (when ? ' · ' + when : '');
-      if (!v.signed) chip.classList.add('fresh');
+      chip.title = 'v0.5 · ' + v.shortSha + (when ? ' · ' + when : '') + '\nClick for diagnostics';
+      if (!v.signed) avatar.classList.add('fresh');
     } else {
-      textEl.textContent = 'v0.5 · offline';
-      chip.classList.add('stale');
+      chip.title = 'v0.5 · version unavailable (offline)\nClick for diagnostics';
     }
   }
 
