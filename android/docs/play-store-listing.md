@@ -83,9 +83,8 @@ Required. Minimum 2, recommended 8. Capture from the native app:
 
 - **BLUETOOTH_SCAN** with `android:usesPermissionFlags="neverForLocation"`. Core to pairing the strap. Not used for geolocation.
 - **BLUETOOTH_CONNECT**. Core to subscribing to heart rate notifications.
-- **FOREGROUND_SERVICE** and three subtypes:
+- **FOREGROUND_SERVICE** and two subtypes:
   - `connectedDevice`: Continuous heart rate from a paired BLE chest strap during an active session.
-  - `health`: Fitness and autonomic session tracking while the phone is locked or backgrounded.
   - `dataSync`: Session CSV upload to the user's Google Drive when the session ends.
 - **POST_NOTIFICATIONS**. Shows the session notification with current heart rate and a Stop button.
 - **WAKE_LOCK**. Keeps the CPU awake under Doze so the strap stream does not drop when the screen is off.

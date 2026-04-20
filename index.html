@@ -170,6 +170,18 @@
         <div class="card-desc">Can continue recording while the screen is off or the app is in the background.</div>
         <span class="apk-version" id="apk-version"></span>
       </a>
+      <a class="card android android-native" href="https://github.com/Nakauri/hr-monitor/releases/download/android-native-latest/hr-monitor-native.apk" rel="noopener">
+        <div class="card-title">
+          <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"></path>
+            <path d="M7 10l5 5 5-5"></path>
+            <path d="M5 21h14"></path>
+          </svg>
+          Android native (beta)
+        </div>
+        <div class="card-desc">Native Kotlin build. Keeps streaming with the screen off for hours. Takes over from the WebView build once soak testing passes.</div>
+        <span class="apk-version" id="apk-native-version"></span>
+      </a>
     </div>
     <div class="footer">This is not a medical tool.</div>
   </div>
@@ -195,9 +207,10 @@
     // the release body + the published_at date. Also flags builds that
     // weren't release-signed (Google Sign-In won't work on those).
     (function() {
-      const el = document.getElementById('apk-version');
+    function hydrateApkCard(releaseTag, assetName, elementId, storageKey) {
+      const el = document.getElementById(elementId);
       if (!el) return;
-      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/android-latest', { cache: 'no-store' })
+      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/' + releaseTag, { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
         .then(rel => {
           if (!rel) return;
@@ -206,9 +219,9 @@
           const shortSha = shaMatch ? shaMatch[1].slice(0, 7) : '';
           const signedMatch = body.match(/signed:\s*(true|false)/i);
           // Rolling-tag quirk: rel.published_at is frozen at first creation of
-          // android-latest and never bumps. Each asset's updated_at reflects
-          // its actual upload time — read the APK's to get the real build time.
-          const apk = (rel.assets || []).find(a => a.name === 'hr-monitor.apk');
+          // the tag and never bumps. Each asset's updated_at reflects its
+          // actual upload time — read the APK's to get the real build time.
+          const apk = (rel.assets || []).find(a => a.name === assetName);
           const stamp = (apk && apk.updated_at) || rel.updated_at || rel.published_at;
           const date = stamp ? new Date(stamp) : null;
           const when = date
@@ -221,10 +234,13 @@
             el.textContent += ' · unsigned';
             el.style.color = '#E89858';
           }
-          const installed = localStorage.getItem('hr_monitor_installed_apk_sha');
+          const installed = localStorage.getItem(storageKey);
           if (shaMatch && installed && installed !== shaMatch[1]) el.classList.add('fresh');
         })
         .catch(() => {});
+    }
+    hydrateApkCard('android-latest', 'hr-monitor.apk', 'apk-version', 'hr_monitor_installed_apk_sha');
+    hydrateApkCard('android-native-latest', 'hr-monitor-native.apk', 'apk-native-version', 'hr_monitor_installed_native_apk_sha');
     })();
   </script>
 </body>

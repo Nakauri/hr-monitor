@@ -1,7 +1,16 @@
 package com.nakauri.hrmonitor.ui.screens
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,14 +30,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.nakauri.hrmonitor.ble.DiscoveredStrap
+import com.nakauri.hrmonitor.ble.HrScanner
 import com.nakauri.hrmonitor.data.HrPrefsState
 import com.nakauri.hrmonitor.ui.components.PermissionState
 
@@ -40,14 +52,17 @@ fun ScanScreen(
     onOpenDiagnostics: () -> Unit,
     onSelectStrap: (mac: String, name: String?) -> Unit,
 ) {
-    var scanning by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scanning by HrScanner.scanning.collectAsState()
+    val discovered by HrScanner.discovered.collectAsState()
+    val batteryExempt = remember { isBatteryOptExempt(context) }
 
-    // Phase 1 placeholder devices. Phase 2 replaces with real Nordic BLE scan.
-    val placeholderDevices = remember {
-        listOf(
-            ScanResultStub("AA:BB:CC:DD:EE:01", "COOSPO H808S", rssi = -48),
-            ScanResultStub("AA:BB:CC:DD:EE:02", "Polar H10 9D1B", rssi = -62),
-        )
+    // Stop the scan when the screen leaves composition; scanning on Android
+    // 11+ blocks GATT connects until the scan callback is stopped.
+    DisposableEffect(Unit) {
+        onDispose {
+            if (HrScanner.scanning.value && permission.allGranted) stopScanSafe(context)
+        }
     }
 
     Scaffold(
@@ -87,6 +102,29 @@ fun ScanScreen(
                         }
                     }
                 }
+            } else if (!batteryExempt) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "Keep this app alive in the background",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Android kills background BLE sessions unless you grant a battery exemption. Without it your stream will drop when the screen turns off.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { requestBatteryOptExemption(context) }) {
+                                Text("Grant exemption")
+                            }
+                            TextButton(onClick = onOpenDiagnostics) {
+                                Text("Later")
+                            }
+                        }
+                    }
+                }
             }
 
             if (prefs.lastStrapMac != null) {
@@ -119,21 +157,28 @@ fun ScanScreen(
             }
 
             Button(
-                onClick = { scanning = !scanning },
+                onClick = {
+                    if (!permission.allGranted) return@Button
+                    if (scanning) stopScanSafe(context) else startScanSafe(context)
+                },
                 enabled = permission.allGranted,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(if (scanning) "Stop scanning" else "Scan for straps")
             }
 
-            if (scanning) {
+            if (scanning && discovered.isEmpty()) {
                 Text(
-                    "Scanning — Phase 2 wires the real Nordic BLE scan.",
+                    "Scanning, put the strap on or wet the electrodes so it starts advertising.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+
+            if (discovered.isNotEmpty()) {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(placeholderDevices) { dev ->
+                    items(discovered, key = { it.mac }) { dev ->
                         ScanResultRow(dev) {
+                            stopScanSafe(context)
                             onSelectStrap(dev.mac, dev.name)
                         }
                     }
@@ -143,14 +188,8 @@ fun ScanScreen(
     }
 }
 
-private data class ScanResultStub(
-    val mac: String,
-    val name: String?,
-    val rssi: Int,
-)
-
 @Composable
-private fun ScanResultRow(dev: ScanResultStub, onTap: () -> Unit) {
+private fun ScanResultRow(dev: DiscoveredStrap, onTap: () -> Unit) {
     OutlinedButton(
         onClick = onTap,
         modifier = Modifier.fillMaxWidth(),
@@ -163,4 +202,26 @@ private fun ScanResultRow(dev: ScanResultStub, onTap: () -> Unit) {
             )
         }
     }
+}
+
+// The UI always gates calls to these by permission.allGranted. Suppressing
+// the Lint check rather than sprinkling try/catch through the Compose file.
+@SuppressLint("MissingPermission")
+private fun startScanSafe(context: Context) = HrScanner.start(context)
+
+@SuppressLint("MissingPermission")
+private fun stopScanSafe(context: Context) = HrScanner.stop(context)
+
+private fun isBatteryOptExempt(context: Context): Boolean {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+    return pm.isIgnoringBatteryOptimizations(context.packageName)
+}
+
+@SuppressLint("BatteryLife")
+private fun requestBatteryOptExemption(context: Context) {
+    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+        data = Uri.parse("package:${context.packageName}")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try { context.startActivity(intent) } catch (_: Exception) { /* fall through */ }
 }

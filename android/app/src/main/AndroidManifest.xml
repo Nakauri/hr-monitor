@@ -25,10 +25,12 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
-    <!-- Foreground service + subtypes required by Android 14+. -->
+    <!-- Foreground service + subtypes required by Android 14+. connectedDevice
+         covers the BLE strap; dataSync covers Drive uploads. Health was
+         considered but requires BODY_SENSORS (a dangerous runtime permission),
+         so we keep the simpler two-type set. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Notification channel visible on Android 13+. -->
@@ -70,7 +72,7 @@
         <service
             android:name=".service.HrSessionService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|health|dataSync" />
+            android:foregroundServiceType="connectedDevice|dataSync" />
 
         <receiver
             android:name=".service.BootReceiver"

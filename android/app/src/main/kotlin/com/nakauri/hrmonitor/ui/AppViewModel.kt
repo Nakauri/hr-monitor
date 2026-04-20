@@ -14,12 +14,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * Single app-scoped ViewModel. Holds nav route, live HR snapshot (fed by
- * the service once BLE lands in Phase 2), prefs state.
- *
- * Phase 1 keeps this minimal: route state is saveable, prefs are pulled
- * from DataStore, live values are placeholders until BLE + WebSocket wire
- * in.
+ * App-scoped ViewModel. Holds nav route and pending-start intent.
+ * Live HR / RMSSD / connection state live in [com.nakauri.hrmonitor.session.SessionState]
+ * (updated by the service) and are observed directly by Composables.
  */
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -34,14 +31,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _route = MutableStateFlow<AppRoute>(AppRoute.Scan)
     val route: StateFlow<AppRoute> = _route.asStateFlow()
 
-    private val _sessionActive = MutableStateFlow(false)
-    val sessionActive: StateFlow<Boolean> = _sessionActive.asStateFlow()
+    private val _pendingStart = MutableStateFlow<PendingStart?>(null)
+    val pendingStart: StateFlow<PendingStart?> = _pendingStart.asStateFlow()
 
-    private val _liveHr = MutableStateFlow<Int?>(null)
-    val liveHr: StateFlow<Int?> = _liveHr.asStateFlow()
-
-    private val _liveRmssd = MutableStateFlow<Double?>(null)
-    val liveRmssd: StateFlow<Double?> = _liveRmssd.asStateFlow()
+    private val _pendingStop = MutableStateFlow(false)
+    val pendingStop: StateFlow<Boolean> = _pendingStop.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -54,18 +48,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _route.value = route
     }
 
-    fun startSession() {
-        _sessionActive.value = true
-        HrmLog.info("session", "Session start requested")
+    fun requestStartSession(mac: String, name: String?) {
+        _pendingStart.value = PendingStart(mac, name)
         _route.value = AppRoute.Live
     }
 
-    fun stopSession() {
-        _sessionActive.value = false
-        _liveHr.value = null
-        _liveRmssd.value = null
-        HrmLog.info("session", "Session stopped")
+    fun consumePendingStart(): PendingStart? {
+        val p = _pendingStart.value
+        _pendingStart.value = null
+        return p
+    }
+
+    fun requestStopSession() {
+        _pendingStop.value = true
         _route.value = AppRoute.Scan
+    }
+
+    fun consumePendingStop(): Boolean {
+        val v = _pendingStop.value
+        _pendingStop.value = false
+        return v
     }
 
     fun rememberStrap(mac: String, name: String?) {
@@ -99,3 +101,5 @@ sealed interface AppRoute {
     data object Live : AppRoute
     data object Diagnostics : AppRoute
 }
+
+data class PendingStart(val mac: String, val name: String?)
