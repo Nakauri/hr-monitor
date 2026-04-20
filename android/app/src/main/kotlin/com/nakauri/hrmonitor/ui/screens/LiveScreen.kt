@@ -19,22 +19,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nakauri.hrmonitor.ble.BleConnectionState
+import com.nakauri.hrmonitor.session.RelayConnectionState
+import com.nakauri.hrmonitor.session.SessionState
 import com.nakauri.hrmonitor.ui.components.StatusChip
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveScreen(
-    hr: Int?,
-    rmssd: Double?,
     strapLabel: String?,
     onOpenDiagnostics: () -> Unit,
     onStop: () -> Unit,
 ) {
+    val hr by SessionState.hr.collectAsState()
+    val rmssd by SessionState.rmssd.collectAsState()
+    val battery by SessionState.battery.collectAsState()
+    val contactOff by SessionState.contactOff.collectAsState()
+    val bleState by SessionState.bleState.collectAsState()
+    val relayState by SessionState.relayState.collectAsState()
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -53,7 +63,7 @@ fun LiveScreen(
                 .padding(24.dp)
                 .fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 hr?.toString() ?: "--",
@@ -64,15 +74,24 @@ fun LiveScreen(
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusChip("RMSSD ${rmssd?.let { "%.1f".format(it) } ?: "--"} ms")
-                StatusChip("Relay offline")
+                StatusChip(relayLabel(relayState))
             }
 
-            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusChip("BLE ${bleLabel(bleState)}")
+                if (battery != null) StatusChip("Strap ${battery}%")
+                if (contactOff) StatusChip("Contact off")
+            }
 
-            Text(
-                "Live trace lands when Phase 2 wires the real BLE stream.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Spacer(Modifier.height(16.dp))
+
+            if (bleState != BleConnectionState.Ready && hr == null) {
+                Text(
+                    bleStatusExplanation(bleState),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
 
             Spacer(Modifier.weight(1f))
 
@@ -84,4 +103,25 @@ fun LiveScreen(
             }
         }
     }
+}
+
+private fun bleLabel(state: BleConnectionState): String = when (state) {
+    BleConnectionState.Disconnected -> "offline"
+    BleConnectionState.Connecting -> "connecting"
+    BleConnectionState.Ready -> "live"
+    BleConnectionState.Disconnecting -> "closing"
+}
+
+private fun relayLabel(state: RelayConnectionState): String = when (state) {
+    RelayConnectionState.Offline -> "Relay offline"
+    RelayConnectionState.Connecting -> "Relay connecting"
+    RelayConnectionState.Live -> "Relay live"
+    RelayConnectionState.Reconnecting -> "Relay reconnecting"
+}
+
+private fun bleStatusExplanation(state: BleConnectionState): String = when (state) {
+    BleConnectionState.Connecting -> "Connecting to your strap."
+    BleConnectionState.Disconnected -> "Strap disconnected. Retrying."
+    BleConnectionState.Disconnecting -> "Disconnecting."
+    BleConnectionState.Ready -> "Waiting for first heart rate tick."
 }

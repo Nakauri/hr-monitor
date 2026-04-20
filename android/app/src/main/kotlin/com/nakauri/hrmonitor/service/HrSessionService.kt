@@ -8,32 +8,82 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
 import com.nakauri.hrmonitor.HrMonitorApp
 import com.nakauri.hrmonitor.MainActivity
 import com.nakauri.hrmonitor.R
+import com.nakauri.hrmonitor.data.HrPrefs
+import com.nakauri.hrmonitor.diag.HrmLog
+import com.nakauri.hrmonitor.session.SessionCoordinator
+import com.nakauri.hrmonitor.session.SessionState
+import com.nakauri.hrmonitor.session.StrapInfo
+import com.nakauri.hrmonitor.session.lastStrap
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 
 /**
- * Foreground service skeleton. Phase 0 stands up the notification, wake
- * lock, and START_STICKY contract. BLE + WebSocket bodies land in Phase 2
- * and Phase 3.
+ * Foreground service hosting the active session. Owns the
+ * [SessionCoordinator] and updates the ongoing notification with live HR.
  *
- * FGS type is declared as connectedDevice|health|dataSync in the manifest
- * so all three justifications stand when Play Console reviews the service.
+ * Intents:
+ *   ACTION_START_SESSION — start or resume a session. Reads the last-known
+ *     strap MAC from DataStore if no mac is supplied.
+ *   ACTION_STOP_SESSION — tear down and stop the service.
+ *
+ * START_STICKY on restart-from-kill: re-resolves the last strap and
+ * reconnects so the session survives transient OOM kills.
  */
 class HrSessionService : LifecycleService() {
 
+    private lateinit var prefs: HrPrefs
+    private var coordinator: SessionCoordinator? = null
+    private var notificationJob: Job? = null
+
     override fun onCreate() {
         super.onCreate()
-        startForegroundNotification()
+        prefs = HrPrefs(applicationContext)
+        startForegroundNotification(hr = null)
         WakeLockHelper.acquire(this)
+        launchNotificationUpdater()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        val action = intent?.action
+        val mac = intent?.getStringExtra(EXTRA_STRAP_MAC)
+        val name = intent?.getStringExtra(EXTRA_STRAP_NAME)
+
+        when (action) {
+            ACTION_STOP_SESSION -> {
+                HrmLog.info(TAG, "Stop requested via intent")
+                stopSessionAndSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_START_SESSION, null -> {
+                if (mac != null) {
+                    startSession(StrapInfo(mac, name))
+                } else {
+                    // Restart from kill (null intent) or warm start without a MAC.
+                    lifecycleScope.launch {
+                        val last = prefs.lastStrap()
+                        if (last != null) {
+                            HrmLog.info(TAG, "Resuming last strap ${last.mac}")
+                            startSession(last)
+                        } else {
+                            HrmLog.warn(TAG, "No strap to resume; service idle")
+                        }
+                    }
+                }
+            }
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        notificationJob?.cancel()
+        coordinator?.stop()
+        coordinator = null
         WakeLockHelper.release()
         super.onDestroy()
     }
@@ -43,7 +93,59 @@ class HrSessionService : LifecycleService() {
         return null
     }
 
-    private fun startForegroundNotification() {
+    private fun startSession(strap: StrapInfo) {
+        val existing = coordinator
+        if (existing != null && SessionState.active.value && SessionState.strap.value?.mac == strap.mac) {
+            HrmLog.info(TAG, "Session already running for ${strap.mac}")
+            return
+        }
+        existing?.stop()
+        val c = SessionCoordinator(applicationContext, prefs)
+        coordinator = c
+        c.start(strap)
+    }
+
+    private fun stopSessionAndSelf() {
+        coordinator?.stop()
+        coordinator = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun launchNotificationUpdater() {
+        notificationJob = lifecycleScope.launch {
+            combine(
+                SessionState.hr,
+                SessionState.relayState,
+                SessionState.bleState,
+            ) { hr, relay, ble ->
+                Triple(hr, relay, ble)
+            }.collect { (hr, _, _) ->
+                updateNotification(hr)
+            }
+        }
+    }
+
+    private fun startForegroundNotification(hr: Int?) {
+        val notification = buildNotification(hr)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun updateNotification(hr: Int?) {
+        val nm = getSystemService(android.app.NotificationManager::class.java) ?: return
+        nm.notify(NOTIFICATION_ID, buildNotification(hr))
+    }
+
+    private fun buildNotification(hr: Int?): Notification {
         val contentIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -54,31 +156,42 @@ class HrSessionService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val notification: Notification = NotificationCompat.Builder(this, HrMonitorApp.SESSION_CHANNEL_ID)
+        val stopIntent = Intent(this, HrSessionService::class.java).apply {
+            action = ACTION_STOP_SESSION
+        }
+        val stopPending = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val bodyText = when {
+            hr != null -> "HR ${hr} bpm"
+            SessionState.bleState.value.name == "Ready" -> "Connected, waiting for HR"
+            SessionState.bleState.value.name == "Connecting" -> "Connecting to strap"
+            else -> getString(R.string.session_notification_text_idle)
+        }
+
+        return NotificationCompat.Builder(this, HrMonitorApp.SESSION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_hr)
             .setContentTitle(getString(R.string.session_notification_title))
-            .setContentText(getString(R.string.session_notification_text_idle))
+            .setContentText(bodyText)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setContentIntent(pending)
+            .addAction(0, "Stop", stopPending)
             .build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
     }
 
     companion object {
         const val NOTIFICATION_ID = 1001
+        const val ACTION_START_SESSION = "com.nakauri.hrmonitor.action.START_SESSION"
+        const val ACTION_STOP_SESSION = "com.nakauri.hrmonitor.action.STOP_SESSION"
+        const val EXTRA_STRAP_MAC = "strap_mac"
+        const val EXTRA_STRAP_NAME = "strap_name"
+        private const val TAG = "service"
     }
 }
