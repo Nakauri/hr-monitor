@@ -104,10 +104,6 @@
   }
   .apk-version:empty { display: none; }
   .apk-version.fresh { color: var(--accent-rmssd); }
-  /* When the page is being served inside the installed Android app
-     (Capacitor WebView), hide the Download for Android card — the user
-     obviously already has it. */
-  body.native .card.android { display: none; }
   /* On iOS the APK can't be installed — show the card but muted with a
      "Android only" tag so the user knows it's not for them. */
   body.ios-device .card.android {
@@ -158,7 +154,7 @@
         <div class="card-title"><span class="accent-line">∿</span> Session viewer</div>
         <div class="card-desc">Browse saved sessions by month, week, and day. Autonomic interpretation and palpitation detection.</div>
       </a>
-      <a class="card android" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">
+      <a class="card android" href="https://github.com/Nakauri/hr-monitor/releases/download/android-native-latest/hr-monitor-native.apk" rel="noopener">
         <div class="card-title">
           <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3v12"></path>
@@ -167,34 +163,16 @@
           </svg>
           Download for Android
         </div>
-        <div class="card-desc">Can continue recording while the screen is off or the app is in the background.</div>
+        <div class="card-desc">Keeps streaming with the screen off, locked, and backgrounded.</div>
         <span class="apk-version" id="apk-version"></span>
-      </a>
-      <a class="card android android-native" href="https://github.com/Nakauri/hr-monitor/releases/download/android-native-latest/hr-monitor-native.apk" rel="noopener">
-        <div class="card-title">
-          <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 3v12"></path>
-            <path d="M7 10l5 5 5-5"></path>
-            <path d="M5 21h14"></path>
-          </svg>
-          Android native (beta)
-        </div>
-        <div class="card-desc">Native Kotlin build. Keeps streaming with the screen off for hours. Takes over from the WebView build once soak testing passes.</div>
-        <span class="apk-version" id="apk-native-version"></span>
       </a>
     </div>
     <div class="footer">This is not a medical tool.</div>
   </div>
   <script>
-    // Tag the body if we're running inside the Capacitor Android shell so
-    // CSS can hide the "Download for Android" card — they already installed
-    // it, the card is noise.
+    // Rough UA sniff so the Download card can present itself differently on
+    // devices that can and can't use the APK. Cosmetic only.
     (function() {
-      var isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-      if (isNative) document.body.classList.add('native');
-      // Rough UA sniff so the Android download card can present itself
-      // differently across devices that can and can't use it. Not perfect
-      // — detection here is cosmetic only, nothing security-sensitive.
       var ua = navigator.userAgent || '';
       if (/iPhone|iPad|iPod/i.test(ua)) document.body.classList.add('ios-device');
       else if (/Android/i.test(ua)) document.body.classList.add('android-device');
@@ -207,10 +185,9 @@
     // the release body + the published_at date. Also flags builds that
     // weren't release-signed (Google Sign-In won't work on those).
     (function() {
-    function hydrateApkCard(releaseTag, assetName, elementId, storageKey) {
-      const el = document.getElementById(elementId);
+      const el = document.getElementById('apk-version');
       if (!el) return;
-      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/' + releaseTag, { cache: 'no-store' })
+      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/android-native-latest', { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
         .then(rel => {
           if (!rel) return;
@@ -219,9 +196,10 @@
           const shortSha = shaMatch ? shaMatch[1].slice(0, 7) : '';
           const signedMatch = body.match(/signed:\s*(true|false)/i);
           // Rolling-tag quirk: rel.published_at is frozen at first creation of
-          // the tag and never bumps. Each asset's updated_at reflects its
-          // actual upload time — read the APK's to get the real build time.
-          const apk = (rel.assets || []).find(a => a.name === assetName);
+          // android-native-latest and never bumps. Each asset's updated_at
+          // reflects its actual upload time — read the APK's to get the
+          // real build time.
+          const apk = (rel.assets || []).find(a => a.name === 'hr-monitor-native.apk');
           const stamp = (apk && apk.updated_at) || rel.updated_at || rel.published_at;
           const date = stamp ? new Date(stamp) : null;
           const when = date
@@ -234,13 +212,10 @@
             el.textContent += ' · unsigned';
             el.style.color = '#E89858';
           }
-          const installed = localStorage.getItem(storageKey);
+          const installed = localStorage.getItem('hr_monitor_installed_apk_sha');
           if (shaMatch && installed && installed !== shaMatch[1]) el.classList.add('fresh');
         })
         .catch(() => {});
-    }
-    hydrateApkCard('android-latest', 'hr-monitor.apk', 'apk-version', 'hr_monitor_installed_apk_sha');
-    hydrateApkCard('android-native-latest', 'hr-monitor-native.apk', 'apk-native-version', 'hr_monitor_installed_native_apk_sha');
     })();
   </script>
 </body>
