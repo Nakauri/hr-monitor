@@ -13,6 +13,7 @@ import com.nakauri.hrmonitor.HrMonitorApp
 import com.nakauri.hrmonitor.MainActivity
 import com.nakauri.hrmonitor.R
 import com.nakauri.hrmonitor.data.HrPrefs
+import com.nakauri.hrmonitor.data.SessionFlags
 import com.nakauri.hrmonitor.diag.HrmLog
 import com.nakauri.hrmonitor.session.SessionCoordinator
 import com.nakauri.hrmonitor.session.SessionState
@@ -57,22 +58,33 @@ class HrSessionService : LifecycleService() {
         when (action) {
             ACTION_STOP_SESSION -> {
                 HrmLog.info(TAG, "Stop requested via intent")
+                SessionFlags.setIntended(applicationContext, false)
                 stopSessionAndSelf()
                 return START_NOT_STICKY
             }
-            ACTION_START_SESSION, null -> {
+            ACTION_START_SESSION -> {
                 if (mac != null) {
+                    SessionFlags.setIntended(applicationContext, true)
                     startSession(StrapInfo(mac, name))
-                } else {
-                    // Restart from kill (null intent) or warm start without a MAC.
-                    lifecycleScope.launch {
-                        val last = prefs.lastStrap()
-                        if (last != null) {
-                            HrmLog.info(TAG, "Resuming last strap ${last.mac}")
-                            startSession(last)
-                        } else {
-                            HrmLog.warn(TAG, "No strap to resume; service idle")
-                        }
+                }
+            }
+            null -> {
+                // START_STICKY restart after process kill. Only resume if the
+                // user had an active session when the process died.
+                if (!SessionFlags.isIntended(applicationContext)) {
+                    HrmLog.info(TAG, "Restart with no intended session; stopping")
+                    stopSessionAndSelf()
+                    return START_NOT_STICKY
+                }
+                lifecycleScope.launch {
+                    val last = prefs.lastStrap()
+                    if (last != null) {
+                        HrmLog.info(TAG, "Resuming last strap ${last.mac}")
+                        startSession(last)
+                    } else {
+                        HrmLog.warn(TAG, "Intended session but no strap; stopping")
+                        SessionFlags.setIntended(applicationContext, false)
+                        stopSessionAndSelf()
                     }
                 }
             }

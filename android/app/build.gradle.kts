@@ -25,11 +25,12 @@ android {
         applicationId = "com.nakauri.hrmonitor"
         minSdk = 26
         targetSdk = 35
-        // Starts at 10 so the upgrade install over any existing Capacitor
-        // APK (which was versionCode 1) works cleanly. Bump for every
-        // release; GH Actions will eventually drive this from the tag.
-        versionCode = 10
-        versionName = "0.2.0"
+        // Base 10 + GH_RUN_NUMBER in CI so every green build publishes a
+        // higher versionCode and sideloads cleanly upgrade. Local builds
+        // fall back to the base; if you iterate locally, bump BASE or
+        // uninstall between installs.
+        versionCode = 10 + (System.getenv("GH_RUN_NUMBER")?.toIntOrNull() ?: 0)
+        versionName = "0.2.0" + (System.getenv("GH_RUN_NUMBER")?.let { ".$it" } ?: "")
 
         vectorDrawables { useSupportLibrary = true }
 

@@ -108,11 +108,15 @@ class HrBleManager(context: Context) : BleManager(context) {
         batteryCharacteristic = null
     }
 
-    fun connectStrap(device: BluetoothDevice) {
+    fun connectStrap(device: BluetoothDevice, autoConnect: Boolean = false) {
+        // First connect uses autoConnect=false for fast pairing. Reconnect
+        // after link loss uses autoConnect=true so the system keeps trying
+        // as soon as the strap advertises again (survives walking out of
+        // range and back, strap briefly powering off, etc).
         connect(device)
-            .timeout(15_000)
+            .timeout(if (autoConnect) 0 else 15_000)
             .retry(3, 100)
-            .useAutoConnect(false)
+            .useAutoConnect(autoConnect)
             .enqueue()
     }
 
