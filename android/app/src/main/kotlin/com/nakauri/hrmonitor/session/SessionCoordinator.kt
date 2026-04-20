@@ -8,6 +8,7 @@ import com.nakauri.hrmonitor.ble.HrBleManager
 import com.nakauri.hrmonitor.ble.HrReading
 import com.nakauri.hrmonitor.ble.HrScanner
 import com.nakauri.hrmonitor.data.HrPrefs
+import com.nakauri.hrmonitor.data.SessionCsvWriter
 import com.nakauri.hrmonitor.diag.HrmLog
 import com.nakauri.hrmonitor.relay.PresenceEndMessage
 import com.nakauri.hrmonitor.relay.PresenceMessage
@@ -39,6 +40,7 @@ class SessionCoordinator(
     private val rrWindow = RrWindow()
     private var bleManager: HrBleManager? = null
     private var relay: RelayClient? = null
+    private var csv: SessionCsvWriter? = null
     private var sessionStartMs: Long = 0L
     private var senderBooted: Long = 0L
     private var lastTickMs: Long = 0L
@@ -51,6 +53,13 @@ class SessionCoordinator(
         senderBooted = sessionStartMs
         lastTickMs = 0L
         rrWindow.clear()
+
+        csv = try {
+            SessionCsvWriter.open(appContext, sessionStartMs)
+        } catch (e: Exception) {
+            HrmLog.error(TAG, "Could not open session CSV: ${e.message}", e)
+            null
+        }
 
         SessionState.setActive(true, sessionStartMs)
         SessionState.setStrap(strap)
@@ -78,11 +87,18 @@ class SessionCoordinator(
         bleManager?.disconnectStrap()
         bleManager?.close()
         bleManager = null
+        csv?.close()
+        val closedFile = csv?.file
+        csv = null
         scope.cancel()
         SessionState.setActive(false)
         rrWindow.clear()
         HrmLog.info(TAG, "Session stopped")
+        closedFile?.let { onSessionFileClosed?.invoke(it) }
     }
+
+    /** Hook called with the closed CSV file so the service can enqueue upload. */
+    var onSessionFileClosed: ((java.io.File) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     private fun connectBle(strap: StrapInfo) {
@@ -144,6 +160,8 @@ class SessionCoordinator(
         }
         val rmssd = rrWindow.rmssd()
         SessionState.setRmssd(rmssd)
+
+        csv?.appendHrRow(reading.hr, rmssd, reading.timestampMs)
 
         val elapsedMinutes = ((lastTickMs - sessionStartMs).coerceAtLeast(0L)) / 60_000.0
         val tick = TickMessage(

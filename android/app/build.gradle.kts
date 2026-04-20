@@ -135,4 +135,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.sentry.android)
+
+    implementation(libs.play.services.auth)
 }

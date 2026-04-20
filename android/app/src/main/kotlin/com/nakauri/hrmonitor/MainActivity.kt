@@ -100,6 +100,8 @@ private fun AppRoot() {
             onRegenerateRelayKey = { vm.regenerateRelayKey() },
             onForgetStrap = { vm.forgetStrap() },
             onToggleBootRestart = { vm.setBootRestartEnabled(it) },
+            onDriveSignInSuccess = { vm.onDriveSignInSuccess(it) },
+            onDriveSignOut = { vm.onDriveSignOut() },
         )
     }
 }

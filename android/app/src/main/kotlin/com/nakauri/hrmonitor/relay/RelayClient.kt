@@ -9,7 +9,9 @@ import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import io.ktor.websocket.send
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +26,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.math.min
 import kotlin.random.Random
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * Ktor WebSocket client for the PartyKit relay.
@@ -93,7 +94,10 @@ class RelayClient(
     private suspend fun runReconnectLoop() {
         val client = HttpClient(OkHttp) {
             install(WebSockets) {
-                pingInterval = 20.seconds
+                // Ktor 3.0.x exposes pingIntervalMillis on the config; the
+                // kotlin.time.Duration variant is only in some minor versions.
+                // Milliseconds is stable across the 3.0.x range.
+                pingIntervalMillis = 20_000
             }
         }
 
