@@ -1,10 +1,14 @@
 package com.nakauri.hrmonitor.ui.screens
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,7 +43,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.ApiException
+import com.nakauri.hrmonitor.data.SessionCsvWriter
 import com.nakauri.hrmonitor.drive.GoogleAuth
+import com.nakauri.hrmonitor.drive.SessionUploadWorker
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -98,20 +107,77 @@ fun DiagnosticsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            SectionCard(title = "First time testing?") {
+                Text(
+                    "1. Grant Bluetooth and notification permissions on the Scan screen.\n" +
+                        "2. Grant battery-optimisation exemption when prompted.\n" +
+                        "3. Pair the strap. The Live screen shows your heart rate.\n" +
+                        "4. On a desktop, open the overlay URL below (or copy it). That's your OBS Browser Source.\n" +
+                        "5. Lock your phone for a minute or two. HR should keep flowing to the overlay.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
             SectionCard(title = "Relay") {
+                val relayKey = prefs.relayKey
+                val overlayUrl = relayKey?.let { "https://hr-monitor-topaz.vercel.app/overlay.html?key=$it" }
+
                 Text("Broadcast key", style = MaterialTheme.typography.labelMedium)
                 Text(
-                    prefs.relayKey ?: "(generating...)",
+                    relayKey ?: "(generating...)",
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
+                Text("Overlay URL", style = MaterialTheme.typography.labelMedium)
                 Text(
-                    "Paste this into the web overlay to receive the live HR stream.",
+                    overlayUrl ?: "(waiting for key)",
                     style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onRegenerateRelayKey) { Text("Regenerate key") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        enabled = overlayUrl != null,
+                        onClick = { if (overlayUrl != null) copyToClipboard(context, "Overlay URL", overlayUrl) },
+                    ) { Text("Copy URL") }
+                    OutlinedButton(
+                        enabled = overlayUrl != null,
+                        onClick = { if (overlayUrl != null) shareText(context, overlayUrl) },
+                    ) { Text("Share") }
+                    OutlinedButton(onClick = onRegenerateRelayKey) { Text("New key") }
+                }
+            }
+
+            SectionCard(title = "Recordings") {
+                var pendingFiles by remember { mutableStateOf(SessionCsvWriter.listPending(context)) }
+                LaunchedEffect(Unit) {
+                    pendingFiles = SessionCsvWriter.listPending(context)
+                }
+                if (pendingFiles.isEmpty()) {
+                    Text(
+                        "No pending recordings on device.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    Text(
+                        "${pendingFiles.size} CSV${if (pendingFiles.size == 1) "" else "s"} waiting to upload:",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    pendingFiles.forEach { f ->
+                        Text(
+                            "${f.name}  (${f.length() / 1024}k)",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                OutlinedButton(onClick = {
+                    SessionUploadWorker.enqueue(context)
+                    Toast.makeText(context, "Upload re-queued", Toast.LENGTH_SHORT).show()
+                }) { Text("Retry upload now") }
             }
 
             SectionCard(title = "Drive backup") {
@@ -249,14 +315,31 @@ private fun LabelRow(label: String, value: String) {
     }
 }
 
+private fun copyToClipboard(context: Context, label: String, text: String) {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    cm.setPrimaryClip(ClipData.newPlainText(label, text))
+    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+}
+
+private fun shareText(context: Context, text: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    val chooser = Intent.createChooser(intent, "Share overlay URL").apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try { context.startActivity(chooser) } catch (_: Exception) { /* no share target */ }
+}
+
 /**
  * ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS requires the exact-named
  * permission AND a package-scoped URI. Play Store flags this as sensitive;
  * the permission is declared in the manifest.
  */
 @SuppressLint("BatteryLife")
-private fun openBatteryOptimisationSettings(context: android.content.Context) {
-    val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as? PowerManager
+private fun openBatteryOptimisationSettings(context: Context) {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
     val alreadyExempt = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
     val intent = if (alreadyExempt) {
         Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)

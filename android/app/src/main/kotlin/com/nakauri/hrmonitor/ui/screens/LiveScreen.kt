@@ -30,6 +30,7 @@ import com.nakauri.hrmonitor.ble.BleConnectionState
 import com.nakauri.hrmonitor.session.RelayConnectionState
 import com.nakauri.hrmonitor.session.SessionState
 import com.nakauri.hrmonitor.ui.components.StatusChip
+import com.nakauri.hrmonitor.ui.theme.BrandColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,8 +70,13 @@ fun LiveScreen(
                 hr?.toString() ?: "--",
                 fontSize = 128.sp,
                 fontWeight = FontWeight.SemiBold,
+                color = BrandColors.AccentHr,
             )
-            Text("bpm", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "bpm",
+                style = MaterialTheme.typography.titleMedium,
+                color = BrandColors.OnSurfaceDim,
+            )
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusChip("RMSSD ${rmssd?.let { "%.1f".format(it) } ?: "--"} ms")

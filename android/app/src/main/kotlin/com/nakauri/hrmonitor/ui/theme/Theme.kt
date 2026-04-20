@@ -1,41 +1,75 @@
 package com.nakauri.hrmonitor.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFFB24A58),
-    secondary = Color(0xFF8AB4F8),
-    tertiary = Color(0xFFFBBC04),
-)
+/**
+ * Palette pulled from `index.html` / `hr_monitor.html` / `widget.css` so the
+ * Android surfaces and the web surfaces look like the same product.
+ *
+ *   bg      #0a0a0a   (near-black background)
+ *   panel   #101010   (card surface)
+ *   border  #1f1f1f
+ *   text    #d8d8d8
+ *   dim     #8a8a8a
+ *   accent-hr     #E88464   (big HR number, coral-orange)
+ *   accent-rmssd  #5DCAA5   (RMSSD, mint green)
+ *
+ * Force-dark: the site never has a light mode and the ask is visual parity.
+ * Dynamic colour is disabled for the same reason; dynamic wallpaper-derived
+ * hues override the brand on Android 12+ otherwise.
+ */
+object BrandColors {
+    val Background = Color(0xFF0A0A0A)
+    val Surface = Color(0xFF101010)
+    val SurfaceVariant = Color(0xFF1F1F1F)
+    val OnSurface = Color(0xFFD8D8D8)
+    val OnSurfaceDim = Color(0xFF8A8A8A)
+    val AccentHr = Color(0xFFE88464)
+    val AccentRmssd = Color(0xFF5DCAA5)
+    val AccentWarm = Color(0xFFE89858)
+}
 
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF8F2E3E),
-    secondary = Color(0xFF1A73E8),
-    tertiary = Color(0xFFE37400),
+private val BrandDark = darkColorScheme(
+    primary = BrandColors.AccentHr,
+    onPrimary = Color(0xFF1A0E0B),
+    primaryContainer = Color(0xFF2A1612),
+    onPrimaryContainer = BrandColors.OnSurface,
+
+    secondary = BrandColors.AccentRmssd,
+    onSecondary = Color(0xFF08201A),
+    secondaryContainer = Color(0xFF142822),
+    onSecondaryContainer = BrandColors.OnSurface,
+
+    tertiary = BrandColors.AccentWarm,
+    onTertiary = Color(0xFF1A0F05),
+
+    background = BrandColors.Background,
+    onBackground = BrandColors.OnSurface,
+
+    surface = BrandColors.Surface,
+    onSurface = BrandColors.OnSurface,
+    surfaceVariant = BrandColors.SurfaceVariant,
+    onSurfaceVariant = BrandColors.OnSurfaceDim,
+    surfaceTint = BrandColors.AccentHr,
+    inverseSurface = BrandColors.OnSurface,
+    inverseOnSurface = BrandColors.Background,
+    inversePrimary = BrandColors.AccentHr,
+
+    outline = BrandColors.SurfaceVariant,
+    outlineVariant = Color(0xFF2A2A2A),
+
+    error = Color(0xFFE04848),
+    onError = Color(0xFF1A0808),
+    errorContainer = Color(0xFF2A0F0F),
+    onErrorContainer = BrandColors.OnSurface,
+
+    scrim = Color(0xFF000000),
 )
 
 @Composable
-fun HRMonitorTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit,
-) {
-    val colors = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val ctx = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        }
-        darkTheme -> DarkColors
-        else -> LightColors
-    }
-    MaterialTheme(colorScheme = colors, content = content)
+fun HRMonitorTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = BrandDark, content = content)
 }
