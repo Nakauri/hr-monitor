@@ -25,8 +25,11 @@ android {
         applicationId = "com.nakauri.hrmonitor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-native"
+        // Starts at 10 so the upgrade install over any existing Capacitor
+        // APK (which was versionCode 1) works cleanly. Bump for every
+        // release; GH Actions will eventually drive this from the tag.
+        versionCode = 10
+        versionName = "0.2.0"
 
         vectorDrawables { useSupportLibrary = true }
 
