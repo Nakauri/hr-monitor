@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
@@ -17,15 +16,26 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Native BluetoothLeScanner wrapper. Filters on the HR service UUID so
- * phones, keyboards, and random BLE junk stay out of the picker.
+ * Unfiltered BLE scanner. The original design filtered on the HR service
+ * UUID (0x180D) to keep phones and keyboards out of the picker, but many
+ * straps (including the Coospo H808S this project targets) advertise
+ * 0x180D only in the scan response or post-connection — the primary
+ * advertisement doesn't carry it, and ScanFilter.setServiceUuid can't
+ * see scan-response payloads reliably on every OEM.
  *
- * [discovered] is keyed by MAC, newest reading wins so RSSI stays fresh.
- * The scanner must be stopped before starting a connection on Android 11+,
- * otherwise the scanner holds the radio and GATT connect times out.
+ * Consequence: scan everything, classify in [ingest]. Devices whose scan
+ * record exposes 0x180D are marked `isHr = true` and float to the top.
+ * Named-but-unknown devices sit below. `showAll = false` on [discovered]
+ * hides anonymous noise; the UI offers a "Show all" toggle for the edge
+ * case where a strap has neither 0x180D in scan record nor a known name.
  */
 object HrScanner {
     private const val TAG = "scan"
+
+    private val STRAP_NAME_HINTS = listOf(
+        "COOSPO", "H808", "H10", "H7", "H6", "POLAR", "GARMIN", "WAHOO",
+        "HRM", "TICKR", "SCOSCHE", "HEART RATE",
+    )
 
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
@@ -55,9 +65,8 @@ object HrScanner {
         byMac.clear()
         _discovered.value = emptyList()
 
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(HrBleSpec.HEART_RATE_SERVICE))
-            .build()
+        // No service-UUID filter — see class doc. Rely on client-side
+        // classification in ingest().
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
@@ -79,9 +88,9 @@ object HrScanner {
         }
         callback = cb
         try {
-            scanner.startScan(listOf(filter), settings, cb)
+            scanner.startScan(null, settings, cb)
             _scanning.value = true
-            HrmLog.info(TAG, "Scan started")
+            HrmLog.info(TAG, "Scan started (unfiltered)")
         } catch (e: SecurityException) {
             HrmLog.error(TAG, "BLUETOOTH_SCAN permission missing", e)
             _scanning.value = false
@@ -94,8 +103,7 @@ object HrScanner {
         try {
             adapter(context)?.bluetoothLeScanner?.stopScan(cb)
         } catch (_: SecurityException) {
-            // Best-effort stop. If BLUETOOTH_SCAN was revoked mid-scan,
-            // the scan list clears itself.
+            // Best-effort. Revoked BLUETOOTH_SCAN mid-scan just drops results.
         }
         callback = null
         _scanning.value = false
@@ -106,16 +114,28 @@ object HrScanner {
     private fun ingest(result: ScanResult) {
         val device = result.device ?: return
         val mac = device.address ?: return
-        val name = try { device.name } catch (_: SecurityException) { null } ?: result.scanRecord?.deviceName
+        val scanName = result.scanRecord?.deviceName
+        val btName = try { device.name } catch (_: SecurityException) { null }
+        val name = scanName ?: btName
+
+        val serviceUuids = result.scanRecord?.serviceUuids.orEmpty()
+        val hasHrService = serviceUuids.any { it == ParcelUuid(HrBleSpec.HEART_RATE_SERVICE) }
+        val nameHintsHr = name?.uppercase()?.let { upper -> STRAP_NAME_HINTS.any { upper.contains(it) } } == true
+
         val entry = DiscoveredStrap(
             mac = mac,
             name = name,
             rssi = result.rssi,
             lastSeenMs = System.currentTimeMillis(),
+            isHr = hasHrService || nameHintsHr,
         )
         byMac[mac] = entry
+
         _discovered.value = byMac.values
-            .sortedByDescending { it.rssi }
+            .sortedWith(
+                compareByDescending<DiscoveredStrap> { it.isHr }
+                    .thenByDescending { it.rssi }
+            )
             .toList()
     }
 
@@ -128,4 +148,5 @@ data class DiscoveredStrap(
     val name: String?,
     val rssi: Int,
     val lastSeenMs: Long,
+    val isHr: Boolean = false,
 )
