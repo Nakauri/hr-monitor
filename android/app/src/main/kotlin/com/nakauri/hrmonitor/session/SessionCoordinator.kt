@@ -15,7 +15,6 @@ import com.nakauri.hrmonitor.relay.RelayClient
 import com.nakauri.hrmonitor.relay.TickMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -101,15 +100,18 @@ class SessionCoordinator(
         bleManager = manager
 
         scope.launch {
+            var hadReady = false
             manager.connectionState.collectLatest { state ->
                 SessionState.setBleState(state)
+                if (state == BleConnectionState.Ready) hadReady = true
                 if (state == BleConnectionState.Disconnected && SessionState.active.value) {
-                    // Disconnect while the session is live: wait briefly then retry.
-                    // Nordic already retried the initial connect; this handles link
-                    // loss after a successful session has started.
-                    HrmLog.warn(TAG, "BLE link lost; reconnecting")
+                    // After an initial successful link, prefer autoConnect=true
+                    // for reconnects: Android holds the connect request and
+                    // resumes the instant the strap advertises again. Before
+                    // the first success, stay fast so pairing errors surface.
+                    HrmLog.warn(TAG, "BLE link lost; reconnecting (auto=${hadReady})")
                     delay(1_500)
-                    if (SessionState.active.value) manager.connectStrap(device)
+                    if (SessionState.active.value) manager.connectStrap(device, autoConnect = hadReady)
                 }
             }
         }
@@ -202,6 +204,9 @@ class SessionCoordinator(
                     val strap = SessionState.strap.value ?: continue
                     bleManager?.disconnectStrap()
                     delay(500)
+                    // Reset lastTick so the watchdog doesn't re-fire before
+                    // the reconnect has had a chance to deliver a first tick.
+                    SessionState.markTick(System.currentTimeMillis())
                     connectBle(strap)
                 }
             }

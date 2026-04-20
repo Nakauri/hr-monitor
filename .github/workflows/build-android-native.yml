@@ -81,6 +81,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GH_RUN_NUMBER: ${{ github.run_number }}
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
       - name: Collect APK + version info
