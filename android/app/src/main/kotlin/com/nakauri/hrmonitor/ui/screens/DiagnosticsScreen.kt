@@ -30,10 +30,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
+import com.nakauri.hrmonitor.drive.GoogleAuth
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -54,9 +60,23 @@ fun DiagnosticsScreen(
     onRegenerateRelayKey: () -> Unit,
     onForgetStrap: () -> Unit,
     onToggleBootRestart: (Boolean) -> Unit,
+    onDriveSignInSuccess: (String?) -> Unit,
+    onDriveSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
     val events by HrmLog.events.collectAsState()
+
+    val signInLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        try {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            val account = task.getResult(ApiException::class.java)
+            onDriveSignInSuccess(account?.email)
+        } catch (e: ApiException) {
+            HrmLog.warn("drive", "Sign-in cancelled or failed: code=${e.statusCode}")
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -95,15 +115,26 @@ fun DiagnosticsScreen(
             }
 
             SectionCard(title = "Drive backup") {
-                Text(
-                    prefs.driveEmail ?: "Not signed in",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Drive sync lands when Phase 5 wires WorkManager + Drive appData uploads.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                if (prefs.driveEmail != null) {
+                    Text("Signed in", style = MaterialTheme.typography.labelMedium)
+                    Text(prefs.driveEmail, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Session CSVs upload to your Drive in \"HR Monitor Sessions\". Same folder the web app uses.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(onClick = onDriveSignOut) { Text("Sign out") }
+                } else {
+                    Text(
+                        "Sign in to back up session recordings to your Google Drive. Optional.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = {
+                        signInLauncher.launch(GoogleAuth.signInIntent(context))
+                    }) { Text("Sign in with Google") }
+                }
             }
 
             SectionCard(title = "Keep alive on your phone") {

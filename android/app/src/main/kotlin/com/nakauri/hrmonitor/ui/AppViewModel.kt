@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.nakauri.hrmonitor.data.HrPrefs
 import com.nakauri.hrmonitor.data.HrPrefsState
 import com.nakauri.hrmonitor.diag.HrmLog
+import com.nakauri.hrmonitor.drive.GoogleAuth
+import com.nakauri.hrmonitor.drive.SessionUploadWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -93,6 +95,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setBootRestartEnabled(enabled: Boolean) {
         viewModelScope.launch { prefs.setBootRestartEnabled(enabled) }
+    }
+
+    fun onDriveSignInSuccess(email: String?) {
+        viewModelScope.launch {
+            prefs.setDriveEmail(email)
+            HrmLog.info("drive", "Signed in as ${email ?: "unknown"}")
+            SessionUploadWorker.enqueue(getApplication())
+        }
+    }
+
+    fun onDriveSignOut() {
+        viewModelScope.launch {
+            GoogleAuth.signOut(getApplication())
+            prefs.setDriveEmail(null)
+        }
     }
 }
 

@@ -114,7 +114,7 @@ class HrBleManager(context: Context) : BleManager(context) {
         // as soon as the strap advertises again (survives walking out of
         // range and back, strap briefly powering off, etc).
         connect(device)
-            .timeout(if (autoConnect) 0 else 15_000)
+            .timeout(if (autoConnect) 0L else 15_000L)
             .retry(3, 100)
             .useAutoConnect(autoConnect)
             .enqueue()

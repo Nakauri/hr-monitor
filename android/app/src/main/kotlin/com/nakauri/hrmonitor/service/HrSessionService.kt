@@ -15,6 +15,7 @@ import com.nakauri.hrmonitor.R
 import com.nakauri.hrmonitor.data.HrPrefs
 import com.nakauri.hrmonitor.data.SessionFlags
 import com.nakauri.hrmonitor.diag.HrmLog
+import com.nakauri.hrmonitor.drive.SessionUploadWorker
 import com.nakauri.hrmonitor.session.SessionCoordinator
 import com.nakauri.hrmonitor.session.SessionState
 import com.nakauri.hrmonitor.session.StrapInfo
@@ -113,6 +114,9 @@ class HrSessionService : LifecycleService() {
         }
         existing?.stop()
         val c = SessionCoordinator(applicationContext, prefs)
+        c.onSessionFileClosed = { _ ->
+            SessionUploadWorker.enqueue(applicationContext)
+        }
         coordinator = c
         c.start(strap)
     }
