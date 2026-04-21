@@ -175,6 +175,19 @@ class SessionCoordinator(
             }
         }
 
+        scope.launch {
+            manager.polarH10.collectLatest { present ->
+                SessionState.setPolarH10(present)
+                if (present) HrmLog.info(TAG, "Polar H10 detected, ECG stream available")
+            }
+        }
+
+        scope.launch {
+            manager.ecgFrames.collect { frame ->
+                SessionState.emitEcg(frame)
+            }
+        }
+
         manager.connectStrap(device)
     }
 

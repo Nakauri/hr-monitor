@@ -1,8 +1,12 @@
 package com.nakauri.hrmonitor.session
 
 import com.nakauri.hrmonitor.ble.BleConnectionState
+import com.nakauri.hrmonitor.ble.polar.EcgFrameParser
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
@@ -53,6 +57,20 @@ object SessionState {
     private val _pairingStale = MutableStateFlow(false)
     val pairingStale: StateFlow<Boolean> = _pairingStale.asStateFlow()
 
+    /** True when the connected strap exposed the Polar PMD service (H10). */
+    private val _polarH10 = MutableStateFlow(false)
+    val polarH10: StateFlow<Boolean> = _polarH10.asStateFlow()
+
+    /**
+     * Raw ECG frames from the Polar PMD stream, 130 Hz on the H10. Empty
+     * when the connected strap isn't an H10. Consumers (UI trace, CSV
+     * writer) observe and keep their own rolling buffers.
+     */
+    private val _ecgFrames = MutableSharedFlow<EcgFrameParser.EcgFrame>(
+        extraBufferCapacity = 32,
+    )
+    val ecgFrames: SharedFlow<EcgFrameParser.EcgFrame> = _ecgFrames.asSharedFlow()
+
     fun setActive(active: Boolean, startMs: Long? = null) {
         _active.value = active
         _sessionStartMs.value = if (active) (startMs ?: System.currentTimeMillis()) else null
@@ -67,6 +85,7 @@ object SessionState {
             _bleState.value = BleConnectionState.Disconnected
             _relayState.value = RelayConnectionState.Offline
             _lastTickMs.value = null
+            _polarH10.value = false
         }
     }
 
@@ -79,6 +98,8 @@ object SessionState {
     fun setBattery(level: Int?) { _battery.value = level }
     fun setContactOff(off: Boolean) { _contactOff.value = off }
     fun setRelayState(state: RelayConnectionState) { _relayState.value = state }
+    fun setPolarH10(present: Boolean) { _polarH10.value = present }
+    fun emitEcg(frame: EcgFrameParser.EcgFrame) { _ecgFrames.tryEmit(frame) }
     fun markTick(ms: Long = System.currentTimeMillis()) { _lastTickMs.value = ms }
 }
 
