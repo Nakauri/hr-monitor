@@ -45,8 +45,12 @@ Either sender writes to the relay; consumers don't care which. Both must emit th
   trendRmssd: Array<{x: number, y: number}>,   // 3 min window, smoothed
   trendWindow: [number, number],               // [startMin, endMin]
 
-  // Widget prefs mirror so the OBS overlay reflects live toggles.
-  prefs: {
+  // Optional. Widget prefs mirror so the OBS overlay reflects live toggles.
+  // Produced only by hr_monitor.html broadcastTick. The native Android
+  // plugin currently does NOT emit this — it has no awareness of the
+  // WebView's widget toggle state. Viewers must treat an absent prefs
+  // field as "use local defaults" and not replace current settings.
+  prefs?: {
     showHr: boolean,
     showHrv: boolean,
     showLiveHr: boolean,
@@ -58,6 +62,10 @@ Either sender writes to the relay; consumers don't care which. Both must emit th
   }
 }
 ```
+
+## Known per-sender gaps
+
+- **Native Android sender** always emits `palpPerMin: 0`, `warn: null`, `conn: "live"`, and no `prefs`. These are set by `hr_monitor.html` on the web path from real state. Viewers must render degraded (no warning banner, no palp chip, no pref-driven toggles) when those fields are missing or fixed.
 
 ## Checklist when touching the tick payload
 

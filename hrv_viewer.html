@@ -323,9 +323,54 @@
     max-width: 520px;
     text-align: center;
   }
-  .empty-panel h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
-  .empty-panel p { margin: 0 0 20px; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
-  .empty-panel .hint { margin-top: 18px; font-size: 11px; color: var(--text-faint); line-height: 1.6; }
+  .empty-panel h2 { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
+  .empty-panel p { margin: 0 0 24px; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+  .empty-panel .hint { margin-top: 22px; font-size: 11px; color: var(--text-faint); line-height: 1.6; }
+  .empty-choices {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .empty-choice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 16px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, transform 0.12s;
+    color: inherit;
+    font: inherit;
+    text-align: center;
+  }
+  .empty-choice:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-panel);
+    transform: translateY(-1px);
+  }
+  .empty-choice svg {
+    width: 22px;
+    height: 22px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .empty-choice .empty-choice-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .empty-choice .empty-choice-sub {
+    font-size: 11px;
+    color: var(--text-faint);
+    line-height: 1.45;
+  }
+  @media (max-width: 520px) {
+    .empty-choices { grid-template-columns: 1fr; }
+  }
 
   /* Sessions list view (landing page until month view is built) */
   .sessions-grid {
@@ -2302,10 +2347,27 @@
   <div id="empty-state">
     <div class="empty-panel">
       <h2>No sessions yet</h2>
-      <p>This viewer reads the CSV files your live HR Monitor auto-saves. Point it at the folder you chose for auto-save, or sign in with Google Drive to pull sessions synced from another device.</p>
-      <button id="empty-pick" class="primary">Pick sessions folder</button>
-      <button id="empty-drive" style="margin-left:8px">Sign in with Google</button>
-      <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically on next load. Drive sessions are cached in this browser for faster loads.</div>
+      <p>Pick where your sessions live. You can open a local folder, or sign in to pull from Google Drive.</p>
+      <div class="empty-choices">
+        <button id="empty-pick" type="button" class="empty-choice fsa-only">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          </svg>
+          <span class="empty-choice-title">Open a local folder</span>
+          <span class="empty-choice-sub">Reads CSVs you already have on this device.</span>
+        </button>
+        <button id="empty-drive" type="button" class="empty-choice">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M7.71 3.52L1.15 14.48h6.44l2.63-4.6L7.71 3.52z" fill="#4285F4"/>
+            <path d="M8.63 14.48h13.22L15.3 3.52H10l-1.37 2.4 5.05 8.56z" fill="#34A853"/>
+            <path d="M8.63 14.48l-2.2 3.78L9.14 22h6.15l2.69-4.65-9.35-2.87z" fill="#FBBC05"/>
+            <path d="M22.85 14.48H15.3l-2.72 4.65H20.14l2.71-4.65z" fill="#EA4335"/>
+          </svg>
+          <span class="empty-choice-title">Sign in with Google</span>
+          <span class="empty-choice-sub">Sync sessions across devices.</span>
+        </button>
+      </div>
+      <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically. Drive sessions are cached here for faster loads.</div>
     </div>
   </div>
 
@@ -2919,7 +2981,20 @@
     if (pulled + uploaded + written > 0) {
       persistIndex();
       await loadSessions();
-      route();
+      // Only re-route if the current view's backing data is actually
+      // affected. Routing during a sync while the user is inside a day
+      // or session view was blowing away their in-progress interaction
+      // (clicks swallowed, state reset). The hash-based route stays the
+      // same either way, so re-render in place instead. route() still
+      // runs for the index/month/week/all views since those genuinely
+      // depend on the full sessionsIndex.
+      const { view } = parseHash();
+      if (view === 'session' || view === 'day') {
+        // Leave the current view alone. Next navigation will pick up
+        // the fresh data on its own.
+      } else {
+        route();
+      }
     }
     return { pulled, uploaded, written, skipped };
   }

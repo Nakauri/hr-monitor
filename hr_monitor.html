@@ -2338,6 +2338,16 @@
     // Each confirmed HR notification is proof the link is healthy; clear
     // the reconnect backoff so the next disconnect starts fresh at 1 s.
     if (typeof resetReconnectBackoff === 'function') resetReconnectBackoff();
+    // Gap break: if the last sample was > 10 s ago (WebView pause, BLE
+    // drop, native backlog dropped by the 3 s staleness filter), insert
+    // a null point so Chart.js with spanGaps:false draws a break instead
+    // of a straight line across the silence.
+    if (state.hrSeries.length) {
+      const last = state.hrSeries[state.hrSeries.length - 1];
+      if (last && last.v != null && (now - last.t) > 10 / 60) {
+        state.hrSeries.push({ t: now - 0.001, v: null });
+      }
+    }
     state.hrSeries.push({ t: now, v: hr });
     if (state.hrSeries.length > 5000) state.hrSeries.shift();
 
@@ -2362,6 +2372,12 @@
       const rmssd = computeRMSSD(state.rrBuffer.map(r => r.rr));
       if (rmssd != null) {
         state.currentRMSSD = rmssd;
+        if (state.rmssdSeries.length) {
+          const last = state.rmssdSeries[state.rmssdSeries.length - 1];
+          if (last && last.v != null && (now - last.t) > 10 / 60) {
+            state.rmssdSeries.push({ t: now - 0.001, v: null });
+          }
+        }
         state.rmssdSeries.push({ t: now, v: rmssd });
         if (state.rmssdSeries.length > 5000) state.rmssdSeries.shift();
       }
