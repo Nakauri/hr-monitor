@@ -96,6 +96,21 @@ jobs:
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/app/release.keystore
           cat mobile/android-overlay/app/signing-append.gradle >> mobile/android/app/build.gradle
 
+      - name: Append OkHttp dependency for NativeRelaySocketPlugin
+        run: |
+          # The native WebSocket plugin uses OkHttp directly. Capacitor 6
+          # doesn't ship okhttp3 on the app module's classpath by default,
+          # so we append a single-line dependencies block to the
+          # Capacitor-generated app/build.gradle. Multiple dependencies
+          # blocks in one Gradle file merge — no conflict with the auto-
+          # generated one above.
+          cat >> mobile/android/app/build.gradle <<'EOF'
+
+          dependencies {
+              implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+          }
+          EOF
+
       - name: Capacitor sync
         working-directory: mobile
         run: npx cap sync android
