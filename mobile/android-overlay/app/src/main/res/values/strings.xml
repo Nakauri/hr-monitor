@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">aorti.ca</string>
+    <string name="title_activity_main">aorti.ca</string>
+    <string name="package_name">com.nakauri.hrmonitor</string>
+    <string name="custom_url_scheme">com.nakauri.hrmonitor</string>
+    <string name="server_client_id">103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com</string>
+</resources>
