@@ -106,16 +106,14 @@ class HrBleManager(context: Context) : BleManager(context) {
     }
 
     override fun initialize() {
-        // Match what a Garmin/Wahoo watch does on connection-ready: request
-        // HIGH connection priority (Nordic maps this to Android's
-        // CONNECTION_PRIORITY_HIGH → 11.25-15ms intervals, 0 slave latency).
-        // Watches are flawless with chest straps partly because they hold
-        // this tight interval; the default "balanced" interval (~50ms) is
-        // what makes Android BLE feel shaky by comparison.
-        requestConnectionPriority(android.bluetooth.BluetoothGatt.CONNECTION_PRIORITY_HIGH).enqueue()
-        // PMD frames at 130 Hz fit ~73 samples per notification at MTU 232.
-        // Request 247 (Android max) and let the link negotiate down.
-        requestMtu(247).enqueue()
+        // Deliberately minimal. Earlier versions called requestConnectionPriority(HIGH)
+        // to mimic watches' tight intervals and requestMtu(247) for PMD frames.
+        // On the Coospo H808S both caused the link to drop between Services
+        // Ready and HR notifications — connection observer reported Ready,
+        // GATT log said "connected", but the strap never delivered a
+        // notification. Reverting to Nordic defaults: let the strap's own
+        // preferred interval stick, and only request a large MTU when the
+        // PMD service is present (H10, needs 232+ byte frames).
         setNotificationCallback(hrCharacteristic)
             .with { _, data ->
                 val bytes = data.value ?: return@with
@@ -140,13 +138,14 @@ class HrBleManager(context: Context) : BleManager(context) {
             enableNotifications(batt).enqueue()
         }
 
-        // PMD / Polar H10 ECG path. Enable notifications on both CP and DATA
-        // before writing the start command. The SDK enforces a ~200-500 ms
-        // gap after CCCDs are enabled; we use sleep() to ensure the write
-        // stays ordered after both enableNotifications()'s complete.
+        // PMD / Polar H10 ECG path. PMD frames don't fit in the default
+        // ATT MTU of 23 — need ~232 bytes to carry 73 samples. Request MTU
+        // only here so non-H10 straps stay on default and don't trigger an
+        // unnecessary parameter change.
         val pmdCp = pmdControlCharacteristic
         val pmdData = pmdDataCharacteristic
         if (pmdCp != null && pmdData != null) {
+            requestMtu(247).enqueue()
             setNotificationCallback(pmdCp)
                 .with { _, data ->
                     val bytes = data.value ?: return@with

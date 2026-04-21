@@ -30,6 +30,27 @@ object BrandColors {
     val AccentHr = Color(0xFFE88464)
     val AccentRmssd = Color(0xFF5DCAA5)
     val AccentWarm = Color(0xFFE89858)
+
+    // HR-stage colours — pulled from widget.css so the Android widget renders
+    // with the same palette the desktop overlay uses. Stage class names match
+    // HrStages.kt and the web app's body class hooks.
+    val StageLow = Color(0xFF7DB8E8)       // < 60 bpm — cool blue
+    val StageNormal = Color(0xFFB8D97E)    // 60-99 — fresh green
+    val StageElevated = Color(0xFFF0C75E)  // 100-139 — amber
+    val StageHigh = Color(0xFFE89858)      // 140-169 — warm orange (== AccentWarm)
+    val StageCritical = Color(0xFFE24B4A)  // >= 170 — red
+
+    fun stageColor(stageKey: String): Color = when (stageKey) {
+        "stage-low" -> StageLow
+        "stage-normal" -> StageNormal
+        "stage-elevated" -> StageElevated
+        "stage-high" -> StageHigh
+        "stage-critical" -> StageCritical
+        else -> OnSurfaceDim
+    }
+
+    /** Ordered list of stages for pip rendering — 5 pips, one per stage. */
+    val StageOrder = listOf("stage-low", "stage-normal", "stage-elevated", "stage-high", "stage-critical")
 }
 
 /**

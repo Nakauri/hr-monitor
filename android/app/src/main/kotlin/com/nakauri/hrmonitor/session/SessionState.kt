@@ -62,6 +62,24 @@ object SessionState {
     val polarH10: StateFlow<Boolean> = _polarH10.asStateFlow()
 
     /**
+     * Rolling window of the last ~45 seconds of HR samples, one entry per
+     * BLE tick. Format: [timestampMs, hrBpm]. The Live widget's inline
+     * trace reads this to draw the scrolling line that mirrors the
+     * desktop overlay's live HR trace.
+     */
+    data class HrPoint(val timestampMs: Long, val hrBpm: Int)
+    private val _hrSeries = MutableStateFlow<List<HrPoint>>(emptyList())
+    val hrSeries: StateFlow<List<HrPoint>> = _hrSeries.asStateFlow()
+    private const val HR_SERIES_WINDOW_MS: Long = 45_000L
+
+    fun appendHrPoint(point: HrPoint) {
+        val current = _hrSeries.value
+        val cutoff = point.timestampMs - HR_SERIES_WINDOW_MS
+        val pruned = current.dropWhile { it.timestampMs < cutoff }
+        _hrSeries.value = pruned + point
+    }
+
+    /**
      * Raw ECG frames from the Polar PMD stream, 130 Hz on the H10. Empty
      * when the connected strap isn't an H10. Consumers (UI trace, CSV
      * writer) observe and keep their own rolling buffers.
@@ -86,6 +104,7 @@ object SessionState {
             _relayState.value = RelayConnectionState.Offline
             _lastTickMs.value = null
             _polarH10.value = false
+            _hrSeries.value = emptyList()
         }
     }
 
