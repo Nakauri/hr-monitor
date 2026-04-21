@@ -3375,6 +3375,14 @@
 
     if (!hr.length) return null;
 
+    // Authoritative session start time. Prefer the first row's epoch_ms
+    // (UTC ms) because the filename's wall-clock portion can be in the
+    // device's local time (Android) OR UTC (web) depending on which
+    // surface wrote it. epoch_ms is unambiguous across both. The day
+    // view reads this so sessions land in the correct hour regardless
+    // of how the filename was stamped.
+    const startEpoch = (hr[0] && hr[0].ep) ? hr[0].ep : fileStartEpoch;
+
     const hrVals = hr.map(p => p.v);
     const rmssdVals = rmssd.map(p => p.v);
 
@@ -3508,6 +3516,7 @@
 
     const summary = {
       filename,
+      startEpoch,
       duration: hr[hr.length - 1].t,
       hrAvg: Math.round(hrVals.reduce((s, v) => s + v, 0) / hrVals.length),
       hrMax: maxHR,
@@ -4239,7 +4248,12 @@
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
       if (!s || !meta) return '';
-      const startHr = meta.date.getHours() + meta.date.getMinutes() / 60 + meta.date.getSeconds() / 3600;
+      // Prefer the CSV's real start epoch (set in summarizeCSV from
+      // epoch_ms) so Android-written local-time filenames still land in
+      // the correct hour slot on the strip. Fall back to the filename-
+      // derived date for old files with no epoch_ms column.
+      const realStart = s.startEpoch ? new Date(s.startEpoch) : meta.date;
+      const startHr = realStart.getHours() + realStart.getMinutes() / 60 + realStart.getSeconds() / 3600;
       const durHr = s.duration / 60;
       const left = (startHr / 24) * 100;
       const width = Math.max(0.3, (durHr / 24) * 100);
@@ -5146,8 +5160,8 @@
           <div class="interp-grid">
             <div class="interp-cell good" data-quad="low-high"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
             <div class="interp-cell ok" data-quad="high-high"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
-            <div class="interp-cell warn" data-quad="low-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">Low HR · Low HRV</div>Fatigue, under-recovery, overtraining, deconditioning. Can also appear in illness. Watch if sustained across days.</div>
-            <div class="interp-cell bad" data-quad="high-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">High HR · Low HRV</div>Sympathetic stress: pain, panic, dehydration, orthostatic strain, acute illness. Classic flare or orthostatic pattern.</div>
+            <div class="interp-cell warn" data-quad="low-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">Low HR · Low HRV</div>Commonly seen with fatigue, under-recovery, overtraining, or when you're feeling run down. Worth noticing if it lingers for days.</div>
+            <div class="interp-cell bad" data-quad="high-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">High HR · Low HRV</div>Commonly seen with stress, pain, dehydration, strong emotion, or after standing up quickly. A pattern, not a diagnosis.</div>
           </div>
         </div>
       </div>

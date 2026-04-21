@@ -462,11 +462,8 @@
     stroke-dasharray: 3 3;
     opacity: 0.7;
   }
-  .widget-scroll { animation: widgetScroll 14s linear infinite; }
-  @keyframes widgetScroll {
-    from { transform: translateX(0); }
-    to { transform: translateX(-50%); }
-  }
+  /* Trend polylines are redrawn on each tick by hero-widget JS from the
+     rolling HR history array, so there's no CSS scroll animation. */
 
   /* ===== Section shell ===== */
   section {
@@ -1533,7 +1530,7 @@
   <p class="section-lede">Each recording shows up in the viewer with the raw HR and RMSSD trace, autonomic interpretation, palpitation clusters, sympathetic flushes, posture and sleep windows. Multiple sessions from the same day stitch into a single day timeline so gaps, peaks, and warm-ups are all in one picture. Sync to Drive to see it across devices, or keep it all local.</p>
   <div class="viewer-hero">
     <img src="./screen 6.jpg" alt="Full session view with HR trace, RMSSD overlay, palpitation clusters, and a sympathetic flush tooltip" loading="lazy">
-    <div class="viewer-hero-caption">A full day of recording. Mouse any spike for a tooltip, drag a marker anywhere, drill into any range.</div>
+    <div class="viewer-hero-caption">A full day of recording. Hover any spike for a tooltip, scrub the timeline, drill into any range.</div>
   </div>
   <a class="btn-secondary" href="./hrv_viewer.html" style="margin-top:24px;">Open viewer →</a>
 </section>
@@ -1749,8 +1746,8 @@
 <section>
   <div class="support">
     <div class="support-body">
-      <h2 class="support-title">Free and open.</h2>
-      <p class="support-desc">Built and maintained by one person. If this is useful to you and you want to help keep it free, a tip makes a real difference.</p>
+      <h2 class="support-title">Free, built by one person.</h2>
+      <p class="support-desc">No subscription, no ads. If this is useful and you want to help keep it that way, a tip makes a real difference.</p>
       <div class="support-links">
         <a class="support-btn primary" href="https://paypal.me/crowek" rel="noopener">Tip via PayPal</a>
         <a class="support-btn" href="https://ko-fi.com/crowek" rel="noopener">Ko-fi</a>
@@ -1812,9 +1809,11 @@
     else if (/Android/i.test(ua)) document.body.classList.add('android-device');
   })();
 
-  // Hero widget: tick HR and HRV while cycling through the stage palette
-  // the same way the real widget does. Pips fill cumulatively; the warning
-  // banner toggles on when HR drives into elevated or higher.
+  // Hero widget: cycles HR between 75 and 130 so every stage colour is
+  // visible in one loop. Polylines track real HR + HRV history so the
+  // trend shapes actually correspond to the big number (peaks match
+  // peaks, valleys match valleys). Mini trace holds ~30 s; main trace
+  // holds ~3 min. No CSS scroll animation — each tick redraws.
   (function () {
     const hrEl = document.getElementById('widget-hr');
     const hrvEl = document.getElementById('widget-hrv');
@@ -1824,11 +1823,47 @@
     const warnTextEl = document.getElementById('widget-warning-text');
     if (!hrEl || !hrvEl || !widgetEl) return;
 
-    const STAGE_PIPS = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 };
+    const miniPoly = widgetEl.querySelector('.widget-live-trace .trace');
+    const mainHrPoly = widgetEl.querySelector('.widget-trend .hr-line');
+    const mainHrvPoly = widgetEl.querySelector('.widget-trend .hrv-line');
+    // Remove the two `<g class="widget-scroll">` wrappers so our polylines
+    // render at their actual X positions without the translate animation.
+    widgetEl.querySelectorAll('.widget-scroll').forEach(g => {
+      while (g.firstChild) g.parentNode.insertBefore(g.firstChild, g);
+      g.remove();
+    });
 
-    // Wander from 75 (low, blue) up to 130 (critical, red) and back over
-    // ~45s so every stage is visible in one loop. Threshold bands match
-    // the app's default colour thresholds (55 low / 130 high).
+    const STAGE_PIPS = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 };
+    const MINI_N = 38;   // 30 s at ~800 ms / sample
+    const MAIN_N = 180;  // 3 min at ~1 s / sample
+
+    // Seed the histories so the chart isn't blank for the first cycle.
+    const hrHist = [];
+    const hrvHist = [];
+    for (let i = 0; i < MAIN_N; i++) {
+      const seed = 90 + Math.sin(i * 0.12) * 12;
+      hrHist.push(Math.round(seed));
+      hrvHist.push(Math.round(45 - Math.sin(i * 0.12) * 8));
+    }
+
+    // Map a value to a y-coord in the given viewBox height.
+    function yFor(v, min, max, h, pad) {
+      const clamped = Math.max(min, Math.min(max, v));
+      const t = (clamped - min) / (max - min);
+      return pad + (1 - t) * (h - 2 * pad);
+    }
+
+    function renderPoly(poly, hist, n, w, h, min, max, pad) {
+      if (!poly) return;
+      const slice = hist.slice(-n);
+      const len = slice.length;
+      const pts = slice.map((v, i) => {
+        const x = (i / (n - 1)) * w;
+        return x.toFixed(1) + ',' + yFor(v, min, max, h, pad).toFixed(1);
+      }).join(' ');
+      poly.setAttribute('points', pts);
+    }
+
     let t = 0;
     function tick() {
       t += 0.028;
@@ -1839,6 +1874,17 @@
       const hrv = Math.round(Math.max(18, Math.min(65, 40 - Math.sin(t * 0.32) * 18 + (Math.random() - 0.5) * 2)));
       hrEl.textContent = hr;
       hrvEl.textContent = hrv;
+
+      // Track history and cap length.
+      hrHist.push(hr);
+      hrvHist.push(hrv);
+      if (hrHist.length > MAIN_N) hrHist.shift();
+      if (hrvHist.length > MAIN_N) hrvHist.shift();
+
+      // Repaint the three polylines from the real data.
+      renderPoly(miniPoly, hrHist, MINI_N, 140, 68, 65, 140, 10);
+      renderPoly(mainHrPoly, hrHist, MAIN_N, 200, 56, 65, 140, 6);
+      renderPoly(mainHrvPoly, hrvHist, MAIN_N, 200, 56, 15, 70, 6);
 
       // Stage bands tuned so a single 75 to 130 cycle passes through all
       // five colours for the visitor to see.
@@ -1870,80 +1916,57 @@
     tick();
   })();
 
-  // GitHub Releases + APK metadata → "What's new". Goal is user-friendly
-  // copy, not raw commit subjects: people don't care about branch names or
-  // internal tags. We surface the most recent Android build time from the
-  // rolling android-latest tag alongside curated release notes, and skip
-  // noisy entries (bare 'main' tag, auto-generated release-drafter titles).
+  // GitHub Releases → "What's new". Strictly user-facing: skip the
+  // rolling android-latest pointer, skip commit/branch chatter, surface
+  // the release title + the first real sentence of the release body.
+  // If that sentence still sounds dev-y (contains words like 'commit',
+  // 'branch', 'signed', 'main'), we fall through to the next line and
+  // then finally to a generic "update" label so users never see the
+  // raw release-automation boilerplate.
   (function () {
     const el = document.getElementById('changelog');
     if (!el) return;
 
-    // Noise filter: release titles / tags that shouldn't surface to users.
-    const NOISY = /^(main|master|android-latest|draft|auto)$/i;
-    // Clean up internal-sounding words so the blurb reads like a user note.
-    function humanise(s) {
-      return s
-        .replace(/\bci\b/gi, 'build')
-        .replace(/\brepo\b/gi, 'project')
-        .replace(/\bmain branch\b/gi, 'latest')
-        .replace(/\bWIP:?\s*/gi, '')
-        .trim();
-    }
-
+    const NOISY_TAG = /^(main|master|android-latest|draft|auto|head)$/i;
+    const DEV_NOISE = /\b(commit|branch|signed|main branch|ci\b|rolling|apk asset|release-drafter|freshly)/i;
     const fmtDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-    Promise.all([
-      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases?per_page=8', { cache: 'default' }).then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/android-latest', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([rels, apk]) => {
-      const items = [];
+    function pickBlurb(body, name) {
+      if (!body) return name || '';
+      const lines = body.split('\n').map(l => l.trim()).filter(Boolean).filter(l => !l.startsWith('#'));
+      for (const l of lines) {
+        if (!DEV_NOISE.test(l)) return l.replace(/^[-*]\s*/, '').replace(/\s+\(#\d+\)$/, '');
+      }
+      return name || 'Update';
+    }
 
-      // Surface the Android build line first so a visitor sees "there's a
-      // new APK from today" rather than a week-old release subject.
-      if (apk) {
-        const apkAsset = (apk.assets || []).find(a => a.name === 'hr-monitor.apk');
-        const stamp = (apkAsset && apkAsset.updated_at) || apk.updated_at || apk.published_at;
-        if (stamp) {
-          items.push({
-            when: new Date(stamp),
-            title: 'Android build',
-            body: 'Freshly signed APK available from the Android download card above.',
-          });
+    fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases?per_page=8', { cache: 'default' })
+      .then(r => r.ok ? r.json() : [])
+      .then(rels => {
+        const items = (rels || [])
+          .filter(r => r.tag_name && !NOISY_TAG.test(r.tag_name) && !(r.name && NOISY_TAG.test(r.name)))
+          .map(r => ({
+            when: r.published_at ? new Date(r.published_at) : null,
+            title: r.name || r.tag_name,
+            body: pickBlurb(r.body, r.name),
+          }))
+          .sort((a, b) => (b.when || 0) - (a.when || 0))
+          .slice(0, 5);
+
+        if (!items.length) {
+          el.innerHTML = '<div class="changelog-empty">No updates yet. Check back after the next build.</div>';
+          return;
         }
-      }
-
-      // Real releases: skip the noisy auto-tags, use the release title +
-      // first meaningful line of the body.
-      (rels || []).forEach(r => {
-        if (!r.tag_name || NOISY.test(r.tag_name)) return;
-        if (r.name && NOISY.test(r.name)) return;
-        const body = r.body || '';
-        const firstLine = body.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('#')) || r.name || r.tag_name;
-        items.push({
-          when: r.published_at ? new Date(r.published_at) : null,
-          title: r.name || r.tag_name,
-          body: humanise(firstLine),
-        });
+        el.innerHTML = items.map(it => {
+          const when = it.when ? fmtDate(it.when) : '';
+          const safe = (it.body || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])).slice(0, 160);
+          const title = (it.title || 'Update').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+          return '<div class="changelog-item"><span class="changelog-date">' + when + '</span><span class="changelog-body"><strong>' + title + '</strong>. ' + safe + '</span></div>';
+        }).join('');
+      })
+      .catch(() => {
+        el.innerHTML = '<div class="changelog-empty">Couldn\'t load updates right now.</div>';
       });
-
-      // Newest first, cap to 5.
-      items.sort((a, b) => (b.when || 0) - (a.when || 0));
-      const top = items.slice(0, 5);
-
-      if (!top.length) {
-        el.innerHTML = '<div class="changelog-empty">No updates yet. Check back after the next build.</div>';
-        return;
-      }
-      el.innerHTML = top.map(it => {
-        const when = it.when ? fmtDate(it.when) : '';
-        const safe = (it.body || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])).slice(0, 160);
-        const title = (it.title || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
-        return '<div class="changelog-item"><span class="changelog-date">' + when + '</span><span class="changelog-body"><strong>' + title + '</strong>. ' + safe + '</span></div>';
-      }).join('');
-    }).catch(() => {
-      el.innerHTML = '<div class="changelog-empty">Couldn\'t load updates right now.</div>';
-    });
   })();
 
   // APK version chip — unchanged from the current index.

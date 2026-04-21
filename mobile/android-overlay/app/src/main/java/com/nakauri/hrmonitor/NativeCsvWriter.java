@@ -42,14 +42,13 @@ public class NativeCsvWriter {
         this.sessionStartMs = sessionStartMs;
         File dir = new File(context.getFilesDir(), "sessions");
         if (!dir.exists()) dir.mkdirs();
-        // MUST be UTC to match hr_monitor.html's auto-save naming
-        // (Date.toISOString()). The viewer parses the timestamp portion of
-        // the filename as UTC and recomputes local hours for display. If
-        // this were the device's local timezone, every Android-sourced
-        // session would land in the wrong hour slot on the viewer's day
-        // timeline, and UTC-originated web sessions would collide.
+        // Filename timestamp is the device's local time. The viewer treats
+        // this as a display hint only and uses the CSV's epoch_ms column
+        // for the authoritative session start. Keeping it local-time is
+        // backward-compatible with every Android session the user has
+        // already recorded; the viewer handles the ambiguity centrally.
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss", Locale.US);
-        fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+        fmt.setTimeZone(TimeZone.getDefault());
         String filename = "hrv_session_" + fmt.format(new Date(sessionStartMs)) + ".csv";
         this.file = new File(dir, filename);
         this.writer = new BufferedWriter(new FileWriter(file, false));
