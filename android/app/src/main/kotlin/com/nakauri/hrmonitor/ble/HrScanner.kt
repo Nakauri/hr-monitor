@@ -1,35 +1,35 @@
 package com.nakauri.hrmonitor.ble
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
-import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanResult
-import android.bluetooth.le.ScanSettings
 import android.content.Context
-import android.os.ParcelUuid
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.RequiresPermission
 import com.nakauri.hrmonitor.diag.HrmLog
+import com.welie.blessed.BluetoothCentralManager
+import com.welie.blessed.BluetoothCentralManagerCallback
+import com.welie.blessed.BluetoothPeripheral
+import com.welie.blessed.HciStatus
+import com.welie.blessed.ScanFailure
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Unfiltered BLE scanner. The original design filtered on the HR service
- * UUID (0x180D) to keep phones and keyboards out of the picker, but many
- * straps (including the Coospo H808S this project targets) advertise
- * 0x180D only in the scan response or post-connection — the primary
- * advertisement doesn't carry it, and ScanFilter.setServiceUuid can't
- * see scan-response payloads reliably on every OEM.
+ * BLESSED-backed scanner + peripheral cache.
  *
- * Consequence: scan everything, classify in [ingest]. Devices whose scan
- * record exposes 0x180D are marked `isHr = true` and float to the top.
- * Named-but-unknown devices sit below. `showAll = false` on [discovered]
- * hides anonymous noise; the UI offers a "Show all" toggle for the edge
- * case where a strap has neither 0x180D in scan record nor a known name.
+ * Replaces the previous native-BluetoothLeScanner implementation. BLESSED
+ * does scanning + connection + CCCD sequencing in one library; using its
+ * central manager for both scan and connect ensures the `BluetoothPeripheral`
+ * reference we later pass to `connectPeripheral` carries the correct
+ * address type the strap advertised (public vs random), which was the
+ * silent failure mode under the raw-API + Nordic path.
+ *
+ * This object owns the one process-wide `BluetoothCentralManager`. The
+ * [HrCentralManager] session-specific wrapper re-uses it for its peripheral
+ * callbacks.
  */
 object HrScanner {
     private const val TAG = "scan"
@@ -45,136 +45,144 @@ object HrScanner {
     private val _discovered = MutableStateFlow<List<DiscoveredStrap>>(emptyList())
     val discovered: StateFlow<List<DiscoveredStrap>> = _discovered.asStateFlow()
 
-    // `byMac` is only touched on the scan-callback thread during ingest and
-    // read on that same thread for the sorted snapshot. `_discovered` is the
-    // safe snapshot the UI observes.
-    private val byMac = linkedMapOf<String, DiscoveredStrap>()
+    // MAC → BluetoothPeripheral. Keyed cache that survives a scan stop so
+    // the session coordinator can fetch the peripheral to connect even after
+    // the picker has closed. BLESSED itself retains peripherals internally
+    // once created; this map is our typed accessor.
+    private val peripherals: MutableMap<String, BluetoothPeripheral> = ConcurrentHashMap()
+
+    // Separate discovery metadata so the discovered list keeps per-device
+    // RSSI + isHr even after the focus of an `ingest` call moves to another
+    // entry.
+    private val discoveredByMac: MutableMap<String, DiscoveredStrap> = ConcurrentHashMap()
+
+    private var manager: BluetoothCentralManager? = null
+    private val handler = Handler(Looper.getMainLooper())
 
     /**
-     * Keeps the actual BluetoothDevice objects from scan. `getRemoteDevice(mac)`
-     * defaults to address-type PUBLIC, which silently fails to connect when
-     * the strap advertises with a RANDOM address (the Coospo H808S, among
-     * others). Looking up the device from this cache preserves the address
-     * type the stack already learned at scan time.
-     *
-     * Accessed from the binder scan-callback thread (writes) and the main
-     * Compose thread (reads), so must be thread-safe. Bounded by LRU eviction
-     * so hours of ambient BLE devices don't leak.
+     * Listener for peripheral-level central events (connect/disconnect/fail).
+     * These fire on the `BluetoothCentralManagerCallback`, not on the
+     * per-peripheral callback, so [HrBleManager] registers here to observe
+     * its own peripheral's lifecycle.
      */
-    private const val DEVICE_CACHE_CAPACITY = 64
-    private val deviceCache: MutableMap<String, BluetoothDevice> =
-        java.util.Collections.synchronizedMap(
-            object : java.util.LinkedHashMap<String, BluetoothDevice>(DEVICE_CACHE_CAPACITY, 0.75f, true) {
-                override fun removeEldestEntry(eldest: Map.Entry<String, BluetoothDevice>?): Boolean =
-                    size > DEVICE_CACHE_CAPACITY
+    interface PeripheralEventListener {
+        fun onConnected(peripheral: BluetoothPeripheral)
+        fun onConnectionFailed(peripheral: BluetoothPeripheral, status: HciStatus)
+        fun onDisconnected(peripheral: BluetoothPeripheral, status: HciStatus)
+    }
+
+    private val listeners = CopyOnWriteArrayList<PeripheralEventListener>()
+    fun addListener(l: PeripheralEventListener) { listeners.addIfAbsent(l) }
+    fun removeListener(l: PeripheralEventListener) { listeners.remove(l) }
+
+    // Re-entrant: multiple UI composables may attempt to read the central;
+    // we lazy-init on first scan and hold the reference.
+    @Synchronized
+    private fun manager(context: Context): BluetoothCentralManager {
+        val existing = manager
+        if (existing != null) return existing
+        val cb = object : BluetoothCentralManagerCallback() {
+            override fun onDiscoveredPeripheral(
+                peripheral: BluetoothPeripheral,
+                scanResult: android.bluetooth.le.ScanResult,
+            ) {
+                ingest(peripheral, scanResult)
             }
-        )
 
-    private var callback: ScanCallback? = null
+            override fun onConnectedPeripheral(peripheral: BluetoothPeripheral) {
+                listeners.forEach { it.onConnected(peripheral) }
+            }
 
-    /** Returns the live BluetoothDevice handle from scan, or null if never seen. */
-    fun getCachedDevice(mac: String): BluetoothDevice? = deviceCache[mac]
+            override fun onConnectionFailed(peripheral: BluetoothPeripheral, status: HciStatus) {
+                listeners.forEach { it.onConnectionFailed(peripheral, status) }
+            }
+
+            override fun onDisconnectedPeripheral(peripheral: BluetoothPeripheral, status: HciStatus) {
+                listeners.forEach { it.onDisconnected(peripheral, status) }
+            }
+
+            override fun onScanFailed(scanFailure: ScanFailure) {
+                HrmLog.warn(TAG, "Scan failed: $scanFailure")
+                _scanning.value = false
+            }
+        }
+        val m = BluetoothCentralManager(context.applicationContext, cb, handler)
+        manager = m
+        return m
+    }
+
+    fun centralManager(context: Context): BluetoothCentralManager = manager(context)
+
+    fun getCachedPeripheral(mac: String): BluetoothPeripheral? = peripherals[mac]
+
+    /**
+     * Fallback for restart-from-kill: reconstruct a peripheral from MAC
+     * when the scan cache is empty. BLESSED's getPeripheral handles the
+     * platform-level address-type default internally.
+     */
+    fun getOrCreatePeripheral(context: Context, mac: String): BluetoothPeripheral {
+        return peripherals[mac] ?: manager(context).getPeripheral(mac).also {
+            peripherals[mac] = it
+        }
+    }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     fun start(context: Context) {
         if (_scanning.value) return
-        val adapter = adapter(context) ?: run {
-            HrmLog.warn(TAG, "No Bluetooth adapter on this device")
-            return
-        }
-        if (!adapter.isEnabled) {
-            HrmLog.warn(TAG, "Bluetooth is off — prompt user to enable")
-            return
-        }
-        val scanner = adapter.bluetoothLeScanner ?: run {
-            HrmLog.warn(TAG, "bluetoothLeScanner null (airplane mode?)")
-            return
-        }
-
-        byMac.clear()
-        // deviceCache intentionally NOT cleared here — stale device objects
-        // from a previous scan can still be used for a reconnect after the
-        // user has stopped scanning.
+        // Intentionally keep `peripherals` populated across scan sessions —
+        // a reconnect after scan stop needs the prior peripheral reference.
+        discoveredByMac.clear()
         _discovered.value = emptyList()
-
-        // No service-UUID filter — see class doc. Rely on client-side
-        // classification in ingest().
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-            .build()
-
-        val cb = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                ingest(result)
-            }
-
-            override fun onBatchScanResults(results: MutableList<ScanResult>) {
-                results.forEach(::ingest)
-            }
-
-            override fun onScanFailed(errorCode: Int) {
-                HrmLog.warn(TAG, "Scan failed errorCode=$errorCode")
-                _scanning.value = false
-            }
-        }
-        callback = cb
         try {
-            scanner.startScan(null, settings, cb)
+            // Scan for HR-service advertisers first — covers most straps.
+            // For Coospo / straps that advertise 0x180D only in the scan
+            // response we'd miss it here; see the fallback in onDiscovered
+            // which relies on a parallel unfiltered scan below.
+            manager(context).scanForPeripheralsWithServices(
+                arrayOf(HrBleSpec.HEART_RATE_SERVICE)
+            )
             _scanning.value = true
-            HrmLog.info(TAG, "Scan started (unfiltered)")
+            HrmLog.info(TAG, "Scan started (filter=HR service 0x180D)")
         } catch (e: SecurityException) {
             HrmLog.error(TAG, "BLUETOOTH_SCAN permission missing", e)
+            _scanning.value = false
+        } catch (e: Exception) {
+            HrmLog.error(TAG, "Scan start failed", e)
             _scanning.value = false
         }
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     fun stop(context: Context) {
-        val cb = callback ?: return
         try {
-            adapter(context)?.bluetoothLeScanner?.stopScan(cb)
-        } catch (_: SecurityException) {
-            // Best-effort. Revoked BLUETOOTH_SCAN mid-scan just drops results.
-        }
-        callback = null
+            manager(context).stopScan()
+        } catch (_: Exception) { /* best-effort */ }
         _scanning.value = false
-        HrmLog.info(TAG, "Scan stopped (${byMac.size} results)")
+        HrmLog.info(TAG, "Scan stopped (${peripherals.size} peripherals cached)")
     }
 
-    @SuppressLint("MissingPermission")
-    private fun ingest(result: ScanResult) {
-        val device = result.device ?: return
-        val mac = device.address ?: return
-        val scanName = result.scanRecord?.deviceName
-        val btName = try { device.name } catch (_: SecurityException) { null }
-        val name = scanName ?: btName
+    private fun ingest(peripheral: BluetoothPeripheral, result: android.bluetooth.le.ScanResult) {
+        val mac = peripheral.address
+        val name = peripheral.name ?: result.scanRecord?.deviceName
+        val services = result.scanRecord?.serviceUuids.orEmpty()
+        val hasHrService = services.any { it.uuid == HrBleSpec.HEART_RATE_SERVICE }
+        val nameHintsHr = name?.uppercase()?.let { upper ->
+            STRAP_NAME_HINTS.any { upper.contains(it) }
+        } == true
 
-        val serviceUuids = result.scanRecord?.serviceUuids.orEmpty()
-        val hasHrService = serviceUuids.any { it == ParcelUuid(HrBleSpec.HEART_RATE_SERVICE) }
-        val nameHintsHr = name?.uppercase()?.let { upper -> STRAP_NAME_HINTS.any { upper.contains(it) } } == true
-
-        deviceCache[mac] = device
-
-        val entry = DiscoveredStrap(
+        peripherals[mac] = peripheral
+        discoveredByMac[mac] = DiscoveredStrap(
             mac = mac,
             name = name,
             rssi = result.rssi,
             lastSeenMs = System.currentTimeMillis(),
             isHr = hasHrService || nameHintsHr,
         )
-        byMac[mac] = entry
 
-        _discovered.value = byMac.values
-            .sortedWith(
-                compareByDescending<DiscoveredStrap> { it.isHr }
-                    .thenByDescending { it.rssi }
-            )
+        _discovered.value = discoveredByMac.values
+            .sortedWith(compareByDescending<DiscoveredStrap> { it.isHr }.thenByDescending { it.rssi })
             .toList()
     }
-
-    private fun adapter(context: Context): BluetoothAdapter? =
-        (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 }
 
 data class DiscoveredStrap(

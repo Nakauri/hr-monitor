@@ -1,7 +1,6 @@
 package com.nakauri.hrmonitor.session
 
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.nakauri.hrmonitor.ble.BleConnectionState
 import com.nakauri.hrmonitor.ble.HrBleManager
@@ -102,24 +101,16 @@ class SessionCoordinator(
 
     @SuppressLint("MissingPermission")
     private fun connectBle(strap: StrapInfo) {
-        val btAdapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-            ?: run {
-                HrmLog.warn(TAG, "No Bluetooth adapter")
-                return
-            }
-        // Preferred: use the BluetoothDevice handed to us by the scan. Its
-        // address type (PUBLIC vs. RANDOM) is already set correctly. Fallback
-        // to getRemoteDevice only for restart-from-kill, where we have the
-        // MAC from DataStore but no scan cache — those devices usually
-        // advertise PUBLIC, and the session wasn't live anyway.
-        val device = com.nakauri.hrmonitor.ble.HrScanner.getCachedDevice(strap.mac)
-            ?: try { btAdapter.getRemoteDevice(strap.mac) } catch (e: IllegalArgumentException) {
-                HrmLog.error(TAG, "Invalid MAC ${strap.mac}", e)
-                return
-            }
+        // Preferred: use the BluetoothPeripheral the scan already discovered
+        // — its address type (PUBLIC vs RANDOM) was captured at scan time.
+        // Fallback for restart-from-kill: reconstruct from MAC via BLESSED's
+        // getPeripheral, which works for PUBLIC-address straps and for any
+        // strap the Android stack has previously bonded with.
+        val peripheral = com.nakauri.hrmonitor.ble.HrScanner.getCachedPeripheral(strap.mac)
+            ?: com.nakauri.hrmonitor.ble.HrScanner.getOrCreatePeripheral(appContext, strap.mac)
         HrmLog.info(
             TAG,
-            "Connecting to ${strap.mac} (cached=${com.nakauri.hrmonitor.ble.HrScanner.getCachedDevice(strap.mac) != null})",
+            "Connecting to ${strap.mac} (cached=${com.nakauri.hrmonitor.ble.HrScanner.getCachedPeripheral(strap.mac) != null})",
         )
 
         val manager = HrBleManager(appContext)
@@ -158,7 +149,7 @@ class SessionCoordinator(
                     // the first success, stay fast so pairing errors surface.
                     HrmLog.warn(TAG, "BLE link lost; reconnecting (auto=${hadReady}, attempt=$failedAttemptsBeforeReady)")
                     delay(1_500)
-                    if (SessionState.active.value) manager.connectStrap(device, autoConnect = hadReady)
+                    if (SessionState.active.value) manager.connectStrap(peripheral, autoConnect = hadReady)
                 }
             }
         }
@@ -188,7 +179,7 @@ class SessionCoordinator(
             }
         }
 
-        manager.connectStrap(device)
+        manager.connectStrap(peripheral)
     }
 
     private fun onReading(reading: HrReading) {

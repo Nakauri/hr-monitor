@@ -124,8 +124,10 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    implementation(libs.nordic.ble)
-    implementation(libs.nordic.ble.ktx)
+    // BLESSED replaces Nordic BLE Library as of 2026-04-21. Van Welie's
+    // library handles CCCD-ack sequencing that Nordic v2.9 misses on Samsung
+    // + Coospo; see TODO.md under "BLE stack swap" for the full reasoning.
+    implementation(libs.blessed)
 
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
