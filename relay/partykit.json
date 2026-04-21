@@ -1,0 +1,6 @@
+{
+  "$schema": "https://www.partykit.io/schema.json",
+  "name": "hr-relay",
+  "main": "src/server.js",
+  "compatibilityDate": "2024-09-01"
+}

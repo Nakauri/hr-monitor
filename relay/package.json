@@ -1,0 +1,14 @@
+{
+  "name": "hr-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal WebSocket relay for HR Monitor — fans out broadcaster messages to subscribers on the same broadcast key. Runs on PartyKit (Cloudflare Workers + Durable Objects).",
+  "scripts": {
+    "dev": "partykit dev",
+    "deploy": "partykit deploy"
+  },
+  "dependencies": {
+    "partykit": "latest",
+    "partysocket": "latest"
+  }
+}

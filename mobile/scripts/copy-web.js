@@ -14,7 +14,12 @@ const mobileRoot = path.resolve(__dirname, '..');
 const wwwDir = path.join(mobileRoot, 'www');
 
 // Files copied as-is.
-const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'index.html', 'widget.css', 'widget.js', 'diagnostics.js', 'settings.js'];
+const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'widget.css', 'widget.js', 'diagnostics.js', 'settings.js'];
+// The Capacitor WebView loads index.html by default; we want it to show the
+// dedicated mobile-first landing (app-home.html), not the scrolling public
+// landing. Public https://aorti.ca/ keeps the scroll-heavy page because
+// Vercel serves the repo-root index.html. See also mobile/README.md.
+const INDEX_OVERRIDE = { from: 'app-home.html', to: 'index.html' };
 // hr_monitor.html gets the ble-adapter + capacitor-core shims injected just
 // before the closing </head> so navigator.bluetooth is patched before any
 // page script touches it.
@@ -30,6 +35,7 @@ const SHIM_TAGS = `
   <script src="./capacitor-bootstrap.js"></script>
   <script src="./ble-adapter.js"></script>
   <script src="./native-relay-socket.js"></script>
+  <script src="./native-hr-session.js"></script>
   <script src="./drive-auth-native.js"></script>
   <script src="./foreground-service.js"></script>
   <script src="./battery-opt.js"></script>
@@ -96,7 +102,7 @@ function copyWithInject(relative) {
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
 // web files so relative paths just work.
 function copyMobileAssets() {
-  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'];
+  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js', 'native-hr-session.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'];
   for (const name of assets) {
     const from = path.join(mobileRoot, 'src', name);
     const to = path.join(wwwDir, name);
@@ -109,17 +115,30 @@ function copyMobileAssets() {
   }
 }
 
+function copyIndexOverride() {
+  const from = path.join(repoRoot, INDEX_OVERRIDE.from);
+  const to = path.join(wwwDir, INDEX_OVERRIDE.to);
+  if (!fs.existsSync(from)) {
+    console.warn(`[copy-web] skipping ${INDEX_OVERRIDE.from} -> ${INDEX_OVERRIDE.to} (source missing)`);
+    return;
+  }
+  const src = fs.readFileSync(from, 'utf8');
+  fs.writeFileSync(to, stripForMobile(src));
+  console.log(`[copy-web] ${INDEX_OVERRIDE.from} → www/${INDEX_OVERRIDE.to} (app home, analytics stripped)`);
+}
+
 function buildOnce() {
   ensureDir(wwwDir);
   for (const f of PASSTHROUGH) copyFile(f);
   copyWithInject(INJECT_TARGET);
+  copyIndexOverride();
   copyMobileAssets();
   console.log('[copy-web] done');
 }
 
 function watch() {
   buildOnce();
-  const files = [...PASSTHROUGH, INJECT_TARGET].map(f => path.join(repoRoot, f));
+  const files = [...PASSTHROUGH, INJECT_TARGET, INDEX_OVERRIDE.from].map(f => path.join(repoRoot, f));
   const mobileAssets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'].map(f => path.join(mobileRoot, 'src', f));
   const watched = [...files, ...mobileAssets].filter(f => fs.existsSync(f));
   console.log(`[copy-web] watching ${watched.length} files…`);

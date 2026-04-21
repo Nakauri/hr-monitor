@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>aorti.ca</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #101010;
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --text: #e8e8e8;
+    --text-dim: #9a9a9a;
+    --text-faint: #5a5a5a;
+    --ekg: #E84838;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100dvh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(circle at 50% 20%, rgba(232,72,56,0.18) 0%, transparent 45%),
+      radial-gradient(circle at 80% 100%, rgba(93,202,165,0.05) 0%, transparent 55%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .app-shell {
+    position: relative;
+    z-index: 1;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top, 0) 20px env(safe-area-inset-bottom, 0);
+  }
+  .app-top {
+    padding-top: 28px;
+    text-align: center;
+  }
+  .app-top .beta {
+    display: inline-block;
+    padding: 3px 10px;
+    background: rgba(240,199,94,0.12);
+    color: #F0C75E;
+    border: 1px solid rgba(240,199,94,0.4);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+  }
+  .app-hero {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    position: relative;
+  }
+  .app-logo-wrap {
+    position: relative;
+    display: inline-block;
+    margin-bottom: 20px;
+  }
+  .app-logo-wrap::before {
+    content: '';
+    position: absolute;
+    inset: -25% -30%;
+    background: radial-gradient(circle at center, rgba(232,72,56,0.85) 0%, rgba(232,72,56,0.35) 35%, transparent 75%);
+    filter: blur(48px);
+    z-index: 0;
+    animation: logoPulse 4s ease-in-out infinite;
+  }
+  @keyframes logoPulse {
+    0%, 100% { opacity: 0.65; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.1); }
+  }
+  .app-logo {
+    position: relative;
+    z-index: 1;
+    width: 150px;
+    height: auto;
+    display: block;
+  }
+  .app-wordmark {
+    position: relative;
+    z-index: 1;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 34px;
+    letter-spacing: -0.02em;
+    margin: 0 0 10px;
+  }
+  .app-wordmark .dot { color: var(--ekg); }
+  .app-wordmark .ca { color: var(--text-dim); font-weight: 500; }
+  .app-sub {
+    position: relative;
+    z-index: 1;
+    font-size: 14px;
+    color: var(--text-dim);
+    max-width: 300px;
+    margin: 0;
+    line-height: 1.5;
+  }
+  .app-bottom {
+    padding: 0 0 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .app-primary-btn {
+    display: block;
+    padding: 16px;
+    background: var(--ekg);
+    color: #fff;
+    border-radius: 12px;
+    text-align: center;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 16px;
+    letter-spacing: 0.01em;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 8px 28px rgba(232,72,56,0.28);
+  }
+  .app-primary-btn:active { transform: translateY(1px); }
+  .app-secondary-row {
+    display: flex;
+    justify-content: center;
+    gap: 22px;
+    margin-top: 4px;
+  }
+  .app-secondary {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 13px;
+    padding: 10px 8px;
+  }
+  .app-secondary:active { color: var(--text); }
+
+  /* Optional intro slider — hidden by default, flips on if showIntro() */
+  .intro-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: var(--bg);
+    display: none;
+    flex-direction: column;
+    padding: env(safe-area-inset-top, 0) 20px env(safe-area-inset-bottom, 0);
+  }
+  .intro-overlay.visible { display: flex; }
+  .intro-skip {
+    padding: 16px 4px;
+    text-align: right;
+    font-size: 13px;
+    color: var(--text-dim);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+  .intro-track {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .intro-slide {
+    display: none;
+    text-align: center;
+    padding: 0 12px;
+  }
+  .intro-slide.active { display: block; }
+  .intro-slide h2 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    margin: 0 0 16px;
+  }
+  .intro-slide p {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 300px;
+    margin: 0 auto;
+  }
+  .intro-dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px 0;
+  }
+  .intro-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #2a2a2a;
+    transition: background 0.2s, width 0.2s;
+  }
+  .intro-dot.active { background: var(--ekg); width: 22px; border-radius: 3px; }
+  .intro-next {
+    padding: 14px;
+    background: var(--ekg);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 24px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="app-top">
+    <span class="beta">BETA · EARLY DAYS</span>
+  </div>
+
+  <div class="app-hero">
+    <div class="app-logo-wrap">
+      <svg class="app-logo" viewBox="-80 -80 1928 1732" aria-hidden="true">
+        <path d="M598 775.273H360.5L766 5.27344H1094L1498 777.273H1352C1323.78 724.464 1311.03 695.921 1290.5 645.773C1275.75 709.201 1265.06 731.292 1242.5 751.773C1189.75 588.669 1162.61 496.403 1131 326.273C1117.4 398.491 1109.49 438.584 1081 489.773L1000 362.273L920.5 66.2734L853 362.273L765 509.273C749.619 460.035 737.578 409.318 726 326.273C678.661 503.064 651.614 612.503 598 775.273Z" fill="#ffffff"/>
+        <path d="M482 924.273C484.574 924.273 487.41 924.254 489.783 924.573C492.415 924.927 495.777 925.838 498.606 928.667C501.436 931.496 502.346 934.858 502.7 937.49C503.019 939.863 503 942.699 503 945.273V969.551C503 970.69 503.07 972.878 502.486 975.053C501.902 977.227 500.745 979.086 500.174 980.072L424.217 1111.27C423.207 1113.01 422.368 1114.47 421.661 1115.74C423.119 1115.77 424.798 1115.77 426.813 1115.77H643.5C646.074 1115.77 648.91 1115.75 651.283 1116.07C653.833 1116.42 657.068 1117.28 659.84 1119.91L660.106 1120.17L660.366 1120.43C662.992 1123.21 663.857 1126.44 664.2 1128.99C664.519 1131.36 664.5 1134.2 664.5 1136.77V1304.77C664.5 1307.35 664.519 1310.18 664.2 1312.56C663.846 1315.19 662.936 1318.55 660.106 1321.38C657.277 1324.21 653.915 1325.12 651.283 1325.47C648.91 1325.79 646.074 1325.77 643.5 1325.77H104.5C101.926 1325.77 99.0898 1325.79 96.7168 1325.47C94.085 1325.12 90.723 1324.21 87.8936 1321.38C85.0641 1318.55 84.1537 1315.19 83.7998 1312.56C83.4808 1310.18 83.5 1307.35 83.5 1304.77V1289.42C83.5 1288.3 83.4327 1286.17 83.9893 1284.04L84.0996 1283.65C84.6815 1281.69 85.6843 1280.03 86.1953 1279.12L279.715 934.98C280.467 933.643 281.342 932.065 282.253 930.766C283.279 929.303 284.726 927.619 286.937 926.326L287.35 926.094C289.416 924.98 291.434 924.586 293.101 924.42C294.68 924.263 296.485 924.273 298.02 924.273H482Z" fill="#ffffff"/>
+        <path d="M1352 924.273C1349.43 924.273 1346.59 924.254 1344.22 924.573C1341.58 924.927 1338.22 925.838 1335.39 928.667C1332.56 931.496 1331.65 934.858 1331.3 937.49C1330.98 939.863 1331 942.699 1331 945.273V969.551C1331 970.69 1330.93 972.878 1331.51 975.053C1332.1 977.227 1333.26 979.086 1333.83 980.072L1409.78 1111.27C1410.79 1113.01 1411.63 1114.47 1412.34 1115.74C1410.88 1115.77 1409.2 1115.77 1407.19 1115.77H1190.5C1187.93 1115.77 1185.09 1115.75 1182.72 1116.07C1180.17 1116.42 1176.93 1117.28 1174.16 1119.91L1173.89 1120.17L1173.63 1120.43C1171.01 1123.21 1170.14 1126.44 1169.8 1128.99C1169.48 1131.36 1169.5 1134.2 1169.5 1136.77V1304.77C1169.5 1307.35 1169.48 1310.18 1169.8 1312.56C1170.15 1315.19 1171.06 1318.55 1173.89 1321.38C1176.72 1324.21 1180.08 1325.12 1182.72 1325.47C1185.09 1325.79 1187.93 1325.77 1190.5 1325.77H1729.5C1732.07 1325.77 1734.91 1325.79 1737.28 1325.47C1739.92 1325.12 1743.28 1324.21 1746.11 1321.38C1748.94 1318.55 1749.85 1315.19 1750.2 1312.56C1750.52 1310.18 1750.5 1307.35 1750.5 1304.77V1289.42C1750.5 1288.3 1750.57 1286.17 1750.01 1284.04L1749.9 1283.65C1749.32 1281.69 1748.32 1280.03 1747.8 1279.12L1554.29 934.98C1553.53 933.643 1552.66 932.065 1551.75 930.766C1550.72 929.303 1549.27 927.619 1547.06 926.326L1546.65 926.094C1544.58 924.98 1542.57 924.586 1540.9 924.42C1539.32 924.263 1537.52 924.273 1535.98 924.273H1352Z" fill="#ffffff"/>
+        <path d="M556 884.4 95 861.3 574.6 817.9c3.2-.3 4.7-.4 6.1.2 1.4.6 2.4 1.8 4.4 4.3l28.4 35.7c6.4 8 9.6 12 13.2 11.3 3.6-.7 5-5.7 7.8-15.5L709.2 589.4c5.1-18 7.7-27.1 12.3-27 4.7.1 6.8 9.3 11 27.6L794.5 861.8c5.2 22.9 7.8 34.3 12.7 34.2 4.9-.1 6.9-11.7 10.8-34.8L905.8 341.5c5.3-31.5 8-47.3 13.2-47.1 5.2.1 7 16 10.6 47.8L1007.3 1034.3c3.1 27.9 4.7 41.8 9.8 42.1 5.1.2 8-13.5 13.9-41L1121.5 610.2c3.8-17.8 5.7-26.7 10.3-26.9 4.6-.2 7.3 8.5 12.9 25.8L1222.9 856c3.9 12.2 5.8 18.3 9.8 18.6 4.1.3 6.8-5.5 12.4-17L1284.7 775.6c4.1-8.6 6.2-12.8 9.7-13 3.5-.2 6.1 3.8 11.2 11.8L1329.8 812.3c1.6 2.5 2.4 3.7 3.6 4.4 1.2.7 2.6.8 5.5 1L1592.2 838.8c53.5 4.5 80.2 6.7 80.2 12.3 0 5.5-26.7 7.6-80.2 11.7L1312.2 884.3c-3.1.2-4.6.3-5.9 1.1-1.2.8-2 2.1-3.6 4.8L1223.6 1024.7c-5.8 9.9-8.8 14.9-12.6 14.5-3.9-.4-5.6-5.9-9.1-16.9L1145.8 847.4c-5.9-18.4-8.8-27.5-13.5-27.2-4.7.3-6.4 9.8-9.7 28.8L1019.2 1431.3c-5.3 30.1-8 45.1-13.2 45-5.2-.2-7-15.3-10.5-45.7L916.9 765.8c-3.9-32.8-5.8-49.2-11.1-49.3-5.2-.1-7.7 16.2-12.7 48.9L827.3 1196.5c-3.8 24.7-5.6 37.1-10.6 37.3-5 .1-7.6-12.1-12.9-36.5L722.1 821.1c-4-18.5-6-27.7-10.7-27.9-4.7-.2-7.3 8.9-12.6 27.1L642.4 1015.4c-3.9 13.5-5.9 20.2-10.1 20.5-4.2.3-7-6.2-12.5-19.1L566.4 891.7c-1.4-3.4-2.1-5-3.5-6-1.4-1-3.2-1.1-6.9-1.3Z" fill="url(#homeEkg)"/>
+        <defs>
+          <linearGradient id="homeEkg" x1="95" y1="560" x2="1673" y2="1480" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#AC6F6C"/>
+            <stop offset="0.32" stop-color="#EB3D3C"/>
+            <stop offset="0.54" stop-color="#EE2A29"/>
+            <stop offset="0.76" stop-color="#EB3D3C"/>
+            <stop offset="1" stop-color="#AC6F6C"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+    <h1 class="app-wordmark">aorti<span class="dot">.</span><span class="ca">ca</span></h1>
+    <p class="app-sub">Live heart rate and HRV tracking. Pair a strap, start a session.</p>
+  </div>
+
+  <div class="app-bottom">
+    <a class="app-primary-btn" href="./hr_monitor.html?mode=online">Start session</a>
+    <div class="app-secondary-row">
+      <a class="app-secondary" href="./hrv_viewer.html">Viewer</a>
+      <a class="app-secondary" href="./hr_monitor.html?mode=offline">Offline mode</a>
+    </div>
+  </div>
+</div>
+
+<!-- Intro carousel (disabled by default). To enable: remove the 'hidden'
+     default and show the overlay on first launch via localStorage. -->
+<div class="intro-overlay" id="intro-overlay" aria-hidden="true">
+  <button class="intro-skip" id="intro-skip" type="button">Skip →</button>
+  <div class="intro-track">
+    <div class="intro-slide active" data-slide="0">
+      <h2>Live heart rate, right in your pocket.</h2>
+      <p>Pair a chest strap, see HR and HRV update in real time, broadcast to OBS or friends.</p>
+    </div>
+    <div class="intro-slide" data-slide="1">
+      <h2>Runs 24/7 in the background.</h2>
+      <p>Foreground service keeps recording with the screen off. Data syncs to Drive along the way.</p>
+    </div>
+    <div class="intro-slide" data-slide="2">
+      <h2>Look back at the whole history.</h2>
+      <p>Every session opens in the viewer with HR, HRV, palps, and posture. Patterns become obvious over time.</p>
+    </div>
+  </div>
+  <div class="intro-dots" id="intro-dots">
+    <span class="intro-dot active"></span>
+    <span class="intro-dot"></span>
+    <span class="intro-dot"></span>
+  </div>
+  <button class="intro-next" id="intro-next" type="button">Next</button>
+</div>
+
+<script>
+  // If a native session is already running, skip the home and drop the
+  // user straight into the monitor so they can see and control it.
+  (function () {
+    try {
+      if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+      const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.NativeHrSession;
+      if (!plugin || typeof plugin.status !== 'function') return;
+      plugin.status().then(function (s) {
+        if (s && s.sessionActive) location.replace('./hr_monitor.html?mode=online');
+      }).catch(function () {});
+    } catch (e) {}
+  })();
+
+  // First-run intro carousel. Off by default — flip
+  // localStorage.aorti_intro_enabled = '1' to test. Shipping this on every
+  // cold-start needs a design pass first.
+  (function () {
+    const overlay = document.getElementById('intro-overlay');
+    const shouldShow = localStorage.getItem('aorti_intro_enabled') === '1'
+      && !localStorage.getItem('aorti_intro_seen');
+    if (!shouldShow || !overlay) return;
+    overlay.classList.add('visible');
+    overlay.setAttribute('aria-hidden', 'false');
+    const slides = overlay.querySelectorAll('.intro-slide');
+    const dots = overlay.querySelectorAll('.intro-dot');
+    const next = document.getElementById('intro-next');
+    const skip = document.getElementById('intro-skip');
+    let i = 0;
+    function set(n) {
+      i = n;
+      slides.forEach((s, idx) => s.classList.toggle('active', idx === n));
+      dots.forEach((d, idx) => d.classList.toggle('active', idx === n));
+      next.textContent = n === slides.length - 1 ? 'Get started' : 'Next';
+    }
+    next.addEventListener('click', function () {
+      if (i === slides.length - 1) {
+        localStorage.setItem('aorti_intro_seen', '1');
+        overlay.classList.remove('visible');
+      } else {
+        set(i + 1);
+      }
+    });
+    skip.addEventListener('click', function () {
+      localStorage.setItem('aorti_intro_seen', '1');
+      overlay.classList.remove('visible');
+    });
+  })();
+</script>
+</body>
+</html>
