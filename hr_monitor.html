@@ -1003,6 +1003,46 @@
   .posture-btn.active[data-posture="lying"] { background: rgba(125,184,232,0.15); border-color: #7DB8E8; color: #7DB8E8; }
   .posture-btn.active[data-posture="sitting"] { background: rgba(184,217,126,0.15); border-color: #B8D97E; color: #B8D97E; }
   .posture-btn.active[data-posture="standing"] { background: rgba(232,152,88,0.15); border-color: #E89858; color: #E89858; }
+  .download-csv-btn {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 14px;
+    font-size: 13px;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+    background: rgba(93,202,165,0.15);
+    border: 1px solid #5DCAA5;
+    color: #5DCAA5;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .download-csv-btn:hover { background: rgba(93,202,165,0.25); color: #fff; }
+
+  .hrm-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%) translateY(20px);
+    background: #101010;
+    border: 1px solid #2a2a2a;
+    color: #d8d8d8;
+    padding: 12px 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 99999;
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+    max-width: 80vw;
+    text-align: center;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+  }
+  .hrm-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 
   .events {
     max-height: 140px;
@@ -2264,10 +2304,18 @@
   }
 
   function onHRNotification(event) {
-    // Guard against notifications arriving before startTime is set
-    if (state.startTime == null) state.startTime = Date.now();
     const value = event.target.value;
     const { hr, rrs, contactSupported, contactDetected } = parseHR(value);
+    processHRData(hr, rrs, contactSupported, contactDetected);
+  }
+
+  // Single HR-data pipeline. Called from both the Web Bluetooth notification
+  // path (onHRNotification, desktop/web) and the native plugin event path
+  // (HRMNativeHrSession.onHr, Capacitor/Android). Same state updates, same
+  // UI refresh, same warning/breath/broadcast work regardless of source.
+  function processHRData(hr, rrs, contactSupported, contactDetected) {
+    // Guard against notifications arriving before startTime is set
+    if (state.startTime == null) state.startTime = Date.now();
     const now = (Date.now() - state.startTime) / 60000;
     // Skin-contact state: only flip classes when the strap actually reports
     // the field (many don't). Sustained-contact-lost gating could live here
@@ -2292,7 +2340,12 @@
 
     // Keep the Android foreground-service notification current. The wrapper
     // throttles updates to 1 Hz internally; calling every tick is fine.
-    if (window.HRMForegroundService && window.HRMForegroundService.isStarted()) {
+    // Skip entirely on native sessions — NativeHrService owns the notification
+    // and updates itself from inside the plugin.
+    const nativeSessionActive = window.HRMNativeHrSession
+      && window.HRMNativeHrSession.isPublishing
+      && window.HRMNativeHrSession.isPublishing();
+    if (!nativeSessionActive && window.HRMForegroundService && window.HRMForegroundService.isStarted()) {
       const mm = Math.floor(now);
       const ss = String(Math.floor((now - mm) * 60)).padStart(2, '0');
       const hrvPart = state.currentRMSSD != null ? ' · HRV ' + Math.round(state.currentRMSSD) + 'ms' : '';
@@ -2415,6 +2468,14 @@
   }
   function publishToRelay(payload) {
     if (!isPublisherLive()) return;
+    // When the native HR session plugin is publishing (Capacitor only), it
+    // owns the relay WebSocket entirely — publishing from here would
+    // produce duplicate ticks on the same room and the overlay would
+    // flicker between them. Native's publish path survives WebView pause;
+    // JS's does not. Native always wins.
+    if (window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing()) {
+      return;
+    }
     if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
     try { relaySocket.send(JSON.stringify(payload)); } catch (e) {}
   }
@@ -2638,7 +2699,14 @@
     el.className = 'streaming-status ' + (known.includes(s) ? s : '');
   }
   function buildObsSourceUrl() {
-    const origin = location.origin + location.pathname.replace(/hr_monitor\.html$/, '');
+    // When running inside the Capacitor WebView, location.origin is
+    // `https://localhost` and the resulting URL is useless from any other
+    // browser (i.e. OBS). Hardcode the production hostname when native, so
+    // the user can paste the URL into OBS on their desktop.
+    const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    const origin = isNative
+      ? 'https://hr-monitor-topaz.vercel.app/'
+      : location.origin + location.pathname.replace(/hr_monitor\.html$/, '');
     const params = new URLSearchParams();
     params.set('key', getOrCreateBroadcastKey());
     params.set('bg', 'transparent');
@@ -2862,7 +2930,12 @@
         showWarning: widgetPrefs.showWarning,
         warningPlacement: widgetPrefs.warningPlacement || 'inside',
       },
-      widgetSize: getEffectiveSize(),
+      // widgetSize is only sent when the user has customised it. Otherwise the
+      // overlay would forcibly clamp #overlay-zone to the broadcaster's
+      // viewport size (380x260 default), which clipped content when the
+      // broadcaster was a phone with smaller dims than the desktop overlay
+      // naturally rendered. Receiver auto-sizes when widgetSize absent.
+      widgetSize: (Number.isFinite(widgetPrefs.customWidth) || Number.isFinite(widgetPrefs.customHeight)) ? getEffectiveSize() : undefined,
     };
     overlayChannel.postMessage(tick);
     publishToRelay(tick);
@@ -2967,6 +3040,17 @@
 
   async function connect() {
     if (window.HRMLog) window.HRMLog.event('connect() called');
+    // Safety net: if the last session's "Download CSV" button is still up
+    // because the user skipped it, restore posture buttons on new Start.
+    if (typeof restorePostureRow === 'function') restorePostureRow();
+    // Capacitor / Android: skip Web Bluetooth entirely. The native plugin
+    // owns the BLE connection; JS is a pure consumer of 'hr' events. This
+    // eliminates dual-GATT (the Capacitor BLE plugin and the native plugin
+    // both fighting for the same strap) which was collapsing at ~5 min
+    // once WebView JS got suspended.
+    if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) {
+      return connectNative();
+    }
     if (!navigator.bluetooth) {
       setStatus('Web Bluetooth not supported. Use Chrome, Edge, or Opera.', 'error');
       return;
@@ -3030,11 +3114,132 @@
       startSessionAutoSave();
       acquireWakeLock();
       updateSessionToggle();
+
     } catch (e) {
       setStatus('Connection failed: ' + e.message, 'error');
       updateSessionToggle();
     }
   }
+
+  // Capacitor path: native plugin owns BLE. JS just consumes 'hr' events
+  // and drives the UI. No navigator.bluetooth involvement at all.
+  async function connectNative() {
+    thresholds.high = parseInt($('thresh-high').value) || 130;
+    thresholds.low = parseInt($('thresh-low').value) || 55;
+    thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15;
+    thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5;
+    state.audioOn = $('audio-on').checked;
+    // If the native plugin is already publishing — the WebView got
+    // reloaded while the FGS kept the session alive — skip the picker
+    // and just resync the JS UI to "live". Otherwise tapping Start
+    // after a reload pops a picker even though we're still streaming.
+    if (window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing()) {
+      const last = getLastStrap();
+      device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
+      if (state.startTime === null) state.startTime = Date.now();
+      state.lastDataTime = Date.now();
+      state.autoReconnect = true;
+      setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
+      $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
+      setConnState('live');
+      updateSessionToggle();
+      return;
+    }
+    setStatus('Scanning for strap...');
+    try {
+      const picked = await window.HRMNativeHrSession.showPicker();
+      if (!picked || !picked.mac) {
+        setStatus('No strap selected.');
+        return;
+      }
+      setStatus('Connecting to ' + (picked.name || 'strap') + '...');
+      // Virtual device stand-in so downstream code (device.name, etc.) works.
+      device = { name: picked.name || 'HR Strap', id: picked.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
+      await window.HRMNativeHrSession.connect(picked.mac);
+      const ident = getDeviceIdentity();
+      await window.HRMNativeHrSession.startSession({
+        broadcastKey: getOrCreateBroadcastKey(),
+        senderId: ident.id,
+        senderLabel: ident.label,
+      });
+      device.gatt.connected = true;
+      if (state.startTime === null) state.startTime = Date.now();
+      state.lastDataTime = Date.now();
+      state.autoReconnect = true;
+      saveLastStrap(device);
+      if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+      startSessionAutoSave();
+      setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
+      $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
+      setConnState('live');
+      logConnectionEvent('connect');
+      updateSessionToggle();
+    } catch (e) {
+      const msg = (e && e.message) ? e.message : String(e);
+      setStatus('Connection failed: ' + msg, 'error');
+      updateSessionToggle();
+    }
+  }
+
+  // Native 'hr' event → processHRData. Attached once at startup on
+  // Capacitor; piggy-backs on the plugin's continuous BLE notifications.
+  // Deferred until the native-hr-session shim has had a chance to init
+  // (it registers inside its own DOMContentLoaded handler).
+  function wireNativeHr() {
+    if (!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable)) return false;
+    try {
+      window.HRMNativeHrSession.onHr(function (d) {
+        if (!d) return;
+        // Capacitor buffers listener calls while the WebView is paused
+        // (screen off / backgrounded). On resume, a 7-minute backlog
+        // floods in at once — UI sprints through hundreds of stale ticks
+        // and blocks Stop from responding. Drop anything older than 3 s.
+        if (d.timestampMs && Date.now() - d.timestampMs > 3000) return;
+        const rrs = Array.isArray(d.rrIntervals) ? d.rrIntervals.slice() : [];
+        // Native emits contactOff (true = strap off skin). Map back to
+        // Web-BLE-style contactSupported/contactDetected pair.
+        processHRData(d.hr || 0, rrs, true, !d.contactOff);
+      });
+      if (window.HRMLog) window.HRMLog.event('native-hr handler attached');
+      return true;
+    } catch (e) {
+      console.warn('[native-hr] handler attach failed:', e);
+      return false;
+    }
+  }
+  (function waitForNativeHr() {
+    if (wireNativeHr()) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (wireNativeHr() || ++tries > 40) clearInterval(timer);
+    }, 100);
+  })();
+
+  // On page load / WebView reload, if the native session is still alive
+  // behind the scenes (FGS kept the process running), auto-resync the UI
+  // to "live" so the user doesn't see a stale "Start session" button and
+  // accidentally kick off a new pair flow.
+  function restoreNativeSessionUI() {
+    if (!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable)) return false;
+    if (!(window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing())) return false;
+    const last = getLastStrap();
+    device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
+    if (state.startTime === null) state.startTime = Date.now();
+    state.lastDataTime = Date.now();
+    state.autoReconnect = true;
+    setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
+    $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
+    setConnState('live');
+    updateSessionToggle();
+    return true;
+  }
+  (function waitForNativeSession() {
+    if (restoreNativeSessionUI()) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (restoreNativeSessionUI() || ++tries > 40) clearInterval(timer);
+    }, 100);
+  })();
 
   // Screen Wake Lock: keep the phone/laptop awake during an active session so BLE
   // doesn't drop when the display times out. Auto-released on tab hide; re-request
@@ -3146,6 +3351,9 @@
   function resetReconnectBackoff() { reconnectBackoffMs = 1000; }
   async function tryReconnect() {
     if (!state.autoReconnect || !device) return;
+    // Native plugin owns BLE + handles its own reconnection on Capacitor.
+    // No Web Bluetooth work to do here.
+    if (device._native) return;
     if (device.gatt.connected) return;
     try {
       await attachConnection();
@@ -3179,9 +3387,19 @@
 
   async function disconnect() {
     state.autoReconnect = false;
+    // Capture Drive-upload intent BEFORE we tear everything down so the
+    // toast only fires when the session actually had a Drive target.
+    const nativeWasPublishing = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing());
+    const driveActive = !!driveAccessToken || nativeWasPublishing;
     stopSessionAutoSave();
     releaseWakeLock();
     if (window.HRMForegroundService) { try { window.HRMForegroundService.stop(); } catch (e) {} }
+    // Native HR session shutdown — flushes CSV + final Drive push before
+    // we disconnect the Web Bluetooth GATT.
+    if (nativeWasPublishing) {
+      try { await window.HRMNativeHrSession.stopSession(); } catch (e) {}
+      try { await window.HRMNativeHrSession.disconnect(); } catch (e) {}
+    }
     if (device && device.gatt.connected) device.gatt.disconnect();
     batteryChar = null;
     $('battery-display').textContent = 'Battery: —';
@@ -3190,6 +3408,87 @@
     setConnState('idle');
     updateSessionToggle();
     setStatus('Session stopped.');
+    // Mobile-only: confirm the Drive upload + surface a download path.
+    // Posture bar becomes a "Download CSV" button until the user taps it
+    // (or starts a new session).
+    if (isMobileShell()) {
+      if (driveActive) showToast('Uploading session to Drive…');
+      showDownloadCsvInsteadOfPosture();
+    }
+  }
+
+  // True when we're running inside the Capacitor WebView (the mobile APK
+  // shell), as opposed to a regular desktop browser tab.
+  function isMobileShell() {
+    try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+    catch (e) { return false; }
+  }
+
+  // Simple bottom-centre toast. Single instance — re-calling replaces the
+  // message + resets the auto-hide timer.
+  let hrmToastTimer = null;
+  function showToast(message, durationMs) {
+    const dur = typeof durationMs === 'number' ? durationMs : 3200;
+    let el = document.getElementById('hrm-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'hrm-toast';
+      el.className = 'hrm-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = message;
+    // Force a reflow so the transition replays when we toggle the class
+    // back-to-back (e.g. two toasts in quick succession).
+    void el.offsetWidth;
+    el.classList.add('visible');
+    if (hrmToastTimer) { clearTimeout(hrmToastTimer); hrmToastTimer = null; }
+    hrmToastTimer = setTimeout(() => {
+      el.classList.remove('visible');
+      hrmToastTimer = null;
+    }, dur);
+  }
+
+  // Mobile-only: swap the posture row contents to a single "Download CSV"
+  // button when a session just ended, so the user can grab the file without
+  // having to dig into Drive. Restored to the default posture buttons when
+  // the user taps Download (or starts a new session).
+  function showDownloadCsvInsteadOfPosture() {
+    const row = document.querySelector('.posture-row');
+    if (!row) return;
+    row.setAttribute('data-mode', 'download');
+    row.innerHTML = '<button class="download-csv-btn" id="download-csv-inline">Download session CSV</button>';
+    const btn = document.getElementById('download-csv-inline');
+    if (btn) btn.addEventListener('click', () => {
+      try { exportCSV(); } catch (e) { console.warn('exportCSV failed:', e); }
+      showToast('Saving CSV…', 2200);
+      restorePostureRow();
+    });
+  }
+  function restorePostureRow() {
+    const row = document.querySelector('.posture-row');
+    if (!row || row.getAttribute('data-mode') !== 'download') return;
+    row.removeAttribute('data-mode');
+    row.innerHTML = `
+      <span class="posture-label">Posture</span>
+      <button class="posture-btn" data-posture="lying">Lying</button>
+      <button class="posture-btn active" data-posture="sitting">Sitting</button>
+      <button class="posture-btn" data-posture="standing">Standing</button>`;
+    state.currentPosture = 'sitting';
+    wirePostureButtons();
+  }
+  function wirePostureButtons() {
+    document.querySelectorAll('.posture-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = btn.dataset.posture;
+        if (p === state.currentPosture) return;
+        state.currentPosture = p;
+        document.querySelectorAll('.posture-btn').forEach(b => b.classList.toggle('active', b.dataset.posture === p));
+        if (state.startTime) {
+          const t = (Date.now() - state.startTime) / 60000;
+          state.postureLog.push({ t, posture: p });
+        }
+      });
+    });
   }
 
   // Drive the body's conn-* class + update the unified status banner. The
@@ -4400,18 +4699,7 @@
     $('drive-signout').addEventListener('click', driveSignOut);
     $('add-marker').addEventListener('click', addMarker);
     $('marker-label').addEventListener('keydown', e => { if (e.key === 'Enter') addMarker(); });
-    document.querySelectorAll('.posture-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const p = btn.dataset.posture;
-        if (p === state.currentPosture) return;
-        state.currentPosture = p;
-        document.querySelectorAll('.posture-btn').forEach(b => b.classList.toggle('active', b.dataset.posture === p));
-        if (state.startTime) {
-          const t = (Date.now() - state.startTime) / 60000;
-          state.postureLog.push({ t, posture: p });
-        }
-      });
-    });
+    wirePostureButtons();
     loadSectionStates();
     loadAudioConfig();
     loadWidgetStyle();
