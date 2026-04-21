@@ -2,12 +2,17 @@ package com.nakauri.hrmonitor.ble
 
 import java.util.UUID
 
-/** Bluetooth SIG assigned numbers for the heart rate profile. */
+/** Bluetooth SIG assigned numbers used by the manager. */
 object HrBleSpec {
     val HEART_RATE_SERVICE: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
     val HEART_RATE_MEASUREMENT: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
     val BATTERY_SERVICE: UUID = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
     val BATTERY_LEVEL: UUID = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+    // Device Information Service — read first as ATT-layer warm-up before
+    // the HR setNotify (matches van Welie's BLESSED sample pattern).
+    val DIS_SERVICE: UUID = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb")
+    val MANUFACTURER_NAME: UUID = UUID.fromString("00002a29-0000-1000-8000-00805f9b34fb")
+    val MODEL_NUMBER: UUID = UUID.fromString("00002a24-0000-1000-8000-00805f9b34fb")
 }
 
 /**
