@@ -1,0 +1,1989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0a0a">
+<title>aorti.ca · live heart rate & HRV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-soft: #0f0f0f;
+    --panel: #101010;
+    --panel-2: #141414;
+    --border: #1f1f1f;
+    --border-strong: #2a2a2a;
+    --text: #e8e8e8;
+    --text-dim: #9a9a9a;
+    --text-faint: #5a5a5a;
+    --accent: #E89858;
+    --accent-rmssd: #5DCAA5;
+    --ekg: #E84838;
+
+    /* HR stage palette — mirrors the live widget */
+    --stage-low: #7DB8E8;
+    --stage-normal: #B8D97E;
+    --stage-elevated: #F0C75E;
+    --stage-high: #E89858;
+    --stage-critical: #E84838;
+    --warn-palp: #D76CBA;
+
+    --ok: #5DCAA5;
+    --warn: #F0C75E;
+    --bad: #7a7a7a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  /* Background texture: radial warm spotlight from above plus a very faint
+     noise overlay. Fixed so it never reflows with content. */
+  /* Layered background: faint dot grid for geometry, plus warm + cool
+     radial glows that anchor the page without overpowering content. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(circle at center, rgba(255,255,255,0.05) 1px, transparent 1.5px),
+      radial-gradient(ellipse 70% 50% at 30% 0%, rgba(232,72,56,0.12) 0%, transparent 55%),
+      radial-gradient(ellipse 80% 60% at 85% 95%, rgba(93,202,165,0.05) 0%, transparent 55%);
+    background-size: 32px 32px, 100% 100%, 100% 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* ===== Beta banner ===== */
+  /* Thin text row on flat black. Stripes only as a 4 px accent band
+     above and below so the design reads without crowding the copy. */
+  .beta-banner {
+    position: relative;
+    z-index: 5;
+    background: #0a0a0a;
+    border-top: 2px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-image: repeating-linear-gradient(
+      -45deg,
+      rgba(240,199,94,0.5) 0 10px,
+      rgba(10,10,10,0) 10px 22px
+    ) 2;
+  }
+  .beta-banner-inner {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 8px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .beta-pill {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    background: #F0C75E;
+    color: #0a0a0a;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+  }
+  .beta-text {
+    color: #F0C75E;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  /* ===== Preview notice ===== */
+  .preview-notice {
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 14px 28px 0;
+    font-size: 12px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+  .preview-notice strong { color: var(--text-dim); font-weight: 600; }
+
+  /* ===== Top nav ===== */
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    background: rgba(10,10,10,0.72);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 14px 28px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-size: 22px;
+    color: var(--text);
+  }
+  .brand-mark {
+    width: 32px;
+    height: 30px;
+    display: inline-block;
+    filter: drop-shadow(0 0 10px rgba(232,72,56,0.55));
+  }
+  .brand-dot { color: var(--ekg); font-weight: 700; }
+  .brand-ca { color: var(--text-dim); font-weight: 500; }
+  .nav-links {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+  }
+  .nav-link {
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+    padding: 6px 0;
+    border-bottom: 1px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .nav-link:hover { color: var(--text); border-bottom-color: var(--text); }
+  .nav-signin {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text);
+    padding: 8px 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: transparent;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .nav-signin:hover { background: rgba(255,255,255,0.04); border-color: #3a3a3a; }
+  .nav-signin svg { width: 14px; height: 14px; }
+
+  /* ===== Hero ===== */
+  .hero {
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 72px 28px 56px;
+    display: grid;
+    grid-template-columns: 1fr minmax(320px, 380px);
+    gap: 56px;
+    align-items: center;
+  }
+  .hero-title {
+    font-size: 52px;
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    margin: 0 0 20px;
+  }
+  .hero-title .accent { color: var(--ekg); }
+  .hero-sub {
+    font-size: 16px;
+    color: var(--text-dim);
+    max-width: 480px;
+    margin: 0 0 16px;
+  }
+  .hero-sub:last-of-type { margin-bottom: 32px; }
+  .hero-sub-note {
+    font-size: 14px;
+    color: var(--text-faint);
+  }
+  .hero-cta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    background: #fff;
+    color: #0a0a0a;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(255,255,255,0.08);
+  }
+  .btn-primary svg { width: 18px; height: 18px; }
+  .btn-secondary {
+    font-size: 14px;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border-strong);
+    padding: 6px 2px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .btn-secondary:hover { color: var(--text); border-bottom-color: var(--text-dim); }
+
+  /* ===== Live widget recreation ===== */
+  /* Mirrors widget.css in the real app. Arial Black 900 numbers,
+     heartbeat animation on the icon, cumulative stage pips (low = 1,
+     normal = 2, elevated = 3, high = 4, critical = 5), colour-coded
+     warning banner, two-line HR/HRV trend. */
+  .widget {
+    background: #0a0a0a;
+    border: 1px solid #1f1f1f;
+    border-radius: 16px;
+    padding: 14px 18px;
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-rows: auto auto auto auto;
+    gap: 10px 16px;
+    align-items: start;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+    transition: border-color 0.3s, box-shadow 0.3s, color 0.4s;
+    color: var(--stage-low);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  .widget.stage-low { color: var(--stage-low); }
+  .widget.stage-normal { color: var(--stage-normal); }
+  .widget.stage-elevated { color: var(--stage-elevated); }
+  .widget.stage-high { color: var(--stage-high); }
+  .widget.stage-critical { color: var(--stage-critical); }
+  .widget.warn-crash { border-color: var(--stage-critical); box-shadow: 0 0 0 1px var(--stage-critical), 0 20px 50px rgba(0,0,0,0.4); }
+
+  .widget-header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    position: relative;
+  }
+  .widget-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .widget-label {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: #8a8a8a;
+    text-transform: uppercase;
+  }
+  .widget-heart {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+    animation: heartbeat 1s ease-in-out infinite;
+    transition: color 0.4s;
+  }
+  @keyframes heartbeat {
+    0%, 100% { transform: scale(1); }
+    15% { transform: scale(1.18); }
+    30% { transform: scale(1); }
+    45% { transform: scale(1.12); }
+    60% { transform: scale(1); }
+  }
+
+  .widget-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.25s, border-color 0.3s, background 0.3s;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-left: auto;
+  }
+  .widget-warning.active {
+    opacity: 1;
+    animation: warning-flash 1.5s ease-in-out infinite;
+  }
+  @keyframes warning-flash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  .widget-warning.warn-high { border-color: var(--ekg); background: rgba(232,72,56,0.12); color: var(--ekg); }
+  .widget-warning.warn-crash { border-color: var(--ekg); background: rgba(232,72,56,0.14); color: var(--ekg); }
+  .widget-warning svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 2.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+  .widget-number-row {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    align-items: stretch;
+    gap: 14px;
+    min-width: 0;
+  }
+  .widget-hr {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    font-size: 64px;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.4s;
+    text-align: left;
+    flex: 0 0 auto;
+  }
+  .widget-live-trace {
+    flex: 1 1 0;
+    flex-basis: 140px;
+    min-width: 0;
+    height: 68px;
+    overflow: hidden;
+    padding: 6px 0 10px;
+  }
+  .widget-live-trace svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .widget-live-trace .trace {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+  }
+
+  .widget-pips {
+    grid-column: 1;
+    grid-row: 3;
+    margin-top: 6px;
+    display: flex;
+    gap: 6px;
+    height: 6px;
+  }
+  .widget-pip {
+    flex: 1;
+    background: #1a1a1a;
+    border-radius: 2px;
+    transition: background 0.4s;
+  }
+  .widget-pip.active { background: currentColor; }
+
+  .widget-hrv {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-end;
+    border-left: 1px solid #1f1f1f;
+    padding-left: 16px;
+  }
+  .widget-hrv-label {
+    font-size: 12px;
+    color: #c8c8c8;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    margin-bottom: 3px;
+  }
+  .widget-hrv-val {
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    font-size: 36px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+    transition: color 0.4s;
+  }
+  .widget-hrv-unit {
+    font-size: 11px;
+    color: #9a9a9a;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  .widget-trend {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    height: 64px;
+    min-width: 0;
+    margin-top: 12px;
+    padding: 6px 0 4px;
+    border-top: 1px solid #1f1f1f;
+    overflow: hidden;
+  }
+  .widget-trend svg { width: 100%; height: 100%; display: block; }
+  .widget-trend .hr-line {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    transition: stroke 0.4s;
+  }
+  .widget-trend .hrv-line {
+    fill: none;
+    stroke: var(--accent-rmssd);
+    stroke-width: 1.3;
+    stroke-linejoin: round;
+    opacity: 0.85;
+  }
+  .widget-scroll { animation: widgetScroll 14s linear infinite; }
+  @keyframes widgetScroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+
+  /* ===== Section shell ===== */
+  section {
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 56px 28px;
+  }
+  .section-eyebrow {
+    font-size: 11px;
+    color: var(--ekg);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: 0 0 12px;
+    font-weight: 600;
+  }
+  .section-title {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    margin: 0 0 12px;
+    line-height: 1.15;
+  }
+  .section-lede {
+    font-size: 15px;
+    color: var(--text-dim);
+    max-width: 620px;
+    margin: 0 0 32px;
+  }
+
+  /* ===== Modes: inline, less card-y ===== */
+  .modes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+  }
+  .mode-inline {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-left: 16px;
+    border-left: 2px solid var(--border);
+    transition: border-color 0.2s;
+  }
+  .mode-inline.stream { border-left-color: var(--ekg); }
+  .mode-inline.review { border-left-color: var(--accent-rmssd); }
+  .mode-inline-title {
+    font-size: 19px;
+    font-weight: 700;
+    margin: 0;
+  }
+  .mode-inline-desc {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin: 0;
+  }
+  .mode-inline-link {
+    font-size: 13px;
+    color: var(--text);
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--border-strong);
+    padding-bottom: 2px;
+    align-self: flex-start;
+  }
+  .mode-inline-link:hover { border-bottom-color: var(--text); }
+
+  /* ===== Story ===== */
+  .story {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 56px;
+    align-items: start;
+  }
+  .story-text { max-width: 600px; }
+  .story-lede {
+    font-size: 17px;
+    color: var(--text-dim);
+    margin: 0 0 18px;
+    line-height: 1.7;
+  }
+  .story-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    position: relative;
+  }
+  /* Stronger red glow sits behind the logo as an actual layer so it reads
+     at any zoom level. Drop-shadow alone gets dimmed too quickly on large
+     assets. */
+  .story-logo::before {
+    content: '';
+    position: absolute;
+    inset: 5% 15%;
+    background: radial-gradient(circle at center, rgba(232,72,56,0.45) 0%, rgba(232,72,56,0.18) 45%, transparent 78%);
+    filter: blur(40px);
+    z-index: 0;
+    pointer-events: none;
+  }
+  .story-logo::after {
+    content: '';
+    position: absolute;
+    inset: 28% 36%;
+    background: radial-gradient(circle at center, rgba(255,110,96,0.35) 0%, transparent 70%);
+    filter: blur(18px);
+    z-index: 0;
+    pointer-events: none;
+    animation: logoPulse 5s ease-in-out infinite;
+  }
+  @keyframes logoPulse {
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50% { opacity: 0.85; transform: scale(1.08); }
+  }
+  .story-logo svg {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 320px;
+    height: auto;
+    overflow: visible;
+  }
+  .story-note {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 16px 18px;
+    background: rgba(232,72,56,0.06);
+    border: 1px solid rgba(232,72,56,0.2);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-top: 24px;
+  }
+  .story-note svg {
+    width: 18px;
+    height: 18px;
+    color: var(--ekg);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .story-note strong { color: var(--text); font-weight: 600; }
+
+  /* ===== Screenshots gallery (large pair) ===== */
+  .gallery-wide {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .gallery-wide-item {
+    margin: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  }
+  .gallery-wide-item img {
+    display: block;
+    width: 100%;
+    height: auto;
+    clip-path: inset(3% 0 0 0);
+    margin-top: -3%;
+  }
+  .gallery-wide-item figcaption {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .gallery-wide-label {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ekg);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .gallery-wide-body {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .gallery-disclaimer {
+    margin: 18px 0 0;
+    font-size: 12px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+  .gallery-disclaimer strong { color: var(--text-dim); font-weight: 600; }
+
+  /* ===== Sign-in comparison ===== */
+  .signin-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .signin-col {
+    padding: 24px 26px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .signin-col-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .signin-col-head svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .signin-col-head-plain { color: var(--text-dim); }
+  .signin-col-head-plain svg { stroke: var(--text-dim); }
+  .signin-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .signin-list li {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.55;
+    padding-left: 16px;
+    position: relative;
+  }
+  .signin-list li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border-strong);
+  }
+  .signin-col:first-child .signin-list li::before { background: var(--accent-rmssd); }
+  .signin-note {
+    font-size: 12px;
+    color: var(--text-faint);
+    margin: 16px 0 0;
+    text-align: center;
+  }
+
+  /* ===== FAQ ===== */
+  .faq {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .faq-item {
+    border-bottom: 1px solid var(--border);
+  }
+  .faq-item:last-child { border-bottom: none; }
+  .faq-item summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 18px 22px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    transition: background 0.15s;
+  }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary:hover { background: rgba(255,255,255,0.02); }
+  .faq-item summary::after {
+    content: '';
+    width: 10px;
+    height: 10px;
+    border-right: 1.5px solid var(--text-dim);
+    border-bottom: 1.5px solid var(--text-dim);
+    transform: rotate(45deg);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+    margin-right: 6px;
+  }
+  .faq-item[open] summary::after { transform: rotate(-135deg); margin-right: 0; margin-left: 6px; }
+  .faq-item-body {
+    padding: 0 22px 18px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .faq-item-body p { margin: 0 0 8px; }
+  .faq-item-body p:last-child { margin: 0; }
+
+  /* ===== Viewer hero screenshot ===== */
+  .viewer-hero {
+    position: relative;
+    margin-top: 12px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid var(--border);
+    box-shadow: 0 30px 60px rgba(0,0,0,0.5);
+  }
+  .viewer-hero img {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    object-position: top center;
+    clip-path: inset(3.5% 0 0 0);
+    margin-top: -3.5%;
+  }
+  .viewer-hero-caption {
+    padding: 14px 20px;
+    font-size: 12px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  /* ===== Viewer showcase (legacy, unused) ===== */
+  .showcase {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr;
+    gap: 48px;
+    align-items: center;
+  }
+  .showcase-chart {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+  }
+  .showcase-chart-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .showcase-chart-stats {
+    display: flex;
+    gap: 22px;
+    margin-bottom: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .showcase-stat {
+    display: flex;
+    flex-direction: column;
+  }
+  .showcase-stat .s-val {
+    font-size: 22px;
+    font-weight: 600;
+  }
+  .showcase-stat.hr .s-val { color: var(--accent); }
+  .showcase-stat.hrv .s-val { color: var(--accent-rmssd); }
+  .showcase-stat .s-lbl {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .showcase-chart-svg {
+    width: 100%;
+    height: 120px;
+  }
+  .showcase-chart-svg .axis {
+    stroke: rgba(255,255,255,0.05);
+    stroke-width: 1;
+  }
+  .showcase-chart-svg .hr {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+  }
+  .showcase-chart-svg .hrv {
+    fill: none;
+    stroke: var(--accent-rmssd);
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+  }
+  .showcase-chart-svg .marker {
+    fill: none;
+    stroke: var(--ekg);
+    stroke-width: 1.2;
+    stroke-dasharray: 2 3;
+    opacity: 0.7;
+  }
+  .showcase-chart-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .showcase-chart-legend span::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 2px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .showcase-chart-legend .lg-hr::before { background: var(--accent); }
+  .showcase-chart-legend .lg-hrv::before { background: var(--accent-rmssd); }
+  .showcase-chart-legend .lg-mk::before { border-top: 1px dashed var(--ekg); height: 0; }
+
+  /* ===== Steps: minimal, numbered ===== */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+  .step {
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+  .step-num {
+    font-size: 24px;
+    font-weight: 300;
+    color: var(--ekg);
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  .step-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 6px;
+  }
+  .step-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin: 0;
+    line-height: 1.55;
+  }
+
+  /* ===== Supported straps with traffic-light dots ===== */
+  .straps {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .strap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+  }
+  .strap-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .strap-dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(93,202,165,0.4); }
+  .strap-dot.warn { background: var(--warn); }
+  .strap-dot.bad { background: var(--bad); }
+  .strap-body { flex: 1; min-width: 0; }
+  .strap-name { color: var(--text); font-weight: 500; }
+  .strap-status {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .strap-status.ok { color: var(--ok); }
+  .strap-status.warn { color: var(--warn); }
+  .strap-status.bad { color: var(--bad); }
+  .strap-legend {
+    display: flex;
+    gap: 18px;
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .strap-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .strap-legend .ld { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ===== Changelog ===== */
+  .changelog {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .changelog-empty {
+    padding: 20px;
+    font-size: 13px;
+    color: var(--text-faint);
+  }
+  .changelog-item {
+    display: flex;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .changelog-item:last-child { border-bottom: none; }
+  .changelog-date {
+    color: var(--text-faint);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 11px;
+    min-width: 60px;
+    flex-shrink: 0;
+  }
+  .changelog-body { color: var(--text-dim); line-height: 1.55; }
+  .changelog-body strong { color: var(--text); font-weight: 600; }
+
+  /* ===== Mobile screenshots ===== */
+  .mobile-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  .mobile-shot {
+    margin: 0;
+    border-radius: 28px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid var(--border);
+    box-shadow: 0 30px 60px rgba(0,0,0,0.5);
+  }
+  .mobile-shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  /* ===== Android download ===== */
+  .android-card {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    padding: 24px 28px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: border-color 0.2s;
+  }
+  .android-card:hover { border-color: rgba(93,202,165,0.35); }
+  .android-card-icon {
+    width: 36px;
+    height: 36px;
+    color: var(--accent-rmssd);
+    flex-shrink: 0;
+  }
+  .android-card-body { flex: 1; min-width: 0; }
+  .android-card-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0 0 3px;
+  }
+  .android-card-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin: 0;
+  }
+  .android-card-note {
+    font-size: 12px;
+    color: var(--text-faint);
+    margin: 6px 0 0;
+    line-height: 1.5;
+  }
+  .android-card-version {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: 'Consolas', 'Monaco', monospace;
+    margin-top: 6px;
+    letter-spacing: 0.04em;
+  }
+  .android-card-version.fresh { color: var(--accent-rmssd); }
+  .android-card-arrow { color: var(--text-dim); flex-shrink: 0; }
+  body.ios-device .android-card {
+    opacity: 0.5;
+    pointer-events: none;
+    position: relative;
+  }
+  body.ios-device .android-card::after {
+    content: 'Android only';
+    position: absolute;
+    top: 10px; right: 14px;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.04);
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  body.android-device .android-card { border-color: rgba(93,202,165,0.3); }
+
+  /* ===== Support block (prominent, not footer) ===== */
+  .support {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 40px;
+    align-items: center;
+    padding: 36px 36px;
+    background: linear-gradient(180deg, #0d0d0d 0%, #0a0a0a 100%);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+  .support-body {
+    max-width: 480px;
+  }
+  .support-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .support-desc {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin: 0 0 18px;
+    line-height: 1.55;
+  }
+  .support-links {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .support-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 16px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .support-btn:hover { background: rgba(255,255,255,0.04); border-color: #3a3a3a; }
+  .support-btn.primary {
+    background: var(--ekg);
+    border-color: var(--ekg);
+    color: #fff;
+  }
+  .support-btn.primary:hover { background: #ff5a4a; }
+  .support-qr {
+    background: #fff;
+    padding: 10px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .support-qr img {
+    display: block;
+    width: 140px;
+    height: 140px;
+  }
+  .support-qr-label {
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+
+  /* ===== Contact form ===== */
+  .contact-form {
+    width: 100%;
+  }
+  .contact-row { margin-bottom: 14px; }
+  .contact-field { display: block; }
+  .contact-label {
+    display: block;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .contact-field input[type="email"],
+  .contact-field textarea {
+    display: block;
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: vertical;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .contact-field input[type="email"]:focus,
+  .contact-field textarea:focus {
+    outline: none;
+    border-color: var(--ekg);
+    background: var(--bg-soft);
+  }
+  .contact-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 8px;
+  }
+  .contact-submit {
+    padding: 12px 22px;
+    background: var(--ekg);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-family: inherit;
+  }
+  .contact-submit:hover { background: #ff5a4a; }
+  .contact-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+  .contact-status {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .contact-status.success { color: var(--ok); }
+  .contact-status.error { color: var(--ekg); }
+
+  /* ===== Back-to-top FAB ===== */
+  .fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 50;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--ekg);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 10px 28px rgba(232,72,56,0.45), 0 0 0 1px rgba(255,255,255,0.05) inset;
+    opacity: 0;
+    transform: translateY(12px);
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s, background 0.15s;
+  }
+  .fab.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  .fab:hover { background: #ff5a4a; }
+  .fab:active { transform: translateY(1px); }
+  .fab svg {
+    width: 28px;
+    height: 26px;
+    display: block;
+  }
+
+  /* ===== Footer ===== */
+  footer {
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 32px 28px 40px;
+    border-top: 1px solid var(--border);
+    margin-top: 24px;
+    font-size: 12px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+
+  /* ===== Mobile ===== */
+  @media (max-width: 760px) {
+    .watermark { font-size: 42vw; opacity: 0.018; top: 30%; }
+
+    .nav-inner { padding: 12px 18px; gap: 12px; }
+    .nav-link { display: none; }
+
+    .hero {
+      padding: 32px 18px 24px;
+      grid-template-columns: 1fr;
+      gap: 28px;
+    }
+    .hero-title { font-size: 36px; }
+    .hero-sub { font-size: 15px; }
+    .hero-cta { flex-direction: column; align-items: stretch; gap: 12px; }
+    .btn-primary { justify-content: center; padding: 14px 20px; }
+    .btn-secondary { text-align: center; }
+
+    section { padding: 36px 18px; }
+    .section-title { font-size: 24px; }
+
+    .modes { grid-template-columns: 1fr; gap: 22px; }
+    .showcase { grid-template-columns: 1fr; gap: 24px; }
+    .steps { grid-template-columns: 1fr; gap: 20px; }
+    .signin-compare { grid-template-columns: 1fr; gap: 14px; }
+    .story { grid-template-columns: 1fr; gap: 28px; }
+    .story-logo { padding: 20px; }
+    .gallery-wide { grid-template-columns: 1fr; gap: 16px; }
+    .beta-banner-inner { padding: 10px 16px; gap: 10px; }
+    .beta-text { font-size: 12px; }
+    .signin-col { padding: 20px; }
+    .faq-item summary { padding: 16px 18px; font-size: 13px; }
+    .faq-item-body { padding: 0 18px 16px; }
+
+    .android-card { padding: 20px; }
+    .android-card-arrow { display: none; }
+
+    .support {
+      grid-template-columns: 1fr;
+      padding: 24px;
+      text-align: center;
+    }
+    .support-body { margin: 0 auto; }
+    .support-links { justify-content: center; }
+    .support-qr { margin: 0 auto; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="/">
+      <!-- aorti.ca glyph. A in white, EKG in red gradient. Paths from
+           AORTICA LOGO.svg at the repo root. -->
+      <svg class="brand-mark" viewBox="0 0 1779 1642" aria-hidden="true">
+        <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
+        <path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="url(#navEkg)"/>
+        <defs>
+          <linearGradient id="navEkg" x1="66" y1="424" x2="1644" y2="1610" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#AC6F6C"/>
+            <stop offset="0.32" stop-color="#EB3D3C"/>
+            <stop offset="0.54" stop-color="#EE2A29"/>
+            <stop offset="0.76" stop-color="#EB3D3C"/>
+            <stop offset="1" stop-color="#AC6F6C"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span>aorti<span class="brand-dot">.</span><span class="brand-ca">ca</span></span>
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="./hrv_viewer.html">Viewer</a>
+      <a class="nav-link" href="./hr_monitor.html?mode=offline">Offline</a>
+      <a class="nav-signin" href="./hr_monitor.html?mode=online">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.75h3.57c2.08-1.92 3.28-4.74 3.28-8.07z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.75c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Sign in
+      </a>
+    </div>
+  </div>
+</nav>
+
+<div class="beta-banner" role="note">
+  <div class="beta-banner-inner">
+    <span class="beta-pill">BETA · EARLY DAYS</span>
+    <span class="beta-text">One person, active development. Expect bugs and changes. Please report errors or wishes.</span>
+  </div>
+</div>
+
+<div class="preview-notice">
+  <span>Screens on this page are pulled from earlier builds. The live app may look a little different.</span>
+</div>
+
+<section class="hero">
+  <div>
+    <h1 class="hero-title">Live heart rate <span class="accent">&amp; HRV</span> for streams and self.</h1>
+    <p class="hero-sub">Pair a chest strap. Stream it to OBS, or track your heart data over weeks and months. Works in Chrome, Edge, and on Android. Offline or signed in, free, no subscription.</p>
+    <p class="hero-sub hero-sub-note">Chest straps only; they're more accurate than watches anyway, and no Apple Watch or Fitbit companion app is needed.</p>
+    <div class="hero-cta">
+      <a class="btn-primary" href="./hr_monitor.html?mode=online">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.75h3.57c2.08-1.92 3.28-4.74 3.28-8.07z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.75c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Sign in with Google
+      </a>
+      <a class="btn-secondary" href="./hr_monitor.html?mode=offline">Use without signing in →</a>
+    </div>
+  </div>
+
+  <!-- Widget built to match widget.css. Heart icon beats, pips fill
+       cumulatively by stage, Arial Black 900 numbers, warning banner
+       appears when the fake data drives into the high range. -->
+  <div class="widget stage-low" id="hero-widget">
+    <div class="widget-header">
+      <div class="widget-header-left">
+        <svg class="widget-heart" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 7a5.5 5.5 0 0 1 9.5 5c-2.5 4.5-9.5 9-9.5 9z"/>
+        </svg>
+        <span class="widget-label">BPM</span>
+      </div>
+      <div class="widget-warning" id="widget-warning">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l10 18H2L12 2z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5"/></svg>
+        <span id="widget-warning-text">Heart rate high</span>
+      </div>
+    </div>
+
+    <div class="widget-number-row">
+      <div class="widget-hr" id="widget-hr">78</div>
+      <div class="widget-live-trace">
+        <svg viewBox="0 0 140 68" preserveAspectRatio="none" aria-hidden="true">
+          <g class="widget-scroll">
+            <polyline class="trace" points="
+              0,36 6,30 12,38 18,28 24,34 30,26 36,34 42,32 48,38 54,28 60,32 66,30 72,36 78,28 84,34 90,30 96,38 102,28 108,32 114,30 120,36 126,30 132,34 138,28 140,32
+              140,36 146,30 152,38 158,28 164,34 170,26 176,34 182,32 188,38 194,28 200,32 206,30 212,36 218,28 224,34 230,30 236,38 242,28 248,32 254,30 260,36 266,30 272,34 278,28 280,32
+            "/>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <div class="widget-pips" id="widget-pips">
+      <div class="widget-pip"></div>
+      <div class="widget-pip"></div>
+      <div class="widget-pip"></div>
+      <div class="widget-pip"></div>
+      <div class="widget-pip"></div>
+    </div>
+
+    <div class="widget-hrv">
+      <div class="widget-hrv-label">HRV</div>
+      <div class="widget-hrv-val" id="widget-hrv">42</div>
+      <div class="widget-hrv-unit">MS RMSSD</div>
+    </div>
+
+    <div class="widget-trend">
+      <svg viewBox="0 0 200 56" preserveAspectRatio="none" aria-hidden="true">
+        <g class="widget-scroll">
+          <polyline class="hr-line" points="
+            0,36 10,32 20,38 30,28 40,34 50,26 60,36 70,30 80,34 90,26 100,32 110,28 120,34 130,30 140,36 150,28 160,32 170,30 180,36 190,28 200,32
+            200,36 210,32 220,38 230,28 240,34 250,26 260,36 270,30 280,34 290,26 300,32 310,28 320,34 330,30 340,36 350,28 360,32 370,30 380,36 390,28 400,32
+          "/>
+          <polyline class="hrv-line" points="
+            0,22 10,24 20,20 30,26 40,22 50,28 60,22 70,26 80,22 90,28 100,24 110,26 120,22 130,26 140,20 150,28 160,24 170,26 180,20 190,26 200,22
+            200,22 210,24 220,20 230,26 240,22 250,28 260,22 270,26 280,22 290,28 300,24 310,26 320,22 330,26 340,20 350,28 360,24 370,26 380,20 390,26 400,22
+          "/>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="story">
+    <div class="story-text">
+      <p class="section-eyebrow">Why this exists</p>
+      <h2 class="section-title">This started as a personal project.</h2>
+      <p class="story-lede">I was dealing with heart rate swings, high and low, that nobody seemed to take seriously. I wanted a quiet 24/7 way to record HR and HRV, then look back at the patterns myself over weeks and months.</p>
+      <p class="story-lede">I also stream and play games. I'd been using Pulsoid for the OBS widget and realised I wanted one app that did both. A streaming overlay and a long-term tracker off the same strap, free.</p>
+    </div>
+    <div class="story-logo" aria-hidden="true">
+      <svg viewBox="-80 -80 1939 1802" preserveAspectRatio="xMidYMid meet">
+        <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
+        <path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="url(#bigEkg)"/>
+        <defs>
+          <linearGradient id="bigEkg" x1="66" y1="424" x2="1644" y2="1610" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#AC6F6C"/>
+            <stop offset="0.32" stop-color="#EB3D3C"/>
+            <stop offset="0.54" stop-color="#EE2A29"/>
+            <stop offset="0.76" stop-color="#EB3D3C"/>
+            <stop offset="1" stop-color="#AC6F6C"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section>
+  <p class="section-eyebrow">Two ways to use it</p>
+  <h2 class="section-title">Stream it. Or study it.</h2>
+  <div class="modes">
+    <div class="mode-inline stream">
+      <h3 class="mode-inline-title">Stream overlay</h3>
+      <p class="mode-inline-desc">Drop the live widget into OBS two ways. Use a relay link as a browser source (nothing on your desktop), or capture a cropped window with chroma key if you'd rather keep everything local. Same visual either way.</p>
+      <a class="mode-inline-link" href="./hr_monitor.html?mode=online">Open monitor →</a>
+    </div>
+    <div class="mode-inline review">
+      <h3 class="mode-inline-title">Session viewer</h3>
+      <p class="mode-inline-desc">Review every past recording with autonomic interpretation, palpitation clusters, posture overlays, and month, week, or day timelines.</p>
+      <a class="mode-inline-link" href="./hrv_viewer.html">Open viewer →</a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <p class="section-eyebrow">Signing in</p>
+  <h2 class="section-title">Why sign in with Google?</h2>
+  <div class="signin-compare">
+    <div class="signin-col">
+      <div class="signin-col-head">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.75h3.57c2.08-1.92 3.28-4.74 3.28-8.07z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.75c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+        Signed in
+      </div>
+      <ul class="signin-list">
+        <li>Session CSVs save to your Google Drive automatically.</li>
+        <li>Open past sessions from any device signed into the same account.</li>
+        <li>Android app keeps syncing in the background, even with the screen off.</li>
+      </ul>
+    </div>
+    <div class="signin-col">
+      <div class="signin-col-head signin-col-head-plain">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 12h6"/></svg>
+        Offline
+      </div>
+      <ul class="signin-list">
+        <li>Same core monitor and viewer; the Google sign-in button is hidden.</li>
+        <li>Sessions stay on this device. Nothing leaves unless you export it.</li>
+        <li>Useful if you don't want any cloud sync or account prompts.</li>
+      </ul>
+    </div>
+  </div>
+  </div>
+  <p class="signin-note">Broadcasting and CSV export both work in either mode. Signing in is only about Drive sync. You can switch any time; existing sessions aren't tied to sign-in state.</p>
+</section>
+
+<section>
+  <p class="section-eyebrow">Session viewer</p>
+  <h2 class="section-title">Every session, together.</h2>
+  <p class="section-lede">Each recording shows up in the viewer with the raw HR and RMSSD trace, autonomic interpretation, palpitation clusters, sympathetic flushes, posture and sleep windows. Sync to Drive to see them across devices, or keep it all local.</p>
+  <div class="viewer-hero">
+    <img src="./screen 6.jpg" alt="Full session view with HR trace, RMSSD overlay, palpitation clusters, and a sympathetic flush tooltip" loading="lazy">
+    <div class="viewer-hero-caption">A full day of recording. Mouse any spike for a tooltip, drag a marker anywhere, drill into any range.</div>
+  </div>
+  <a class="btn-secondary" href="./hrv_viewer.html" style="margin-top:24px;">Open viewer →</a>
+</section>
+
+<section>
+  <p class="section-eyebrow">Zoom out</p>
+  <h2 class="section-title">From months down to individual beats.</h2>
+  <p class="section-lede">The viewer stacks the same data at three zoom levels so you can spot a pattern and then investigate it without losing the thread.</p>
+  <div class="gallery-wide">
+    <figure class="gallery-wide-item">
+      <img src="./screen 1.jpg" alt="Month calendar view with HR range chips per day" loading="lazy">
+      <figcaption>
+        <span class="gallery-wide-label">Month</span>
+        <span class="gallery-wide-body">Every day at a glance. Click a square to drop into that day.</span>
+      </figcaption>
+    </figure>
+    <figure class="gallery-wide-item">
+      <img src="./screen 3.jpg" alt="Day view with 24-hour timeline and session cards" loading="lazy">
+      <figcaption>
+        <span class="gallery-wide-label">Day</span>
+        <span class="gallery-wide-body">24-hour timeline with every session stacked. Click a block to open it.</span>
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <p class="section-eyebrow">Setup</p>
+  <h2 class="section-title">Three steps.</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">01</div>
+      <h3 class="step-title">Pair a chest strap</h3>
+      <p class="step-desc">Any Bluetooth HR monitor that advertises service 0x180D. Works with Coospo, Polar, Wahoo, Garmin.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">02</div>
+      <h3 class="step-title">Open the app</h3>
+      <p class="step-desc">Chrome or Edge on desktop for streaming and review. Android APK for background recording with the screen off.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">03</div>
+      <h3 class="step-title">Stream or review</h3>
+      <p class="step-desc">Drop the widget into OBS as a browser source, or come back any time to analyse past sessions in the viewer.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <p class="section-eyebrow">Compatible straps</p>
+  <h2 class="section-title">Bring your own strap.</h2>
+  <p class="section-lede">Confirmed on the one we daily drive. The rest use the same standard BLE profile, so they should work. We haven't tested each one.</p>
+  <div class="straps">
+    <div class="strap">
+      <div class="strap-dot ok" aria-hidden="true"></div>
+      <div class="strap-body">
+        <div class="strap-name">Coospo H808S</div>
+        <div class="strap-status ok">Tested · daily driver</div>
+      </div>
+    </div>
+    <div class="strap">
+      <div class="strap-dot warn" aria-hidden="true"></div>
+      <div class="strap-body">
+        <div class="strap-name">Polar H10</div>
+        <div class="strap-status warn">Theoretical. Should work.</div>
+      </div>
+    </div>
+    <div class="strap">
+      <div class="strap-dot warn" aria-hidden="true"></div>
+      <div class="strap-body">
+        <div class="strap-name">Wahoo TICKR</div>
+        <div class="strap-status warn">Theoretical. Should work.</div>
+      </div>
+    </div>
+    <div class="strap">
+      <div class="strap-dot warn" aria-hidden="true"></div>
+      <div class="strap-body">
+        <div class="strap-name">Garmin HRM-Dual</div>
+        <div class="strap-status warn">Theoretical. Should work.</div>
+      </div>
+    </div>
+    <div class="strap">
+      <div class="strap-dot bad" aria-hidden="true"></div>
+      <div class="strap-body">
+        <div class="strap-name">Apple Watch / Garmin Fenix / Fitbit</div>
+        <div class="strap-status bad">Not supported. No BLE HR service.</div>
+      </div>
+    </div>
+  </div>
+  <div class="strap-legend">
+    <span><span class="ld" style="background:var(--ok);"></span>Tested</span>
+    <span><span class="ld" style="background:var(--warn);"></span>Presumed</span>
+    <span><span class="ld" style="background:var(--bad);"></span>Not supported</span>
+  </div>
+</section>
+
+<section>
+  <p class="section-eyebrow">What's new</p>
+  <h2 class="section-title">Recent updates</h2>
+  <div class="changelog" id="changelog">
+    <div class="changelog-empty">Loading updates…</div>
+  </div>
+</section>
+
+<section>
+  <p class="section-eyebrow">On the phone</p>
+  <h2 class="section-title">Pocket-sized, fully live.</h2>
+  <p class="section-lede">The mobile build keeps the same widget, same data, same broadcast, but its own compact UI with one-tap posture logging. Runs a foreground service so it doesn't sleep when the screen does.</p>
+  <div class="mobile-gallery">
+    <figure class="mobile-shot">
+      <img src="./mobile 4.jpg" alt="Mobile live widget with HR, HRV, trend line, and posture buttons" loading="lazy">
+    </figure>
+    <figure class="mobile-shot">
+      <img src="./mobile 3.jpg" alt="Mobile connection panel showing live broadcast status and Drive sync" loading="lazy">
+    </figure>
+  </div>
+</section>
+
+<section>
+  <a class="android-card" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">
+    <svg class="android-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 3v12"/>
+      <path d="M7 10l5 5 5-5"/>
+      <path d="M5 21h14"/>
+    </svg>
+    <div class="android-card-body">
+      <h3 class="android-card-title">Android app</h3>
+      <p class="android-card-desc">Keeps streaming with the screen off, locked, or backgrounded. Native BLE, foreground service, Drive sync.</p>
+      <p class="android-card-note">Not on the Play Store yet. You'll need to allow install from unknown sources and open the APK manually. Release-signed, so Google Drive works.</p>
+      <div class="android-card-version" id="apk-version"></div>
+    </div>
+    <svg class="android-card-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 18l6-6-6-6"/>
+    </svg>
+  </a>
+</section>
+
+<section>
+  <p class="section-eyebrow">FAQ</p>
+  <h2 class="section-title">Commonly faced issues.</h2>
+  <div class="faq">
+    <details class="faq-item">
+      <summary>What does HRV actually measure?</summary>
+      <div class="faq-item-body">
+        <p>RMSSD, the beat-to-beat variation in the intervals between heartbeats. It tracks how the autonomic nervous system is balancing sympathetic and parasympathetic tone. Higher usually means more recovery and rest; lower usually means stress or fatigue.</p>
+        <p>For most people, resting RMSSD sits somewhere between 25 and 60 ms. Context matters more than the absolute number.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>Which strap should I buy?</summary>
+      <div class="faq-item-body">
+        <p>Any chest strap that advertises the standard Bluetooth heart rate service 0x180D. That covers every major brand. Coospo H808S is the one we use daily; Polar H10, Wahoo TICKR, and Garmin HRM-Dual follow the same profile.</p>
+        <p>Wrist watches like Apple Watch, Garmin Fenix, and Fitbit do not expose the BLE heart rate service to third-party apps. They won't work here.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>Does it work without internet?</summary>
+      <div class="faq-item-body">
+        <p>Yes, in offline mode. Once the page has loaded, recording works without a connection. Sessions stay on the device until you choose to export them.</p>
+        <p>Drive sync and the streaming relay both need internet, so those only run when signed in and online.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>What's the most reliable setup for 24/7 recording?</summary>
+      <div class="faq-item-body">
+        <p>The Android app. It runs a foreground service that keeps the BLE link, the CSV writer, and the Drive upload alive with the screen off, the app backgrounded, and the phone locked.</p>
+        <p>The web app works too, but long desktop sessions need the tab visible and the display awake.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>How do I install the Android app?</summary>
+      <div class="faq-item-body">
+        <p>The app isn't on the Play Store yet. Tap the Android download card, accept the APK, and when Android asks, allow install from unknown sources just for your browser. The APK is release-signed, so Google Sign-In inside the app works normally.</p>
+        <p>A Play Store listing is planned once the product hits wider beta.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>Why does Chrome go quiet if I leave the tab alone?</summary>
+      <div class="faq-item-body">
+        <p>Chrome throttles background tabs to save battery. After a few minutes in the background, timers slow down and BLE delivery gets choppy. This is the browser doing its job, not a bug in the app.</p>
+        <p>If you need the tab to keep working while backgrounded, keep it focused, use a second monitor so it stays visible, or switch to the Android app which isn't subject to browser throttling.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>Is my data private?</summary>
+      <div class="faq-item-body">
+        <p>CSVs stay on your device, or in your own Google Drive when signed in. No server stores your data. The broadcast relay passes live ticks through to viewers and holds nothing.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>Does the Android app drain the battery?</summary>
+      <div class="faq-item-body">
+        <p>Streaming 24/7 with the screen off is possible. It holds a foreground-service notification and a partial wake lock so Android keeps the process alive.</p>
+        <p>Expect noticeably more battery use than idle, but similar to any fitness tracking app. Toggle off when you're done.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>Is this a medical device?</summary>
+      <div class="faq-item-body">
+        <p>No. It shows heart rate and a derived HRV estimate for personal and creative use. It is not a diagnostic tool and it does not replace clinical equipment or advice.</p>
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary>Can two people share one broadcast?</summary>
+      <div class="faq-item-body">
+        <p>Each session has a unique broadcast key. Anyone you give the key to can watch the overlay in real time, but only one sender at a time publishes to a given key.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section>
+  <div class="support">
+    <div class="support-body">
+      <h2 class="support-title">Free and open.</h2>
+      <p class="support-desc">Built and maintained by one person. If this is useful to you and you want to help keep it free, a tip makes a real difference.</p>
+      <div class="support-links">
+        <a class="support-btn primary" href="https://paypal.me/aortica" rel="noopener">Tip via PayPal</a>
+        <a class="support-btn" href="https://ko-fi.com/aortica" rel="noopener">Ko-fi</a>
+      </div>
+    </div>
+    <div>
+      <div class="support-qr">
+        <!-- Generated dynamically so the URL stays in one place. Handle
+             network failures by hiding silently. -->
+        <img id="support-qr-img" alt="Scan to tip via PayPal" />
+      </div>
+      <div class="support-qr-label">Scan to tip</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <p class="section-eyebrow">Get in touch</p>
+  <h2 class="section-title">Bug, request, thought?</h2>
+  <p class="section-lede">Drop a note. Goes straight to my inbox, no public tracker.</p>
+  <form class="contact-form" id="contact-form" action="https://api.web3forms.com/submit" method="POST" novalidate>
+    <input type="hidden" name="access_key" value="YOUR_WEB3FORMS_KEY">
+    <input type="hidden" name="subject" value="aorti.ca contact form">
+    <input type="text" name="honeypot" style="display:none" tabindex="-1" autocomplete="off">
+    <div class="contact-row">
+      <label class="contact-field">
+        <span class="contact-label">Your email</span>
+        <input type="email" name="email" required autocomplete="email" placeholder="you@example.com">
+      </label>
+    </div>
+    <div class="contact-row">
+      <label class="contact-field">
+        <span class="contact-label">Message</span>
+        <textarea name="message" rows="5" required placeholder="Anything at all"></textarea>
+      </label>
+    </div>
+    <div class="contact-actions">
+      <button type="submit" class="contact-submit">Send</button>
+      <span class="contact-status" id="contact-status" aria-live="polite"></span>
+    </div>
+  </form>
+</section>
+
+<footer>
+  aorti.ca · Not a medical tool.
+</footer>
+
+<button class="fab" id="back-to-top" type="button" aria-label="Back to top">
+  <svg viewBox="0 0 1779 1642" aria-hidden="true">
+    <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
+  </svg>
+</button>
+
+<script>
+  // Rough UA sniff so the Download card can present itself differently.
+  (function() {
+    var ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/i.test(ua)) document.body.classList.add('ios-device');
+    else if (/Android/i.test(ua)) document.body.classList.add('android-device');
+  })();
+
+  // Hero widget: tick HR and HRV while cycling through the stage palette
+  // the same way the real widget does. Pips fill cumulatively; the warning
+  // banner toggles on when HR drives into elevated or higher.
+  (function () {
+    const hrEl = document.getElementById('widget-hr');
+    const hrvEl = document.getElementById('widget-hrv');
+    const pipsEl = document.getElementById('widget-pips');
+    const widgetEl = document.getElementById('hero-widget');
+    const warnEl = document.getElementById('widget-warning');
+    const warnTextEl = document.getElementById('widget-warning-text');
+    if (!hrEl || !hrvEl || !widgetEl) return;
+
+    const STAGE_PIPS = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 };
+
+    // Wander from 75 (low, blue) up to 130 (critical, red) and back over
+    // ~45s so every stage is visible in one loop. Threshold bands match
+    // the app's default colour thresholds (55 low / 130 high).
+    let t = 0;
+    function tick() {
+      t += 0.028;
+      const mid = 102.5;
+      const amp = 27.5;
+      const base = mid + Math.sin(t * 0.32) * amp;
+      const hr = Math.round(Math.max(75, Math.min(130, base + (Math.random() - 0.5) * 2)));
+      const hrv = Math.round(Math.max(18, Math.min(65, 40 - Math.sin(t * 0.32) * 18 + (Math.random() - 0.5) * 2)));
+      hrEl.textContent = hr;
+      hrvEl.textContent = hrv;
+
+      // Stage bands tuned so a single 75 to 130 cycle passes through all
+      // five colours for the visitor to see.
+      let stage = 'stage-low';
+      if (hr < 85) stage = 'stage-low';
+      else if (hr < 95) stage = 'stage-normal';
+      else if (hr < 110) stage = 'stage-elevated';
+      else if (hr < 125) stage = 'stage-high';
+      else stage = 'stage-critical';
+
+      widgetEl.className = 'widget ' + stage + (hrv < 20 ? ' warn-crash' : '');
+
+      const count = STAGE_PIPS[stage] || 0;
+      Array.from(pipsEl.children).forEach((p, i) => p.classList.toggle('active', i < count));
+
+      const showCrash = hrv < 20;
+      const showHigh = hr >= 120 && !showCrash;
+      if (showCrash) {
+        warnEl.className = 'widget-warning warn-crash active';
+        warnTextEl.textContent = 'HRV crashed';
+      } else if (showHigh) {
+        warnEl.className = 'widget-warning warn-high active';
+        warnTextEl.textContent = 'Heart rate high';
+      } else {
+        warnEl.className = 'widget-warning';
+      }
+    }
+    setInterval(tick, 800);
+    tick();
+  })();
+
+  // GitHub Releases → "What's new". Silent on failure (API rate limits).
+  (function () {
+    const el = document.getElementById('changelog');
+    if (!el) return;
+    fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases?per_page=8', { cache: 'default' })
+      .then(r => r.ok ? r.json() : null)
+      .then(rels => {
+        if (!rels || !rels.length) {
+          el.innerHTML = '<div class="changelog-empty">No releases yet.</div>';
+          return;
+        }
+        const filtered = rels.filter(r => r.tag_name && r.tag_name !== 'android-latest');
+        const top = filtered.slice(0, 5);
+        if (!top.length) {
+          el.innerHTML = '<div class="changelog-empty">No releases yet.</div>';
+          return;
+        }
+        el.innerHTML = top.map(r => {
+          const d = r.published_at ? new Date(r.published_at) : null;
+          const date = d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+          const firstLine = (r.body || r.name || '').split('\n').map(l => l.trim()).find(l => l && !l.startsWith('#')) || r.name || r.tag_name;
+          const safe = firstLine.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])).slice(0, 140);
+          return '<div class="changelog-item"><span class="changelog-date">' + date + '</span><span class="changelog-body"><strong>' + (r.name || r.tag_name) + '</strong>. ' + safe + '</span></div>';
+        }).join('');
+      })
+      .catch(() => {
+        el.innerHTML = '<div class="changelog-empty">Couldn\'t load updates right now.</div>';
+      });
+  })();
+
+  // APK version chip — unchanged from the current index.
+  (function() {
+    const el = document.getElementById('apk-version');
+    if (!el) return;
+    fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/android-latest', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(rel => {
+        if (!rel) return;
+        const body = rel.body || '';
+        const shaMatch = body.match(/commit\s+([0-9a-f]{7,40})/i);
+        const shortSha = shaMatch ? shaMatch[1].slice(0, 7) : '';
+        const signedMatch = body.match(/signed:\s*(true|false)/i);
+        const apk = (rel.assets || []).find(a => a.name === 'hr-monitor.apk');
+        const stamp = (apk && apk.updated_at) || rel.updated_at || rel.published_at;
+        const date = stamp ? new Date(stamp) : null;
+        const when = date
+          ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            + ' · ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+          : '';
+        const parts = [shortSha, when].filter(Boolean);
+        if (parts.length) el.textContent = parts.join(' · ');
+        if (signedMatch && signedMatch[1].toLowerCase() !== 'true') {
+          el.textContent += ' · unsigned';
+          el.style.color = '#E89858';
+        }
+        const installed = localStorage.getItem('hr_monitor_installed_apk_sha');
+        if (shaMatch && installed && installed !== shaMatch[1]) el.classList.add('fresh');
+      })
+      .catch(() => {});
+  })();
+
+  // Back-to-top FAB: shows after scrolling past the hero, smooth-scrolls
+  // to the top on tap. Small enough that it doesn't justify a library.
+  (function () {
+    const btn = document.getElementById('back-to-top');
+    if (!btn) return;
+    function update() {
+      const show = window.scrollY > window.innerHeight * 0.6;
+      btn.classList.toggle('visible', show);
+    }
+    window.addEventListener('scroll', update, { passive: true });
+    update();
+    btn.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  })();
+
+  // Contact form: AJAX submit so the page doesn't navigate away on send.
+  // Works with Web3Forms and Formspree (both return JSON on success).
+  // Falls back to a normal form POST if fetch fails.
+  (function () {
+    const form = document.getElementById('contact-form');
+    const status = document.getElementById('contact-status');
+    if (!form) return;
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (form.honeypot && form.honeypot.value) return; // bot
+      const submit = form.querySelector('.contact-submit');
+      submit.disabled = true;
+      status.textContent = 'Sending…';
+      status.className = 'contact-status';
+      try {
+        const res = await fetch(form.action, {
+          method: 'POST',
+          body: new FormData(form),
+          headers: { 'Accept': 'application/json' },
+        });
+        if (res.ok) {
+          status.textContent = 'Sent. Thanks for the note.';
+          status.className = 'contact-status success';
+          form.reset();
+        } else {
+          throw new Error('HTTP ' + res.status);
+        }
+      } catch (err) {
+        status.textContent = 'Could not send. Try again in a bit.';
+        status.className = 'contact-status error';
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  })();
+
+  // PayPal QR. Uses a free public QR generator; swap the URL when the
+  // PayPal.me handle is finalised. Fails silently — the text link below
+  // is the actual source of truth.
+  (function () {
+    const img = document.getElementById('support-qr-img');
+    if (!img) return;
+    const paypalUrl = 'https://paypal.me/aortica';
+    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=0&bgcolor=ffffff&color=0a0a0a&data=' + encodeURIComponent(paypalUrl);
+    img.onerror = () => { img.style.display = 'none'; };
+  })();
+</script>
+</body>
+</html>
