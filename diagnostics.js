@@ -237,6 +237,25 @@
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       }
       .hrm-diag-title { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 14px; }
+      .hrm-diag-legal-strip {
+        display: block;
+        text-align: center;
+        padding: 10px 0 24px;
+        margin: 0 0 18px;
+        border-bottom: 1px solid #1a1a1a;
+      }
+      .hrm-diag-legal-strip a {
+        color: #9a9a9a;
+        text-decoration: none;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 8px 16px;
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .hrm-diag-legal-strip a:hover { color: #d8d8d8; border-color: #3a3a3a; background: #1a1a1a; }
       .hrm-diag-subtitle { font-size: 11px; color: #8a8a8a; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; margin: 14px 0 6px; }
       .hrm-diag-row {
         display: flex; justify-content: space-between; gap: 12px;
@@ -343,6 +362,7 @@
 
     overlay.innerHTML = `
       <div class="hrm-diag-modal">
+        <div class="hrm-diag-legal-strip"><a href="./legal.html" target="_blank" rel="noopener">Legal &amp; disclaimers</a></div>
         <h2 class="hrm-diag-title">App diagnostics</h2>
         ${rows('Build', [
           ['Version', v && v.shortSha ? 'v0.5 · ' + v.shortSha : 'v0.5 · offline'],
