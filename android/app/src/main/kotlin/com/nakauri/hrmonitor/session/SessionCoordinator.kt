@@ -206,6 +206,7 @@ class SessionCoordinator(
         SessionState.setRmssd(rmssd)
 
         csv?.appendHrRow(reading.hr, rmssd, reading.timestampMs)
+        SessionState.appendHrPoint(SessionState.HrPoint(reading.timestampMs, reading.hr))
 
         val elapsedMinutes = ((lastTickMs - sessionStartMs).coerceAtLeast(0L)) / 60_000.0
         val tick = TickMessage(
