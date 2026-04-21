@@ -315,8 +315,11 @@ body.conn-reconnecting .conn-text { display: inline; }
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  width: 150px;
-  min-width: 150px;
+  /* Widened from 150 so full strings render without the "Heart rate hi..."
+     truncation. nowrap + ellipsis stay as a safety net for longer labels. */
+  min-width: 190px;
+  width: auto;
+  max-width: 240px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
