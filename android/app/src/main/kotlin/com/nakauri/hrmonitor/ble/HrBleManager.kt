@@ -77,6 +77,13 @@ class HrBleManager(context: Context) : BleManager(context) {
     }
 
     override fun initialize() {
+        // Match what a Garmin/Wahoo watch does on connection-ready: request
+        // HIGH connection priority (Nordic maps this to Android's
+        // CONNECTION_PRIORITY_HIGH → 11.25-15ms intervals, 0 slave latency).
+        // Watches are flawless with chest straps partly because they hold
+        // this tight interval; the default "balanced" interval (~50ms) is
+        // what makes Android BLE feel shaky by comparison.
+        requestConnectionPriority(android.bluetooth.BluetoothGatt.CONNECTION_PRIORITY_HIGH).enqueue()
         requestMtu(247).enqueue()
         setNotificationCallback(hrCharacteristic)
             .with { _, data ->

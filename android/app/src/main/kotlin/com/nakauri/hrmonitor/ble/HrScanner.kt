@@ -3,6 +3,7 @@ package com.nakauri.hrmonitor.ble
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -14,6 +15,7 @@ import com.nakauri.hrmonitor.diag.HrmLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Unfiltered BLE scanner. The original design filtered on the HR service
@@ -43,8 +45,35 @@ object HrScanner {
     private val _discovered = MutableStateFlow<List<DiscoveredStrap>>(emptyList())
     val discovered: StateFlow<List<DiscoveredStrap>> = _discovered.asStateFlow()
 
+    // `byMac` is only touched on the scan-callback thread during ingest and
+    // read on that same thread for the sorted snapshot. `_discovered` is the
+    // safe snapshot the UI observes.
     private val byMac = linkedMapOf<String, DiscoveredStrap>()
+
+    /**
+     * Keeps the actual BluetoothDevice objects from scan. `getRemoteDevice(mac)`
+     * defaults to address-type PUBLIC, which silently fails to connect when
+     * the strap advertises with a RANDOM address (the Coospo H808S, among
+     * others). Looking up the device from this cache preserves the address
+     * type the stack already learned at scan time.
+     *
+     * Accessed from the binder scan-callback thread (writes) and the main
+     * Compose thread (reads), so must be thread-safe. Bounded by LRU eviction
+     * so hours of ambient BLE devices don't leak.
+     */
+    private const val DEVICE_CACHE_CAPACITY = 64
+    private val deviceCache: MutableMap<String, BluetoothDevice> =
+        java.util.Collections.synchronizedMap(
+            object : java.util.LinkedHashMap<String, BluetoothDevice>(DEVICE_CACHE_CAPACITY, 0.75f, true) {
+                override fun removeEldestEntry(eldest: Map.Entry<String, BluetoothDevice>?): Boolean =
+                    size > DEVICE_CACHE_CAPACITY
+            }
+        )
+
     private var callback: ScanCallback? = null
+
+    /** Returns the live BluetoothDevice handle from scan, or null if never seen. */
+    fun getCachedDevice(mac: String): BluetoothDevice? = deviceCache[mac]
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     fun start(context: Context) {
@@ -63,6 +92,9 @@ object HrScanner {
         }
 
         byMac.clear()
+        // deviceCache intentionally NOT cleared here — stale device objects
+        // from a previous scan can still be used for a reconnect after the
+        // user has stopped scanning.
         _discovered.value = emptyList()
 
         // No service-UUID filter — see class doc. Rely on client-side
@@ -121,6 +153,8 @@ object HrScanner {
         val serviceUuids = result.scanRecord?.serviceUuids.orEmpty()
         val hasHrService = serviceUuids.any { it == ParcelUuid(HrBleSpec.HEART_RATE_SERVICE) }
         val nameHintsHr = name?.uppercase()?.let { upper -> STRAP_NAME_HINTS.any { upper.contains(it) } } == true
+
+        deviceCache[mac] = device
 
         val entry = DiscoveredStrap(
             mac = mac,

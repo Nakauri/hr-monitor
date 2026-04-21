@@ -32,15 +32,31 @@ object BrandColors {
     val AccentWarm = Color(0xFFE89858)
 }
 
+/**
+ * Desktop / web palette usage:
+ *   - #5DCAA5 (accent-rmssd, mint green) is THE primary brand accent —
+ *     card accent lines, the session-viewer "∿" mark, tab indicators,
+ *     `apk-version.fresh` state, most interactive highlights.
+ *   - #E88464 / #E89858 (accent-hr / accent-warm) is reserved for the
+ *     big HR number inside the widget and the landing page's · dot.
+ *     It's an accent, not a theme colour.
+ *
+ * Android mistake on the first pass: I wired primary = AccentHr, which
+ * made every Material component default to salmon (buttons, switches,
+ * selection, ripple, surface tint). That's why the app looked salmon-
+ * washed. Correct wiring: primary = AccentRmssd for everything Material
+ * touches, and only the HR number + HR-stage chips use AccentHr
+ * explicitly.
+ */
 private val BrandDark = darkColorScheme(
-    primary = BrandColors.AccentHr,
-    onPrimary = Color(0xFF1A0E0B),
-    primaryContainer = Color(0xFF2A1612),
+    primary = BrandColors.AccentRmssd,
+    onPrimary = Color(0xFF08201A),
+    primaryContainer = Color(0xFF142822),
     onPrimaryContainer = BrandColors.OnSurface,
 
-    secondary = BrandColors.AccentRmssd,
-    onSecondary = Color(0xFF08201A),
-    secondaryContainer = Color(0xFF142822),
+    secondary = BrandColors.AccentHr,
+    onSecondary = Color(0xFF1A0E0B),
+    secondaryContainer = Color(0xFF2A1612),
     onSecondaryContainer = BrandColors.OnSurface,
 
     tertiary = BrandColors.AccentWarm,
@@ -53,10 +69,10 @@ private val BrandDark = darkColorScheme(
     onSurface = BrandColors.OnSurface,
     surfaceVariant = BrandColors.SurfaceVariant,
     onSurfaceVariant = BrandColors.OnSurfaceDim,
-    surfaceTint = BrandColors.AccentHr,
+    surfaceTint = BrandColors.AccentRmssd,
     inverseSurface = BrandColors.OnSurface,
     inverseOnSurface = BrandColors.Background,
-    inversePrimary = BrandColors.AccentHr,
+    inversePrimary = BrandColors.AccentRmssd,
 
     outline = BrandColors.SurfaceVariant,
     outlineVariant = Color(0xFF2A2A2A),
