@@ -4,32 +4,38 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.content.Context
+import com.nakauri.hrmonitor.ble.polar.EcgFrameParser
+import com.nakauri.hrmonitor.ble.polar.PmdControlResponse
+import com.nakauri.hrmonitor.ble.polar.PolarPmdCommands
+import com.nakauri.hrmonitor.ble.polar.PolarPmdSpec
 import com.nakauri.hrmonitor.diag.HrmLog
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import no.nordicsemi.android.ble.BleManager
 import no.nordicsemi.android.ble.observer.ConnectionObserver
 
 /**
- * Nordic BleManager subclass for the HR service (0x180D). Subscribes to
- * the heart rate measurement characteristic (0x2A37) and optionally reads
- * battery level (0x180F / 0x2A19).
+ * BleManager subclass covering:
+ *   - Standard HR service (0x180D / 0x2A37) — every strap.
+ *   - Battery service (0x180F / 0x2A19) — most straps.
+ *   - Polar PMD service (FB005C80-...) for raw ECG streaming — Polar H10 only.
  *
- * The Nordic library handles 133-retry (the infamous Android GATT error),
- * bond races, and MTU negotiation for us. We add:
- *   - HR packet parsing via [HrPacketParser]
- *   - StateFlow exposure so the service and UI can observe readings
- *   - Silent-connection detection timer (reset on each notification)
- *
- * Reconnect is handled by the caller: when [connectionState] transitions
- * to [BleConnectionState.Disconnected] and the session is still active,
- * the SessionCoordinator calls [connectStrap] again.
+ * PMD is additive: if the strap doesn't expose the PMD service (Coospo, Wahoo,
+ * older H10 firmware <3.0), we fall through to HR-only. When PMD is present,
+ * we enable the CP and DATA characteristics' notifications, wait the required
+ * ~300 ms settling window, then write the START_H10_ECG command. Frames
+ * arrive at 130 Hz and surface via [ecgFrames].
  */
 class HrBleManager(context: Context) : BleManager(context) {
 
     private var hrCharacteristic: BluetoothGattCharacteristic? = null
     private var batteryCharacteristic: BluetoothGattCharacteristic? = null
+    private var pmdControlCharacteristic: BluetoothGattCharacteristic? = null
+    private var pmdDataCharacteristic: BluetoothGattCharacteristic? = null
 
     private val _readings = MutableStateFlow<HrReading?>(null)
     val readings: StateFlow<HrReading?> = _readings.asStateFlow()
@@ -39,6 +45,16 @@ class HrBleManager(context: Context) : BleManager(context) {
 
     private val _connectionState = MutableStateFlow(BleConnectionState.Disconnected)
     val connectionState: StateFlow<BleConnectionState> = _connectionState.asStateFlow()
+
+    /** True once this device has been detected as a Polar H10 (PMD present). */
+    private val _polarH10 = MutableStateFlow(false)
+    val polarH10: StateFlow<Boolean> = _polarH10.asStateFlow()
+
+    /** Raw ECG frames. Empty when the strap is not a Polar H10. */
+    private val _ecgFrames = MutableSharedFlow<EcgFrameParser.EcgFrame>(
+        extraBufferCapacity = 32,
+    )
+    val ecgFrames: SharedFlow<EcgFrameParser.EcgFrame> = _ecgFrames.asSharedFlow()
 
     init {
         setConnectionObserver(object : ConnectionObserver {
@@ -64,6 +80,7 @@ class HrBleManager(context: Context) : BleManager(context) {
                 HrmLog.info(TAG, "Disconnected ${device.address} reason=$reason")
                 _connectionState.value = BleConnectionState.Disconnected
                 _readings.value = null
+                _polarH10.value = false
             }
         })
     }
@@ -73,6 +90,18 @@ class HrBleManager(context: Context) : BleManager(context) {
         hrCharacteristic = hrSvc.getCharacteristic(HrBleSpec.HEART_RATE_MEASUREMENT) ?: return false
         val battSvc = gatt.getService(HrBleSpec.BATTERY_SERVICE)
         batteryCharacteristic = battSvc?.getCharacteristic(HrBleSpec.BATTERY_LEVEL)
+
+        // Optional: detect Polar PMD for ECG streaming. Strap can still
+        // deliver HR/RR without it; PMD is opportunistic.
+        val pmdSvc = gatt.getService(PolarPmdSpec.PMD_SERVICE)
+        if (pmdSvc != null) {
+            pmdControlCharacteristic = pmdSvc.getCharacteristic(PolarPmdSpec.PMD_CONTROL_POINT)
+            pmdDataCharacteristic = pmdSvc.getCharacteristic(PolarPmdSpec.PMD_DATA_STREAM)
+            if (pmdControlCharacteristic != null && pmdDataCharacteristic != null) {
+                _polarH10.value = true
+                HrmLog.info(TAG, "Polar PMD service present; ECG streaming available")
+            }
+        }
         return true
     }
 
@@ -84,6 +113,8 @@ class HrBleManager(context: Context) : BleManager(context) {
         // this tight interval; the default "balanced" interval (~50ms) is
         // what makes Android BLE feel shaky by comparison.
         requestConnectionPriority(android.bluetooth.BluetoothGatt.CONNECTION_PRIORITY_HIGH).enqueue()
+        // PMD frames at 130 Hz fit ~73 samples per notification at MTU 232.
+        // Request 247 (Android max) and let the link negotiate down.
         requestMtu(247).enqueue()
         setNotificationCallback(hrCharacteristic)
             .with { _, data ->
@@ -108,11 +139,75 @@ class HrBleManager(context: Context) : BleManager(context) {
                 }
             enableNotifications(batt).enqueue()
         }
+
+        // PMD / Polar H10 ECG path. Enable notifications on both CP and DATA
+        // before writing the start command. The SDK enforces a ~200-500 ms
+        // gap after CCCDs are enabled; we use sleep() to ensure the write
+        // stays ordered after both enableNotifications()'s complete.
+        val pmdCp = pmdControlCharacteristic
+        val pmdData = pmdDataCharacteristic
+        if (pmdCp != null && pmdData != null) {
+            setNotificationCallback(pmdCp)
+                .with { _, data ->
+                    val bytes = data.value ?: return@with
+                    val response = PmdControlResponse.parse(bytes)
+                    if (response != null) onPmdControlResponse(response)
+                }
+            enableNotifications(pmdCp).enqueue()
+
+            setNotificationCallback(pmdData)
+                .with { _, data ->
+                    val bytes = data.value ?: return@with
+                    val frame = EcgFrameParser.parse(bytes) ?: return@with
+                    _ecgFrames.tryEmit(frame)
+                }
+            enableNotifications(pmdData).enqueue()
+
+            // 350 ms grace before START so both CCCDs have settled.
+            sleep(350).enqueue()
+            writeCharacteristic(
+                pmdCp,
+                PolarPmdCommands.START_H10_ECG,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+            ).with { _, _ ->
+                HrmLog.info(TAG, "PMD ECG start written")
+            }.fail { _, status ->
+                HrmLog.warn(TAG, "PMD ECG start write failed status=$status")
+            }.enqueue()
+        }
     }
 
     override fun onServicesInvalidated() {
         hrCharacteristic = null
         batteryCharacteristic = null
+        pmdControlCharacteristic = null
+        pmdDataCharacteristic = null
+    }
+
+    private fun onPmdControlResponse(response: PmdControlResponse) {
+        when (response.status) {
+            PolarPmdSpec.STATUS_SUCCESS -> {
+                HrmLog.info(TAG, "PMD op=${response.opCode} type=${response.measurementType} ok")
+            }
+            PolarPmdSpec.STATUS_ALREADY_IN_STATE -> {
+                // Strap says ECG is already streaming — benign on reconnect.
+                HrmLog.info(TAG, "PMD ECG already streaming")
+            }
+            PolarPmdSpec.STATUS_INVALID_STATE -> {
+                HrmLog.warn(TAG, "PMD ECG rejected: invalid state (retry after STOP?)")
+                // Try a clean stop + restart for future commands. Fire-and-forget.
+                pmdControlCharacteristic?.let { cp ->
+                    writeCharacteristic(
+                        cp,
+                        PolarPmdCommands.STOP_ECG,
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+                    ).enqueue()
+                }
+            }
+            else -> {
+                HrmLog.warn(TAG, "PMD op=${response.opCode} status=${response.status}")
+            }
+        }
     }
 
     fun connectStrap(device: BluetoothDevice, autoConnect: Boolean = false) {
