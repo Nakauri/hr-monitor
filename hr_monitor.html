@@ -1003,21 +1003,24 @@
   .posture-btn.active[data-posture="lying"] { background: rgba(125,184,232,0.15); border-color: #7DB8E8; color: #7DB8E8; }
   .posture-btn.active[data-posture="sitting"] { background: rgba(184,217,126,0.15); border-color: #B8D97E; color: #B8D97E; }
   .posture-btn.active[data-posture="standing"] { background: rgba(232,152,88,0.15); border-color: #E89858; color: #E89858; }
+  .posture-row[data-mode="download"] {
+    display: block;
+  }
   .download-csv-btn {
-    flex: 1;
-    min-width: 0;
-    padding: 10px 14px;
+    width: 100%;
+    padding: 12px 16px;
     font-size: 13px;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     font-weight: 600;
-    background: rgba(93,202,165,0.15);
-    border: 1px solid #5DCAA5;
-    color: #5DCAA5;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
     border-radius: 999px;
     cursor: pointer;
     transition: background 0.12s, border-color 0.12s, color 0.12s;
   }
-  .download-csv-btn:hover { background: rgba(93,202,165,0.25); color: #fff; }
+  .download-csv-btn:hover { border-color: var(--border-strong); color: var(--text); }
 
   .hrm-toast {
     position: fixed;
@@ -2966,12 +2969,20 @@
   //   connecting (attach in progress) → dashed "Starting…"
   //   recording (live + data)     → red "Stop session"
   //   reconnecting (strap dropped)→ red "Stop session" (but mode chip says Reconnecting)
+  // Tracks an in-flight native picker Promise so the session toggle can
+  // abort the scan if the user hits Cancel while we're still searching.
+  let currentPicker = null;
   function updateSessionToggle() {
     const btn = document.getElementById('session-toggle');
     if (!btn) return;
     if (btn.disabled) {
       btn.setAttribute('data-state', 'idle');
       btn.textContent = 'Start session';
+      return;
+    }
+    if (currentPicker) {
+      btn.setAttribute('data-state', 'connecting');
+      btn.textContent = 'Cancel search';
       return;
     }
     const cs = state.connState;
@@ -2991,6 +3002,11 @@
   // Single handler for the Start/Stop button. Idle → connect(). Recording
   // or reconnecting → full stop: disconnect + finalize + reset.
   async function onSessionToggleClick() {
+    // Mid-scan: Cancel aborts the picker Promise + restores the idle button.
+    if (currentPicker) {
+      try { currentPicker.cancel(); } catch (e) {}
+      return;
+    }
     const cs = state.connState;
     if (cs === 'live' || cs === 'reconnecting') {
       try { await disconnect(); } catch (e) {}
@@ -3147,7 +3163,15 @@
     }
     setStatus('Scanning for strap...');
     try {
-      const picked = await window.HRMNativeHrSession.showPicker();
+      currentPicker = window.HRMNativeHrSession.showPicker();
+      updateSessionToggle();
+      let picked = null;
+      try {
+        picked = await currentPicker;
+      } finally {
+        currentPicker = null;
+        updateSessionToggle();
+      }
       if (!picked || !picked.mac) {
         setStatus('No strap selected.');
         return;
@@ -3176,7 +3200,10 @@
       updateSessionToggle();
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
-      setStatus('Connection failed: ' + msg, 'error');
+      // User-cancelled is a normal outcome, not an error — quiet status
+      // so we don't flash red text that makes it look like something broke.
+      if (/cancelled/i.test(msg)) setStatus('Search cancelled.');
+      else setStatus('Connection failed: ' + msg, 'error');
       updateSessionToggle();
     }
   }
