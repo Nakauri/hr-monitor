@@ -22,11 +22,14 @@ const INJECT_TARGET = 'hr_monitor.html';
 
 const SHIM_TAGS = `
   <!-- Capacitor-only shims loaded before page scripts so they can patch
-       navigator.bluetooth, register the native Drive sign-in override, and
-       attach the foreground-service wrapper before hr_monitor.html's main
-       code runs. Files served from the WebView bundle. -->
+       navigator.bluetooth, register the native Drive sign-in override,
+       monkey-patch WebSocket for the relay (so ws.send doesn't buffer
+       when the Activity is paused), and attach the foreground-service
+       wrapper before hr_monitor.html's main code runs. Files served
+       from the WebView bundle. -->
   <script src="./capacitor-bootstrap.js"></script>
   <script src="./ble-adapter.js"></script>
+  <script src="./native-relay-socket.js"></script>
   <script src="./drive-auth-native.js"></script>
   <script src="./foreground-service.js"></script>
   <script src="./battery-opt.js"></script>
@@ -93,7 +96,7 @@ function copyWithInject(relative) {
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
 // web files so relative paths just work.
 function copyMobileAssets() {
-  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'];
+  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'];
   for (const name of assets) {
     const from = path.join(mobileRoot, 'src', name);
     const to = path.join(wwwDir, name);

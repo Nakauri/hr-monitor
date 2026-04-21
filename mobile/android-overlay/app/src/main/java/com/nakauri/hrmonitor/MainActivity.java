@@ -18,6 +18,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(WakeLockPlugin.class);
         registerPlugin(OemBackgroundPlugin.class);
+        registerPlugin(NativeRelaySocketPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
