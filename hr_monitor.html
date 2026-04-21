@@ -2872,6 +2872,10 @@
     return { id, label };
   }
 
+  // Broadcast tick sender. Wire format is documented in RELAY_TICK.md.
+  // The native plugin's publishTick (Android) MUST emit the same fields.
+  // When adding or renaming a field, update all three: this function,
+  // NativeHrSessionPlugin.publishTick, and overlay.html's handleTick.
   function broadcastTick() {
     if (!overlayChannel) return;
     const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;

@@ -178,6 +178,23 @@
       else if (/Android/i.test(ua)) document.body.classList.add('android-device');
     })();
 
+    // Capacitor-only: if the user taps the foreground-service notification
+    // during an active session, Android brings the app up on index.html by
+    // default. Detect the live native session and bounce to the monitor
+    // page so the user can see the in-flight recording and stop it. The
+    // NativeHrSession plugin's status() reflects real Java-side state
+    // (not a JS flag that resets on WebView reload).
+    (function () {
+      try {
+        if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+        const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.NativeHrSession;
+        if (!plugin || typeof plugin.status !== 'function') return;
+        plugin.status().then(function (s) {
+          if (s && s.sessionActive) location.replace('./hr_monitor.html?mode=online');
+        }).catch(function () { /* silent */ });
+      } catch (e) {}
+    })();
+
     // Surface the latest APK build on the Download card. We hit the GitHub
     // Releases API (CORS-friendly) instead of the asset download URL
     // (CORS-blocked — the release-assets host doesn't serve ACAO headers

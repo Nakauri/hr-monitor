@@ -43,10 +43,11 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
       let lastTitle = '';
       let lastBody = '';
 
-      // Throttle updateForegroundService to 1 Hz. Updates omit smallIcon
-      // (the initial post set it) + smallIcon on every tick would re-resolve
-      // the drawable ID in the plugin, wasted work. silent:true keeps the
-      // notification from buzzing / pinging every second.
+      // Throttle updateForegroundService to 1 Hz. The capawesome FGS plugin
+      // calls AssetUtil.getResourceID(smallIcon) on every update call — if
+      // smallIcon is missing it throws NullPointerException("name is null")
+      // and the update fails. So we pass smallIcon every time, even though
+      // it never changes.
       let pendingUpdate = null;
       let updateTimer = null;
       function flushPending() {
@@ -61,6 +62,7 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
             notificationChannelId: CHANNEL_ID,
             title,
             body,
+            smallIcon: 'ic_stat_hr',
             silent: true,
           });
         } catch (e) { console.warn('[fgs] update failed:', e); }

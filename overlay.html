@@ -337,6 +337,10 @@
   }
   setInterval(updateMultiSenderBanner, 1000);
 
+  // Relay tick consumer. Wire format is documented in RELAY_TICK.md.
+  // Both senders (hr_monitor.html broadcastTick and the native Android
+  // plugin's publishTick) emit the same shape. If a field is missing,
+  // render a degraded but non-crashing view.
   function handleTick(msg) {
     if (!msg || msg.type !== 'tick') return;
     lastTick = Date.now();
