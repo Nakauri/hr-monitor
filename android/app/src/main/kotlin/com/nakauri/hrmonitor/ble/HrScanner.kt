@@ -134,6 +134,11 @@ object HrScanner {
         discoveredByMac.clear()
         _discovered.value = emptyList()
         try {
+            // Samsung-specific workaround: startPairingPopupHack() before
+            // scan resets a bonding-state-machine quirk on S8-class firmware
+            // that otherwise silently breaks CCCD writes on first connect.
+            // No-op on non-Samsung devices. See van Welie's BLESSED sample.
+            manager(context).startPairingPopupHack()
             // Scan for HR-service advertisers first — covers most straps.
             // For Coospo / straps that advertise 0x180D only in the scan
             // response we'd miss it here; see the fallback in onDiscovered
