@@ -210,13 +210,14 @@
   .hero-sub {
     font-size: 16px;
     color: var(--text-dim);
-    max-width: 480px;
-    margin: 0 0 16px;
+    max-width: 560px;
+    margin: 0 0 32px;
   }
-  .hero-sub:last-of-type { margin-bottom: 32px; }
-  .hero-sub-note {
-    font-size: 14px;
+  .hero-micro {
+    font-size: 12px;
     color: var(--text-faint);
+    margin: 16px 0 0;
+    max-width: 520px;
   }
   .hero-cta {
     display: flex;
@@ -455,10 +456,11 @@
   }
   .widget-trend .hrv-line {
     fill: none;
-    stroke: var(--accent-rmssd);
-    stroke-width: 1.3;
+    stroke: #c8c8c8;
+    stroke-width: 1.1;
     stroke-linejoin: round;
-    opacity: 0.85;
+    stroke-dasharray: 3 3;
+    opacity: 0.7;
   }
   .widget-scroll { animation: widgetScroll 14s linear infinite; }
   @keyframes widgetScroll {
@@ -492,7 +494,7 @@
   .section-lede {
     font-size: 15px;
     color: var(--text-dim);
-    max-width: 620px;
+    max-width: 720px;
     margin: 0 0 32px;
   }
 
@@ -534,6 +536,11 @@
     align-self: flex-start;
   }
   .mode-inline-link:hover { border-bottom-color: var(--text); }
+  .mode-disclaimer {
+    margin: 28px 0 0;
+    font-size: 12px;
+    color: var(--text-faint);
+  }
 
   /* ===== Story ===== */
   .story {
@@ -542,7 +549,7 @@
     gap: 56px;
     align-items: start;
   }
-  .story-text { max-width: 600px; }
+  .story-text { max-width: 680px; }
   .story-lede {
     font-size: 17px;
     color: var(--text-dim);
@@ -1367,8 +1374,7 @@
 <section class="hero">
   <div>
     <h1 class="hero-title">Live heart rate <span class="accent">&amp; HRV</span> for streams and self.</h1>
-    <p class="hero-sub">Pair a chest strap. Stream it to OBS, or track your heart data over weeks and months. Works in Chrome, Edge, and on Android. Offline or signed in, free, no subscription.</p>
-    <p class="hero-sub hero-sub-note">Chest straps only; they're more accurate than watches anyway, and no Apple Watch or Fitbit companion app is needed.</p>
+    <p class="hero-sub">Pair a chest strap. Stream it to OBS, or track your heart data over weeks and months. Android for 24/7 background sessions, Chromium browsers on the desktop. Offline or signed in, free, no subscription.</p>
     <div class="hero-cta">
       <a class="btn-primary" href="./hr_monitor.html?mode=online">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1381,6 +1387,7 @@
       </a>
       <a class="btn-secondary" href="./hr_monitor.html?mode=offline">Use without signing in →</a>
     </div>
+    <p class="hero-micro">Browsers may throttle background tabs depending on settings. See the FAQ if you hit disconnects.</p>
   </div>
 
   <!-- Widget built to match widget.css. Heart icon beats, pips fill
@@ -1486,6 +1493,7 @@
       <a class="mode-inline-link" href="./hrv_viewer.html">Open viewer →</a>
     </div>
   </div>
+  <p class="mode-disclaimer">Not a medical tool. Interpretations are estimated.</p>
 </section>
 
 <section>
@@ -1522,7 +1530,7 @@
 <section>
   <p class="section-eyebrow">Session viewer</p>
   <h2 class="section-title">Every session, together.</h2>
-  <p class="section-lede">Each recording shows up in the viewer with the raw HR and RMSSD trace, autonomic interpretation, palpitation clusters, sympathetic flushes, posture and sleep windows. Sync to Drive to see them across devices, or keep it all local.</p>
+  <p class="section-lede">Each recording shows up in the viewer with the raw HR and RMSSD trace, autonomic interpretation, palpitation clusters, sympathetic flushes, posture and sleep windows. Multiple sessions from the same day stitch into a single day timeline so gaps, peaks, and warm-ups are all in one picture. Sync to Drive to see it across devices, or keep it all local.</p>
   <div class="viewer-hero">
     <img src="./screen 6.jpg" alt="Full session view with HR trace, RMSSD overlay, palpitation clusters, and a sympathetic flush tooltip" loading="lazy">
     <div class="viewer-hero-caption">A full day of recording. Mouse any spike for a tooltip, drag a marker anywhere, drill into any range.</div>
@@ -1533,7 +1541,7 @@
 <section>
   <p class="section-eyebrow">Zoom out</p>
   <h2 class="section-title">From months down to individual beats.</h2>
-  <p class="section-lede">The viewer stacks the same data at three zoom levels so you can spot a pattern and then investigate it without losing the thread.</p>
+  <p class="section-lede">The viewer stacks the same data at multiple zoom levels so you can spot a pattern and then investigate it without losing the thread. Swap between session, day, week, month, or an all-time report with interpretive summary graphs whenever it helps.</p>
   <div class="gallery-wide">
     <figure class="gallery-wide-item">
       <img src="./screen 1.jpg" alt="Month calendar view with HR range chips per day" loading="lazy">
@@ -1564,7 +1572,7 @@
     <div class="step">
       <div class="step-num">02</div>
       <h3 class="step-title">Open the app</h3>
-      <p class="step-desc">Chrome or Edge on desktop for streaming and review. Android APK for background recording with the screen off.</p>
+      <p class="step-desc">Any Chromium browser on desktop for streaming and review. Android APK for background recording with the screen off.</p>
     </div>
     <div class="step">
       <div class="step-num">03</div>
@@ -1632,8 +1640,8 @@
 
 <section>
   <p class="section-eyebrow">On the phone</p>
-  <h2 class="section-title">Pocket-sized, fully live.</h2>
-  <p class="section-lede">The mobile build keeps the same widget, same data, same broadcast, but its own compact UI with one-tap posture logging. Runs a foreground service so it doesn't sleep when the screen does.</p>
+  <h2 class="section-title">Pocket sized, fully live.</h2>
+  <p class="section-lede">The mobile build keeps the same widget, same data, same broadcast, with its own compact UI and one-tap posture logging. Runs a foreground service so it doesn't sleep when the screen does. Meant for 24/7 recording.</p>
   <div class="mobile-gallery">
     <figure class="mobile-shot">
       <img src="./mobile 4.jpg" alt="Mobile live widget with HR, HRV, trend line, and posture buttons" loading="lazy">
@@ -1685,14 +1693,15 @@
       <summary>Does it work without internet?</summary>
       <div class="faq-item-body">
         <p>Yes, in offline mode. Once the page has loaded, recording works without a connection. Sessions stay on the device until you choose to export them.</p>
-        <p>Drive sync and the streaming relay both need internet, so those only run when signed in and online.</p>
+        <p>Without internet, Drive sync pauses and the relay won't broadcast. Recording itself keeps going.</p>
       </div>
     </details>
     <details class="faq-item">
       <summary>What's the most reliable setup for 24/7 recording?</summary>
       <div class="faq-item-body">
         <p>The Android app. It runs a foreground service that keeps the BLE link, the CSV writer, and the Drive upload alive with the screen off, the app backgrounded, and the phone locked.</p>
-        <p>The web app works too, but long desktop sessions need the tab visible and the display awake.</p>
+        <p>The web app works too, but different browsers have more aggressive throttling behaviour when a tab is backgrounded, which can pause the live stream. Keep the tab visible and the display awake for long desktop sessions.</p>
+        <p>Heads up: this is still in beta. Unexpected battery drain is possible while we stabilise the native pipeline, so toggle it off when you're done.</p>
       </div>
     </details>
     <details class="faq-item">
@@ -1719,7 +1728,7 @@
       <summary>Does the Android app drain the battery?</summary>
       <div class="faq-item-body">
         <p>Streaming 24/7 with the screen off is possible. It holds a foreground-service notification and a partial wake lock so Android keeps the process alive.</p>
-        <p>Expect noticeably more battery use than idle, but similar to any fitness tracking app. Toggle off when you're done.</p>
+        <p>Expect noticeably more battery use than idle, similar to any fitness tracking app. And because this is still in beta, the pipeline may occasionally get into a bad state and burn more than it should. Toggle off when you're done.</p>
       </div>
     </details>
     <details class="faq-item">
@@ -1743,8 +1752,8 @@
       <h2 class="support-title">Free and open.</h2>
       <p class="support-desc">Built and maintained by one person. If this is useful to you and you want to help keep it free, a tip makes a real difference.</p>
       <div class="support-links">
-        <a class="support-btn primary" href="https://paypal.me/aortica" rel="noopener">Tip via PayPal</a>
-        <a class="support-btn" href="https://ko-fi.com/aortica" rel="noopener">Ko-fi</a>
+        <a class="support-btn primary" href="https://paypal.me/crowek" rel="noopener">Tip via PayPal</a>
+        <a class="support-btn" href="https://ko-fi.com/crowek" rel="noopener">Ko-fi</a>
       </div>
     </div>
     <div>
@@ -1786,7 +1795,7 @@
 </section>
 
 <footer>
-  aorti.ca · Not a medical tool.
+  aorti.ca · Not a medical tool. · <a href="./legal.html">Legal &amp; disclaimers</a>
 </footer>
 
 <button class="fab" id="back-to-top" type="button" aria-label="Back to top">
@@ -1861,34 +1870,80 @@
     tick();
   })();
 
-  // GitHub Releases → "What's new". Silent on failure (API rate limits).
+  // GitHub Releases + APK metadata → "What's new". Goal is user-friendly
+  // copy, not raw commit subjects: people don't care about branch names or
+  // internal tags. We surface the most recent Android build time from the
+  // rolling android-latest tag alongside curated release notes, and skip
+  // noisy entries (bare 'main' tag, auto-generated release-drafter titles).
   (function () {
     const el = document.getElementById('changelog');
     if (!el) return;
-    fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases?per_page=8', { cache: 'default' })
-      .then(r => r.ok ? r.json() : null)
-      .then(rels => {
-        if (!rels || !rels.length) {
-          el.innerHTML = '<div class="changelog-empty">No releases yet.</div>';
-          return;
+
+    // Noise filter: release titles / tags that shouldn't surface to users.
+    const NOISY = /^(main|master|android-latest|draft|auto)$/i;
+    // Clean up internal-sounding words so the blurb reads like a user note.
+    function humanise(s) {
+      return s
+        .replace(/\bci\b/gi, 'build')
+        .replace(/\brepo\b/gi, 'project')
+        .replace(/\bmain branch\b/gi, 'latest')
+        .replace(/\bWIP:?\s*/gi, '')
+        .trim();
+    }
+
+    const fmtDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+    Promise.all([
+      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases?per_page=8', { cache: 'default' }).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases/tags/android-latest', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([rels, apk]) => {
+      const items = [];
+
+      // Surface the Android build line first so a visitor sees "there's a
+      // new APK from today" rather than a week-old release subject.
+      if (apk) {
+        const apkAsset = (apk.assets || []).find(a => a.name === 'hr-monitor.apk');
+        const stamp = (apkAsset && apkAsset.updated_at) || apk.updated_at || apk.published_at;
+        if (stamp) {
+          items.push({
+            when: new Date(stamp),
+            title: 'Android build',
+            body: 'Freshly signed APK available from the Android download card above.',
+          });
         }
-        const filtered = rels.filter(r => r.tag_name && r.tag_name !== 'android-latest');
-        const top = filtered.slice(0, 5);
-        if (!top.length) {
-          el.innerHTML = '<div class="changelog-empty">No releases yet.</div>';
-          return;
-        }
-        el.innerHTML = top.map(r => {
-          const d = r.published_at ? new Date(r.published_at) : null;
-          const date = d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-          const firstLine = (r.body || r.name || '').split('\n').map(l => l.trim()).find(l => l && !l.startsWith('#')) || r.name || r.tag_name;
-          const safe = firstLine.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])).slice(0, 140);
-          return '<div class="changelog-item"><span class="changelog-date">' + date + '</span><span class="changelog-body"><strong>' + (r.name || r.tag_name) + '</strong>. ' + safe + '</span></div>';
-        }).join('');
-      })
-      .catch(() => {
-        el.innerHTML = '<div class="changelog-empty">Couldn\'t load updates right now.</div>';
+      }
+
+      // Real releases: skip the noisy auto-tags, use the release title +
+      // first meaningful line of the body.
+      (rels || []).forEach(r => {
+        if (!r.tag_name || NOISY.test(r.tag_name)) return;
+        if (r.name && NOISY.test(r.name)) return;
+        const body = r.body || '';
+        const firstLine = body.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('#')) || r.name || r.tag_name;
+        items.push({
+          when: r.published_at ? new Date(r.published_at) : null,
+          title: r.name || r.tag_name,
+          body: humanise(firstLine),
+        });
       });
+
+      // Newest first, cap to 5.
+      items.sort((a, b) => (b.when || 0) - (a.when || 0));
+      const top = items.slice(0, 5);
+
+      if (!top.length) {
+        el.innerHTML = '<div class="changelog-empty">No updates yet. Check back after the next build.</div>';
+        return;
+      }
+      el.innerHTML = top.map(it => {
+        const when = it.when ? fmtDate(it.when) : '';
+        const safe = (it.body || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])).slice(0, 160);
+        const title = (it.title || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+        return '<div class="changelog-item"><span class="changelog-date">' + when + '</span><span class="changelog-body"><strong>' + title + '</strong>. ' + safe + '</span></div>';
+      }).join('');
+    }).catch(() => {
+      el.innerHTML = '<div class="changelog-empty">Couldn\'t load updates right now.</div>';
+    });
   })();
 
   // APK version chip — unchanged from the current index.
@@ -1980,7 +2035,7 @@
   (function () {
     const img = document.getElementById('support-qr-img');
     if (!img) return;
-    const paypalUrl = 'https://paypal.me/aortica';
+    const paypalUrl = 'https://paypal.me/crowek';
     img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=0&bgcolor=ffffff&color=0a0a0a&data=' + encodeURIComponent(paypalUrl);
     img.onerror = () => { img.style.display = 'none'; };
   })();
