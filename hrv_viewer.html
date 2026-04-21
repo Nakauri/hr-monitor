@@ -473,6 +473,11 @@
     font-weight: 600;
     margin-bottom: 14px;
   }
+  .session-card-dur {
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 15px;
+  }
   .session-card-stats {
     display: flex;
     gap: 18px;
@@ -3684,6 +3689,9 @@
     });
     const vsLabel = document.getElementById('view-switcher-label');
     if (vsLabel) vsLabel.textContent = VIEW_LABELS[view] || 'Sessions';
+    // Cancel any active auto-poll from a previous session view. renderSession
+    // will restart it if the next view is also a session.
+    if (view !== 'session' && typeof clearAutoPoll === 'function') clearAutoPoll();
     switch (view) {
       case 'index': renderIndex(); showOnly('view-index'); break;
       case 'session': await renderSession(arg); showOnly('view-session'); break;
@@ -3787,8 +3795,8 @@
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
-          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoDate + ' · ' + meta.isoTime : fn}</div>
-          <div class="session-card-date">${dur} session</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoDate : fn}</div>
+          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(meta.date, s.duration)} <span class="session-card-dur">(${dur})</span>` : `${dur} session`}</div>
           <div class="session-card-stats">
             <div class="session-card-stat">
               <span class="session-card-stat-label">Avg HR</span>
@@ -4175,8 +4183,8 @@
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
-          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoTime : fn}</div>
-          <div class="session-card-date">${formatDuration(s.duration)} session</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta && meta.date ? formatClockTime(meta.date.getTime()) : (meta ? meta.isoTime : fn)}</div>
+          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(meta.date, s.duration)} <span class="session-card-dur">(${formatDuration(s.duration)})</span>` : `${formatDuration(s.duration)} session`}</div>
           <div class="session-card-stats">
             <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
@@ -4902,6 +4910,12 @@
       document.getElementById('view-session').innerHTML = `<div class="stub-panel">Session not found: ${filename}</div>`;
       return;
     }
+    // When the auto-poll pulls a longer version of the same session and the
+    // route re-invokes renderSession, preserve the user's brush/zoom so the
+    // live update doesn't jump the view back to the full range.
+    const sameSessionReload = currentFilename === filename;
+    const priorBrushMin = sameSessionReload ? brushMin : null;
+    const priorBrushMax = sameSessionReload ? brushMax : null;
     currentSummary = s;
     currentFilename = filename;
     const data = await loadFullSession(filename);
@@ -4941,7 +4955,8 @@
     activeFilters = Object.assign({}, filterAvailability);
     activeFilters.disconnect = false;
     activeFilters.delta = false;
-    brushMin = null; brushMax = null;
+    brushMin = priorBrushMin;
+    brushMax = priorBrushMax;
     const meta = parseSessionFilename(filename);
     const dur = formatDuration(s.duration);
 
@@ -5059,6 +5074,7 @@
               <div class="chart-legend-item toggleable" data-type="sleep" title="Click to toggle"><span class="legend-swatch" style="background: rgba(110,140,200,0.15); border: 1px dashed rgba(110,140,200,0.5);"></span>Sleep window</div>
               <div class="chart-legend-item"><span class="legend-swatch dot" style="background: #B8D97E; border: 1px solid #000;"></span>Max / Min HR</div>
               <div class="legend-spacer"></div>
+              <button class="legend-reset-zoom" id="timeline-mode-toggle" title="Switch between elapsed time and clock time on the timeline">⟳ <span id="timeline-mode-label">Clock time</span></button>
               <button class="legend-reset-zoom hidden" id="reset-zoom">Reset zoom</button>
             </div>
             <div class="chart-wrap">
@@ -5119,6 +5135,49 @@
     wireChillsSlider();
     document.getElementById('reset-zoom').addEventListener('click', resetZoom);
     updateResetZoomVisibility();
+    wireTimelineModeToggle();
+    startAutoPoll();
+  }
+
+  function wireTimelineModeToggle() {
+    const btn = document.getElementById('timeline-mode-toggle');
+    const label = document.getElementById('timeline-mode-label');
+    if (!btn || !label) return;
+    const refresh = () => {
+      label.textContent = timelineMode === 'clock' ? 'Duration' : 'Clock time';
+    };
+    refresh();
+    btn.addEventListener('click', () => {
+      setTimelineMode(timelineMode === 'clock' ? 'duration' : 'clock');
+      refresh();
+      // Swap the tick label function in place — same linear scale, just
+      // different labels — so we don't reset brush / zoom state.
+      if (currentChart && currentChart.options && currentChart.options.scales && currentChart.options.scales.x) {
+        const startEpoch = (() => {
+          const m = parseSessionFilename(currentFilename);
+          return m && m.date ? m.date.getTime() : null;
+        })();
+        currentChart.options.scales.x.ticks.callback = makeTimeTickFormatter(startEpoch);
+        currentChart.update('none');
+      }
+    });
+  }
+
+  // Auto-poll Drive while an in-session view is open. driveSync already
+  // skips unchanged files via modifiedTime, so repeat polls are cheap.
+  // Lets the user open a session that's still being recorded on the phone
+  // and watch it update without manually tapping Sync. Stops on route out.
+  let autoPollTimer = null;
+  const AUTO_POLL_INTERVAL_MS = 60000;
+  function startAutoPoll() {
+    clearAutoPoll();
+    autoPollTimer = setInterval(() => {
+      if (!driveAccessToken || !driveFolderId) return;
+      driveSync().catch(e => console.warn('[auto-poll] driveSync failed', e));
+    }, AUTO_POLL_INTERVAL_MS);
+  }
+  function clearAutoPoll() {
+    if (autoPollTimer) { clearInterval(autoPollTimer); autoPollTimer = null; }
   }
 
   // Posture + sleep overrides — stored per session in localStorage so the user can
@@ -6542,6 +6601,11 @@
 
     const hr = downsample(data.hr, 2000);
     const rmssd = downsample(data.rmssd, 2000);
+    // Session start epoch — lets the x-axis flip between MM:SS duration and
+    // absolute wall-clock time. Null if filename doesn't parse (e.g. virtual
+    // day rows), in which case clock-mode falls back to duration ticks.
+    const sessionMeta = parseSessionFilename(currentFilename);
+    const sessionStartEpoch = sessionMeta && sessionMeta.date ? sessionMeta.date.getTime() : null;
 
     // Palpitation cluster dots (one dot per cluster, sized by count)
     const palpDots = activeFilters.palp ? s.palpClusters.map(c => {
@@ -6847,7 +6911,7 @@
             type: 'linear',
             min: brushMin !== null ? brushMin : 0,
             max: brushMax !== null ? brushMax : s.duration,
-            ticks: { color: '#9a9a9a', font: { size: 12 }, callback: v => formatDuration(v) },
+            ticks: { color: '#9a9a9a', font: { size: 12 }, callback: makeTimeTickFormatter(sessionStartEpoch) },
             grid: { color: 'rgba(255,255,255,0.04)' },
           },
           y: {
@@ -7081,6 +7145,39 @@
     const s = totalSec % 60;
     if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  // Absolute wall-clock time for an epoch, 12-hour format with AM/PM so it's
+  // visually distinct from the MM:SS duration format.
+  function formatClockTime(epochMs) {
+    if (!epochMs || isNaN(epochMs)) return '—';
+    const d = new Date(epochMs);
+    let h = d.getHours();
+    const m = d.getMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return `${h}:${String(m).padStart(2, '0')} ${ampm}`;
+  }
+  function formatClockRange(startDate, durationMin) {
+    if (!startDate || durationMin == null) return '';
+    const start = startDate.getTime();
+    const end = start + durationMin * 60000;
+    return `${formatClockTime(start)} – ${formatClockTime(end)}`;
+  }
+  // Chart timeline labels switch between duration and wall clock via this
+  // toggle. Persisted so the user's preference sticks across sessions.
+  let timelineMode = localStorage.getItem('hrv_viewer_timeline_mode') === 'clock' ? 'clock' : 'duration';
+  function setTimelineMode(mode) {
+    timelineMode = mode === 'clock' ? 'clock' : 'duration';
+    try { localStorage.setItem('hrv_viewer_timeline_mode', timelineMode); } catch (e) {}
+  }
+  // Captures the session's start epoch at chart-build time so a cheap swap
+  // of ticks.callback can flip formats without rebuilding the chart.
+  function makeTimeTickFormatter(startEpoch) {
+    return function (v) {
+      if (timelineMode === 'clock' && startEpoch) return formatClockTime(startEpoch + v * 60000);
+      return formatDuration(v);
+    };
   }
 
   function escape(s) {
