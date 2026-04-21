@@ -7,7 +7,7 @@ composeBom = "2024.12.01"
 lifecycle = "2.8.7"
 datastore = "1.1.1"
 workManager = "2.10.0"
-nordicBle = "2.9.0"
+blessed = "3.1.2"
 ktor = "3.0.3"
 coroutines = "1.9.0"
 kotlinxSerialization = "1.7.3"
@@ -32,8 +32,7 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 
-nordic-ble = { group = "no.nordicsemi.android", name = "ble", version.ref = "nordicBle" }
-nordic-ble-ktx = { group = "no.nordicsemi.android", name = "ble-ktx", version.ref = "nordicBle" }
+blessed = { group = "com.github.weliem", name = "blessed-android", version.ref = "blessed" }
 
 ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }

@@ -1,7 +1,8 @@
-# Keep Nordic BLE Library internals. It uses reflection for GATT characteristic
-# parsing; shrinker strips classes that only reflection references.
--keep class no.nordicsemi.android.ble.** { *; }
--dontwarn no.nordicsemi.android.ble.**
+# BLESSED is the BLE stack (replaced Nordic v2.9 on 2026-04-21). Keep its
+# internals — it uses reflection for the shim that makes some Samsung
+# Bluetooth stack quirks work.
+-keep class com.welie.blessed.** { *; }
+-dontwarn com.welie.blessed.**
 
 # Keep Ktor OkHttp engine. Engine is loaded via ServiceLoader.
 -keep class io.ktor.client.engine.okhttp.** { *; }

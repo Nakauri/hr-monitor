@@ -17,6 +17,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // BLESSED ships via JitPack. See weliem/blessed-android on GitHub.
+        maven("https://jitpack.io")
     }
 }
 
