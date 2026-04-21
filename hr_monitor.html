@@ -7,8 +7,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>HR Monitor</title>
-<link rel="manifest" href='data:application/manifest+json,{"name":"HR Monitor","short_name":"HR Monitor","start_url":"./hr_monitor.html","display":"standalone","background_color":"%230a0a0a","theme_color":"%230f0f11","icons":[{"src":"data:image/svg%2Bxml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 192 192%22%3E%3Crect width=%22192%22 height=%22192%22 fill=%22%23101010%22/%3E%3Cpath d=%22M96 160 c-40 -32 -64 -56 -64 -88 0 -24 16 -40 40 -40 16 0 24 8 24 16 0 -8 8 -16 24 -16 24 0 40 16 40 40 0 32 -24 56 -64 88z%22 fill=%22%23E89858%22/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+<title>aorti.ca · live monitor</title>
+<link rel="manifest" href='data:application/manifest+json,{"name":"aorti.ca","short_name":"aorti.ca","start_url":"./hr_monitor.html","display":"standalone","background_color":"%230a0a0a","theme_color":"%230a0a0a","icons":[{"src":"data:image/svg%2Bxml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 192 192%22%3E%3Crect width=%22192%22 height=%22192%22 fill=%22%230a0a0a%22/%3E%3Cpath d=%22M96 160 c-40 -32 -64 -56 -64 -88 0 -24 16 -40 40 -40 16 0 24 8 24 16 0 -8 8 -16 24 -16 24 0 40 16 40 40 0 32 -24 56 -64 88z%22 fill=%22%23E84838%22/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -38,7 +41,7 @@
     margin: 0;
     padding: 0;
     background: var(--bg);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     color: var(--text);
     overflow: hidden;
     height: 100vh;
@@ -64,9 +67,58 @@
   .app-nav-title {
     color: var(--text);
     text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+    text-transform: none;
+  }
+  .aorti-nav-mark {
+    width: 24px;
+    height: 22px;
+    display: inline-block;
+    filter: drop-shadow(0 0 6px rgba(232,72,56,0.4));
+  }
+  .aorti-nav-dot { color: #E84838; font-weight: 700; }
+  .aorti-nav-ca { color: var(--text-dim); font-weight: 500; }
+  /* Beta banner — thin strip above the nav. Matches index2's design so
+     jumping from landing to monitor feels like one app. */
+  .aorti-beta-banner {
+    background: #0a0a0a;
+    border-top: 2px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-image: repeating-linear-gradient(
+      -45deg,
+      rgba(240,199,94,0.5) 0 10px,
+      rgba(10,10,10,0) 10px 22px
+    ) 2;
+    padding: 6px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 101;
+  }
+  .aorti-beta-pill {
+    padding: 2px 8px;
+    background: #F0C75E;
+    color: #0a0a0a;
+    border-radius: 3px;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
     font-weight: 700;
-    font-size: 14px;
-    letter-spacing: 0.15em;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+  }
+  .aorti-beta-text {
+    color: #F0C75E;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
   }
   .app-nav-link {
     color: var(--text-dim);
@@ -1210,13 +1262,22 @@
     }
   })();
 </script>
+<div class="aorti-beta-banner" role="note">
+  <span class="aorti-beta-pill">BETA</span>
+  <span class="aorti-beta-text">Early days. Expect bugs. Report anything weird.</span>
+</div>
 <nav class="app-nav">
-  <a class="app-nav-title" href="./index.html" target="_blank" rel="noopener">HR Monitor <span style="color: var(--accent-hr);">·</span></a>
+  <a class="app-nav-title" href="./index.html" target="_blank" rel="noopener" aria-label="aorti.ca home">
+    <svg class="aorti-nav-mark" viewBox="0 0 1779 1642" aria-hidden="true">
+      <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
+    </svg>
+    <span class="aorti-nav-word">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span></span>
+  </a>
   <a class="app-nav-link active" href="./hr_monitor.html">Live monitor</a>
   <a class="app-nav-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
-  <a class="app-nav-link nav-feedback" href="https://mail.google.com/mail/?view=cm&fs=1&to=nakauri@gmail.com&su=HR%20Monitor%20feedback%20%E2%80%94%20Live%20Monitor&body=%0A%0A%E2%80%94%E2%80%94%E2%80%94%0AApp%3A%20Live%20Monitor%0A" target="_blank" rel="noopener" title="Opens Gmail compose in a new tab with the feedback pre-filled">Send feedback</a>
+  <a class="app-nav-link nav-feedback" href="./legal.html" target="_blank" rel="noopener" title="Disclaimers, privacy, contact">Legal</a>
   <span id="hrm-version-chip-slot" style="margin-left: 8px;"></span>
 </nav>
 <script src="./diagnostics.js"></script>
