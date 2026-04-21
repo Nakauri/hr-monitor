@@ -72,15 +72,35 @@ class HrBleManager(private val appContext: Context) : HrScanner.PeripheralEventL
             HrmLog.info(TAG, "Services ready ${peripheral.address}")
             _connectionState.value = BleConnectionState.Ready
 
-            // Watch-pattern: request HIGH connection priority. BLESSED
-            // sequences this safely — it blocks the queue until the
-            // parameter change is honoured, so the subsequent CCCD write
-            // doesn't race the radio renegotiation.
-            peripheral.requestConnectionPriority(ConnectionPriority.HIGH)
+            // Previous version requested HIGH connection priority here, before
+            // the CCCD write. On cheap $25-40 straps (Coospo H808S class), the
+            // firmware enters a brief "connection update pending" state during
+            // the parameter renegotiation (default 50 ms → 15 ms) and drops
+            // queued TX — including the first HR notifications after CCCD
+            // write. The symptom was "services ready, notifications on, no
+            // data ever." Chrome Web Bluetooth doesn't expose this API at
+            // all, which is why Chrome + the same strap works. Pulsoid also
+            // doesn't use it. 1 Hz HR doesn't benefit from 15 ms intervals.
+            //
+            // Priority is now only raised on the Polar PMD path below, where
+            // 130 Hz ECG actually benefits — and only AFTER the HR subscription
+            // is stable.
 
-            // Enable HR notifications. BLESSED writes CCCD 0x2902 and
-            // awaits the descriptor-write ack before considering notify
-            // active. Silent "callback never fires" doesn't happen here.
+            // Warm-up read before the first setNotify. Van Welie's BLESSED
+            // sample reads manufacturer / model / battery BEFORE any notify;
+            // a serialized read as the first post-discovery GATT op stabilises
+            // Samsung's ATT layer so the CCCD write doesn't get mis-fired.
+            val battChar = peripheral.getCharacteristic(
+                HrBleSpec.BATTERY_SERVICE,
+                HrBleSpec.BATTERY_LEVEL,
+            )
+            if (battChar != null) {
+                peripheral.readCharacteristic(battChar)
+                peripheral.setNotify(battChar, true)
+            }
+
+            // Enable HR notifications. BLESSED writes CCCD 0x2902 and awaits
+            // the descriptor-write ack before considering notify active.
             val hrChar = peripheral.getCharacteristic(
                 HrBleSpec.HEART_RATE_SERVICE,
                 HrBleSpec.HEART_RATE_MEASUREMENT,
@@ -89,16 +109,6 @@ class HrBleManager(private val appContext: Context) : HrScanner.PeripheralEventL
                 peripheral.setNotify(hrChar, true)
             } else {
                 HrmLog.warn(TAG, "HR measurement characteristic not found")
-            }
-
-            // Battery: read once + subscribe to updates.
-            val battChar = peripheral.getCharacteristic(
-                HrBleSpec.BATTERY_SERVICE,
-                HrBleSpec.BATTERY_LEVEL,
-            )
-            if (battChar != null) {
-                peripheral.readCharacteristic(battChar)
-                peripheral.setNotify(battChar, true)
             }
 
             // Polar PMD / H10 ECG — opportunistic. Non-H10 straps simply
@@ -114,13 +124,12 @@ class HrBleManager(private val appContext: Context) : HrScanner.PeripheralEventL
             if (pmdCp != null && pmdData != null) {
                 _polarH10.value = true
                 HrmLog.info(TAG, "Polar PMD detected — ECG streaming available")
-                // PMD needs larger MTU for 73-sample frames (~232 bytes).
+                // ECG benefits from HIGH priority (130 Hz → can't afford 50 ms
+                // intervals) and larger MTU for 73-sample frames (~232 B).
+                peripheral.requestConnectionPriority(ConnectionPriority.HIGH)
                 peripheral.requestMtu(247)
                 peripheral.setNotify(pmdCp, true)
                 peripheral.setNotify(pmdData, true)
-                // Start the ECG stream after notifications are active.
-                // BLESSED's queue ensures this runs after both setNotify
-                // descriptor writes have been acknowledged.
                 peripheral.writeCharacteristic(
                     pmdCp,
                     PolarPmdCommands.START_H10_ECG,
@@ -129,6 +138,25 @@ class HrBleManager(private val appContext: Context) : HrScanner.PeripheralEventL
             } else {
                 _polarH10.value = false
             }
+        }
+
+        override fun onCharacteristicWrite(
+            peripheral: BluetoothPeripheral,
+            value: ByteArray,
+            characteristic: BluetoothGattCharacteristic,
+            status: GattStatus,
+        ) {
+            if (status != GattStatus.SUCCESS) {
+                HrmLog.warn(TAG, "Char write failed uuid=${characteristic.uuid} status=$status")
+            }
+        }
+
+        override fun onMtuChanged(
+            peripheral: BluetoothPeripheral,
+            mtu: Int,
+            status: GattStatus,
+        ) {
+            HrmLog.info(TAG, "MTU negotiated: $mtu status=$status")
         }
 
         override fun onNotificationStateUpdate(
