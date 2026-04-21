@@ -45,6 +45,7 @@ fun LiveScreen(
     val contactOff by SessionState.contactOff.collectAsState()
     val bleState by SessionState.bleState.collectAsState()
     val relayState by SessionState.relayState.collectAsState()
+    val pairingStale by SessionState.pairingStale.collectAsState()
 
     Scaffold(
         topBar = {
@@ -91,7 +92,14 @@ fun LiveScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            if (bleState != BleConnectionState.Ready && hr == null) {
+            if (pairingStale) {
+                Text(
+                    "Couldn't reach the strap after several tries. Stop the session and scan again — the stored device handle may need refreshing.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            } else if (bleState != BleConnectionState.Ready && hr == null) {
                 Text(
                     bleStatusExplanation(bleState),
                     style = MaterialTheme.typography.bodyMedium,
@@ -105,7 +113,7 @@ fun LiveScreen(
                 onClick = onStop,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Stop session")
+                Text(if (pairingStale) "Stop and re-pair" else "Stop session")
             }
         }
     }

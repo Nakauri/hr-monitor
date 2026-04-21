@@ -44,9 +44,21 @@ object SessionState {
     private val _lastTickMs = MutableStateFlow<Long?>(null)
     val lastTickMs: StateFlow<Long?> = _lastTickMs.asStateFlow()
 
+    /**
+     * True when the coordinator has exhausted reconnect attempts against a
+     * cached or fallback BluetoothDevice (usually because the stored device
+     * handle has the wrong address type after a restart-from-kill). UI
+     * surfaces a "re-pair" banner when this is true.
+     */
+    private val _pairingStale = MutableStateFlow(false)
+    val pairingStale: StateFlow<Boolean> = _pairingStale.asStateFlow()
+
     fun setActive(active: Boolean, startMs: Long? = null) {
         _active.value = active
         _sessionStartMs.value = if (active) (startMs ?: System.currentTimeMillis()) else null
+        if (active) {
+            _pairingStale.value = false
+        }
         if (!active) {
             _hr.value = null
             _rmssd.value = null
@@ -57,6 +69,8 @@ object SessionState {
             _lastTickMs.value = null
         }
     }
+
+    fun setPairingStale(stale: Boolean) { _pairingStale.value = stale }
 
     fun setStrap(info: StrapInfo?) { _strap.value = info }
     fun setBleState(state: BleConnectionState) { _bleState.value = state }

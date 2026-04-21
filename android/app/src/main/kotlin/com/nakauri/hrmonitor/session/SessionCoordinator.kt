@@ -107,25 +107,56 @@ class SessionCoordinator(
                 HrmLog.warn(TAG, "No Bluetooth adapter")
                 return
             }
-        val device = try { btAdapter.getRemoteDevice(strap.mac) } catch (e: IllegalArgumentException) {
-            HrmLog.error(TAG, "Invalid MAC ${strap.mac}", e)
-            return
-        }
+        // Preferred: use the BluetoothDevice handed to us by the scan. Its
+        // address type (PUBLIC vs. RANDOM) is already set correctly. Fallback
+        // to getRemoteDevice only for restart-from-kill, where we have the
+        // MAC from DataStore but no scan cache — those devices usually
+        // advertise PUBLIC, and the session wasn't live anyway.
+        val device = com.nakauri.hrmonitor.ble.HrScanner.getCachedDevice(strap.mac)
+            ?: try { btAdapter.getRemoteDevice(strap.mac) } catch (e: IllegalArgumentException) {
+                HrmLog.error(TAG, "Invalid MAC ${strap.mac}", e)
+                return
+            }
+        HrmLog.info(
+            TAG,
+            "Connecting to ${strap.mac} (cached=${com.nakauri.hrmonitor.ble.HrScanner.getCachedDevice(strap.mac) != null})",
+        )
 
         val manager = HrBleManager(appContext)
         bleManager = manager
 
         scope.launch {
             var hadReady = false
+            var failedAttemptsBeforeReady = 0
             manager.connectionState.collectLatest { state ->
                 SessionState.setBleState(state)
-                if (state == BleConnectionState.Ready) hadReady = true
+                if (state == BleConnectionState.Ready) {
+                    hadReady = true
+                    failedAttemptsBeforeReady = 0
+                }
                 if (state == BleConnectionState.Disconnected && SessionState.active.value) {
+                    // Fallback-path failure guard. If we never got to Ready and
+                    // we've burned INITIAL_CONNECT_ATTEMPTS cycles, the cached
+                    // BluetoothDevice almost certainly has the wrong address
+                    // type (getRemoteDevice assumed PUBLIC for a RANDOM strap).
+                    // Stop the loop and surface a re-pair request — the user
+                    // can re-scan to refresh the scan-sourced device handle.
+                    if (!hadReady) {
+                        failedAttemptsBeforeReady += 1
+                        if (failedAttemptsBeforeReady >= INITIAL_CONNECT_ATTEMPTS) {
+                            HrmLog.error(
+                                TAG,
+                                "Gave up after $failedAttemptsBeforeReady connect failures; asking user to re-pair",
+                            )
+                            SessionState.setPairingStale(true)
+                            return@collectLatest
+                        }
+                    }
                     // After an initial successful link, prefer autoConnect=true
                     // for reconnects: Android holds the connect request and
                     // resumes the instant the strap advertises again. Before
                     // the first success, stay fast so pairing errors surface.
-                    HrmLog.warn(TAG, "BLE link lost; reconnecting (auto=${hadReady})")
+                    HrmLog.warn(TAG, "BLE link lost; reconnecting (auto=${hadReady}, attempt=$failedAttemptsBeforeReady)")
                     delay(1_500)
                     if (SessionState.active.value) manager.connectStrap(device, autoConnect = hadReady)
                 }
@@ -235,6 +266,7 @@ class SessionCoordinator(
         private const val TAG = "session"
         private const val SILENT_POLL_MS = 5_000L
         private const val SILENT_THRESHOLD_MS = 30_000L
+        private const val INITIAL_CONNECT_ATTEMPTS = 4
     }
 }
 
