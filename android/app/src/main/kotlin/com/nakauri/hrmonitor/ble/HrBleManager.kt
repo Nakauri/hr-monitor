@@ -12,6 +12,8 @@ import com.welie.blessed.BluetoothPeripheralCallback
 import com.welie.blessed.ConnectionPriority
 import com.welie.blessed.GattStatus
 import com.welie.blessed.HciStatus
+import com.welie.blessed.PhyOptions
+import com.welie.blessed.PhyType
 import com.welie.blessed.WriteType
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,47 +74,42 @@ class HrBleManager(private val appContext: Context) : HrScanner.PeripheralEventL
             HrmLog.info(TAG, "Services ready ${peripheral.address}")
             _connectionState.value = BleConnectionState.Ready
 
-            // Previous version requested HIGH connection priority here, before
-            // the CCCD write. On cheap $25-40 straps (Coospo H808S class), the
-            // firmware enters a brief "connection update pending" state during
-            // the parameter renegotiation (default 50 ms → 15 ms) and drops
-            // queued TX — including the first HR notifications after CCCD
-            // write. The symptom was "services ready, notifications on, no
-            // data ever." Chrome Web Bluetooth doesn't expose this API at
-            // all, which is why Chrome + the same strap works. Pulsoid also
-            // doesn't use it. 1 Hz HR doesn't benefit from 15 ms intervals.
-            //
-            // Priority is now only raised on the Polar PMD path below, where
-            // 130 Hz ECG actually benefits — and only AFTER the HR subscription
-            // is stable.
+            // Verbatim port of weliem/blessed-android sample BluetoothHandler.java's
+            // onServicesDiscovered ordering. That sample is van Welie's own
+            // reference HR-monitor implementation and is known-working on
+            // Samsung + cheap straps. Sequence:
+            //   MTU → priority → PHY → DIS reads → battery read → setNotify
+            // The four reads (manufacturer + model + PHY + battery) before
+            // any setNotify warm up the ATT layer so the CCCD write isn't
+            // the very first GATT op after discovery — which on Samsung is
+            // documented to silently mis-fire.
+            peripheral.requestMtu(185)
+            peripheral.requestConnectionPriority(ConnectionPriority.HIGH)
+            peripheral.setPreferredPhy(PhyType.LE_2M, PhyType.LE_2M, PhyOptions.S2)
 
-            // Warm-up read before the first setNotify. Van Welie's BLESSED
-            // sample reads manufacturer / model / battery BEFORE any notify;
-            // a serialized read as the first post-discovery GATT op stabilises
-            // Samsung's ATT layer so the CCCD write doesn't get mis-fired.
-            val battChar = peripheral.getCharacteristic(
-                HrBleSpec.BATTERY_SERVICE,
-                HrBleSpec.BATTERY_LEVEL,
-            )
-            if (battChar != null) {
-                peripheral.readCharacteristic(battChar)
-                peripheral.setNotify(battChar, true)
-            }
+            peripheral.readCharacteristic(HrBleSpec.DIS_SERVICE, HrBleSpec.MANUFACTURER_NAME)
+            peripheral.readCharacteristic(HrBleSpec.DIS_SERVICE, HrBleSpec.MODEL_NUMBER)
+            peripheral.readPhy()
+            peripheral.readCharacteristic(HrBleSpec.BATTERY_SERVICE, HrBleSpec.BATTERY_LEVEL)
 
-            // Enable HR notifications. BLESSED writes CCCD 0x2902 and awaits
-            // the descriptor-write ack before considering notify active.
-            val hrChar = peripheral.getCharacteristic(
+            // HR notify — the UUID overload, same as van Welie's sample.
+            peripheral.setNotify(
                 HrBleSpec.HEART_RATE_SERVICE,
                 HrBleSpec.HEART_RATE_MEASUREMENT,
+                true,
             )
-            if (hrChar != null) {
-                peripheral.setNotify(hrChar, true)
-            } else {
-                HrmLog.warn(TAG, "HR measurement characteristic not found")
-            }
+            // Battery notify — the UUID overload.
+            peripheral.setNotify(
+                HrBleSpec.BATTERY_SERVICE,
+                HrBleSpec.BATTERY_LEVEL,
+                true,
+            )
 
-            // Polar PMD / H10 ECG — opportunistic. Non-H10 straps simply
-            // don't advertise the PMD service; getCharacteristic returns null.
+            // Polar PMD / H10 ECG — opportunistic. Non-H10 straps don't
+            // advertise the PMD service; the setNotify on a missing
+            // service is a no-op. We still try the PMD start command;
+            // if the strap rejects it (e.g. it's a Coospo, not H10),
+            // the response is INVALID_STATE and we ignore.
             val pmdCp = peripheral.getCharacteristic(
                 PolarPmdSpec.PMD_SERVICE,
                 PolarPmdSpec.PMD_CONTROL_POINT,
@@ -124,9 +121,6 @@ class HrBleManager(private val appContext: Context) : HrScanner.PeripheralEventL
             if (pmdCp != null && pmdData != null) {
                 _polarH10.value = true
                 HrmLog.info(TAG, "Polar PMD detected — ECG streaming available")
-                // ECG benefits from HIGH priority (130 Hz → can't afford 50 ms
-                // intervals) and larger MTU for 73-sample frames (~232 B).
-                peripheral.requestConnectionPriority(ConnectionPriority.HIGH)
                 peripheral.requestMtu(247)
                 peripheral.setNotify(pmdCp, true)
                 peripheral.setNotify(pmdData, true)
