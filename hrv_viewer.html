@@ -28,7 +28,10 @@
     --text-faint: #5a5a5a;
     --accent-hr: #E89858;
     --accent-rmssd: #5DCAA5;
-    --accent-blue: #85B7EB;
+    /* UI-chrome accent (primary button, active tab, focus). Retuned to
+       the brand red so aorti.ca surfaces match. Semantic blues for
+       low-HR warnings or posture stay literal elsewhere. */
+    --accent-blue: #E84838;
     --warn-high: #E24B4A;
     --warn-low: #85B7EB;
     --warn-crash: #BA7517;
@@ -56,7 +59,7 @@
     transition: border-color 0.15s, background 0.15s;
   }
   button:hover { border-color: var(--border-strong); background: #1a1a1a; }
-  button.primary { background: var(--accent-blue); color: #0a1a2a; border-color: var(--accent-blue); font-weight: 600; }
+  button.primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); font-weight: 600; }
 
   /* Stage colors (shared with live app) */
   .stage-low { color: #7DB8E8; }
@@ -654,7 +657,7 @@
     transition: background 0.15s, color 0.15s;
   }
   .metric-switch button:hover { color: var(--text); }
-  .metric-switch button.active { background: var(--accent-blue); color: #0a1a2a; }
+  .metric-switch button.active { background: var(--accent-blue); color: #fff; }
   .cal-legend-strip {
     display: flex;
     gap: 16px;
@@ -971,7 +974,7 @@
     transition: background 0.15s, color 0.15s;
   }
   .all-granularity button:hover { color: var(--text); }
-  .all-granularity button.active { background: var(--accent-blue); color: #0a1a2a; }
+  .all-granularity button.active { background: var(--accent-blue); color: #fff; }
   .all-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2340,10 +2343,6 @@
 </head>
 <body>
 
-<div class="aorti-beta-banner" role="note">
-  <span class="aorti-beta-pill">BETA</span>
-  <span class="aorti-beta-text">Early days. Expect bugs. Report anything weird.</span>
-</div>
 <header class="app-bar">
   <a class="app-title" href="./index.html" style="text-decoration: none;">
     <svg class="aorti-nav-mark" viewBox="0 0 1779 1642" aria-hidden="true">
