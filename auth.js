@@ -165,9 +165,11 @@
       throw e;
     }
 
-    const { verifier, challenge } = await makePkcePair();
+    // No PKCE on the web path: GIS popup mode overrides custom code_challenge
+    // params and the resulting verifier mismatch causes invalid_grant on
+    // exchange. Server-side exchange with client_secret already protects the
+    // code; PKCE is only required when there is no secret (pure SPA / mobile).
     const state = makeStateToken();
-    sessionStorage.setItem(LS_PKCE_VERIFIER, verifier);
     sessionStorage.setItem(LS_OAUTH_STATE, state);
 
     let code;
@@ -178,8 +180,6 @@
           scope: SCOPES,
           ux_mode: 'popup',
           state,
-          code_challenge: challenge,
-          code_challenge_method: 'S256',
           access_type: 'offline',
           prompt: 'consent',
           callback: (resp) => {
@@ -207,7 +207,6 @@
     try {
       result = await postAuthApi('/api/auth/exchange', {
         code,
-        code_verifier: verifier,
         redirect_uri: POPUP_REDIRECT_URI,
       });
       trace('web_exchange_response', { status: result.status, ok: result.ok, error: result.data && result.data.error, googleErr: result.data && result.data.google_error });
@@ -215,7 +214,6 @@
       trace('web_exchange_threw', (e && e.message) ? e.message : String(e));
       throw e;
     }
-    sessionStorage.removeItem(LS_PKCE_VERIFIER);
     sessionStorage.removeItem(LS_OAUTH_STATE);
 
     if (!result.ok) {
