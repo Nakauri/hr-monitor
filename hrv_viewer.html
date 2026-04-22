@@ -2744,10 +2744,20 @@
       setTimeout(initGoogleAuth, 400);
       return;
     }
+    // CSRF state token for OAuth — see same-pattern note in hr_monitor.html.
+    const stateToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem('aorti_oauth_state', stateToken); } catch (e) {}
     driveTokenClient = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: DRIVE_SCOPE,
+      state: stateToken,
       callback: async (resp) => {
+        let expectedState = null;
+        try { expectedState = sessionStorage.getItem('aorti_oauth_state'); } catch (e) {}
+        if (resp && resp.access_token && resp.state && expectedState && resp.state !== expectedState) {
+          console.warn('OAuth state mismatch — ignoring token');
+          return;
+        }
         if (resp.error) {
           // A silent refresh (prompt: '') can fail for reasons that have
           // nothing to do with the user, e.g. Firefox ETP blocking the

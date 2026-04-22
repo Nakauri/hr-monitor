@@ -1781,7 +1781,7 @@
   <h2 class="section-title">Bug, request, thought?</h2>
   <p class="section-lede">Drop a note. Goes straight to my inbox, no public tracker.</p>
   <form class="contact-form" id="contact-form" action="https://api.web3forms.com/submit" method="POST" novalidate>
-    <input type="hidden" name="access_key" value="YOUR_WEB3FORMS_KEY">
+    <input type="hidden" name="access_key" value="812ce07c-707c-4d91-a9db-285613f41eb1">
     <input type="hidden" name="subject" value="aorti.ca contact form">
     <input type="text" name="honeypot" style="display:none" tabindex="-1" autocomplete="off">
     <div class="contact-row">
@@ -2105,21 +2105,34 @@
     let tokenClient = null;
     function initClient() {
       if (tokenClient || !window.google || !google.accounts || !google.accounts.oauth2) return;
+      // CSRF protection: generate a random state, attach it to the
+      // request, verify it echoes back on the callback. Google's
+      // OAuth security audit flags clients that omit this even though
+      // the GIS popup flow is structurally protected — explicit is
+      // better and shuts the warning up.
+      const stateToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      try { sessionStorage.setItem('aorti_oauth_state', stateToken); } catch (e) {}
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPE,
+        state: stateToken,
         callback: (resp) => {
           if (resp.error || !resp.access_token) {
             console.warn('[aorti sign-in] OAuth error', resp);
+            return;
+          }
+          // Verify state matches what we sent. If it doesn't, drop the
+          // token: the response wasn't initiated by this page.
+          let expectedState = null;
+          try { expectedState = sessionStorage.getItem('aorti_oauth_state'); } catch (e) {}
+          if (resp.state && expectedState && resp.state !== expectedState) {
+            console.warn('[aorti sign-in] state mismatch — ignoring token');
             return;
           }
           const expiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
           try {
             localStorage.setItem(LS_KEY, JSON.stringify({ token: resp.access_token, expiresAt }));
           } catch (e) {}
-          // Head to the monitor. It sees the cached token on load and
-          // skips its own sign-in popup. Viewer reads the same key the
-          // moment it opens, so SSO propagates.
           window.location.href = MONITOR_URL;
         },
       });
