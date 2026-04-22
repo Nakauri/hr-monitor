@@ -2915,9 +2915,13 @@
     }
     setDriveProgress('syncing…');
     const driveFiles = await driveListSessions();
+    const cacheSize = Object.keys(driveMetaCache).length;
+    console.info('[driveSync] start: drive=' + driveFiles.size + ' files, cache=' + cacheSize + ' entries');
 
     // Phase 1: Drive → IDB
     let pulled = 0, skipped = 0, done = 0;
+    let staleMeta = 0, missingMeta = 0, missingStore = 0;
+    let firstStaleSample = null;
     for (const [name, meta] of driveFiles) {
       const cachedMeta = driveMetaCache[name];
       const fresh = cachedMeta && cachedMeta.id === meta.id && cachedMeta.modifiedTime === meta.modifiedTime;
@@ -2929,10 +2933,18 @@
       if (fresh && inStore) {
         skipped++;
       } else {
+        if (!cachedMeta) missingMeta++;
+        else if (!fresh) {
+          staleMeta++;
+          if (!firstStaleSample) firstStaleSample = { name, cached: cachedMeta, drive: { id: meta.id, modifiedTime: meta.modifiedTime } };
+        } else if (!inStore) missingStore++;
         try {
           const text = await driveDownloadSession(meta.id);
           await idbSet(name, text, IDB_DRIVE_STORE);
           driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime };
+          // Flush meta to localStorage every 10 pulls so a mid-sync close
+          // doesn't waste the work we already did.
+          if (pulled % 10 === 9) drivePersistMeta();
           if (sessionsIndex[name]) delete sessionsIndex[name];
           pulled++;
         } catch (e) { console.warn('Drive download failed for', name, e); }
@@ -2940,6 +2952,9 @@
       done++;
       if (driveFiles.size > 0) setDriveProgress(`pulling ${done}/${driveFiles.size}`);
     }
+    console.info('[driveSync] phase1 done: skipped=' + skipped + ' pulled=' + pulled +
+      ' missingMeta=' + missingMeta + ' staleMeta=' + staleMeta + ' missingStore=' + missingStore);
+    if (firstStaleSample) console.info('[driveSync] first stale sample:', firstStaleSample);
 
     // Phase 2: Local → Drive. Enumerate the folder; upload any file Drive
     // doesn't know about.
@@ -3002,6 +3017,7 @@
     }
 
     drivePersistMeta();
+    try { localStorage.setItem('hrv_viewer_drive_lastsync', String(Date.now())); } catch (e) {}
     const parts = [];
     if (pulled) parts.push(`${pulled} pulled`);
     if (uploaded) parts.push(`${uploaded} uploaded`);
