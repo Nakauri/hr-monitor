@@ -55,7 +55,9 @@ public final class AuthStorage {
     private static final int IV_BYTES = 12;
     private static final int GCM_TAG_BITS = 128;
 
-    private static final String REFRESH_URL = "https://aorti.ca/api/auth/refresh";
+    // Hit www.aorti.ca directly: apex redirects to www and the redirect
+    // would add a second round-trip to every background refresh.
+    private static final String REFRESH_URL = "https://www.aorti.ca/api/auth/refresh";
     // Capacitor Android WebView origin — matches the CORS allowlist in
     // /api/auth/* so the serverless functions accept this call. Native
     // okhttp requests don't set Origin automatically.

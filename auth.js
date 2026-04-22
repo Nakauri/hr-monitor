@@ -36,7 +36,10 @@
   // and /api/auth/* live on the same origin, so relative URLs work.
   const apiBase = (function () {
     if (window.__aortiAuthApiBase) return window.__aortiAuthApiBase;
-    if (isNative) return 'https://aorti.ca';
+    // Hit www.aorti.ca directly: apex aorti.ca 308-redirects to www, and
+    // browsers reject redirects on CORS preflight. Web (same-origin
+    // relative URLs) doesn't care which domain it was served from.
+    if (isNative) return 'https://www.aorti.ca';
     return '';
   })();
 
@@ -215,12 +218,36 @@
   // access_token it returns and mirror a v2 record into localStorage for
   // the UI.
 
+  function trace(step, payload) {
+    try {
+      const entry = { t: Date.now(), step: 'auth:' + step, payload: payload || null };
+      let arr = [];
+      try { arr = JSON.parse(localStorage.getItem('hrm_auth_trace') || '[]') || []; } catch {}
+      arr.push(entry);
+      if (arr.length > 30) arr = arr.slice(-30);
+      localStorage.setItem('hrm_auth_trace', JSON.stringify(arr));
+      console.info('[auth-trace]', 'auth:' + step, payload || '');
+    } catch { /* ignore */ }
+  }
+
   async function signInNative() {
+    trace('native_start');
     if (typeof window.__hrMonitorNativeDriveSignIn !== 'function') {
+      trace('native_shim_missing');
       throw new Error('native_shim_missing');
     }
-    const result = await window.__hrMonitorNativeDriveSignIn();
-    if (!result || !result.accessToken) throw new Error('native_no_token');
+    let result;
+    try {
+      result = await window.__hrMonitorNativeDriveSignIn();
+      trace('native_shim_returned', { hasAccessToken: !!(result && result.accessToken) });
+    } catch (e) {
+      trace('native_shim_threw', (e && e.message) ? e.message : String(e));
+      throw e;
+    }
+    if (!result || !result.accessToken) {
+      trace('native_no_access_token');
+      throw new Error('native_no_token');
+    }
     const record = saveToken({
       access_token: result.accessToken,
       expires_at: Date.now() + (result.expiresIn || 3600) * 1000 - 60 * 1000,
@@ -228,6 +255,7 @@
       scope: SCOPES,
     });
     notifyChange(record);
+    trace('native_saved_v2', { email: record.email });
     return record;
   }
 

@@ -444,6 +444,8 @@
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
+        <div class="hrm-diag-subtitle">Auth trace (newest last)</div>
+        <pre class="hrm-diag-log" id="hrm-auth-trace"></pre>
         <div class="hrm-diag-subtitle">Recent events (newest last)</div>
         <pre class="hrm-diag-log">${esc(formatLog(readLog()))}</pre>
         <div class="hrm-diag-actions">
@@ -458,6 +460,25 @@
 
     document.getElementById('hrm-diag-close').addEventListener('click', close);
     document.getElementById('hrm-diag-xclose').addEventListener('click', close);
+
+    // Hydrate auth trace from localStorage. Set by drive-auth-native.js and
+    // auth.js. Survives navigation because it's localStorage-based.
+    try {
+      const tracePane = document.getElementById('hrm-auth-trace');
+      if (tracePane) {
+        const raw = localStorage.getItem('hrm_auth_trace');
+        const arr = raw ? JSON.parse(raw) : [];
+        if (!arr.length) {
+          tracePane.textContent = 'no auth events yet';
+        } else {
+          tracePane.textContent = arr.map(e => {
+            const when = new Date(e.t).toISOString().slice(11, 23);
+            const payload = e.payload != null ? ' ' + JSON.stringify(e.payload) : '';
+            return when + '  ' + e.step + payload;
+          }).join('\n');
+        }
+      }
+    } catch (e) { /* ignore */ }
     document.getElementById('hrm-diag-copy').addEventListener('click', async () => {
       const text = buildCopyText(d, v);
       try {

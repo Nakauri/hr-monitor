@@ -3,6 +3,18 @@
 CSV Dates/
 _local_snapshot_*/
 
+# Secrets. NEVER commit. Google OAuth client JSON files, .env files,
+# private keys, anything that looks like a credential. The canonical
+# home for this project's secrets is C:/Users/Khal/.secrets/aorti/.
+client_secret*.json
+credentials*.json
+*.env
+*.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+
 # Image assets: scratch images at root stay untracked, but the /assets
 # tree (brand logos + product screenshots shown on the landing page) IS
 # committed so Vercel can serve them.
