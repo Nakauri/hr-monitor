@@ -125,6 +125,20 @@
       localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
       driveSignedIn: !!(window.aortiAuth && window.aortiAuth.isSignedIn()),
       driveEmail: (window.aortiAuth && window.aortiAuth.getEmail()) || null,
+      driveMetaCount: (function () {
+        try {
+          const raw = localStorage.getItem('hrv_viewer_drive_meta');
+          if (!raw) return 0;
+          return Object.keys(JSON.parse(raw)).length;
+        } catch (e) { return -1; }
+      })(),
+      driveLastSync: (function () {
+        try {
+          const t = parseInt(localStorage.getItem('hrv_viewer_drive_lastsync') || '0', 10);
+          if (!t) return null;
+          return new Date(t).toISOString().slice(0, 19).replace('T', ' ');
+        } catch (e) { return null; }
+      })(),
     };
   }
 
@@ -407,6 +421,8 @@
           ['Native sign-in override', yn(d.driveNativeOverride), d.isNative ? ok(d.driveNativeOverride) : ''],
           ['Currently signed in', yn(d.driveSignedIn), d.driveSignedIn ? 'ok' : 'warn'],
           ['Account', d.driveEmail || '—', d.driveEmail ? 'ok' : ''],
+          ['Viewer cache (sessions)', String(d.driveMetaCount), d.driveMetaCount > 0 ? 'ok' : ''],
+          ['Last viewer sync', d.driveLastSync || 'never', d.driveLastSync ? 'ok' : ''],
         ])}
         ${rows('Foreground service (Android background recording)', [
           ['1. script loaded', yn(d.fgsLoaded), d.isNative ? ok(d.fgsLoaded) : ''],
