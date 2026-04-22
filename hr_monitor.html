@@ -1324,6 +1324,25 @@
       font-size: 14px;
       justify-content: center;
     }
+    /* Marker input is the exception: input + button stay side-by-side
+       so you can actually type into the field. The full-width rule
+       above was eating the input down to a few pixels. */
+    .marker-input {
+      flex-direction: row;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .marker-input input {
+      flex: 1 1 auto;
+      width: auto;
+      min-width: 0;
+    }
+    .marker-input button {
+      flex: 0 0 auto;
+      width: auto;
+      min-width: 72px;
+      padding: 0 16px;
+    }
     /* Folder / Drive / sign-in rows: stack their label + button combo
        vertically so the row doesn't squeeze and the button stays a full
        tap target. drive-backup-row is applied to the Drive section's

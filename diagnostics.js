@@ -362,7 +362,7 @@
 
     overlay.innerHTML = `
       <div class="hrm-diag-modal">
-        <div class="hrm-diag-legal-strip"><a href="./legal.html" target="_blank" rel="noopener">Legal &amp; disclaimers</a></div>
+        <div class="hrm-diag-legal-strip"><a id="hrm-diag-legal-link" href="./legal.html">Legal &amp; disclaimers</a></div>
         <h2 class="hrm-diag-title">App diagnostics</h2>
         ${rows('Build', [
           ['Version', v && v.shortSha ? 'v0.5 · ' + v.shortSha : 'v0.5 · offline'],
