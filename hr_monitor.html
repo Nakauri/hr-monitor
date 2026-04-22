@@ -4077,14 +4077,26 @@
       $('drive-signin').disabled = true;
       return;
     }
+    // CSRF state token. Stored in sessionStorage (page-scoped),
+    // verified in callback. Shuts up Google's "not using state"
+    // security audit warning and adds real protection.
+    const stateToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem('aorti_oauth_state', stateToken); } catch (e) {}
     driveTokenClient = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: DRIVE_SCOPE,
+      state: stateToken,
       callback: (resp) => {
         if (resp.error) {
           console.warn('Google OAuth token error:', resp);
           driveTokenError = resp.error || 'unknown';
           driveUpdateUI();
+          return;
+        }
+        let expectedState = null;
+        try { expectedState = sessionStorage.getItem('aorti_oauth_state'); } catch (e) {}
+        if (resp.state && expectedState && resp.state !== expectedState) {
+          console.warn('OAuth state mismatch — ignoring token');
           return;
         }
         driveTokenError = null;
