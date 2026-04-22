@@ -84,6 +84,9 @@
       },
       disconnect: function () { return plugin.disconnect(); },
       status: function () { return plugin.status(); },
+      setPrefs: function (prefs) {
+        return plugin.setPrefs({ prefs: prefs || {} });
+      },
       onHr: function (cb) {
         hrListeners.push(cb);
         return function remove() {

@@ -1228,6 +1228,44 @@
     }
     /* Nav links tapped more often on mobile — bump their vertical bounds. */
     .app-nav-link { min-height: 36px; display: inline-flex; align-items: center; }
+
+    /* Control-panel rows: label stacks above its control on narrow
+       viewports so inputs get full width and taps land reliably. */
+    .section .row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .section .row label,
+    .section .row .label {
+      min-width: 0;
+      font-size: 12px;
+    }
+    .section input[type="text"],
+    .section input[type="number"],
+    .section select {
+      width: 100%;
+      min-height: 44px;
+      font-size: 14px;
+    }
+    .section button,
+    .section .btn {
+      width: 100%;
+      min-height: 44px;
+      font-size: 14px;
+      justify-content: center;
+    }
+    /* Folder / Drive / sign-in rows: stack their label + button combo
+       vertically so the row doesn't squeeze and the button stays a full
+       tap target. drive-backup-row is applied to the Drive section's
+       autosave-row so we hit both at once. */
+    .autosave-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .autosave-row > * { width: 100%; }
+    .autosave-folder { text-align: left; }
   }
 
   @media (max-width: 480px) {
@@ -4557,6 +4595,14 @@
 
   function saveWidgetPrefs() {
     try { localStorage.setItem('hr_monitor_widget_prefs', JSON.stringify(widgetPrefs)); } catch(e) {}
+    // When the native plugin owns the relay socket (Capacitor), push
+    // the current prefs down so publishTick can include them. Otherwise
+    // the OBS overlay never sees toggles made on the phone.
+    try {
+      if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable && typeof window.HRMNativeHrSession.setPrefs === 'function') {
+        window.HRMNativeHrSession.setPrefs(widgetPrefs);
+      }
+    } catch (e) {}
   }
 
   function loadWidgetPrefs() {
