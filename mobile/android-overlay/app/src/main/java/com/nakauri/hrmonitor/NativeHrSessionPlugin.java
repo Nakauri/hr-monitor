@@ -309,6 +309,69 @@ public class NativeHrSessionPlugin extends Plugin {
         call.resolve();
     }
 
+    // ---- Auth storage (Keystore-backed) ---------------------------------
+    // JS sign-in flow: SocialLogin.login -> serverAuthCode -> POST
+    // /api/auth/exchange -> storeAuthTokens(). Native background uploader
+    // then reads the encrypted access+refresh pair via AuthStorage directly.
+
+    @PluginMethod
+    public void storeAuthTokens(PluginCall call) {
+        String accessToken = call.getString("access_token");
+        String refreshToken = call.getString("refresh_token");
+        Long expiresAt = call.getLong("expires_at");
+        String email = call.getString("email");
+        executor().execute(() -> {
+            try {
+                AuthStorage.store(getContext(), accessToken, refreshToken,
+                    expiresAt != null ? expiresAt : 0L, email);
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("storeAuthTokens failed: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void getValidAccessToken(PluginCall call) {
+        executor().execute(() -> {
+            String token = AuthStorage.getValidAccessToken(getContext());
+            if (token == null) {
+                call.reject("no_valid_token");
+                return;
+            }
+            JSObject ret = new JSObject();
+            ret.put("access_token", token);
+            ret.put("expires_at", AuthStorage.getExpiresAt(getContext()));
+            ret.put("email", AuthStorage.getEmail(getContext()));
+            call.resolve(ret);
+        });
+    }
+
+    @PluginMethod
+    public void clearAuth(PluginCall call) {
+        executor().execute(() -> {
+            AuthStorage.clear(getContext());
+            call.resolve();
+        });
+    }
+
+    @PluginMethod
+    public void authStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("signed_in", AuthStorage.isSignedIn(getContext()));
+        ret.put("email", AuthStorage.getEmail(getContext()));
+        ret.put("expires_at", AuthStorage.getExpiresAt(getContext()));
+        call.resolve(ret);
+    }
+
+    private java.util.concurrent.ExecutorService authExecutor;
+    private synchronized java.util.concurrent.ExecutorService executor() {
+        if (authExecutor == null) {
+            authExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        }
+        return authExecutor;
+    }
+
     @PluginMethod
     public void status(PluginCall call) {
         JSObject ret = new JSObject();

@@ -14,7 +14,7 @@ const mobileRoot = path.resolve(__dirname, '..');
 const wwwDir = path.join(mobileRoot, 'www');
 
 // Files copied as-is.
-const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'widget.css', 'widget.js', 'diagnostics.js', 'settings.js'];
+const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'widget.css', 'widget.js', 'diagnostics.js', 'settings.js', 'auth.js'];
 // The Capacitor WebView loads index.html by default; we want it to show the
 // dedicated mobile-first landing (app-home.html), not the scrolling public
 // landing. Public https://aorti.ca/ keeps the scroll-heavy page because
@@ -122,9 +122,17 @@ function copyIndexOverride() {
     console.warn(`[copy-web] skipping ${INDEX_OVERRIDE.from} -> ${INDEX_OVERRIDE.to} (source missing)`);
     return;
   }
-  const src = fs.readFileSync(from, 'utf8');
-  fs.writeFileSync(to, stripForMobile(src));
-  console.log(`[copy-web] ${INDEX_OVERRIDE.from} → www/${INDEX_OVERRIDE.to} (app home, analytics stripped)`);
+  let html = fs.readFileSync(from, 'utf8');
+  html = stripForMobile(html);
+  // Inject the same shim block used for hr_monitor.html so the native
+  // SocialLogin + NativeHrSession plugins are reachable from app-home's
+  // Start Session button on Capacitor. (The web copy at aorti.ca does
+  // not need these — auth.js + GSI already cover the web sign-in path.)
+  if (!/drive-auth-native\.js/.test(html)) {
+    html = html.replace(/<\/head>/i, `${SHIM_TAGS}</head>`);
+  }
+  fs.writeFileSync(to, html);
+  console.log(`[copy-web] ${INDEX_OVERRIDE.from} → www/${INDEX_OVERRIDE.to} (app home, shim injected, analytics stripped)`);
 }
 
 function buildOnce() {

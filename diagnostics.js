@@ -123,7 +123,8 @@
       oemLastError: window.__hrMonitorOemLastError || null,
       userAgent: navigator.userAgent,
       localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
-      driveSignedIn: !!localStorage.getItem('hr_monitor_drive_token'),
+      driveSignedIn: !!(window.aortiAuth && window.aortiAuth.isSignedIn()),
+      driveEmail: (window.aortiAuth && window.aortiAuth.getEmail()) || null,
     };
   }
 
@@ -235,7 +236,18 @@
         padding: 22px 24px;
         color: #d8d8d8;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        position: relative;
       }
+      .hrm-diag-xclose {
+        position: absolute; top: 10px; right: 10px;
+        width: 34px; height: 34px;
+        background: transparent; border: none;
+        color: #8a8a8a; font-size: 20px; line-height: 1;
+        cursor: pointer; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .hrm-diag-xclose:hover { color: #d8d8d8; background: #1a1a1a; }
+      .hrm-diag-xclose svg { width: 16px; height: 16px; }
       .hrm-diag-title { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 14px; }
       .hrm-diag-legal-strip {
         display: block;
@@ -362,6 +374,7 @@
 
     overlay.innerHTML = `
       <div class="hrm-diag-modal">
+        <button class="hrm-diag-xclose" id="hrm-diag-xclose" aria-label="Close diagnostics"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
         <div class="hrm-diag-legal-strip"><a href="./legal.html" target="_blank" rel="noopener">Legal &amp; disclaimers</a></div>
         <h2 class="hrm-diag-title">App diagnostics</h2>
         ${rows('Build', [
@@ -393,6 +406,7 @@
           ['last error', d.driveAuthLastError || 'none', d.driveAuthLastError ? 'err' : 'ok'],
           ['Native sign-in override', yn(d.driveNativeOverride), d.isNative ? ok(d.driveNativeOverride) : ''],
           ['Currently signed in', yn(d.driveSignedIn), d.driveSignedIn ? 'ok' : 'warn'],
+          ['Account', d.driveEmail || '—', d.driveEmail ? 'ok' : ''],
         ])}
         ${rows('Foreground service (Android background recording)', [
           ['1. script loaded', yn(d.fgsLoaded), d.isNative ? ok(d.fgsLoaded) : ''],
@@ -435,6 +449,7 @@
         <div class="hrm-diag-actions">
           <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
           <button id="hrm-diag-clearlog">Clear events</button>
+          <button id="hrm-diag-clearauth">Clear auth state</button>
           <button id="hrm-diag-close">Close</button>
         </div>
       </div>
@@ -442,6 +457,7 @@
     document.body.appendChild(overlay);
 
     document.getElementById('hrm-diag-close').addEventListener('click', close);
+    document.getElementById('hrm-diag-xclose').addEventListener('click', close);
     document.getElementById('hrm-diag-copy').addEventListener('click', async () => {
       const text = buildCopyText(d, v);
       try {
@@ -459,6 +475,18 @@
         writeLog([]);
         const pane = document.querySelector('.hrm-diag-log');
         if (pane) pane.textContent = '';
+      });
+    }
+    const clearAuthBtn = document.getElementById('hrm-diag-clearauth');
+    if (clearAuthBtn) {
+      clearAuthBtn.addEventListener('click', async () => {
+        if (!confirm('Clear all saved Google auth state? You will need to sign in again.')) return;
+        try {
+          if (window.aortiAuth) await window.aortiAuth.signOut({ local: true, remote: false });
+        } catch (e) { /* ignore */ }
+        try { localStorage.removeItem('hr_monitor_drive_token'); } catch (e) {}
+        clearAuthBtn.textContent = 'Cleared — reload page';
+        clearAuthBtn.disabled = true;
       });
     }
   }
