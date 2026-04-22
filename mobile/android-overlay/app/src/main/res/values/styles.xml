@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <!-- Post-splash theme. windowBackground is the dark aorti background
+         so there's no white flash between the splash dismissing and the
+         WebView drawing its first frame. -->
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/aorti_icon_bg</item>
+        <item name="android:background">@null</item>
+    </style>
+
+    <!-- Launch theme. Uses Android 12+'s SplashScreen API with a solid
+         dark background + the aorti glyph as the splash icon. Falls back
+         to the classic android:background on older devices. The
+         postSplashScreenTheme hands off to AppTheme.NoActionBar which
+         ALSO has a dark windowBackground so we never flash white. -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#0A0A0A</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/aorti_foreground</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:background">#0A0A0A</item>
+        <item name="android:windowBackground">#0A0A0A</item>
+    </style>
+</resources>
