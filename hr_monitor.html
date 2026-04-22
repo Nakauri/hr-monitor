@@ -2786,7 +2786,7 @@
     // the user can paste the URL into OBS on their desktop.
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     const origin = isNative
-      ? 'https://hr-monitor-topaz.vercel.app/'
+      ? 'https://aorti.ca/'
       : location.origin + location.pathname.replace(/hr_monitor\.html$/, '');
     const params = new URLSearchParams();
     params.set('key', getOrCreateBroadcastKey());
