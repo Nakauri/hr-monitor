@@ -1151,6 +1151,13 @@
     color: #fff;
   }
   .support-btn.primary:hover { background: #ff5a4a; }
+  /* Hide the PayPal button + QR on mobile. Chrome's link-prerender plus
+     Android App Links (paypal.me → PayPal app) can launch PayPal unprompted
+     when the element scrolls into view if the user has ever confirmed
+     "always open with PayPal" for paypal.me. Ko-fi stays visible. */
+  @media (max-width: 768px) {
+    .support-paypal { display: none !important; }
+  }
   .support-qr {
     background: #fff;
     padding: 10px;
@@ -1762,11 +1769,17 @@
       <h2 class="support-title">Free, built by one person.</h2>
       <p class="support-desc">No subscription, no ads. If this is useful and you want to help keep it that way, a tip makes a real difference.</p>
       <div class="support-links">
-        <a class="support-btn primary" href="https://paypal.me/crowek" rel="noopener">Tip via PayPal</a>
-        <a class="support-btn" href="https://ko-fi.com/crowek" rel="noopener">Ko-fi</a>
+        <!-- PayPal link is guarded with rel="noopener noreferrer" + data-no-prefetch.
+             Android Chrome prerenders links that come into view; with the PayPal
+             app installed and "always open in app" once confirmed, that prerender
+             alone is enough to launch PayPal over whatever the user is doing. The
+             button is hidden on mobile via .support-paypal — only reachable from
+             desktop where the prerender-app-launch chain doesn't apply. -->
+        <a class="support-btn primary support-paypal" href="https://paypal.me/crowek" rel="noopener noreferrer" data-no-prefetch>Tip via PayPal</a>
+        <a class="support-btn" href="https://ko-fi.com/crowek" rel="noopener noreferrer">Ko-fi</a>
       </div>
     </div>
-    <div>
+    <div class="support-paypal">
       <div class="support-qr">
         <!-- Generated dynamically so the URL stays in one place. Handle
              network failures by hiding silently. -->
