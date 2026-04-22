@@ -493,6 +493,30 @@
     margin-top: 2px;
   }
   .big-toggle-meta:empty { display: none; }
+  .big-toggle-email {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: 'Consolas', 'Monaco', monospace;
+    margin-top: 3px;
+    word-break: break-all;
+  }
+  .big-toggle-email:empty { display: none; }
+  .drive-signout-link {
+    align-self: flex-start;
+    margin: 6px 0 0 2px;
+    padding: 4px 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    font-family: inherit;
+    border-radius: 4px;
+    transition: color 0.12s, background 0.12s;
+  }
+  .drive-signout-link:hover { color: var(--text); background: rgba(255,255,255,0.04); }
   .autosave-label {
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -1536,9 +1560,9 @@
           <button type="button" id="drive-signin" class="big-toggle-btn" data-state="unset">
             <span class="big-toggle-title">Save to Google Drive</span>
             <span class="big-toggle-sub" id="drive-status">Tap to sign in</span>
+            <span class="big-toggle-email" id="drive-email"></span>
           </button>
-          <!-- Kept for legacy JS; hidden, the big toggle wires both. -->
-          <button id="drive-signout" style="display: none;">Sign out</button>
+          <button type="button" id="drive-signout" class="drive-signout-link" style="display: none;">Sign out</button>
         </div>
         <div class="toggle-row battopt-row" id="battopt-row" hidden>
           <div class="toggle-text">
@@ -3996,15 +4020,24 @@
     driveTokenExpiresAt = cached ? cached.expires_at : 0;
   }
 
+  function driveErrorLabel(code) {
+    if (!code) return null;
+    if (/refresh_token_invalid|expired|interaction_required/i.test(code)) return 'Session expired — tap to sign in';
+    if (/network|fetch|offline|upstream/i.test(code)) return navigator.onLine ? 'Drive unreachable — tap to retry' : 'Offline — will retry';
+    return 'Drive error — tap to reconnect';
+  }
+
   function driveUpdateUI() {
     const statusEl = $('drive-status');
     const signIn = $('drive-signin');
     const signOut = $('drive-signout');
+    const emailEl = $('drive-email');
     if (typeof renderBroadcastersPanel === 'function') renderBroadcastersPanel();
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
     const tokenExpired = driveAccessToken && Date.now() > driveTokenExpiresAt;
     const effectiveError = driveTokenError && !driveRefreshing;
+    const email = window.aortiAuth ? window.aortiAuth.getEmail() : null;
     if (driveAccessToken && !tokenExpired && !effectiveError) {
       if (driveFolderId) {
         statusEl.textContent = driveRefreshing ? 'refreshing…' : 'syncing to Drive';
@@ -4014,16 +4047,19 @@
         statusEl.classList.add('drive-signedin');
       }
       signIn.setAttribute('data-state', 'set');
-      signOut.style.display = 'none';
+      if (emailEl) emailEl.textContent = email || '';
+      signOut.style.display = '';
     } else if (effectiveError || tokenExpired) {
-      statusEl.textContent = driveAccessToken ? 'Tap to reconnect Drive' : 'Sign-in failed — tap to retry';
+      statusEl.textContent = driveErrorLabel(driveTokenError) || (driveAccessToken ? 'Tap to reconnect Drive' : 'Sign-in failed — tap to retry');
       statusEl.classList.add('drive-error');
       signIn.setAttribute('data-state', 'unset');
+      if (emailEl) emailEl.textContent = '';
       signOut.style.display = 'none';
     } else {
       statusEl.textContent = 'Tap to sign in';
       statusEl.classList.add('drive-idle');
       signIn.setAttribute('data-state', 'unset');
+      if (emailEl) emailEl.textContent = '';
       signOut.style.display = 'none';
     }
   }
@@ -4046,6 +4082,18 @@
     if (driveAccessToken && !driveFolderId) {
       driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
     }
+    // When the network flips back online, quietly re-attempt any pending
+    // refresh so the "Offline" banner doesn't stick around.
+    window.addEventListener('online', () => {
+      if (driveTokenError && /network|fetch|offline|upstream/i.test(driveTokenError)) {
+        driveTokenError = null;
+        driveUpdateUI();
+        if (driveAccessToken && !driveFolderId) {
+          driveEnsureFolder().catch(() => {});
+        }
+      }
+    });
+    window.addEventListener('offline', driveUpdateUI);
   }
 
   async function driveSignIn() {
@@ -4797,16 +4845,13 @@
       }
     });
     restoreAutoSaveFolder();
-    // Google Drive big toggle: unset = sign in, set = confirm then sign out.
+    // Google Drive big toggle: click signs in when signed out. When signed in,
+    // the toggle is informational (email shown below); a separate Sign-out
+    // link handles the sign-out action without a confirm dialog.
     initDriveUI();
     $('drive-signin').addEventListener('click', () => {
-      if (window.aortiAuth && window.aortiAuth.isSignedIn()) {
-        if (confirm('Sign out of Google Drive? Future sessions stop syncing until you sign back in.')) {
-          driveSignOut();
-        }
-      } else {
-        driveSignIn();
-      }
+      if (window.aortiAuth && window.aortiAuth.isSignedIn()) return;
+      driveSignIn();
     });
     $('drive-signout').addEventListener('click', driveSignOut);
     $('add-marker').addEventListener('click', addMarker);

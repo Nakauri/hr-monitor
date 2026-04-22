@@ -286,6 +286,16 @@
     color: var(--border-strong);
     padding: 0 2px;
   }
+  .fi-drive-email {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: 'Consolas', 'Monaco', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+  }
+  .fi-drive-email:empty { display: none; }
   #drive-status {
     font-family: 'Consolas', 'Monaco', monospace;
     padding: 3px 8px;
@@ -2385,6 +2395,7 @@
     <div class="fi-group fi-drive">
       <span>Drive:</span>
       <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
+      <span id="drive-email" class="fi-drive-email"></span>
       <button id="drive-signin">Sign in</button>
       <button class="icon-btn" id="drive-sync" style="display:none" title="Sync with Drive (pulls new files down, pushes local files up, mirrors Drive-only files back to the folder)" aria-label="Sync with Drive">
         <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -2667,8 +2678,11 @@
     const signIn = document.getElementById('drive-signin');
     const signOut = document.getElementById('drive-signout');
     const syncBtn = document.getElementById('drive-sync');
+    const emailEl = document.getElementById('drive-email');
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
+    const email = window.aortiAuth ? window.aortiAuth.getEmail() : null;
+    if (emailEl) emailEl.textContent = (driveAccessToken && email) ? email : '';
     if (driveAccessToken) {
       if (driveFolderId) {
         statusEl.textContent = driveRefreshing ? '↻' : 'on';
@@ -2728,6 +2742,16 @@
     });
     syncAuthStateLocal();
     driveUpdateUI();
+    window.addEventListener('online', () => {
+      // Re-attempt a folder/sync when network returns, in case we hit
+      // an offline error banner earlier in this session.
+      if (driveAccessToken && !driveFolderId) {
+        driveEnsureFolder()
+          .then(() => { driveUpdateUI(); return driveSync(); })
+          .catch(() => {});
+      }
+    });
+    window.addEventListener('offline', () => setDriveError('offline — will retry'));
     // If a token is already cached from another page, pull the folder + sync
     // without waiting for another auth event.
     if (driveAccessToken && !driveFolderId) {
