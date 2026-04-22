@@ -1,13 +1,7 @@
 package com.nakauri.hrmonitor;
 
-import android.accounts.Account;
 import android.content.Context;
 import android.util.Log;
-
-import com.google.android.gms.auth.GoogleAuthException;
-import com.google.android.gms.auth.GoogleAuthUtil;
-import com.google.android.gms.auth.api.signin.GoogleSignIn;
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -32,10 +26,10 @@ import okhttp3.Response;
  * the web app uses. Runs entirely in native code so uploads continue
  * while the WebView is paused / app is backgrounded.
  *
- * Auth: pulls the signed-in GoogleSignInAccount via GoogleSignIn helper
- * (the @codetrix-studio/capacitor-google-auth Capacitor plugin already
- * stores it via Android's account manager). GoogleAuthUtil.getToken()
- * fetches a fresh OAuth access token on demand, even when JS is paused.
+ * Auth: pulls the current OAuth access token from AuthStorage, which is
+ * Keystore-backed and refreshes via /api/auth/refresh whenever the token is
+ * near expiry. The WebView populated these tokens at sign-in time via
+ * NativeHrSessionPlugin.storeAuthTokens().
  *
  * Strategy: same Drive file ID per session, PATCH-update its content on
  * each upload tick (matches hr_monitor.html driveUploadSession exactly).
@@ -43,7 +37,6 @@ import okhttp3.Response;
  */
 public class NativeDriveUploader {
     private static final String TAG = "NativeDriveUploader";
-    private static final String DRIVE_SCOPE = "oauth2:https://www.googleapis.com/auth/drive.file";
     private static final String DRIVE_FOLDER_NAME = "HR Monitor Sessions";
     private static final String FOLDER_MIME = "application/vnd.google-apps.folder";
 
@@ -84,16 +77,9 @@ public class NativeDriveUploader {
 
     /** Synchronous upload (call from a background thread only). */
     private void doUpload(File csv) throws IOException {
-        GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(context);
-        if (account == null || account.getAccount() == null) {
-            Log.i(TAG, "No signed-in Google account; skipping upload");
-            return;
-        }
-        String token;
-        try {
-            token = GoogleAuthUtil.getToken(context, account.getAccount(), DRIVE_SCOPE);
-        } catch (GoogleAuthException e) {
-            Log.w(TAG, "Token fetch failed: " + e.getMessage());
+        String token = AuthStorage.getValidAccessToken(context);
+        if (token == null) {
+            Log.i(TAG, "No valid Drive token; skipping upload");
             return;
         }
 

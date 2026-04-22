@@ -208,13 +208,14 @@
     return record;
   }
 
-  // ---------- sign-in (Capacitor — Stage 2 bridge to old shim) -------------
-  // The existing drive-auth-native.js writes to the legacy LS key and has no
-  // refresh. Here we adapt its return value to the v2 schema so callers get
-  // a consistent contract. Stage 3 replaces this entire branch with a
-  // serverAuthCode → /api/auth/exchange → Keystore path.
+  // ---------- sign-in (Capacitor) ------------------------------------------
+  // drive-auth-native.js owns the native flow: SocialLogin popup →
+  // serverAuthCode → POST /api/auth/exchange → tokens land in Android
+  // Keystore via NativeHrSession.storeAuthTokens. We just consume the
+  // access_token it returns and mirror a v2 record into localStorage for
+  // the UI.
 
-  async function signInNativeLegacy() {
+  async function signInNative() {
     if (typeof window.__hrMonitorNativeDriveSignIn !== 'function') {
       throw new Error('native_shim_missing');
     }
@@ -223,7 +224,7 @@
     const record = saveToken({
       access_token: result.accessToken,
       expires_at: Date.now() + (result.expiresIn || 3600) * 1000 - 60 * 1000,
-      email: null,
+      email: result.email || null,
       scope: SCOPES,
     });
     notifyChange(record);
@@ -231,7 +232,7 @@
   }
 
   async function signIn() {
-    if (isNative) return signInNativeLegacy();
+    if (isNative) return signInNative();
     return signInWeb();
   }
 
@@ -244,8 +245,24 @@
     refreshInFlight = (async () => {
       try {
         if (isNative) {
-          // Legacy shim can't refresh; caller must re-run signIn().
-          throw new Error('native_refresh_unavailable');
+          if (typeof window.__hrMonitorNativeDriveRefresh !== 'function') {
+            throw new Error('native_refresh_unavailable');
+          }
+          const out = await window.__hrMonitorNativeDriveRefresh();
+          if (!out || !out.accessToken) {
+            clearToken();
+            notifyChange(null);
+            throw new Error('refresh_token_invalid');
+          }
+          const existing = loadToken();
+          const record = saveToken({
+            access_token: out.accessToken,
+            expires_at: out.expiresAt || (Date.now() + 3600 * 1000 - 60 * 1000),
+            email: out.email || (existing ? existing.email : null),
+            scope: existing ? existing.scope : SCOPES,
+          });
+          notifyChange(record);
+          return record;
         }
         const { ok, status, data } = await postAuthApi('/api/auth/refresh', null);
         if (status === 401) {
