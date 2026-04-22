@@ -3,10 +3,14 @@
 CSV Dates/
 _local_snapshot_*/
 
-# Image assets used during design, not source of truth
+# Image assets: scratch images at root stay untracked, but the /assets
+# tree (brand logos + product screenshots shown on the landing page) IS
+# committed so Vercel can serve them.
 *.jpg
 *.png
 !icon.png
+!/assets/**
+
 
 # Build / dependency dirs (if we later move to React/Vite)
 node_modules/
@@ -54,7 +58,17 @@ Thumbs.db
 SESSION_LOG.md
 CLAUDE.md
 TODO.md
-MOBILE_LAUNCH_PLAN.md
-baseline_thresholds_plan.md
-crash.txt
-ectopics.txt
+docs/MOBILE_LAUNCH_PLAN.md
+docs/baseline_thresholds_plan.md
+
+# Organised local-only directories created during the rebrand cleanup.
+# backups/ holds the pre-rebrand HTML snapshots (diff / revert source).
+# _scratch/ holds throwaway design refs, screenshots we didn't ship, and
+# error logs pulled during debugging.
+backups/
+_scratch/
+_local/
+
+# Claude Code local state and other editor/tool scratch at repo root.
+.claude/
+HTML HR Monitor Save State/
