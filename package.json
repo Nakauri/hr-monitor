@@ -1,0 +1,7 @@
+{
+  "name": "aorti-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "aorti.ca static site plus /api/auth serverless endpoints (Vercel)."
+}
