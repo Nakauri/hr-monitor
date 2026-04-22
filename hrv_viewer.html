@@ -2698,6 +2698,7 @@
       signIn.style.display = 'none';
       signOut.style.display = '';
       syncBtn.style.display = driveFolderId ? '' : 'none';
+      clearDriveErrorClick();
     } else {
       statusEl.textContent = 'off';
       statusEl.title = 'Not signed in. Click Sign in to enable Drive sync.';
@@ -2705,6 +2706,7 @@
       signIn.style.display = '';
       signOut.style.display = 'none';
       syncBtn.style.display = 'none';
+      clearDriveErrorClick();
     }
   }
 
@@ -2721,6 +2723,24 @@
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing');
     statusEl.classList.add('drive-error');
     statusEl.textContent = text;
+    statusEl.style.cursor = 'pointer';
+    statusEl.title = 'Click for sign-in diagnostics + auth trace';
+    statusEl.onclick = openDiagnosticsModal;
+  }
+
+  function clearDriveErrorClick() {
+    const statusEl = document.getElementById('drive-status');
+    if (!statusEl) return;
+    statusEl.style.cursor = '';
+    statusEl.onclick = null;
+  }
+
+  function openDiagnosticsModal() {
+    if (window.HRMDiagnostics && typeof window.HRMDiagnostics.open === 'function') {
+      window.HRMDiagnostics.open();
+    } else {
+      alert('Diagnostics module not loaded yet. Refresh the page and try again.');
+    }
   }
 
   function initDriveUI() {
