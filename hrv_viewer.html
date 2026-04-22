@@ -2590,14 +2590,47 @@
   // localStorage carried over from a prior monitor session on this browser.
   // Opens overlay.html with &bg=dark so the page renders visibly instead of
   // the transparent-for-OBS default.
+  // Visibility now depends on two things: (1) a broadcast key exists in
+  // localStorage, AND (2) we've actually seen a tick from the relay in
+  // the last 15 seconds. The key alone used to be enough, which meant
+  // the button said "Live" even when nobody was broadcasting — just
+  // because the persistent key was hanging around from a past session.
+  let watchLiveSocket = null;
+  let watchLiveLastTick = 0;
   function updateWatchLiveUI() {
     const link = document.getElementById('watch-live-link');
     if (!link) return;
     const key = localStorage.getItem('hr_monitor_broadcast_key');
     if (!key) { link.hidden = true; return; }
     link.href = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark';
-    link.hidden = false;
+    const tickAgeMs = Date.now() - watchLiveLastTick;
+    link.hidden = !(watchLiveLastTick && tickAgeMs < 15000);
   }
+  // Relay listener: opens once, stays open while the viewer is in the
+  // foreground, stamps watchLiveLastTick on any incoming tick. Timer
+  // re-checks visibility so the button auto-hides 15 s after the last
+  // tick if the sender disconnected.
+  (function connectWatchLiveRelay() {
+    const key = localStorage.getItem('hr_monitor_broadcast_key');
+    if (!key) return;
+    try {
+      watchLiveSocket = new WebSocket('wss://hr-relay.nakauri.partykit.dev/parties/main/' + encodeURIComponent(key));
+      watchLiveSocket.addEventListener('message', (ev) => {
+        try {
+          const m = JSON.parse(ev.data);
+          if (m && m.type === 'tick') {
+            watchLiveLastTick = Date.now();
+            updateWatchLiveUI();
+          }
+        } catch (e) {}
+      });
+      watchLiveSocket.addEventListener('close', () => {
+        watchLiveSocket = null;
+        setTimeout(connectWatchLiveRelay, 5000);
+      });
+    } catch (e) { /* relay unreachable: button stays hidden, correct default */ }
+  })();
+  setInterval(updateWatchLiveUI, 5000);
 
   // ===== Google Drive read integration =====
   // Mirrors the constants + OAuth flow used in hr_monitor.html (same client ID,
