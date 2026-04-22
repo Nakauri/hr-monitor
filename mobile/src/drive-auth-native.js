@@ -1,13 +1,14 @@
-// drive-auth-native.js — inside Capacitor (Android), override the web GSI
-// popup flow with @codetrix-studio/capacitor-google-auth's native sign-in.
-// Plugin accessed via Capacitor.Plugins.GoogleAuth (NOT registerPlugin —
-// see CLAUDE.md for why).
+// drive-auth-native.js — Capacitor Android sign-in bridge.
+// Replaces the abandoned @codetrix-studio/capacitor-google-auth plugin
+// with @capgo/capacitor-social-login (actively maintained). The login
+// returns a one-time `serverAuthCode` which we POST to
+// https://aorti.ca/api/auth/exchange in exchange for access + refresh
+// tokens. Tokens are then handed to NativeHrSession.storeAuthTokens for
+// Keystore-backed encryption so the background uploader can refresh
+// them while the WebView is paused.
 
 try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
 
-// Everything inside this IIFE: "init" used to be a global function decl,
-// which collided with foreground-service.js's identically-named global and
-// silently broke Drive sign-in. Local scope prevents that.
 (function () {
   function dMark(key, val) { try { window[key] = val; } catch (e) {} }
 
@@ -26,46 +27,42 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
       dMark('__hrMonitorDriveAuthPlatform', platform);
       const isNative = cap.isNativePlatform && cap.isNativePlatform();
       dMark('__hrMonitorDriveAuthIsNative', !!isNative);
-      if (!isNative) { console.info('[drive-auth-native] not native, skipping native GoogleAuth.'); return; }
+      if (!isNative) { console.info('[drive-auth-native] not native, skipping native sign-in.'); return; }
 
-      // Prefer the natively-populated Plugins reference. registerPlugin is
-      // an ES-module-only API; not available on window.Capacitor in plain
-      // script-tag mode. See CLAUDE.md.
-      let GoogleAuth = (cap.Plugins && cap.Plugins.GoogleAuth) || null;
-      if (!GoogleAuth && typeof cap.registerPlugin === 'function') {
-        try { GoogleAuth = cap.registerPlugin('GoogleAuth'); }
-        catch (e) {
-          dMark('__hrMonitorDriveAuthLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
-        }
+      const SocialLogin = (cap.Plugins && cap.Plugins.SocialLogin) || null;
+      const Native = (cap.Plugins && cap.Plugins.NativeHrSession) || null;
+      dMark('__hrMonitorDriveAuthGotPlugin', !!(SocialLogin && Native));
+      if (!SocialLogin) {
+        console.error('[drive-auth-native] SocialLogin plugin missing.');
+        dMark('__hrMonitorDriveAuthLastError', 'Capacitor.Plugins.SocialLogin undefined');
+        return;
       }
-      dMark('__hrMonitorDriveAuthGotPlugin', !!GoogleAuth);
-      if (!GoogleAuth) {
-        console.error('[drive-auth-native] GoogleAuth plugin missing — bail.');
-        dMark('__hrMonitorDriveAuthLastError', (window.__hrMonitorDriveAuthLastError || '') + ' / Capacitor.Plugins.GoogleAuth undefined');
+      if (!Native) {
+        console.error('[drive-auth-native] NativeHrSession plugin missing.');
+        dMark('__hrMonitorDriveAuthLastError', 'Capacitor.Plugins.NativeHrSession undefined');
         return;
       }
 
-      // Web OAuth client ID from hr_monitor.html. Plugin's native Google
-      // Sign-In SDK uses this as serverClientId; Android OAuth client must
-      // also be registered in the same GCP project, matched by package
-      // name + SHA-1 of the signing keystore.
       const WEB_CLIENT_ID = '103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com';
-      const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+      const SCOPES = [
+        'openid',
+        'email',
+        'https://www.googleapis.com/auth/drive.file',
+      ];
+      const EXCHANGE_URL = 'https://aorti.ca/api/auth/exchange';
 
       let initialized = false;
       async function ensureInit() {
         if (initialized) return;
-        await GoogleAuth.initialize({
-          clientId: WEB_CLIENT_ID,
-          scopes: [DRIVE_SCOPE],
-          grantOfflineAccess: false,
+        await SocialLogin.initialize({
+          google: {
+            webClientId: WEB_CLIENT_ID,
+            mode: 'offline',
+          },
         });
         initialized = true;
       }
 
-      // Branded dark overlay during sign-in so Play Services' legacy white
-      // activity doesn't crash into our dark UI. Covers OUR side of the
-      // transition — can't restyle Google's dialog (different process).
       function showSignInOverlay() {
         if (document.getElementById('hrm-signin-overlay')) return;
         const style = document.createElement('style');
@@ -117,49 +114,113 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
         if (style && style.parentNode) style.parentNode.removeChild(style);
       }
 
-      window.__hrMonitorNativeDriveSignIn = async function() {
+      async function exchangeServerAuthCode(code) {
+        const resp = await fetch(EXCHANGE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ server_auth_code: code }),
+        });
+        let data = {};
+        try { data = await resp.json(); } catch (e) { /* non-JSON */ }
+        if (!resp.ok) {
+          throw new Error('exchange_failed_' + (data.google_error || resp.status));
+        }
+        return data;
+      }
+
+      window.__hrMonitorNativeDriveSignIn = async function () {
         showSignInOverlay();
         try {
           await ensureInit();
         } catch (e) {
           hideSignInOverlay();
-          console.error('[drive-auth-native] initialize failed:', e);
           throw new Error('Google Sign-In init failed: ' + (e && e.message ? e.message : String(e)));
         }
-        let user;
+
+        let loginResult;
         try {
-          user = await GoogleAuth.signIn();
+          loginResult = await SocialLogin.login({
+            provider: 'google',
+            options: {
+              scopes: SCOPES,
+              forceRefreshToken: true,
+            },
+          });
         } catch (e) {
           hideSignInOverlay();
-          console.error('[drive-auth-native] signIn rejected:', e);
           const msg = (e && e.message) ? e.message : String(e);
-          if (/DEVELOPER_ERROR|10/i.test(msg)) {
+          if (/DEVELOPER_ERROR|10\b/i.test(msg)) {
             throw new Error('Google rejected this build\'s signature. Check that the keystore SHA-1 is registered with the Android OAuth client in Google Cloud Console.');
           }
-          if (/NETWORK_ERROR|7/.test(msg)) {
+          if (/NETWORK_ERROR|7\b/.test(msg)) {
             throw new Error('Network error contacting Google. Check the phone\'s internet connection.');
           }
-          if (/SIGN_IN_CANCELLED|12501/.test(msg)) {
+          if (/cancel|SIGN_IN_CANCELLED|12501/i.test(msg)) {
             throw new Error('Sign-in cancelled.');
           }
           throw new Error('Google Sign-In failed: ' + msg);
         }
-        hideSignInOverlay();
-        if (!user || !user.authentication || !user.authentication.accessToken) {
-          throw new Error('Google sign-in returned no access token. Play Services may be missing on this device.');
+
+        // Capgo returns the actual fields under `.result`.
+        const result = (loginResult && loginResult.result) || loginResult || {};
+        const serverAuthCode = result.serverAuthCode || result.authCode || null;
+        if (!serverAuthCode) {
+          hideSignInOverlay();
+          throw new Error('No serverAuthCode from Google Sign-In (offline mode not returning a code).');
         }
-        return {
-          accessToken: user.authentication.accessToken,
-          expiresIn: 3600,
-        };
+
+        let exchange;
+        try {
+          exchange = await exchangeServerAuthCode(serverAuthCode);
+        } catch (e) {
+          hideSignInOverlay();
+          throw e;
+        }
+
+        const accessToken = exchange.access_token;
+        const refreshToken = exchange.refresh_token;
+        const expiresIn = exchange.expires_in || 3600;
+        const expiresAt = Date.now() + expiresIn * 1000 - 60 * 1000;
+        const email = exchange.email || (result.profile && result.profile.email) || null;
+
+        try {
+          await Native.storeAuthTokens({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            expires_at: expiresAt,
+            email: email,
+          });
+        } catch (e) {
+          console.warn('[drive-auth-native] storeAuthTokens failed', e);
+        }
+
+        hideSignInOverlay();
+        return { accessToken, expiresIn, email };
       };
 
-      window.__hrMonitorNativeDriveSignOut = async function() {
-        try { await GoogleAuth.signOut(); } catch (e) { console.warn('[drive-auth-native] signOut:', e); }
+      window.__hrMonitorNativeDriveSignOut = async function () {
+        try { await SocialLogin.logout({ provider: 'google' }); } catch (e) { /* ignore */ }
+        try { await Native.clearAuth(); } catch (e) { /* ignore */ }
+      };
+
+      // Expose a native refresh path to auth.js so getValidAccessToken() on
+      // Capacitor can mint a fresh access token without re-running the
+      // interactive login.
+      window.__hrMonitorNativeDriveRefresh = async function () {
+        try {
+          const out = await Native.getValidAccessToken();
+          return {
+            accessToken: out.access_token,
+            expiresAt: out.expires_at,
+            email: out.email || null,
+          };
+        } catch (e) {
+          return null;
+        }
       };
 
       dMark('__hrMonitorDriveAuthRegistered', true);
-      console.info('[drive-auth-native] native Google Sign-In override wired.');
+      console.info('[drive-auth-native] native Google Sign-In wired (capgo/social-login + AuthStorage).');
     } catch (err) {
       dMark('__hrMonitorDriveAuthLastError', 'outer: ' + (err && err.message ? err.message : String(err)));
       console.error('[drive-auth-native] unhandled error in init:', err);
