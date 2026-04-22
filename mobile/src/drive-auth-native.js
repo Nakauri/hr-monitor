@@ -16,6 +16,21 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
 (function () {
   function dMark(key, val) { try { window[key] = val; } catch (e) {} }
 
+  // Persistent trace (last 30 events in localStorage) so we can see what
+  // happened on a previous page after navigation. Diagnostics displays it.
+  function trace(step, payload) {
+    try {
+      const entry = { t: Date.now(), step, payload: payload || null };
+      let arr = [];
+      try { arr = JSON.parse(localStorage.getItem('hrm_auth_trace') || '[]') || []; } catch {}
+      arr.push(entry);
+      if (arr.length > 30) arr = arr.slice(-30);
+      localStorage.setItem('hrm_auth_trace', JSON.stringify(arr));
+      console.info('[auth-trace]', step, payload || '');
+    } catch (e) { /* ignore */ }
+  }
+  window.__hrmAuthTrace = trace;
+
   function whenReady(cb) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', cb, { once: true });
@@ -59,7 +74,9 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
         'email',
         'https://www.googleapis.com/auth/drive.file',
       ];
-      const EXCHANGE_URL = 'https://aorti.ca/api/auth/exchange';
+      // Use www. directly — apex aorti.ca redirects to www and CORS
+      // preflight rejects redirects.
+      const EXCHANGE_URL = 'https://www.aorti.ca/api/auth/exchange';
 
       let initialized = false;
       async function ensureInit() {
@@ -140,10 +157,13 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
       }
 
       window.__hrMonitorNativeDriveSignIn = async function () {
+        trace('signIn:start');
         showSignInOverlay();
         try {
           await ensureInit();
+          trace('signIn:init_done');
         } catch (e) {
+          trace('signIn:init_failed', (e && e.message) ? e.message : String(e));
           hideSignInOverlay();
           throw new Error('Google Sign-In init failed: ' + (e && e.message ? e.message : String(e)));
         }
@@ -151,7 +171,13 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
         let loginResult;
         try {
           loginResult = await GoogleAuth.signIn();
+          trace('signIn:plugin_done', {
+            hasServerAuthCode: !!(loginResult && loginResult.serverAuthCode),
+            hasAccessToken: !!(loginResult && loginResult.authentication && loginResult.authentication.accessToken),
+            keys: loginResult ? Object.keys(loginResult) : null,
+          });
         } catch (e) {
+          trace('signIn:plugin_failed', (e && e.message) ? e.message : String(e));
           hideSignInOverlay();
           const msg = (e && e.message) ? e.message : String(e);
           if (/DEVELOPER_ERROR|10\b/i.test(msg)) {
@@ -169,14 +195,22 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
         // Codetrix offline-mode result shape: { serverAuthCode, authentication: {...}, email, ... }
         const serverAuthCode = loginResult && loginResult.serverAuthCode;
         if (!serverAuthCode) {
+          trace('signIn:no_server_auth_code', { keys: loginResult ? Object.keys(loginResult) : null });
           hideSignInOverlay();
           throw new Error('No serverAuthCode from Google Sign-In. Check that Offline mode is enabled and the keystore SHA-1 is registered.');
         }
+        trace('signIn:have_server_auth_code');
 
         let exchange;
         try {
           exchange = await exchangeServerAuthCode(serverAuthCode);
+          trace('signIn:exchange_ok', {
+            hasAccess: !!exchange.access_token,
+            hasRefresh: !!exchange.refresh_token,
+            email: exchange.email || null,
+          });
         } catch (e) {
+          trace('signIn:exchange_failed', (e && e.message) ? e.message : String(e));
           hideSignInOverlay();
           throw e;
         }
@@ -194,11 +228,14 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
             expires_at: expiresAt,
             email: email,
           });
+          trace('signIn:keystore_ok');
         } catch (e) {
+          trace('signIn:keystore_failed', (e && e.message) ? e.message : String(e));
           console.warn('[drive-auth-native] storeAuthTokens failed', e);
         }
 
         hideSignInOverlay();
+        trace('signIn:complete');
         return { accessToken, expiresIn, email };
       };
 
