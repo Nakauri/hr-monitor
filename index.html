@@ -21,6 +21,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="./auth.js"></script>
 <style>
   :root {
     --bg: #0a0a0a;
@@ -2086,91 +2087,31 @@
   // pick up the token automatically on load because they watch the same
   // localStorage key.
   (function () {
-    const CLIENT_ID = '103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com';
-    const SCOPE = 'https://www.googleapis.com/auth/drive.file';
-    const LS_KEY = 'hr_monitor_drive_token';
     const MONITOR_URL = './hr_monitor.html?mode=online';
 
-    function loadCachedToken() {
-      try {
-        const raw = localStorage.getItem(LS_KEY);
-        if (!raw) return null;
-        const p = JSON.parse(raw);
-        if (!p || !p.token || !p.expiresAt) return null;
-        if (Date.now() > p.expiresAt) return null;
-        return p;
-      } catch (e) { return null; }
-    }
-
-    let tokenClient = null;
-    function initClient() {
-      if (tokenClient || !window.google || !google.accounts || !google.accounts.oauth2) return;
-      // CSRF protection: generate a random state, attach it to the
-      // request, verify it echoes back on the callback. Google's
-      // OAuth security audit flags clients that omit this even though
-      // the GIS popup flow is structurally protected — explicit is
-      // better and shuts the warning up.
-      const stateToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
-      try { sessionStorage.setItem('aorti_oauth_state', stateToken); } catch (e) {}
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPE,
-        state: stateToken,
-        callback: (resp) => {
-          if (resp.error || !resp.access_token) {
-            console.warn('[aorti sign-in] OAuth error', resp);
-            return;
-          }
-          // Verify state matches what we sent. If it doesn't, drop the
-          // token: the response wasn't initiated by this page.
-          let expectedState = null;
-          try { expectedState = sessionStorage.getItem('aorti_oauth_state'); } catch (e) {}
-          if (resp.state && expectedState && resp.state !== expectedState) {
-            console.warn('[aorti sign-in] state mismatch — ignoring token');
-            return;
-          }
-          const expiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
-          try {
-            localStorage.setItem(LS_KEY, JSON.stringify({ token: resp.access_token, expiresAt }));
-          } catch (e) {}
-          window.location.href = MONITOR_URL;
-        },
-      });
-    }
-
-    function startSignIn() {
-      const cached = loadCachedToken();
-      if (cached) {
-        // Already signed in — straight to the monitor.
+    async function startSignIn() {
+      if (!window.aortiAuth) {
+        // auth.js still loading; fall back to the monitor and let it prompt.
         window.location.href = MONITOR_URL;
         return;
       }
-      // Retry init in case GSI hasn't loaded yet.
-      initClient();
-      if (!tokenClient) {
-        // Library still loading. Try again shortly; if it's still not
-        // available, fall through to the link's default navigation so
-        // the user isn't stuck. The monitor will trigger its own
-        // sign-in on load as a last resort.
-        setTimeout(() => {
-          initClient();
-          if (tokenClient) tokenClient.requestAccessToken({ prompt: '' });
-          else window.location.href = MONITOR_URL;
-        }, 400);
+      if (window.aortiAuth.isSignedIn()) {
+        window.location.href = MONITOR_URL;
         return;
       }
-      tokenClient.requestAccessToken({ prompt: '' });
+      try {
+        await window.aortiAuth.signIn();
+        window.location.href = MONITOR_URL;
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        if (/popup_closed|cancel/i.test(msg)) return;
+        console.warn('[aorti sign-in] failed:', msg);
+        // Let the monitor try its own sign-in flow rather than stranding
+        // the user on the landing page.
+        window.location.href = MONITOR_URL;
+      }
     }
 
-    // Eager init once GSI's library is ready.
-    (function waitForGsi() {
-      initClient();
-      if (!tokenClient) setTimeout(waitForGsi, 200);
-    })();
-
-    // Intercept any link that targets the online monitor from the
-    // homepage. This covers the hero primary button and the nav Sign-in
-    // button without each needing its own handler wired up.
     document.addEventListener('click', (e) => {
       const a = e.target.closest && e.target.closest('a');
       if (!a) return;

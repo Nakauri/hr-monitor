@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="./auth.js"></script>
 <style>
   :root {
     --bg: #0a0a0a;
@@ -139,6 +141,27 @@
     box-shadow: 0 8px 28px rgba(232,72,56,0.28);
   }
   .app-primary-btn:active { transform: translateY(1px); }
+  .app-account-line {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-faint);
+    font-family: 'Consolas', 'Monaco', monospace;
+    margin-top: 2px;
+    display: none;
+  }
+  .app-account-line.signed-in { display: block; }
+  .app-account-line .app-signout {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 0 4px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .app-account-line .app-signout:hover { color: var(--text); }
   .app-secondary-row {
     display: flex;
     justify-content: center;
@@ -254,6 +277,10 @@
 
   <div class="app-bottom">
     <a class="app-primary-btn" href="./hr_monitor.html?mode=online">Start session</a>
+    <div class="app-account-line" id="app-account-line">
+      <span id="app-account-email"></span>
+      <button type="button" class="app-signout" id="app-signout">Sign out</button>
+    </div>
     <div class="app-secondary-row">
       <a class="app-secondary" href="./hrv_viewer.html">Viewer</a>
       <a class="app-secondary" href="./hr_monitor.html?mode=offline">Offline mode</a>
@@ -301,53 +328,62 @@
     } catch (e) {}
   })();
 
-  // Start session → sign in with Google (native plugin) if not already
-  // cached, then redirect to the monitor. Viewer + monitor share the
-  // same localStorage.hr_monitor_drive_token key, so signing in here
-  // signs the user into the viewer too.
+  // Start session → sign in via window.aortiAuth if not already signed in,
+  // then redirect to the monitor. auth.js handles the platform split:
+  // Capacitor uses the native SocialLogin plugin + /api/auth/exchange;
+  // web uses GIS + PKCE. Either way the token lands in localStorage where
+  // the monitor picks it up on load.
   (function () {
-    const LS_KEY = 'hr_monitor_drive_token';
     const MONITOR_URL = './hr_monitor.html?mode=online';
-
-    function cached() {
-      try {
-        const raw = localStorage.getItem(LS_KEY);
-        if (!raw) return null;
-        const p = JSON.parse(raw);
-        if (!p || !p.token || !p.expiresAt) return null;
-        if (Date.now() > p.expiresAt) return null;
-        return p;
-      } catch (e) { return null; }
-    }
-
-    function nativeSignIn() {
-      try {
-        const cap = window.Capacitor;
-        const plugin = cap && cap.Plugins && cap.Plugins.GoogleAuth;
-        if (!plugin) return Promise.resolve(null);
-        return plugin.signIn().then(function (r) {
-          const accessToken = r && (r.authentication && r.authentication.accessToken || r.accessToken);
-          if (!accessToken) return null;
-          const expiresAt = Date.now() + 3600 * 1000 - 60000;
-          try { localStorage.setItem(LS_KEY, JSON.stringify({ token: accessToken, expiresAt })); } catch (e) {}
-          return accessToken;
-        }).catch(function (e) { console.warn('[app-home] native signIn failed', e); return null; });
-      } catch (e) { return Promise.resolve(null); }
-    }
-
     const btn = document.querySelector('.app-primary-btn');
-    if (!btn) return;
-    btn.addEventListener('click', function (e) {
-      // If we already have a fresh Drive token, don't pop a sign-in
-      // dialog — just go straight into the monitor.
-      if (cached()) return; // let the default link navigation run
-      e.preventDefault();
-      nativeSignIn().then(function () {
-        // Token saved (or sign-in cancelled / unavailable). Head to the
-        // monitor either way; offline mode handles the no-token path.
+    const line = document.getElementById('app-account-line');
+    const emailEl = document.getElementById('app-account-email');
+    const signOutBtn = document.getElementById('app-signout');
+
+    function renderAccount() {
+      if (!window.aortiAuth) { line.classList.remove('signed-in'); return; }
+      const email = window.aortiAuth.getEmail();
+      if (window.aortiAuth.isSignedIn()) {
+        emailEl.textContent = email ? ('Signed in as ' + email + ' · ') : 'Signed in · ';
+        line.classList.add('signed-in');
+      } else {
+        emailEl.textContent = '';
+        line.classList.remove('signed-in');
+      }
+    }
+
+    function waitForAuth(cb) {
+      if (window.aortiAuth) return cb();
+      setTimeout(() => waitForAuth(cb), 120);
+    }
+    waitForAuth(() => {
+      renderAccount();
+      window.aortiAuth.onAuthChange(renderAccount);
+    });
+
+    if (signOutBtn) {
+      signOutBtn.addEventListener('click', async () => {
+        if (!window.aortiAuth) return;
+        try { await window.aortiAuth.signOut(); } catch (e) { /* ignore */ }
+      });
+    }
+
+    if (btn) {
+      btn.addEventListener('click', async function (e) {
+        if (!window.aortiAuth) return;
+        if (window.aortiAuth.isSignedIn()) return;
+        e.preventDefault();
+        try {
+          await window.aortiAuth.signIn();
+        } catch (err) {
+          const msg = err && err.message ? err.message : String(err);
+          if (!/popup_closed|cancel|SIGN_IN_CANCELLED/i.test(msg)) {
+            console.warn('[app-home] sign-in failed', msg);
+          }
+        }
         window.location.href = MONITOR_URL;
       });
-    });
+    }
   })();
 
   // First-run intro carousel. Off by default — flip

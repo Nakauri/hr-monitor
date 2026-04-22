@@ -16,6 +16,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="./auth.js"></script>
 <style>
   :root {
     --bg: #0a0a0a;
@@ -285,6 +286,16 @@
     color: var(--border-strong);
     padding: 0 2px;
   }
+  .fi-drive-email {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: 'Consolas', 'Monaco', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+  }
+  .fi-drive-email:empty { display: none; }
   #drive-status {
     font-family: 'Consolas', 'Monaco', monospace;
     padding: 3px 8px;
@@ -2384,6 +2395,7 @@
     <div class="fi-group fi-drive">
       <span>Drive:</span>
       <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
+      <span id="drive-email" class="fi-drive-email"></span>
       <button id="drive-signin">Sign in</button>
       <button class="icon-btn" id="drive-sync" style="display:none" title="Sync with Drive (pulls new files down, pushes local files up, mirrors Drive-only files back to the folder)" aria-label="Sync with Drive">
         <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -2633,21 +2645,19 @@
   setInterval(updateWatchLiveUI, 5000);
 
   // ===== Google Drive read integration =====
-  // Mirrors the constants + OAuth flow used in hr_monitor.html (same client ID,
-  // same drive.file scope — the viewer only sees files this app created).
-  const GOOGLE_CLIENT_ID = '103129946542-0ll0ojj36a38p52c20uebfl8jnu59ona.apps.googleusercontent.com';
-  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  // OAuth, token refresh, sign-out, and cross-tab sync all live in auth.js
+  // (window.aortiAuth). This block owns viewer-specific Drive state only:
+  // folder ID, file-index map, and the metadata cache. driveAccessToken +
+  // driveTokenExpiresAt remain as sync mirrors so the rest of the file's
+  // truth-checks stay readable.
   const DRIVE_FOLDER_NAME = 'HR Monitor Sessions';
-  // Shared-token key: BOTH hr_monitor.html and hrv_viewer.html read/write this
-  // so signing into one page carries over to the other until the token expires.
-  const LS_DRIVE_TOKEN = 'hr_monitor_drive_token';
 
-  let driveTokenClient = null;
   let driveAccessToken = null;
   let driveTokenExpiresAt = 0;
   let driveFolderId = null;
   let driveFilesByName = new Map(); // filename -> { id, modifiedTime }
   let driveMetaCache = {};          // persistent companion to IndexedDB text store
+  let driveRefreshing = false;
 
   function driveLoadMeta() {
     try { driveMetaCache = JSON.parse(localStorage.getItem(LS_DRIVE_META) || '{}'); }
@@ -2657,24 +2667,10 @@
     try { localStorage.setItem(LS_DRIVE_META, JSON.stringify(driveMetaCache)); } catch (e) {}
   }
 
-  function saveDriveTokenToStorage(token, expiresAt) {
-    try { localStorage.setItem(LS_DRIVE_TOKEN, JSON.stringify({ token, expiresAt })); } catch (e) {}
-  }
-  function loadDriveTokenFromStorage() {
-    try {
-      const raw = localStorage.getItem(LS_DRIVE_TOKEN);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (!parsed || !parsed.token || !parsed.expiresAt) return null;
-      if (Date.now() > parsed.expiresAt) {
-        localStorage.removeItem(LS_DRIVE_TOKEN);
-        return null;
-      }
-      return parsed;
-    } catch (e) { return null; }
-  }
-  function clearDriveTokenFromStorage() {
-    try { localStorage.removeItem(LS_DRIVE_TOKEN); } catch (e) {}
+  function syncAuthStateLocal() {
+    const cached = window.aortiAuth ? window.aortiAuth.getCachedToken() : null;
+    driveAccessToken = cached ? cached.access_token : null;
+    driveTokenExpiresAt = cached ? cached.expires_at : 0;
   }
 
   function driveUpdateUI() {
@@ -2682,12 +2678,17 @@
     const signIn = document.getElementById('drive-signin');
     const signOut = document.getElementById('drive-signout');
     const syncBtn = document.getElementById('drive-sync');
+    const emailEl = document.getElementById('drive-email');
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
+    const email = window.aortiAuth ? window.aortiAuth.getEmail() : null;
+    if (emailEl) emailEl.textContent = (driveAccessToken && email) ? email : '';
     if (driveAccessToken) {
       if (driveFolderId) {
-        statusEl.textContent = 'on';
-        statusEl.title = 'Signed in. Drive sessions sync automatically.';
+        statusEl.textContent = driveRefreshing ? '↻' : 'on';
+        statusEl.title = driveRefreshing
+          ? 'Refreshing Drive session'
+          : 'Signed in. Drive sessions sync automatically.';
         statusEl.classList.add('drive-syncing');
       } else {
         statusEl.textContent = '…';
@@ -2711,7 +2712,7 @@
     const btn = document.getElementById('drive-sync');
     if (!btn) return;
     btn.title = text ? ('Sync with Drive. ' + text) : 'Sync with Drive';
-    const isBusy = !!text && /\//.test(text); // "3/10" pattern = actively working
+    const isBusy = !!text && /\//.test(text);
     btn.classList.toggle('spinning', isBusy);
   }
   function setDriveError(text) {
@@ -2722,231 +2723,100 @@
     statusEl.textContent = text;
   }
 
-  function initGoogleAuth() {
-    // Restore the cached Drive token IMMEDIATELY on every page load,
-    // regardless of whether the GSI library has loaded. On Capacitor
-    // the WebView origin (https://localhost) often prevents GSI from
-    // loading at all; waiting for it would leave a token sitting
-    // unused in localStorage from the homepage / monitor sign-in.
-    if (!driveAccessToken) {
-      const cached = loadDriveTokenFromStorage();
-      if (cached) {
-        driveAccessToken = cached.token;
-        driveTokenExpiresAt = cached.expiresAt;
-        driveUpdateUI();
-        driveEnsureFolder().then(() => {
-          driveUpdateUI();
-          return driveSync();
-        }).catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
+  function initDriveUI() {
+    if (!window.aortiAuth) { setTimeout(initDriveUI, 120); return; }
+    window.aortiAuth.onAuthChange((record) => {
+      syncAuthStateLocal();
+      if (record) {
+        if (!driveFolderId) {
+          driveEnsureFolder()
+            .then(() => { driveUpdateUI(); return driveSync(); })
+            .catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
+        }
+      } else {
+        driveFolderId = null;
+        driveFilesByName = new Map();
+        setDriveProgress('');
       }
-    }
-    if (!window.google || !google.accounts || !google.accounts.oauth2) {
-      setTimeout(initGoogleAuth, 400);
-      return;
-    }
-    // CSRF state token for OAuth — see same-pattern note in hr_monitor.html.
-    const stateToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    try { sessionStorage.setItem('aorti_oauth_state', stateToken); } catch (e) {}
-    driveTokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: DRIVE_SCOPE,
-      state: stateToken,
-      callback: async (resp) => {
-        let expectedState = null;
-        try { expectedState = sessionStorage.getItem('aorti_oauth_state'); } catch (e) {}
-        if (resp && resp.access_token && resp.state && expectedState && resp.state !== expectedState) {
-          console.warn('OAuth state mismatch — ignoring token');
-          return;
-        }
-        if (resp.error) {
-          // A silent refresh (prompt: '') can fail for reasons that have
-          // nothing to do with the user, e.g. Firefox ETP blocking the
-          // hidden iframe's session cookie, or Google deciding the
-          // session is stale. In that case we do NOT want to flash
-          // "sign-in failed" in the UI or force a popup — the user can
-          // keep browsing whatever Drive data they already have cached.
-          // Next explicit Sync click will trigger a proper interactive
-          // sign-in via driveSignIn(). See RELAY_TICK.md and the audit
-          // findings around commit 660e388.
-          if (driveSilentRefreshPending) {
-            console.info('Silent Drive refresh failed, keeping cached token until next sync.', resp);
-            driveSilentRefreshPending = false;
-            return;
-          }
-          console.error('Google OAuth error:', resp);
-          setDriveError('sign-in failed');
-          return;
-        }
-        driveSilentRefreshPending = false;
-        driveAccessToken = resp.access_token;
-        driveTokenExpiresAt = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
-        saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
-        scheduleDriveTokenRefresh();
-        driveUpdateUI();
-        try {
-          await driveEnsureFolder();
-          driveUpdateUI();
-          // Auto-sync once on sign-in so the user sees their Drive sessions
-          // without having to click the Sync button manually.
-          await driveSync();
-        } catch (e) {
-          console.error('Drive init:', e);
-          setDriveError('folder access failed');
-        }
-      },
+      driveUpdateUI();
     });
-    // Restore a shared token from localStorage (written by either page). If the
-    // live monitor signed in 20 minutes ago, this page reuses that token and
-    // skips the OAuth popup entirely.
-    const cached = loadDriveTokenFromStorage();
-    if (cached) {
-      driveAccessToken = cached.token;
-      driveTokenExpiresAt = cached.expiresAt;
-      scheduleDriveTokenRefresh();
-      driveUpdateUI();
-      driveEnsureFolder().then(() => {
-        driveUpdateUI();
-        return driveSync();
-      }).catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
-    }
-  }
-
-  // Silent refresh — kick off a new access-token request ~10 min before the
-  // current one expires. Long viewer sessions (browsing all-time data for an
-  // No more background refresh timer. It was the source of random
-  // sign-in prompts: `requestAccessToken({ prompt: '' })` is a hint,
-  // not a guarantee, and if Google decided the session was stale the
-  // library would pop the interactive dialog even though the user was
-  // idle. New strategy: let the token expire quietly, let the user
-  // browse whatever IDB-cached Drive data they already have, and only
-  // ever trigger an interactive sign-in on an explicit user action
-  // (Sync button, first load). The attempt to refresh still happens
-  // on-demand inside tryRefreshDriveToken, bounded to a single silent
-  // attempt so a 401 inside driveSync can recover without a popup.
-  let driveSilentRefreshPending = false;
-  function scheduleDriveTokenRefresh() { /* intentionally a no-op */ }
-  // Cross-tab sync: reflect sign-in / sign-out that happened in another tab.
-  window.addEventListener('storage', (e) => {
-    if (e.key !== LS_DRIVE_TOKEN) return;
-    const cached = loadDriveTokenFromStorage();
-    if (cached) {
-      driveAccessToken = cached.token;
-      driveTokenExpiresAt = cached.expiresAt;
-      scheduleDriveTokenRefresh();
-      driveUpdateUI();
-      if (!driveFolderId) driveEnsureFolder().then(driveUpdateUI).catch(() => {});
-    } else {
-      driveAccessToken = null;
-      driveTokenExpiresAt = 0;
-      driveFolderId = null;
-      driveFilesByName = new Map();
-      driveUpdateUI();
-      setDriveProgress('');
-    }
-  });
-
-  function driveSignIn() {
-    // Capacitor path: the @codetrix-studio/capacitor-google-auth plugin
-    // owns sign-in natively on Android, which sidesteps the GSI library
-    // race ("Google auth still loading") that kept hitting the mobile
-    // viewer. The plugin returns an access token + profile info; store
-    // those the same way the web callback would so the rest of the
-    // viewer is none the wiser.
-    const cap = window.Capacitor;
-    const nativePlugin = cap && cap.Plugins && cap.Plugins.GoogleAuth;
-    if (cap && cap.isNativePlatform && cap.isNativePlatform() && nativePlugin) {
-      // initialize() MUST run before signIn() or the plugin NPEs at
-      // GoogleAuth.java:81 (GoogleSignInClient.getSignInIntent() on null).
-      // Safe to call on every click — the plugin is idempotent.
-      const initPromise = (typeof nativePlugin.initialize === 'function')
-        ? nativePlugin.initialize({ clientId: GOOGLE_CLIENT_ID, scopes: [DRIVE_SCOPE], grantOfflineAccess: false }).catch(() => {})
-        : Promise.resolve();
-      initPromise.then(() => nativePlugin.signIn()).then(async function (result) {
-        const accessToken = result && (result.authentication && result.authentication.accessToken || result.accessToken);
-        if (!accessToken) throw new Error('No access token from GoogleAuth');
-        driveAccessToken = accessToken;
-        // GoogleAuth plugin doesn't return expires_in in a reliable shape;
-        // assume 1 hour like the web flow, trigger the reactive refresh
-        // path on 401 rather than a proactive timer.
-        driveTokenExpiresAt = Date.now() + 3600 * 1000 - 60000;
-        saveDriveTokenToStorage(driveAccessToken, driveTokenExpiresAt);
-        driveUpdateUI();
-        try {
-          await driveEnsureFolder();
-          driveUpdateUI();
-          await driveSync();
-        } catch (e) {
-          console.error('Drive init (native):', e);
-          setDriveError('folder access failed');
-        }
-      }).catch(function (err) {
-        console.error('GoogleAuth native signIn failed:', err);
-        setDriveError('sign-in failed');
-      });
-      return;
-    }
-    // Web path: lean on the GSI library. Still guard for the loading
-    // race, but we no longer see it on the mobile viewer since that
-    // branch is handled above.
-    if (!driveTokenClient) {
-      alert('Google auth still loading. Try again in a second.');
-      return;
-    }
-    driveTokenClient.requestAccessToken({ prompt: '' });
-  }
-
-  function driveSignOut() {
-    if (driveAccessToken) {
-      try { google.accounts.oauth2.revoke(driveAccessToken, () => {}); } catch (e) {}
-    }
-    driveAccessToken = null;
-    driveTokenExpiresAt = 0;
-    driveFolderId = null;
-    driveFilesByName = new Map();
-    clearDriveTokenFromStorage();
+    syncAuthStateLocal();
     driveUpdateUI();
-    setDriveProgress('');
+    window.addEventListener('online', () => {
+      // Re-attempt a folder/sync when network returns, in case we hit
+      // an offline error banner earlier in this session.
+      if (driveAccessToken && !driveFolderId) {
+        driveEnsureFolder()
+          .then(() => { driveUpdateUI(); return driveSync(); })
+          .catch(() => {});
+      }
+    });
+    window.addEventListener('offline', () => setDriveError('offline — will retry'));
+    // If a token is already cached from another page, pull the folder + sync
+    // without waiting for another auth event.
+    if (driveAccessToken && !driveFolderId) {
+      driveEnsureFolder()
+        .then(() => { driveUpdateUI(); return driveSync(); })
+        .catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
+    }
+  }
+
+  async function driveSignIn() {
+    if (!window.aortiAuth) { alert('Auth module still loading. Try again in a second.'); return; }
+    try {
+      await window.aortiAuth.signIn();
+      // onAuthChange handler kicks off driveEnsureFolder + driveSync.
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      if (/popup_closed|cancel|SIGN_IN_CANCELLED/i.test(msg)) return;
+      console.error('[drive] sign-in failed:', msg);
+      setDriveError('sign-in failed');
+    }
+  }
+
+  async function driveSignOut() {
+    try { await window.aortiAuth.signOut(); } catch (e) { console.warn('[drive] signOut:', e); }
+  }
+
+  async function driveAuthHeader() {
+    const token = await window.aortiAuth.getValidAccessToken();
+    return 'Bearer ' + token;
   }
 
   async function driveFetch(path, init = {}) {
-    if (!driveAccessToken) throw new Error('No Drive token — sign in first');
-    if (Date.now() > driveTokenExpiresAt) {
-      await tryRefreshDriveToken();
-      if (Date.now() > driveTokenExpiresAt) throw new Error('Drive token expired — please sign in again');
+    if (!window.aortiAuth || !window.aortiAuth.isSignedIn()) {
+      throw new Error('No Drive token — sign in first');
+    }
+    const cached = window.aortiAuth.getCachedToken();
+    const needsRefresh = !cached || Date.now() > cached.expires_at - 2 * 60_000;
+    let uiTimer = null;
+    if (needsRefresh) {
+      uiTimer = setTimeout(() => { driveRefreshing = true; driveUpdateUI(); }, 500);
+    }
+    let token;
+    try {
+      token = await window.aortiAuth.getValidAccessToken();
+    } catch (e) {
+      setDriveError('session expired');
+      throw e;
+    } finally {
+      if (uiTimer) clearTimeout(uiTimer);
+      if (driveRefreshing) { driveRefreshing = false; driveUpdateUI(); }
     }
     const url = path.startsWith('http') ? path : 'https://www.googleapis.com/drive/v3/' + path;
-    const headers = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
+    const headers = Object.assign({ 'Authorization': 'Bearer ' + token }, init.headers || {});
     const resp = await fetch(url, Object.assign({}, init, { headers }));
     if (resp.status === 401) {
-      const refreshed = await tryRefreshDriveToken();
-      if (refreshed) {
-        const retryHeaders = Object.assign({ 'Authorization': 'Bearer ' + driveAccessToken }, init.headers || {});
+      try {
+        await window.aortiAuth.refreshIfNeeded();
+        const retryToken = await window.aortiAuth.getValidAccessToken();
+        const retryHeaders = Object.assign({ 'Authorization': 'Bearer ' + retryToken }, init.headers || {});
         return fetch(url, Object.assign({}, init, { headers: retryHeaders }));
+      } catch {
+        return resp;
       }
     }
     return resp;
-  }
-
-  // Silent refresh — same pattern as hr_monitor.html. Resolves true when the
-  // GSI callback lands with a new token; bounded by a 5 s timeout. Flags
-  // the attempt as silent so the callback can swallow any surfaced error
-  // without flashing a sign-in failure banner.
-  function tryRefreshDriveToken() {
-    return new Promise((resolve) => {
-      if (!driveTokenClient) { resolve(false); return; }
-      const startExpires = driveTokenExpiresAt;
-      const timeout = setTimeout(() => { driveSilentRefreshPending = false; resolve(false); }, 5000);
-      const checkInterval = setInterval(() => {
-        if (driveTokenExpiresAt > startExpires) {
-          clearInterval(checkInterval);
-          clearTimeout(timeout);
-          resolve(true);
-        }
-      }, 100);
-      driveSilentRefreshPending = true;
-      try { driveTokenClient.requestAccessToken({ prompt: '' }); }
-      catch (e) { driveSilentRefreshPending = false; clearInterval(checkInterval); clearTimeout(timeout); resolve(false); }
-    });
   }
 
   async function driveEnsureFolder() {
@@ -3023,7 +2893,7 @@
     const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer ' + driveAccessToken,
+        'Authorization': await driveAuthHeader(),
         'Content-Type': 'multipart/related; boundary=' + boundary,
       },
       body,
@@ -7473,7 +7343,7 @@
     driveLoadMeta();
     driveUpdateUI();
     updateWatchLiveUI();
-    initGoogleAuth();
+    initDriveUI();
     if (dirHandle) {
       // Try silent permission check first
       const perm = await dirHandle.queryPermission({ mode: 'read' });
