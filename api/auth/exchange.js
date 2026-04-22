@@ -37,19 +37,23 @@ export default async function handler(req, res) {
       redirect_uri: '',
       grant_type: 'authorization_code',
     });
-  } else if (code && code_verifier && redirect_uri) {
-    params = new URLSearchParams({
+  } else if (code && redirect_uri) {
+    // Web popup flow: no PKCE (client_secret protects the exchange). Optional
+    // code_verifier is forwarded if the client did supply one — covers any
+    // future flow that needs PKCE.
+    const fields = {
       code: String(code),
-      code_verifier: String(code_verifier),
       redirect_uri: String(redirect_uri),
       client_id: process.env.GOOGLE_CLIENT_ID,
       client_secret: process.env.GOOGLE_CLIENT_SECRET,
       grant_type: 'authorization_code',
-    });
+    };
+    if (code_verifier) fields.code_verifier = String(code_verifier);
+    params = new URLSearchParams(fields);
   } else {
     return res.status(400).json({
       error: 'bad_request',
-      message: 'need code+code_verifier+redirect_uri or server_auth_code',
+      message: 'need code+redirect_uri or server_auth_code',
     });
   }
 
