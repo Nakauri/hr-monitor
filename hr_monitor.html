@@ -1383,7 +1383,7 @@
     <span class="aorti-nav-word">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span></span>
   </a>
   <a class="app-nav-link active" href="./hr_monitor.html"><span class="nav-label-full">Live monitor</span><span class="nav-label-short">Monitor</span></a>
-  <a class="app-nav-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+  <a class="app-nav-link" id="nav-viewer-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
   <span id="hrm-version-chip-slot" style="margin-left: auto;"></span>
@@ -3447,6 +3447,23 @@
     updateSessionToggle();
     return true;
   }
+  // On Capacitor, nav links that use target="_blank" get opened in the
+  // system browser (Chrome / Samsung Internet), which has its own
+  // localStorage and won't see our Drive token. For the Viewer link
+  // specifically we want the user to stay inside the Capacitor WebView
+  // so sign-in state carries through. Strip target on native only.
+  (function () {
+    try {
+      if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
+      const link = document.getElementById('nav-viewer-link');
+      if (link) {
+        link.removeAttribute('target');
+        link.removeAttribute('rel');
+        link.title = 'Open viewer';
+      }
+    } catch (e) {}
+  })();
+
   (function waitForNativeSession() {
     if (restoreNativeSessionUI()) return;
     let tries = 0;

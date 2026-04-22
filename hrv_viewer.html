@@ -3476,9 +3476,21 @@
       }
       return fileStartEpoch + t * 60000;
     }
+    // Insert a null break-point when consecutive rows are more than
+    // GAP_MIN minutes apart. With spanGaps:false on the chart, this
+    // renders as a visible gap instead of a long straight line across
+    // a silent window. Prevents the "flat at 100 bpm for 13 min" look
+    // that was really a BLE / pause gap.
+    const GAP_MIN = 10 / 60; // 10 seconds
+    let lastT = null;
     for (const r of rows) {
       const t = parseFloat(r[idx.time_min]);
       if (isNaN(t)) continue;
+      if (lastT != null && t - lastT > GAP_MIN) {
+        hr.push({ t: t - 0.001, v: null });
+        rmssd.push({ t: t - 0.001, v: null });
+      }
+      lastT = t;
       const ep = epochFor(t, r);
       const h = r[idx.hr_bpm] !== '' ? parseFloat(r[idx.hr_bpm]) : null;
       if (h != null && !isNaN(h)) hr.push({ t, v: h, ep });
@@ -7066,8 +7078,8 @@
       type: 'line',
       data: {
         datasets: [
-          { label: 'HR', data: hr, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, fill: true },
-          { label: 'RMSSD', data: rmssd, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3] },
+          { label: 'HR', data: hr, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
+          { label: 'RMSSD', data: rmssd, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
           { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: palpDots.map(p => Math.min(3 + p._count, 10)), pointHoverRadius: 12, pointStyle: 'circle' },
           // Highlight overlay datasets for marker-list hover (populated on demand)
           { label: '_HL_LINE', data: [], borderColor: '#ffffff', backgroundColor: 'transparent', yAxisID: 'y', showLine: true, pointRadius: 0, borderWidth: 2, fill: false, order: -1 },

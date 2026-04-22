@@ -451,8 +451,11 @@ body.no-inline-trends #hr-widget > .compact-trend { display: none !important; }
    column shrinks with available width, and drop the big-number font size a
    notch so 3-digit readouts still fit. */
 @media (max-width: 480px) {
+  /* On mobile, match desktop's shrink-to-fit behaviour so turning
+     off widgets visibly shrinks the card. Still cap at 100vw so a
+     fully populated widget doesn't overflow the screen. */
   #overlay-zone .widget-row {
-    width: 100%;
+    width: fit-content;
     max-width: 100%;
   }
   #hr-widget {
