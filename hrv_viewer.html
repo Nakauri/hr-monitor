@@ -2690,6 +2690,23 @@
   }
 
   function initGoogleAuth() {
+    // Restore the cached Drive token IMMEDIATELY on every page load,
+    // regardless of whether the GSI library has loaded. On Capacitor
+    // the WebView origin (https://localhost) often prevents GSI from
+    // loading at all; waiting for it would leave a token sitting
+    // unused in localStorage from the homepage / monitor sign-in.
+    if (!driveAccessToken) {
+      const cached = loadDriveTokenFromStorage();
+      if (cached) {
+        driveAccessToken = cached.token;
+        driveTokenExpiresAt = cached.expiresAt;
+        driveUpdateUI();
+        driveEnsureFolder().then(() => {
+          driveUpdateUI();
+          return driveSync();
+        }).catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
+      }
+    }
     if (!window.google || !google.accounts || !google.accounts.oauth2) {
       setTimeout(initGoogleAuth, 400);
       return;
@@ -2795,7 +2812,13 @@
     const cap = window.Capacitor;
     const nativePlugin = cap && cap.Plugins && cap.Plugins.GoogleAuth;
     if (cap && cap.isNativePlatform && cap.isNativePlatform() && nativePlugin) {
-      nativePlugin.signIn().then(async function (result) {
+      // initialize() MUST run before signIn() or the plugin NPEs at
+      // GoogleAuth.java:81 (GoogleSignInClient.getSignInIntent() on null).
+      // Safe to call on every click — the plugin is idempotent.
+      const initPromise = (typeof nativePlugin.initialize === 'function')
+        ? nativePlugin.initialize({ clientId: GOOGLE_CLIENT_ID, scopes: [DRIVE_SCOPE], grantOfflineAccess: false }).catch(() => {})
+        : Promise.resolve();
+      initPromise.then(() => nativePlugin.signIn()).then(async function (result) {
         const accessToken = result && (result.authentication && result.authentication.accessToken || result.accessToken);
         if (!accessToken) throw new Error('No access token from GoogleAuth');
         driveAccessToken = accessToken;
