@@ -1,11 +1,15 @@
 // drive-auth-native.js — Capacitor Android sign-in bridge.
-// Replaces the abandoned @codetrix-studio/capacitor-google-auth plugin
-// with @capgo/capacitor-social-login (actively maintained). The login
-// returns a one-time `serverAuthCode` which we POST to
+// Uses @codetrix-studio/capacitor-google-auth in OFFLINE mode so signIn()
+// yields a serverAuthCode. We POST that code to
 // https://aorti.ca/api/auth/exchange in exchange for access + refresh
 // tokens. Tokens are then handed to NativeHrSession.storeAuthTokens for
 // Keystore-backed encryption so the background uploader can refresh
 // them while the WebView is paused.
+//
+// Plugin note: @codetrix-studio/capacitor-google-auth is unmaintained
+// (last stable 2023). The actively-maintained successor
+// @capgo/capacitor-social-login requires Capacitor 7+; we're on
+// Capacitor 6. When we eventually upgrade Capacitor we can swap.
 
 try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
 
@@ -29,12 +33,18 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
       dMark('__hrMonitorDriveAuthIsNative', !!isNative);
       if (!isNative) { console.info('[drive-auth-native] not native, skipping native sign-in.'); return; }
 
-      const SocialLogin = (cap.Plugins && cap.Plugins.SocialLogin) || null;
+      let GoogleAuth = (cap.Plugins && cap.Plugins.GoogleAuth) || null;
       const Native = (cap.Plugins && cap.Plugins.NativeHrSession) || null;
-      dMark('__hrMonitorDriveAuthGotPlugin', !!(SocialLogin && Native));
-      if (!SocialLogin) {
-        console.error('[drive-auth-native] SocialLogin plugin missing.');
-        dMark('__hrMonitorDriveAuthLastError', 'Capacitor.Plugins.SocialLogin undefined');
+      if (!GoogleAuth && typeof cap.registerPlugin === 'function') {
+        try { GoogleAuth = cap.registerPlugin('GoogleAuth'); }
+        catch (e) {
+          dMark('__hrMonitorDriveAuthLastError', 'registerPlugin threw: ' + (e && e.message ? e.message : String(e)));
+        }
+      }
+      dMark('__hrMonitorDriveAuthGotPlugin', !!(GoogleAuth && Native));
+      if (!GoogleAuth) {
+        console.error('[drive-auth-native] GoogleAuth plugin missing.');
+        dMark('__hrMonitorDriveAuthLastError', 'Capacitor.Plugins.GoogleAuth undefined');
         return;
       }
       if (!Native) {
@@ -54,11 +64,12 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
       let initialized = false;
       async function ensureInit() {
         if (initialized) return;
-        await SocialLogin.initialize({
-          google: {
-            webClientId: WEB_CLIENT_ID,
-            mode: 'offline',
-          },
+        // grantOfflineAccess: true → signIn() returns a serverAuthCode we
+        // can exchange for a refresh token on the server side.
+        await GoogleAuth.initialize({
+          clientId: WEB_CLIENT_ID,
+          scopes: SCOPES,
+          grantOfflineAccess: true,
         });
         initialized = true;
       }
@@ -139,13 +150,7 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
 
         let loginResult;
         try {
-          loginResult = await SocialLogin.login({
-            provider: 'google',
-            options: {
-              scopes: SCOPES,
-              forceRefreshToken: true,
-            },
-          });
+          loginResult = await GoogleAuth.signIn();
         } catch (e) {
           hideSignInOverlay();
           const msg = (e && e.message) ? e.message : String(e);
@@ -161,12 +166,11 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
           throw new Error('Google Sign-In failed: ' + msg);
         }
 
-        // Capgo returns the actual fields under `.result`.
-        const result = (loginResult && loginResult.result) || loginResult || {};
-        const serverAuthCode = result.serverAuthCode || result.authCode || null;
+        // Codetrix offline-mode result shape: { serverAuthCode, authentication: {...}, email, ... }
+        const serverAuthCode = loginResult && loginResult.serverAuthCode;
         if (!serverAuthCode) {
           hideSignInOverlay();
-          throw new Error('No serverAuthCode from Google Sign-In (offline mode not returning a code).');
+          throw new Error('No serverAuthCode from Google Sign-In. Check that Offline mode is enabled and the keystore SHA-1 is registered.');
         }
 
         let exchange;
@@ -181,7 +185,7 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
         const refreshToken = exchange.refresh_token;
         const expiresIn = exchange.expires_in || 3600;
         const expiresAt = Date.now() + expiresIn * 1000 - 60 * 1000;
-        const email = exchange.email || (result.profile && result.profile.email) || null;
+        const email = exchange.email || (loginResult && loginResult.email) || null;
 
         try {
           await Native.storeAuthTokens({
@@ -199,7 +203,7 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
       };
 
       window.__hrMonitorNativeDriveSignOut = async function () {
-        try { await SocialLogin.logout({ provider: 'google' }); } catch (e) { /* ignore */ }
+        try { await GoogleAuth.signOut(); } catch (e) { /* ignore */ }
         try { await Native.clearAuth(); } catch (e) { /* ignore */ }
       };
 
@@ -220,7 +224,7 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
       };
 
       dMark('__hrMonitorDriveAuthRegistered', true);
-      console.info('[drive-auth-native] native Google Sign-In wired (capgo/social-login + AuthStorage).');
+      console.info('[drive-auth-native] native Google Sign-In wired (codetrix offline + AuthStorage).');
     } catch (err) {
       dMark('__hrMonitorDriveAuthLastError', 'outer: ' + (err && err.message ? err.message : String(err)));
       console.error('[drive-auth-native] unhandled error in init:', err);

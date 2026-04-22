@@ -235,7 +235,18 @@
         padding: 22px 24px;
         color: #d8d8d8;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        position: relative;
       }
+      .hrm-diag-xclose {
+        position: absolute; top: 10px; right: 10px;
+        width: 34px; height: 34px;
+        background: transparent; border: none;
+        color: #8a8a8a; font-size: 20px; line-height: 1;
+        cursor: pointer; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .hrm-diag-xclose:hover { color: #d8d8d8; background: #1a1a1a; }
+      .hrm-diag-xclose svg { width: 16px; height: 16px; }
       .hrm-diag-title { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 14px; }
       .hrm-diag-legal-strip {
         display: block;
@@ -362,6 +373,7 @@
 
     overlay.innerHTML = `
       <div class="hrm-diag-modal">
+        <button class="hrm-diag-xclose" id="hrm-diag-xclose" aria-label="Close diagnostics"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
         <div class="hrm-diag-legal-strip"><a href="./legal.html" target="_blank" rel="noopener">Legal &amp; disclaimers</a></div>
         <h2 class="hrm-diag-title">App diagnostics</h2>
         ${rows('Build', [
@@ -442,6 +454,7 @@
     document.body.appendChild(overlay);
 
     document.getElementById('hrm-diag-close').addEventListener('click', close);
+    document.getElementById('hrm-diag-xclose').addEventListener('click', close);
     document.getElementById('hrm-diag-copy').addEventListener('click', async () => {
       const text = buildCopyText(d, v);
       try {
