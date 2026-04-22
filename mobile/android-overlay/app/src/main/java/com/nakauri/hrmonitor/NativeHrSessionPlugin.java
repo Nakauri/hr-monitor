@@ -134,6 +134,12 @@ public class NativeHrSessionPlugin extends Plugin {
     // but guard against bursts).
     private long lastNotifUpdateMs = 0;
 
+    // Widget prefs mirror. JS pushes this via setPrefs() whenever the
+    // user toggles a widget checkbox. publishTick splices it into every
+    // outgoing relay message so overlay.html can resize / hide the same
+    // way whether the sender is the web app or the native plugin.
+    private volatile String prefsJson = null;
+
     // Static ref so NativeHrService (separate Android component) can ask
     // us to clean up when the user taps Stop from the notification.
     public static NativeHrSessionPlugin instance;
@@ -294,6 +300,13 @@ public class NativeHrSessionPlugin extends Plugin {
     public void disconnect(PluginCall call) {
         closeGattQuietly();
         call.resolve(new JSObject().put("disconnected", true));
+    }
+
+    @PluginMethod
+    public void setPrefs(PluginCall call) {
+        JSObject p = call.getObject("prefs");
+        prefsJson = p != null ? p.toString() : null;
+        call.resolve();
     }
 
     @PluginMethod
@@ -713,6 +726,12 @@ public class NativeHrSessionPlugin extends Plugin {
           .append(',')
           .append(String.format(java.util.Locale.US, "%.4f", Math.max(3, nowMin)))
           .append(']');
+
+        // prefs passthrough — JS tracks the source of truth, native just
+        // relays it so the OBS overlay mirrors widget toggles in real time.
+        if (prefsJson != null) {
+            sb.append(",\"prefs\":").append(prefsJson);
+        }
 
         sb.append('}');
         relaySocket.send(sb.toString());
