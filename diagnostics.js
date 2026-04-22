@@ -123,7 +123,8 @@
       oemLastError: window.__hrMonitorOemLastError || null,
       userAgent: navigator.userAgent,
       localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
-      driveSignedIn: !!localStorage.getItem('hr_monitor_drive_token'),
+      driveSignedIn: !!(window.aortiAuth && window.aortiAuth.isSignedIn()),
+      driveEmail: (window.aortiAuth && window.aortiAuth.getEmail()) || null,
     };
   }
 
@@ -405,6 +406,7 @@
           ['last error', d.driveAuthLastError || 'none', d.driveAuthLastError ? 'err' : 'ok'],
           ['Native sign-in override', yn(d.driveNativeOverride), d.isNative ? ok(d.driveNativeOverride) : ''],
           ['Currently signed in', yn(d.driveSignedIn), d.driveSignedIn ? 'ok' : 'warn'],
+          ['Account', d.driveEmail || '—', d.driveEmail ? 'ok' : ''],
         ])}
         ${rows('Foreground service (Android background recording)', [
           ['1. script loaded', yn(d.fgsLoaded), d.isNative ? ok(d.fgsLoaded) : ''],
@@ -447,6 +449,7 @@
         <div class="hrm-diag-actions">
           <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
           <button id="hrm-diag-clearlog">Clear events</button>
+          <button id="hrm-diag-clearauth">Clear auth state</button>
           <button id="hrm-diag-close">Close</button>
         </div>
       </div>
@@ -472,6 +475,18 @@
         writeLog([]);
         const pane = document.querySelector('.hrm-diag-log');
         if (pane) pane.textContent = '';
+      });
+    }
+    const clearAuthBtn = document.getElementById('hrm-diag-clearauth');
+    if (clearAuthBtn) {
+      clearAuthBtn.addEventListener('click', async () => {
+        if (!confirm('Clear all saved Google auth state? You will need to sign in again.')) return;
+        try {
+          if (window.aortiAuth) await window.aortiAuth.signOut({ local: true, remote: false });
+        } catch (e) { /* ignore */ }
+        try { localStorage.removeItem('hr_monitor_drive_token'); } catch (e) {}
+        clearAuthBtn.textContent = 'Cleared — reload page';
+        clearAuthBtn.disabled = true;
       });
     }
   }
