@@ -156,58 +156,80 @@
   // ---------- sign-in (web) ------------------------------------------------
 
   async function signInWeb() {
-    await waitForGsi();
+    trace('web_start', { origin: location.origin });
+    try {
+      await waitForGsi();
+      trace('web_gsi_ready');
+    } catch (e) {
+      trace('web_gsi_timeout');
+      throw e;
+    }
 
     const { verifier, challenge } = await makePkcePair();
     const state = makeStateToken();
     sessionStorage.setItem(LS_PKCE_VERIFIER, verifier);
     sessionStorage.setItem(LS_OAUTH_STATE, state);
 
-    const code = await new Promise((resolve, reject) => {
-      const client = google.accounts.oauth2.initCodeClient({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-        ux_mode: 'popup',
-        state,
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        access_type: 'offline',
-        prompt: 'consent',
-        callback: (resp) => {
-          if (resp.error) return reject(new Error('gsi_' + resp.error));
-          if (resp.state !== state) return reject(new Error('state_mismatch'));
-          resolve(resp.code);
-        },
-        error_callback: (err) => {
-          reject(new Error('gsi_error_' + (err && err.type ? err.type : 'unknown')));
-        },
+    let code;
+    try {
+      code = await new Promise((resolve, reject) => {
+        const client = google.accounts.oauth2.initCodeClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          ux_mode: 'popup',
+          state,
+          code_challenge: challenge,
+          code_challenge_method: 'S256',
+          access_type: 'offline',
+          prompt: 'consent',
+          callback: (resp) => {
+            if (resp.error) return reject(new Error('gsi_' + resp.error));
+            if (resp.state !== state) return reject(new Error('state_mismatch'));
+            resolve(resp.code);
+          },
+          error_callback: (err) => {
+            reject(new Error('gsi_error_' + (err && err.type ? err.type : 'unknown')));
+          },
+        });
+        try {
+          client.requestCode();
+        } catch (e) {
+          reject(e);
+        }
       });
-      try {
-        client.requestCode();
-      } catch (e) {
-        reject(e);
-      }
-    });
+      trace('web_got_code');
+    } catch (e) {
+      trace('web_code_failed', (e && e.message) ? e.message : String(e));
+      throw e;
+    }
 
-    const { ok, status, data } = await postAuthApi('/api/auth/exchange', {
-      code,
-      code_verifier: verifier,
-      redirect_uri: POPUP_REDIRECT_URI,
-    });
+    let result;
+    try {
+      result = await postAuthApi('/api/auth/exchange', {
+        code,
+        code_verifier: verifier,
+        redirect_uri: POPUP_REDIRECT_URI,
+      });
+      trace('web_exchange_response', { status: result.status, ok: result.ok, error: result.data && result.data.error, googleErr: result.data && result.data.google_error });
+    } catch (e) {
+      trace('web_exchange_threw', (e && e.message) ? e.message : String(e));
+      throw e;
+    }
     sessionStorage.removeItem(LS_PKCE_VERIFIER);
     sessionStorage.removeItem(LS_OAUTH_STATE);
 
-    if (!ok) {
-      throw new Error('exchange_failed_' + (data.google_error || status));
+    if (!result.ok) {
+      throw new Error('exchange_failed_' + (result.data.google_error || result.status));
     }
 
     const record = saveToken({
-      access_token: data.access_token,
-      expires_at: Date.now() + (data.expires_in || 3600) * 1000 - 60 * 1000,
-      email: data.email,
-      scope: data.scope,
+      access_token: result.data.access_token,
+      expires_at: Date.now() + (result.data.expires_in || 3600) * 1000 - 60 * 1000,
+      email: result.data.email,
+      scope: result.data.scope,
     });
     notifyChange(record);
+    trace('web_saved_v2', { email: record.email });
     return record;
   }
 
