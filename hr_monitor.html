@@ -133,6 +133,9 @@
   }
   .app-nav-link:hover { color: var(--text); background: #141414; }
   .app-nav-link.active { color: var(--text); background: #141414; }
+  /* Nav link label swap: desktop shows the full label, mobile media
+     query below flips to the short one. */
+  .nav-label-short { display: none; }
   .nav-preview { color: var(--text-dim); }
   .nav-preview:hover { color: var(--text); background: #141414; }
   .nav-copy { color: var(--accent-rmssd); border: 1px solid var(--accent-rmssd); }
@@ -429,6 +432,66 @@
     margin-top: 8px;
     flex-wrap: wrap;
   }
+  /* Big toggle button — used for "Save to local folder" and "Save to
+     Google Drive" rows. Single full-width button, label + sub label.
+     data-state="unset" is the empty state (call to action); data-state
+     ="set" flips the styling to an active/filled look and the click
+     asks for confirmation before clearing. */
+  .big-toggle-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    padding: 14px 18px;
+    margin-top: 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, transform 0.12s;
+  }
+  .big-toggle-btn:hover { background: #1f1f22; border-color: #3a3a3f; }
+  .big-toggle-btn:active { transform: scale(0.995); }
+  .big-toggle-btn[data-state="set"] {
+    background: rgba(93,202,165,0.08);
+    border-color: rgba(93,202,165,0.45);
+  }
+  .big-toggle-btn[data-state="set"]:hover {
+    background: rgba(93,202,165,0.14);
+    border-color: rgba(93,202,165,0.7);
+  }
+  .big-toggle-btn[data-state="working"] {
+    opacity: 0.7;
+    cursor: wait;
+  }
+  .big-toggle-title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text);
+  }
+  .big-toggle-btn[data-state="set"] .big-toggle-title::before {
+    content: '✓  ';
+    color: var(--accent-rmssd);
+    font-weight: 700;
+  }
+  .big-toggle-sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: 'Consolas', 'Monaco', monospace;
+    word-break: break-all;
+  }
+  .big-toggle-meta {
+    font-size: 11px;
+    color: var(--accent-rmssd);
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+  .big-toggle-meta:empty { display: none; }
   .autosave-label {
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -1149,13 +1212,19 @@
     }
     .app-nav {
       height: auto;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 10px;
       padding: 10px 14px;
+      overflow: hidden;
     }
-    .app-nav-title { font-size: 17px; }
+    /* Drop the wordmark on mobile so brand + nav + version chip fit in
+       one row. The mark alone is enough branding here; visiting
+       aorti.ca is the place for the wordmark. */
+    .app-nav-title .aorti-nav-word { display: none; }
     .aorti-nav-mark { width: 22px; height: 20px; }
-    .app-nav-link { padding: 6px 10px; font-size: 11px; }
+    .app-nav-link { padding: 6px 10px; font-size: 11px; white-space: nowrap; }
+    .nav-label-full { display: none; }
+    .nav-label-short { display: inline; }
     /* Preview popup + Copy OBS URL are desktop-only concerns (Window Capture,
        Browser Source URL). Hide on phones to declutter the header. */
     .app-nav .nav-preview, .app-nav .nav-copy { display: none; }
@@ -1313,7 +1382,7 @@
     </svg>
     <span class="aorti-nav-word">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span></span>
   </a>
-  <a class="app-nav-link active" href="./hr_monitor.html">Live monitor</a>
+  <a class="app-nav-link active" href="./hr_monitor.html"><span class="nav-label-full">Live monitor</span><span class="nav-label-short">Monitor</span></a>
   <a class="app-nav-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
@@ -1455,21 +1524,19 @@
              up on the same relay room automatically. OBS still works from
              the URL in Settings → Widgets (URL embeds the key). -->
         <code id="broadcast-key-display" hidden>—</code>
-        <div class="autosave-row">
-          <span class="autosave-label">Auto-save folder:</span>
-          <span class="autosave-folder" id="autosave-folder-name">none</span>
-          <span class="autosave-status" id="autosave-status">idle</span>
-          <button id="autosave-toggle" class="icon-btn" title="Choose a folder to auto-save sessions">
-            <svg class="icon-plus" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
+        <!-- Single big toggle per save target. Label reflects current
+             state; clicking in the "set" state confirms before clearing. -->
+        <button type="button" id="autosave-toggle" class="big-toggle-btn" data-state="unset">
+          <span class="big-toggle-title">Save to local folder</span>
+          <span class="big-toggle-sub" id="autosave-folder-name">Tap to pick a folder</span>
+          <span class="big-toggle-meta" id="autosave-status"></span>
+        </button>
+        <div class="drive-backup-row">
+          <button type="button" id="drive-signin" class="big-toggle-btn" data-state="unset">
+            <span class="big-toggle-title">Save to Google Drive</span>
+            <span class="big-toggle-sub" id="drive-status">Tap to sign in</span>
           </button>
-        </div>
-        <div class="autosave-row drive-backup-row">
-          <span class="autosave-label">Drive backup:</span>
-          <span class="autosave-folder" id="drive-status">not signed in</span>
-          <button id="drive-signin">Sign in with Google</button>
+          <!-- Kept for legacy JS; hidden, the big toggle wires both. -->
           <button id="drive-signout" style="display: none;">Sign out</button>
         </div>
         <div class="toggle-row battopt-row" id="battopt-row" hidden>
@@ -3800,12 +3867,14 @@
       nameEl.textContent = autoSaveDirHandle.name || 'selected';
       if (toggleBtn) {
         toggleBtn.classList.add('has-folder');
+        toggleBtn.setAttribute('data-state', 'set');
         toggleBtn.title = 'Clear the auto-save folder';
       }
     } else {
-      nameEl.textContent = 'none';
+      nameEl.textContent = 'Tap to pick a folder';
       if (toggleBtn) {
         toggleBtn.classList.remove('has-folder');
+        toggleBtn.setAttribute('data-state', 'unset');
         toggleBtn.title = 'Choose a folder to auto-save sessions';
       }
       setAutoSaveStatus('', '');
@@ -3948,29 +4017,41 @@
         statusEl.textContent = 'signed in';
         statusEl.classList.add('drive-signedin');
       }
-      signIn.style.display = 'none';
-      signOut.style.display = '';
+      signIn.setAttribute('data-state', 'set');
+      signOut.style.display = 'none';
     } else if (effectiveError || tokenExpired) {
-      // Silent refresh failed or the token aged out. Keep sign-out visible so
-      // the user can clear state if they want, but re-show Sign in so they
-      // can recover with one click (the click runs inside a user gesture,
-      // which bypasses the third-party cookie restrictions that blocked the
-      // silent refresh).
-      statusEl.textContent = driveAccessToken ? 'reconnect Drive' : 'sign-in failed';
+      // Silent refresh failed or the token aged out. Big-toggle stays
+      // in "set" visual state but the sub-label flips to an action hint
+      // so the user can re-click to recover in a user gesture.
+      statusEl.textContent = driveAccessToken ? 'Tap to reconnect Drive' : 'Sign-in failed — tap to retry';
       statusEl.classList.add('drive-error');
-      signIn.style.display = '';
-      signOut.style.display = driveAccessToken ? '' : 'none';
+      signIn.setAttribute('data-state', 'unset');
+      signOut.style.display = 'none';
     } else {
-      statusEl.textContent = 'not signed in';
+      statusEl.textContent = 'Tap to sign in';
       statusEl.classList.add('drive-idle');
-      signIn.style.display = '';
+      signIn.setAttribute('data-state', 'unset');
       signOut.style.display = 'none';
     }
   }
 
   function initGoogleAuth() {
+    // Step 1: restore cached token IMMEDIATELY, regardless of whether GSI
+    // has loaded. On Capacitor the GSI library often never loads at all
+    // (the WebView origin is https://localhost), so if we wait for it
+    // we'd leave the user looking at a "not signed in" button even
+    // though they signed in on the landing / app-home page seconds ago.
+    const cached = loadDriveTokenFromStorage();
+    if (cached && !driveAccessToken) {
+      driveAccessToken = cached.token;
+      driveTokenExpiresAt = cached.expiresAt;
+      driveUpdateUI();
+      driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
+    }
+    // Step 2: set up the GSI token client for explicit sign-in/sign-out
+    // actions from inside this page. On Capacitor this may never resolve,
+    // which is fine — the native GoogleAuth plugin handles sign-in there.
     if (!window.google || !google.accounts || !google.accounts.oauth2) {
-      // GSI script still loading — retry shortly.
       setTimeout(initGoogleAuth, 400);
       return;
     }
@@ -3997,25 +4078,11 @@
         driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
       },
       error_callback: (err) => {
-        // Fires when the silent flow gets blocked (3P cookies, popup denied,
-        // user closed the FedCM prompt). Keep the prior token visible — it
-        // may still be valid for minutes — and flag the error so driveFetch
-        // knows not to spin-loop.
         console.warn('GSI error_callback:', err);
         driveTokenError = err && err.type ? err.type : 'interaction_required';
         driveUpdateUI();
       },
     });
-    // Restore a shared token from localStorage (written by either page). Only
-    // tokens still within their expiry window are kept — expired ones get
-    // cleaned up in loadDriveTokenFromStorage.
-    const cached = loadDriveTokenFromStorage();
-    if (cached) {
-      driveAccessToken = cached.token;
-      driveTokenExpiresAt = cached.expiresAt;
-      driveUpdateUI();
-      driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
-    }
   }
 
   // Previous implementation used a setTimeout to proactively refresh ~10 min
@@ -4841,16 +4908,28 @@
     // controls. No mid-session "discard" action — Stop already finalizes +
     // clears, and Start is always a fresh recording.
     $('btn-export').addEventListener('click', exportCSV);
-    // One button, two states. Plus icon when no folder is set (click to
-    // choose), rotates 45deg to × when a folder is saved (click to clear).
+    // Big toggle: unset = pick, set = confirm then clear.
     $('autosave-toggle').addEventListener('click', () => {
-      if (autoSaveDirHandle) clearAutoSaveFolder();
-      else pickAutoSaveFolder();
+      if (autoSaveDirHandle) {
+        if (confirm('Stop saving sessions to this folder? Existing files stay where they are.')) {
+          clearAutoSaveFolder();
+        }
+      } else {
+        pickAutoSaveFolder();
+      }
     });
     restoreAutoSaveFolder();
-    // Google Drive sign-in wiring
+    // Google Drive big toggle: unset = sign in, set = confirm then sign out.
     initGoogleAuth();
-    $('drive-signin').addEventListener('click', driveSignIn);
+    $('drive-signin').addEventListener('click', () => {
+      if (driveAccessToken) {
+        if (confirm('Sign out of Google Drive? Cached sessions in this browser stay cached until you clear them.')) {
+          driveSignOut();
+        }
+      } else {
+        driveSignIn();
+      }
+    });
     $('drive-signout').addEventListener('click', driveSignOut);
     $('add-marker').addEventListener('click', addMarker);
     $('marker-label').addEventListener('keydown', e => { if (e.key === 'Enter') addMarker(); });
