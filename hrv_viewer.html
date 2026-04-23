@@ -3348,7 +3348,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 2
+        || cached.__schemaV !== 3
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3362,13 +3362,56 @@
     }
     if (newParsed > 0) persistIndex();
 
-    // Group by date
+    // Dedup: dual-save on mobile (JS path + native plugin) wrote the same
+    // session to Drive under two filenames (one UTC-formatted, one local).
+    // Group by rounded-startEpoch + rounded-duration, keep the file with
+    // the higher hrCount (more complete data; the JS copy loses events
+    // during visibility pauses).
+    const dedupHide = new Set();
+    const bySignature = new Map();
+    for (const fn of Object.keys(sessionsIndex)) {
+      const s = sessionsIndex[fn];
+      if (!s || !s.startEpoch) continue;
+      const key = Math.round(s.startEpoch / 60000) + '_' + Math.round((s.duration || 0) * 6);
+      const prev = bySignature.get(key);
+      if (prev == null) { bySignature.set(key, fn); continue; }
+      const ps = sessionsIndex[prev];
+      const prevScore = (ps.hrCount || 0) + (ps.duration || 0) / 1000;
+      const curScore = (s.hrCount || 0) + (s.duration || 0) / 1000;
+      if (curScore > prevScore) { dedupHide.add(prev); bySignature.set(key, fn); }
+      else { dedupHide.add(fn); }
+    }
+
+    // Group by date. Bucket by the startEpoch's LOCAL date (not the
+    // filename's parsed date) so mixed TZ filenames (web writes UTC,
+    // Android writes local) all land on the day the user actually
+    // experienced. Midnight-crossing sessions get pushed onto both days.
     sessionsByDate = {};
     for (const fn of Object.keys(sessionsIndex)) {
-      const meta = parseSessionFilename(fn);
-      if (!meta) continue;
-      if (!sessionsByDate[meta.isoDate]) sessionsByDate[meta.isoDate] = [];
-      sessionsByDate[meta.isoDate].push(fn);
+      if (dedupHide.has(fn)) continue;
+      const s = sessionsIndex[fn];
+      let startDate;
+      if (s && s.startEpoch) {
+        const d = new Date(s.startEpoch);
+        startDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      } else {
+        const meta = parseSessionFilename(fn);
+        if (!meta) continue;
+        startDate = meta.isoDate;
+      }
+      if (!sessionsByDate[startDate]) sessionsByDate[startDate] = [];
+      sessionsByDate[startDate].push(fn);
+      // Midnight crosser: also bucket under end-date so the second day's
+      // view sees the sleep portion from the overnight session.
+      if (s && s.startEpoch && s.duration) {
+        const endMs = s.startEpoch + s.duration * 60000;
+        const ed = new Date(endMs);
+        const endDate = ed.getFullYear() + '-' + String(ed.getMonth() + 1).padStart(2, '0') + '-' + String(ed.getDate()).padStart(2, '0');
+        if (endDate !== startDate) {
+          if (!sessionsByDate[endDate]) sessionsByDate[endDate] = [];
+          sessionsByDate[endDate].push(fn);
+        }
+      }
     }
     for (const d of Object.keys(sessionsByDate)) {
       sessionsByDate[d].sort();
@@ -3645,6 +3688,7 @@
     const summary = {
       filename,
       startEpoch,
+      hrCount: hr.length,
       duration: hr[hr.length - 1].t,
       hrAvg: Math.round(hrVals.reduce((s, v) => s + v, 0) / hrVals.length),
       hrMax: maxHR,
@@ -3668,7 +3712,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 2,
+      __schemaV: 3,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
