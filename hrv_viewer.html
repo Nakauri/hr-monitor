@@ -3348,6 +3348,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
+        || cached.__schemaV !== 2
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3663,6 +3664,11 @@
       hrDeltas,
       flushes,
       chillsWindows,
+      // Bump whenever summarizeCSV's output shape or logic changes. Forces a
+      // re-parse of cached sessionsIndex entries that were produced by older
+      // code — otherwise bug fixes in the summarize path never reach past
+      // sessions already in the cache.
+      __schemaV: 2,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
