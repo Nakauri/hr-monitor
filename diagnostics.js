@@ -103,6 +103,10 @@
       fgsStarted: !!window.__hrMonitorFgsStarted,
       fgsPermission: window.__hrMonitorFgsPermission || null,
       fgsLastError: window.__hrMonitorFgsLastError || null,
+      // NativeHrSessionPlugin's own FGS (NativeHrService) — the actual one
+      // that runs during a session. The @capawesome FGS plugin above is
+      // legacy / never started on the session path.
+      nativeFgsRunning: !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing()),
       battoptLoaded: !!window.__hrMonitorBatteryOptLoaded,
       battoptRanInit: !!window.__hrMonitorBatteryOptRanInit,
       battoptGotPlugin: !!window.__hrMonitorBatteryOptGotPlugin,
@@ -437,13 +441,11 @@
           ['Viewer cache (sessions)', String(d.driveMetaCount), d.driveMetaCount > 0 ? 'ok' : ''],
           ['Last viewer sync', d.driveLastSync || 'never', d.driveLastSync ? 'ok' : ''],
         ])}
-        ${rows('Foreground service (Android background recording)', [
-          ['1. script loaded', yn(d.fgsLoaded), d.isNative ? ok(d.fgsLoaded) : ''],
-          ['2. init ran', yn(d.fgsRanInit), d.isNative ? ok(d.fgsRanInit) : ''],
-          ['3. got plugin', yn(d.fgsGotPlugin), d.isNative ? ok(d.fgsGotPlugin) : ''],
-          ['4. registered', yn(d.fgsRegistered), d.isNative ? ok(d.fgsRegistered) : ''],
-          ['5. started', yn(d.fgsStarted), d.isNative ? okwarn(d.fgsStarted, true) : ''],
-          ['notification permission', (d.fgsPermission != null ? JSON.stringify(d.fgsPermission) : 'not asked yet'), d.fgsPermission ? 'ok' : 'warn'],
+        ${rows('Foreground service (background recording)', [
+          ['Native session FGS running', yn(d.nativeFgsRunning), d.isNative ? ok(d.nativeFgsRunning) : ''],
+          ['Legacy @capawesome plugin loaded', yn(d.fgsLoaded), ''],
+          ['Legacy @capawesome started', yn(d.fgsStarted), ''],
+          ['notification permission', (d.fgsPermission != null ? JSON.stringify(d.fgsPermission) : 'not required on this OS'), ''],
           ['last error', d.fgsLastError || 'none', d.fgsLastError ? 'err' : 'ok'],
         ])}
         ${rows('Battery optimisation', [
