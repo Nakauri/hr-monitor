@@ -314,6 +314,21 @@
       .hrm-diag-actions button.primary { background: #5DCAA5; color: #0a0a0a; border-color: #5DCAA5; font-weight: 700; }
       .hrm-diag-actions button:hover { border-color: #3a3a3a; }
       .hrm-diag-actions button.primary:hover { filter: brightness(1.1); }
+      .hrm-diag-pill {
+        display: inline-block;
+        padding: 3px 8px;
+        font-size: 10px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-decoration: none;
+        color: #6a6a6a;
+        border: 1px solid #2a2a2a;
+        border-radius: 4px;
+        background: transparent;
+        transition: color 0.12s, border-color 0.12s;
+      }
+      .hrm-diag-pill:hover { color: #d8d8d8; border-color: #3a3a3a; }
     `;
     document.head.appendChild(s);
   }
@@ -323,32 +338,30 @@
   const AVATAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2"/></svg>';
 
   async function mountChip(target) {
-    // Chip is only useful inside the Android APK where shim-load markers,
-    // plugin availability, and FGS / battery state are the truth about
-    // whether the app is actually going to survive backgrounding. On a
-    // desktop browser the "Bluetooth shim" and "Foreground service" rows
-    // would be permanently empty and the chip would be noise.
-    const cap = window.Capacitor;
-    const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
-    if (!isNative) {
-      // Collapse the slot on desktop so the flex-gap from .app-nav + the
-      // slot's margin don't leave a visible blank where the chip used to be.
-      const slot = typeof target === 'string' ? document.querySelector(target) : target;
-      if (slot) slot.style.display = 'none';
-      return;
-    }
+    // On Capacitor: full chip with avatar + version (BLE / FGS / battery /
+    // OEM rows are meaningful there). On web: a discrete "diag" pill so
+    // the user can still pop the modal to inspect Drive cache, auth trace,
+    // sign-in state, etc. without devtools.
     injectStyles();
     const el = typeof target === 'string' ? document.querySelector(target) : target;
     if (!el) return;
+    const cap = window.Capacitor;
+    const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
 
     const chip = document.createElement('a');
-    chip.className = 'hrm-user-chip';
     chip.href = '#';
-    chip.setAttribute('aria-label', 'Account and app diagnostics');
-    chip.innerHTML = `
-      <span class="hrm-user-avatar">${AVATAR_SVG}</span>
-      <span class="hrm-version-label">v0.5</span>
-    `;
+    chip.setAttribute('aria-label', 'App diagnostics');
+    if (isNative) {
+      chip.className = 'hrm-user-chip';
+      chip.innerHTML = `
+        <span class="hrm-user-avatar">${AVATAR_SVG}</span>
+        <span class="hrm-version-label">v0.5</span>
+      `;
+    } else {
+      chip.className = 'hrm-diag-pill';
+      chip.textContent = 'diag';
+      chip.title = 'App diagnostics + auth trace';
+    }
     chip.addEventListener('click', (e) => { e.preventDefault(); open(); });
     el.innerHTML = '';
     el.appendChild(chip);
@@ -468,6 +481,7 @@
           <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
           <button id="hrm-diag-clearlog">Clear events</button>
           <button id="hrm-diag-clearauth">Clear auth state</button>
+          <button id="hrm-diag-purge" style="background: #2a1616; border-color: #5a2a2a; color: #E89898;">Purge app data</button>
           <button id="hrm-diag-close">Close</button>
         </div>
       </div>
@@ -524,6 +538,49 @@
         try { localStorage.removeItem('hr_monitor_drive_token'); } catch (e) {}
         clearAuthBtn.textContent = 'Cleared — reload page';
         clearAuthBtn.disabled = true;
+      });
+    }
+    const purgeBtn = document.getElementById('hrm-diag-purge');
+    if (purgeBtn) {
+      purgeBtn.addEventListener('click', async () => {
+        if (!confirm(
+          'Purge all app data on this device?\n\n' +
+          'This clears:\n' +
+          '• Google sign-in (you will need to sign in again)\n' +
+          '• All session history cached on this device\n' +
+          '• All settings (thresholds, widget prefs, folder pick)\n' +
+          '• Event log + auth trace\n\n' +
+          'Sessions stored on Google Drive are NOT affected. Your recordings are safe there.\n\n' +
+          'Use this when the app is stuck in a weird state. Continue?'
+        )) return;
+        purgeBtn.textContent = 'Purging…';
+        purgeBtn.disabled = true;
+        try {
+          if (window.aortiAuth) { try { await window.aortiAuth.signOut({ local: true, remote: false }); } catch (e) {} }
+          try {
+            const keys = Object.keys(localStorage);
+            for (const k of keys) try { localStorage.removeItem(k); } catch (e) {}
+          } catch (e) {}
+          try { sessionStorage.clear(); } catch (e) {}
+          // IndexedDB — drive-cache + any other app DBs. Queue in parallel.
+          try {
+            const dbs = (indexedDB.databases && (await indexedDB.databases())) || [{ name: 'hr_monitor_kv' }];
+            await Promise.all(dbs.filter(d => d && d.name).map(d => new Promise((resolve) => {
+              const req = indexedDB.deleteDatabase(d.name);
+              req.onsuccess = req.onerror = req.onblocked = () => resolve();
+            })));
+          } catch (e) {}
+          // Service worker, if any.
+          try {
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+            }
+          } catch (e) {}
+        } finally {
+          purgeBtn.textContent = 'Purged. Reloading…';
+          setTimeout(() => { try { location.reload(); } catch (e) {} }, 600);
+        }
       });
     }
   }
