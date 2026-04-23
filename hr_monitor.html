@@ -2011,13 +2011,35 @@
   // CPU/GPU work that piles up across a multi-hour session and trips
   // Chromium's renderer killer. State arrays still update on every HR
   // tick; the chart catches up the moment the page becomes visible again.
+  //
+  // When we come back after a long hide (screen off / app minimized for
+  // more than a few seconds), we trigger a rehydrate — wireNativeHr drops
+  // queued events older than 3 seconds (correctly, to avoid the UI flood
+  // when Capacitor delivers a backlog), which otherwise leaves a blank
+  // gap in the chart for the entire sleep duration. Rehydrate pulls the
+  // last 3 min from the CSV so the gap gets filled with the real data
+  // the native plugin was writing all along.
   let pageVisible = typeof document.hidden === 'boolean' ? !document.hidden : true;
+  let lastHiddenAt = 0;
+  const REHYDRATE_ON_RESUME_MS = 5000;
   document.addEventListener('visibilitychange', () => {
+    const wasHidden = !pageVisible;
     pageVisible = !document.hidden;
     if (pageVisible) {
+      const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+      if (wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
+          && window.HRMNativeHrSession
+          && window.HRMNativeHrSession.isPublishing
+          && window.HRMNativeHrSession.isPublishing()) {
+        if (window.HRMLog) window.HRMLog.event('resume rehydrate', { hiddenSec: Math.round(hiddenMs / 1000) });
+        rehydrateFromNativeCsv().catch(e => {
+          if (window.HRMLog) window.HRMLog.event('resume rehydrate error', e && e.message ? e.message : String(e));
+        });
+      }
       try { updateCharts(); } catch (e) {}
       try { updateStats(); } catch (e) {}
     } else {
+      lastHiddenAt = Date.now();
       // Halt any in-flight chart animations + drop the renderer's hold on
       // off-screen GPU resources. Chart.js retains canvas-level state
       // between updates; .stop() flushes pending RAFs so chromium can GC.
