@@ -2002,8 +2002,22 @@
     return out;
   }
 
+  // Pause chart redraws while the page is hidden. Reduces background
+  // CPU/GPU work that piles up across a multi-hour session and trips
+  // Chromium's renderer killer. State arrays still update on every HR
+  // tick; the chart catches up the moment the page becomes visible again.
+  let pageVisible = typeof document.hidden === 'boolean' ? !document.hidden : true;
+  document.addEventListener('visibilitychange', () => {
+    pageVisible = !document.hidden;
+    if (pageVisible) {
+      try { updateCharts(); } catch (e) {}
+      try { updateStats(); } catch (e) {}
+    }
+  });
+
   function updateCharts() {
     if (!state.startTime) return;
+    if (!pageVisible) return; // skip render when backgrounded
     const now = (Date.now() - state.startTime) / 60000;
     // 3-min window that anchors at x=0 early, then scrolls so newest is on the right edge.
     const WINDOW_MIN = 3;
@@ -2385,6 +2399,7 @@
                       : 'crash';
       playAlert(alertType);
       state.warnings.push({ t: (Date.now() - state.startTime) / 60000, type: newWarn, hr: state.currentHR, rmssd: state.currentRMSSD });
+      if (state.warnings.length > 500) state.warnings.shift();
     }
     state.currentWarn = newWarn;
   }
@@ -2471,6 +2486,7 @@
         c.age++;
         if (longEnough) {
           state.ectopicEvents.push({ t: c.t, rr: c.rr, dev: c.dev });
+          if (state.ectopicEvents.length > 1000) state.ectopicEvents.shift();
           ectopicCandidates.splice(i, 1);
         } else if (c.age >= 2) {
           ectopicCandidates.splice(i, 1);
@@ -3492,8 +3508,12 @@
 
   // Reads the native session's CSV and rebuilds in-memory chart state from
   // it. Called once after the WebView reattaches to a still-running native
-  // session. The CSV is the authoritative source — matches exactly what the
-  // user will see later in the viewer.
+  // session. Only the most recent REHYDRATE_KEEP_MIN of data is kept in JS —
+  // the live chart shows the last 3 min anyway, and pulling the entire
+  // multi-hour CSV into JS arrays risks the same renderer crash that lost
+  // the user's previous session. Full data lives in the CSV (and on Drive);
+  // the viewer is the place to look at the whole session.
+  const REHYDRATE_KEEP_MIN = 3;
   async function rehydrateFromNativeCsv() {
     if (window.HRMLog) window.HRMLog.event('rehydrate starting', {
       hasShim: !!window.HRMNativeHrSession,
@@ -3548,10 +3568,19 @@
     }
     if (lastHr != null) state.currentHR = lastHr;
     if (lastRmssd != null) state.currentRMSSD = lastRmssd;
+    // Trim to the most recent REHYDRATE_KEEP_MIN so the live chart isn't
+    // backfilled with hours of stale points. The chart's visible window is
+    // 3 min anyway; older points just bloat the array.
+    const cutoffMin = lastHrT != null ? Math.max(0, lastHrT - REHYDRATE_KEEP_MIN) : 0;
+    if (cutoffMin > 0) {
+      state.hrSeries = state.hrSeries.filter(p => p.t >= cutoffMin);
+      state.rmssdSeries = state.rmssdSeries.filter(p => p.t >= cutoffMin);
+    }
     if (window.HRMLog) window.HRMLog.event('rehydrated', {
       hrRows: state.hrSeries.length,
       rmssdRows: state.rmssdSeries.length,
       sizeBytes: snap.sizeBytes,
+      keptMin: REHYDRATE_KEEP_MIN,
     });
     try { updateCharts(); } catch (e) {}
     try { updateStats(); } catch (e) {}
@@ -3653,6 +3682,7 @@
     if (!state.startTime) return;
     const t = (Date.now() - state.startTime) / 60000;
     state.connectionEvents.push({ t, type });
+    if (state.connectionEvents.length > 500) state.connectionEvents.shift();
   }
 
   async function readBattery() {
@@ -3826,6 +3856,7 @@
         if (state.startTime) {
           const t = (Date.now() - state.startTime) / 60000;
           state.postureLog.push({ t, posture: p });
+          if (state.postureLog.length > 500) state.postureLog.shift();
         }
       });
     });
@@ -3899,6 +3930,7 @@
     const label = $('marker-label').value.trim() || 'event';
     const t = (Date.now() - state.startTime) / 60000;
     state.events.push({ t, label, hr: state.currentHR, rmssd: state.currentRMSSD });
+    if (state.events.length > 500) state.events.shift();
     $('marker-label').value = '';
     renderEvents();
   }

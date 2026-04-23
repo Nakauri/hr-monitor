@@ -47,6 +47,25 @@ public class NativeHrService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : ACTION_START;
+
+        // CRITICAL: any service started via startForegroundService() MUST call
+        // startForeground() within 5 seconds, regardless of the action. If the
+        // FIRST onStartCommand for a service instance is ACTION_STOP (e.g. the
+        // user taps Stop right after launching, or the system spawned a fresh
+        // instance to deliver the stop intent), early-returning before
+        // startForeground crashes the process with RemoteServiceException.
+        // Always startForeground first; stop right after if STOP was requested.
+        String title = intent != null && intent.getStringExtra(EXTRA_TITLE) != null
+            ? intent.getStringExtra(EXTRA_TITLE) : "HR Monitor";
+        String body = intent != null && intent.getStringExtra(EXTRA_BODY) != null
+            ? intent.getStringExtra(EXTRA_BODY) : "Recording";
+        Notification n = buildNotification(title, body);
+        try {
+            startForeground(NOTIFICATION_ID, n);
+        } catch (Throwable t) {
+            Log.w(TAG, "startForeground failed: " + t.getMessage());
+        }
+
         if (ACTION_STOP.equals(action)) {
             // Tell the plugin to flush CSV + final Drive upload + close
             // relay + close GATT before the service dies. Without this,
@@ -62,16 +81,6 @@ public class NativeHrService extends Service {
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
-        }
-        String title = intent != null && intent.getStringExtra(EXTRA_TITLE) != null
-            ? intent.getStringExtra(EXTRA_TITLE) : "HR Monitor";
-        String body = intent != null && intent.getStringExtra(EXTRA_BODY) != null
-            ? intent.getStringExtra(EXTRA_BODY) : "Recording";
-        Notification n = buildNotification(title, body);
-        try {
-            startForeground(NOTIFICATION_ID, n);
-        } catch (Throwable t) {
-            Log.w(TAG, "startForeground failed: " + t.getMessage());
         }
         return START_STICKY;
     }
