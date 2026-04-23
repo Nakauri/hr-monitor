@@ -590,6 +590,19 @@
     font-weight: 500;
     font-size: 15px;
   }
+  .session-card-cont {
+    display: inline-block;
+    margin-left: 8px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    vertical-align: middle;
+  }
   .session-card-stats {
     display: flex;
     gap: 18px;
@@ -3401,13 +3414,44 @@
       }
       if (!sessionsByDate[startDate]) sessionsByDate[startDate] = [];
       sessionsByDate[startDate].push(fn);
-      // Sessions live under their START DATE only. Midnight-crossing
-      // sleep sessions belong to the evening they started, not the
-      // morning they ended. Showing them on both days was confusing —
-      // a card labelled "11:29 PM" on the next day reads as if 11:29 PM
-      // on that day already happened. The session timeline still extends
-      // visually into the next day's hours on the start-date view.
+      // Midnight-crossing session ALSO buckets under the end-date so the
+      // morning of the next day shows the sleep portion. Day-view
+      // rendering computes the per-day portion via sessionDayPortion()
+      // and displays only the clock range that actually falls on that
+      // date, so no "11:29 PM on Thursday" nonsense on the continuation
+      // day. The session is ONE session with data on two days, not two
+      // sessions.
+      if (s && s.startEpoch && s.duration) {
+        const endMs = s.startEpoch + s.duration * 60000;
+        const ed = new Date(endMs);
+        const endDate = ed.getFullYear() + '-' + String(ed.getMonth() + 1).padStart(2, '0') + '-' + String(ed.getDate()).padStart(2, '0');
+        if (endDate !== startDate) {
+          if (!sessionsByDate[endDate]) sessionsByDate[endDate] = [];
+          sessionsByDate[endDate].push(fn);
+        }
+      }
     }
+
+    // Helper: given a session summary and an ISO date, return the portion
+    // of the session that falls within that day's local-time boundaries.
+    // Returns { start, end, durationMin, isContinuation, continuesNext }.
+    window.sessionDayPortion = function (s, dateIso) {
+      if (!s || !s.startEpoch || !s.duration) return null;
+      const dayStart = new Date(dateIso + 'T00:00:00').getTime();
+      const dayEnd = dayStart + 86400000;
+      const sessStart = s.startEpoch;
+      const sessEnd = sessStart + s.duration * 60000;
+      const start = Math.max(sessStart, dayStart);
+      const end = Math.min(sessEnd, dayEnd);
+      return {
+        start, end,
+        durationMin: Math.max(0, (end - start) / 60000),
+        isContinuation: sessStart < dayStart,
+        continuesNext: sessEnd > dayEnd,
+        fullStart: sessStart,
+        fullDurationMin: s.duration,
+      };
+    };
     for (const d of Object.keys(sessionsByDate)) {
       sessionsByDate[d].sort();
     }
@@ -4420,19 +4464,30 @@
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
       if (!s || !meta) return '';
-      // Prefer the CSV's real start epoch (set in summarizeCSV from
-      // epoch_ms) so Android-written local-time filenames still land in
-      // the correct hour slot on the strip. Fall back to the filename-
-      // derived date for old files with no epoch_ms column.
-      const realStart = s.startEpoch ? new Date(s.startEpoch) : meta.date;
-      const startHr = realStart.getHours() + realStart.getMinutes() / 60 + realStart.getSeconds() / 3600;
-      const durHr = s.duration / 60;
-      const left = (startHr / 24) * 100;
-      const width = Math.max(0.3, (durHr / 24) * 100);
+      // Portion of the session that actually falls on THIS day.
+      // For a session that started last night, the portion starts at 00:00
+      // local and ends when the session ended (or midnight if it kept going).
+      const portion = sessionDayPortion(s, iso);
+      let left, width;
+      if (portion && portion.durationMin > 0) {
+        const startD = new Date(portion.start);
+        const startHr = startD.getHours() + startD.getMinutes() / 60 + startD.getSeconds() / 3600;
+        const durHr = portion.durationMin / 60;
+        left = (startHr / 24) * 100;
+        width = Math.max(0.3, (durHr / 24) * 100);
+      } else {
+        // Fallback for pre-epoch_ms CSVs: use filename-parsed date.
+        const realStart = s.startEpoch ? new Date(s.startEpoch) : meta.date;
+        const startHr = realStart.getHours() + realStart.getMinutes() / 60 + realStart.getSeconds() / 3600;
+        const durHr = s.duration / 60;
+        left = (startHr / 24) * 100;
+        width = Math.max(0.3, (durHr / 24) * 100);
+      }
       const head = computeHeadline(headlineMetric, [fn]);
       const color = head.color || STAGE_COLORS['stage-normal'];
       const headVal = head.value != null ? (head.value + (head.unit ? ' ' + head.unit : '')) : '—';
-      const tip = `${meta.isoTime} · ${formatDuration(s.duration)} · ${head.label || 'HR'} ${headVal}${s.rmssdAvg != null ? ` · HRV ${s.rmssdAvg}` : ''}${s.palpCount ? ` · ${s.palpCount} palp` : ''}`;
+      const portionNote = portion && portion.isContinuation ? ' · continued from previous day' : '';
+      const tip = `${portion ? formatClockTime(portion.start) : meta.isoTime} · ${formatDuration(portion ? portion.durationMin : s.duration)}${portionNote} · ${head.label || 'HR'} ${headVal}${s.rmssdAvg != null ? ` · HRV ${s.rmssdAvg}` : ''}${s.palpCount ? ` · ${s.palpCount} palp` : ''}`;
       return `<div class="day-strip-block" data-filename="${encodeURIComponent(fn)}" data-tip="${escape(tip)}" style="left: ${left}%; width: ${width}%; background: ${color};"></div>`;
     }).join('');
 
@@ -4460,11 +4515,22 @@
       const autonomicCols = autonomicOn ? `
             <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-faint)'};">${(s.flushes || []).length}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-faint)'};">${(s.chillsWindows || []).length}</span></div>` : '';
+      // Day-portion: clip the session's times to the current day's
+      // boundaries so a session that started yesterday shows its
+      // continuation range (e.g. 00:00 – 09:05 AM) and a note pointing
+      // back to the full session's start on the previous day.
+      const portion = sessionDayPortion(s, iso);
+      const usePortion = portion && portion.durationMin > 0;
+      const cardStart = usePortion ? portion.start : sessionStartEpoch(s, meta);
+      const cardDurMin = usePortion ? portion.durationMin : s.duration;
+      const contNote = usePortion && portion.isContinuation
+        ? `<span class="session-card-cont" title="Full session started ${formatClockTime(portion.fullStart)} on the previous day">↺ continued from prev. day</span>`
+        : '';
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
-          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta && meta.date ? formatClockTime(sessionStartEpoch(s, meta)) : (meta ? meta.isoTime : fn)}</div>
-          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(sessionStartEpoch(s, meta), s.duration)} <span class="session-card-dur">(${formatDuration(s.duration)})</span>` : `${formatDuration(s.duration)} session`}</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta && meta.date ? formatClockTime(cardStart) : (meta ? meta.isoTime : fn)} ${contNote}</div>
+          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(cardStart, cardDurMin)} <span class="session-card-dur">(${formatDuration(cardDurMin)})</span>` : `${formatDuration(cardDurMin)} session`}</div>
           <div class="session-card-stats">
             <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
