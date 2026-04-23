@@ -1937,12 +1937,17 @@
       ]},
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
+        parsing: false, // datasets are pre-shaped {x,y}; skip Chart.js parsing
         // Share a single vertical cursor across both datasets: hovering at any
         // X shows one tooltip with HR, RMSSD, and any palps + events that land
         // at that timestamp. Avoids the fragmented-hover experience where
         // each dataset popped its own tooltip.
         interaction: { mode: 'index', intersect: false, axis: 'x' },
         plugins: {
+          // Min-Max decimation: collapses runs of off-screen-pixel-collinear
+          // points to two extremes. Cuts render work without distorting the
+          // shape. Kicks in past 1000 points; long sessions benefit a lot.
+          decimation: { enabled: true, algorithm: 'min-max', samples: 1000 },
           legend: { labels: { color: '#9a9a9f', font: { size: 11 }, boxWidth: 12 } },
           tooltip: {
             mode: 'index',
@@ -2012,6 +2017,13 @@
     if (pageVisible) {
       try { updateCharts(); } catch (e) {}
       try { updateStats(); } catch (e) {}
+    } else {
+      // Halt any in-flight chart animations + drop the renderer's hold on
+      // off-screen GPU resources. Chart.js retains canvas-level state
+      // between updates; .stop() flushes pending RAFs so chromium can GC.
+      [mainChart, compactChart, hrInlineChart, rmssdInlineChart, hrLiveTraceChart, rsaChart].forEach(c => {
+        try { if (c && c.stop) c.stop(); } catch (e) {}
+      });
     }
   });
 
@@ -3481,9 +3493,14 @@
   // to "live" so the user doesn't see a stale "Start session" button and
   // accidentally kick off a new pair flow.
   let nativeRehydrated = false;
+  let restoreLogged = false;
   function restoreNativeSessionUI() {
     if (!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable)) return false;
     if (!(window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing())) return false;
+    if (!restoreLogged) {
+      restoreLogged = true;
+      if (window.HRMLog) window.HRMLog.event('native session detected on load');
+    }
     const last = getLastStrap();
     device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
     if (state.startTime === null) state.startTime = Date.now();
@@ -3606,7 +3623,20 @@
     if (restoreNativeSessionUI()) return;
     let tries = 0;
     const timer = setInterval(() => {
-      if (restoreNativeSessionUI() || ++tries > 40) clearInterval(timer);
+      if (restoreNativeSessionUI()) { clearInterval(timer); return; }
+      if (++tries > 40) {
+        clearInterval(timer);
+        // Diagnostic: explain why we gave up. Helps distinguish "FGS died,
+        // session truly gone" from "session alive but JS can't see it".
+        if (window.HRMLog) {
+          let reason = 'shim_missing';
+          if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) {
+            reason = (window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing())
+              ? 'publishing_true_but_skipped' : 'not_publishing_after_4s';
+          }
+          window.HRMLog.event('native session not detected (4s)', reason);
+        }
+      }
     }, 100);
   })();
 
