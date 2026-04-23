@@ -3401,17 +3401,12 @@
       }
       if (!sessionsByDate[startDate]) sessionsByDate[startDate] = [];
       sessionsByDate[startDate].push(fn);
-      // Midnight crosser: also bucket under end-date so the second day's
-      // view sees the sleep portion from the overnight session.
-      if (s && s.startEpoch && s.duration) {
-        const endMs = s.startEpoch + s.duration * 60000;
-        const ed = new Date(endMs);
-        const endDate = ed.getFullYear() + '-' + String(ed.getMonth() + 1).padStart(2, '0') + '-' + String(ed.getDate()).padStart(2, '0');
-        if (endDate !== startDate) {
-          if (!sessionsByDate[endDate]) sessionsByDate[endDate] = [];
-          sessionsByDate[endDate].push(fn);
-        }
-      }
+      // Sessions live under their START DATE only. Midnight-crossing
+      // sleep sessions belong to the evening they started, not the
+      // morning they ended. Showing them on both days was confusing —
+      // a card labelled "11:29 PM" on the next day reads as if 11:29 PM
+      // on that day already happened. The session timeline still extends
+      // visually into the next day's hours on the start-date view.
     }
     for (const d of Object.keys(sessionsByDate)) {
       sessionsByDate[d].sort();
