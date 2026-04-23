@@ -3292,6 +3292,40 @@
     return null;
   }
 
+  // Given raw gap spans from disconnect→connect events, drop any gap whose
+  // interior actually contains HR data. Covers three real cases:
+  //   1. Spurious disconnect events that fire during healthy recording
+  //      (Coospo firmware, brief Windows BT stack blip with instant recovery).
+  //   2. Native-Android sessions where the auto-reconnect writes a "connected"
+  //      row after the disconnect — but the HR characteristic notifications
+  //      carried on through the micro-blip.
+  //   3. Any future source of false disconnect events.
+  // Keeps gaps that are real (no data at all within them).
+  function trimGapsByData(rawGaps, hrPoints) {
+    if (!rawGaps.length) return [];
+    const out = [];
+    let idx = 0;
+    for (const g of rawGaps) {
+      // Advance idx past any samples before the gap (hrPoints is time-sorted).
+      while (idx < hrPoints.length && hrPoints[idx].t < g.start) idx++;
+      let inGap = 0;
+      let firstT = null, lastT = null;
+      for (let i = idx; i < hrPoints.length && hrPoints[i].t <= g.end; i++) {
+        if (hrPoints[i].v == null) continue; // skip null break-points
+        if (firstT == null) firstT = hrPoints[i].t;
+        lastT = hrPoints[i].t;
+        inGap++;
+      }
+      // If the gap is covered by real data (3+ samples AND they span the
+      // majority of the gap), treat the disconnect events as spurious.
+      const gapDur = Math.max(0, g.end - g.start);
+      const dataSpan = firstT != null ? (lastT - firstT) : 0;
+      if (inGap >= 3 && (gapDur === 0 || dataSpan > gapDur * 0.5)) continue;
+      out.push(g);
+    }
+    return out;
+  }
+
   // Epoch of the first row in a file, used to reconstruct epoch_ms when the
   // column isn't present in older CSVs. Returns 0 if filename is unrecognised.
   function deriveFileStartEpoch(filename) {
@@ -3448,7 +3482,16 @@
       if (r[idx.palpitation] === '1') palpTimes.push(t);
       if (r[idx.event] && r[idx.event] !== '') events.push({ t, label: r[idx.event] });
       if (r[idx.warning] && r[idx.warning] !== '') warnings.push({ t, type: r[idx.warning] });
-      if (r[idx.connection] && r[idx.connection] !== '') connections.push({ t, type: r[idx.connection] });
+      if (r[idx.connection] && r[idx.connection] !== '') {
+        // Normalize: native Android writes past tense ("connected" /
+        // "disconnected"); web writes present tense ("connect" / "disconnect").
+        // Canonicalize so everything downstream can match a single string.
+        const raw = r[idx.connection];
+        const ct = raw === 'disconnected' ? 'disconnect'
+                 : raw === 'connected' ? 'connect'
+                 : raw;
+        connections.push({ t, type: ct });
+      }
       if (idx.posture != null && r[idx.posture] && r[idx.posture] !== '') postureLog.push({ t, posture: r[idx.posture] });
     }
 
@@ -3496,16 +3539,21 @@
     // session, clamp end to at least start — otherwise a disconnect that fired
     // AFTER the last HR sample produces a negative "gap" which inflates uptime
     // past 100%.
-    const connGaps = [];
+    const rawGaps = [];
     const lastHRT = hr.length ? hr[hr.length - 1].t : 0;
     for (let i = 0; i < connections.length; i++) {
       if (connections[i].type === 'disconnect') {
         const next = connections.find((c, j) => j > i && c.type === 'connect');
         const start = connections[i].t;
         const end = next ? next.t : Math.max(start, lastHRT);
-        connGaps.push({ start, end });
+        rawGaps.push({ start, end });
       }
     }
+    // Trim any gap against actual HR data presence. A disconnect event that
+    // somehow fired while HR samples were still arriving (buggy firmware,
+    // spurious state change, recovered-instantly reconnect without a matching
+    // connect row) should not mask regions with real data.
+    const connGaps = trimGapsByData(rawGaps, hr);
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
 
     // Resting HR proxy: the LOWEST 5-min rolling mean across the session. Unlike
@@ -3978,7 +4026,7 @@
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
           <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoDate : fn}</div>
-          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(meta.date, s.duration)} <span class="session-card-dur">(${dur})</span>` : `${dur} session`}</div>
+          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(sessionStartEpoch(s, meta), s.duration)} <span class="session-card-dur">(${dur})</span>` : `${dur} session`}</div>
           <div class="session-card-stats">
             <div class="session-card-stat">
               <span class="session-card-stat-label">Avg HR</span>
@@ -4370,8 +4418,8 @@
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
-          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta && meta.date ? formatClockTime(meta.date.getTime()) : (meta ? meta.isoTime : fn)}</div>
-          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(meta.date, s.duration)} <span class="session-card-dur">(${formatDuration(s.duration)})</span>` : `${formatDuration(s.duration)} session`}</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta && meta.date ? formatClockTime(sessionStartEpoch(s, meta)) : (meta ? meta.isoTime : fn)}</div>
+          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(sessionStartEpoch(s, meta), s.duration)} <span class="session-card-dur">(${formatDuration(s.duration)})</span>` : `${formatDuration(s.duration)} session`}</div>
           <div class="session-card-stats">
             <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
@@ -7345,11 +7393,24 @@
     h = h % 12 || 12;
     return `${h}:${String(m).padStart(2, '0')} ${ampm}`;
   }
-  function formatClockRange(startDate, durationMin) {
-    if (!startDate || durationMin == null) return '';
-    const start = startDate.getTime();
-    const end = start + durationMin * 60000;
-    return `${formatClockTime(start)} – ${formatClockTime(end)}`;
+  // Accepts either an epoch_ms number or a Date object as the start. Caller
+  // should prefer s.startEpoch (CSV first-row epoch_ms) — filename-derived
+  // Dates are wrong for Android sessions because the filename string carries
+  // local time but parseSessionFilename treats it as UTC.
+  function formatClockRange(start, durationMin) {
+    if (!start || durationMin == null) return '';
+    const startEpoch = typeof start === 'number' ? start : start.getTime();
+    const end = startEpoch + durationMin * 60000;
+    return `${formatClockTime(startEpoch)} – ${formatClockTime(end)}`;
+  }
+  // Best wall-clock start for a session card. Always prefer the CSV's first
+  // epoch_ms (timezone-correct on every platform) over the filename string
+  // (which is UTC for web sessions but LOCAL for Android sessions and so
+  // would render 6h off when shown via getHours()).
+  function sessionStartEpoch(s, meta) {
+    if (s && s.startEpoch) return s.startEpoch;
+    if (meta && meta.date) return meta.date.getTime();
+    return 0;
   }
   // Chart timeline labels switch between duration and wall clock via this
   // toggle. Persisted so the user's preference sticks across sessions.
