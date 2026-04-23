@@ -1671,11 +1671,13 @@
           </div>
           <div style="height: 14px;"></div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Text color stages</div>
+          <div style="font-size: 11px; color: var(--text-faint); margin-bottom: 8px;">
+            The red (critical) stage matches your High HR alert above.
+          </div>
           <div class="thresh-grid">
             <label>Low zone ceiling</label><input type="number" id="color-low" value="70" /><span class="unit">bpm</span>
             <label>Normal ceiling</label><input type="number" id="color-normal" value="90" /><span class="unit">bpm</span>
             <label>Elevated ceiling</label><input type="number" id="color-elevated" value="110" /><span class="unit">bpm</span>
-            <label>High ceiling</label><input type="number" id="color-high" value="130" /><span class="unit">bpm</span>
           </div>
         </div>
 
@@ -2236,13 +2238,17 @@
     playSound(presetKey, audioConfig.volume);
   }
 
-  const colorThresholds = { low: 70, normal: 90, elevated: 110, high: 130 };
+  // Critical (red) uses thresholds.high so the audio beep and the red
+  // colour trigger at the same value — one setting, "High HR", drives
+  // both. Low/normal/elevated stage ceilings are separate because they
+  // don't have audio counterparts.
+  const colorThresholds = { low: 70, normal: 90, elevated: 110 };
   function getHRStage(hr) {
     if (hr == null) return 'stage-normal';
     if (hr <= colorThresholds.low) return 'stage-low';
     if (hr < colorThresholds.normal) return 'stage-normal';
     if (hr < colorThresholds.elevated) return 'stage-elevated';
-    if (hr < colorThresholds.high) return 'stage-high';
+    if (hr < thresholds.high) return 'stage-high';
     return 'stage-critical';
   }
 
@@ -3458,6 +3464,7 @@
   // behind the scenes (FGS kept the process running), auto-resync the UI
   // to "live" so the user doesn't see a stale "Start session" button and
   // accidentally kick off a new pair flow.
+  let nativeRehydrated = false;
   function restoreNativeSessionUI() {
     if (!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable)) return false;
     if (!(window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing())) return false;
@@ -3470,7 +3477,84 @@
     $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
     setConnState('live');
     updateSessionToggle();
+    // One-shot: pull the CSV off disk and repopulate state.hrSeries /
+    // state.rmssdSeries so the chart isn't empty after a mid-session
+    // reclaim. Fires async; the live HR listener keeps appending meanwhile.
+    if (!nativeRehydrated) {
+      nativeRehydrated = true;
+      if (window.HRMLog) window.HRMLog.event('rehydrate queued');
+      rehydrateFromNativeCsv().catch(e => {
+        if (window.HRMLog) window.HRMLog.event('rehydrate error', e && e.message ? e.message : String(e));
+      });
+    }
     return true;
+  }
+
+  // Reads the native session's CSV and rebuilds in-memory chart state from
+  // it. Called once after the WebView reattaches to a still-running native
+  // session. The CSV is the authoritative source — matches exactly what the
+  // user will see later in the viewer.
+  async function rehydrateFromNativeCsv() {
+    if (window.HRMLog) window.HRMLog.event('rehydrate starting', {
+      hasShim: !!window.HRMNativeHrSession,
+      hasMethod: !!(window.HRMNativeHrSession && typeof window.HRMNativeHrSession.getSessionSnapshot === 'function'),
+    });
+    if (!window.HRMNativeHrSession || typeof window.HRMNativeHrSession.getSessionSnapshot !== 'function') {
+      if (window.HRMLog) window.HRMLog.event('rehydrate skipped', 'shim or method missing');
+      return;
+    }
+    const snap = await window.HRMNativeHrSession.getSessionSnapshot();
+    if (!snap || !snap.csv) {
+      if (window.HRMLog) window.HRMLog.event('rehydrate empty snapshot', snap);
+      return;
+    }
+    const startMs = snap.sessionStartMs || state.startTime || Date.now();
+    state.startTime = startMs;
+    // Wipe any partial live data so we don't double-append.
+    state.hrSeries = [];
+    state.rmssdSeries = [];
+    const lines = snap.csv.split('\n');
+    let lastHrT = null;
+    let lastHr = null;
+    let lastRmssd = null;
+    // Cells: time_min, epoch_ms, hr, rmssd, palp, event, warning, connection, posture
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || line.length < 3) continue;
+      const cells = line.split(',');
+      const tMin = parseFloat(cells[0]);
+      if (isNaN(tMin)) continue;
+      const hrCell = cells[2];
+      const rmssdCell = cells[3];
+      if (hrCell) {
+        const hr = parseInt(hrCell, 10);
+        if (!isNaN(hr) && hr > 0) {
+          // Gap break if previous HR sample is >10 s old.
+          if (lastHrT != null && (tMin - lastHrT) * 60 > 10) {
+            state.hrSeries.push({ t: lastHrT + 0.0001, v: null });
+          }
+          state.hrSeries.push({ t: tMin, v: hr });
+          lastHrT = tMin;
+          lastHr = hr;
+        }
+      }
+      if (rmssdCell) {
+        const rmssd = parseFloat(rmssdCell);
+        if (!isNaN(rmssd) && rmssd > 0) {
+          state.rmssdSeries.push({ t: tMin, v: rmssd });
+          lastRmssd = rmssd;
+        }
+      }
+    }
+    if (lastHr != null) state.currentHR = lastHr;
+    if (lastRmssd != null) state.currentRMSSD = lastRmssd;
+    if (window.HRMLog) window.HRMLog.event('rehydrated', {
+      hrRows: state.hrSeries.length,
+      rmssdRows: state.rmssdSeries.length,
+      sizeBytes: snap.sizeBytes,
+    });
+    try { updateCharts(); } catch (e) {}
+    try { updateStats(); } catch (e) {}
   }
   // On Capacitor, nav links that use target="_blank" get opened in the
   // system browser (Chrome / Samsung Internet), which has its own
@@ -4672,6 +4756,22 @@
     $('breath-rate').textContent = (breathRate != null && breathRate >= 3 && breathRate <= 40) ? Math.round(breathRate) + ' br/min' : '—';
   }
 
+  function saveAlertThresholds() {
+    try { localStorage.setItem('hr_monitor_alert_thresholds', JSON.stringify(thresholds)); } catch(e) {}
+  }
+  function loadAlertThresholds() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('hr_monitor_alert_thresholds') || 'null');
+      if (saved) {
+        Object.assign(thresholds, saved);
+        $('thresh-high').value = thresholds.high;
+        $('thresh-low').value = thresholds.low;
+        $('thresh-rmssd').value = thresholds.rmssd;
+        if ($('thresh-palp')) $('thresh-palp').value = thresholds.palpPerMin;
+      }
+    } catch(e) {}
+  }
+
   function saveColorThresholds() {
     try { localStorage.setItem('hr_monitor_color_thresholds', JSON.stringify(colorThresholds)); } catch(e) {}
   }
@@ -4907,11 +5007,14 @@
     });
     // Live audio toggle
     $('audio-on').addEventListener('change', () => { state.audioOn = $('audio-on').checked; });
-    // Live threshold inputs
-    $('thresh-high').addEventListener('input', () => { thresholds.high = parseInt($('thresh-high').value) || 130; });
-    $('thresh-low').addEventListener('input', () => { thresholds.low = parseInt($('thresh-low').value) || 55; });
-    $('thresh-rmssd').addEventListener('input', () => { thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15; });
-    $('thresh-palp').addEventListener('input', () => { thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5; });
+    // Live threshold inputs. Persist on every change so the setting sticks
+    // across reloads — otherwise every page load reverts to defaults and the
+    // user has to re-tune every session.
+    $('thresh-high').addEventListener('input', () => { thresholds.high = parseInt($('thresh-high').value) || 130; saveAlertThresholds(); });
+    $('thresh-low').addEventListener('input', () => { thresholds.low = parseInt($('thresh-low').value) || 55; saveAlertThresholds(); });
+    $('thresh-rmssd').addEventListener('input', () => { thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15; saveAlertThresholds(); });
+    $('thresh-palp').addEventListener('input', () => { thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5; saveAlertThresholds(); });
+    loadAlertThresholds();
     // Ectopic sensitivity. Scales the short/long thresholds used by
     // detectEctopics; value persists in widgetPrefs.
     const ectopicSlider = $('ectopic-sensitivity');
@@ -4925,13 +5028,13 @@
         saveWidgetPrefs();
       });
     }
-    // Color threshold inputs
-    ['color-low', 'color-normal', 'color-elevated', 'color-high'].forEach(id => {
+    // Color threshold inputs. "high" is merged with the audio threshold —
+    // see getHRStage; no color-high input any more.
+    ['color-low', 'color-normal', 'color-elevated'].forEach(id => {
       $(id).addEventListener('input', () => {
         colorThresholds.low = parseInt($('color-low').value) || 70;
         colorThresholds.normal = parseInt($('color-normal').value) || 90;
         colorThresholds.elevated = parseInt($('color-elevated').value) || 110;
-        colorThresholds.high = parseInt($('color-high').value) || 130;
         saveColorThresholds();
       });
     });
