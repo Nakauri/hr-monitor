@@ -4154,7 +4154,15 @@
       }
     }
     // Dual-save to Drive if signed in. Fires in parallel with the local write.
-    if (driveAccessToken && driveFolderId) {
+    // BUT: skip on Capacitor when the native uploader is running — otherwise
+    // we end up with two files per session on Drive (one JS, one native),
+    // same session, divergent stats (JS state drifts from native during
+    // visibility pauses / event drops on resume). Native is authoritative;
+    // it writes per-HR-notification directly to disk.
+    const nativeDriveActive = !!(window.HRMNativeHrSession
+        && window.HRMNativeHrSession.isPublishing
+        && window.HRMNativeHrSession.isPublishing());
+    if (driveAccessToken && driveFolderId && !nativeDriveActive) {
       driveUploadSession(filename, csv);
     }
   }
