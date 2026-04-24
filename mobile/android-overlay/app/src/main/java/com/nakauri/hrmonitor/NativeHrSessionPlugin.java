@@ -81,8 +81,13 @@ public class NativeHrSessionPlugin extends Plugin {
     private static final UUID HR_MEASUREMENT = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb");
     private static final UUID CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    // RMSSD window — match hr_monitor.html: rolling 30 s of RR intervals.
-    private static final long RR_WINDOW_MS = 30_000L;
+    // RMSSD window — rolling 60 s of RR intervals, matching
+    // hr_monitor.html:~2634 (`cutoff = now - 1` minute). Earlier comment
+    // here incorrectly said 30 s; that was a doc bug. Shorter windows
+    // inflate RMSSD variance and made the phone's HRV drift from what
+    // Firefox saw on the relay.
+    // PARITY CRITICAL — see scripts/rmssd-parity.test.js.
+    private static final long RR_WINDOW_MS = 60_000L;
     // Drive upload cadence — every 30 s. Same data pace as the JS auto-save.
     private static final long DRIVE_UPLOAD_INTERVAL_MS = 30_000L;
     // Buffers for the overlay charts. livePoints = 45 s of instantaneous
@@ -802,10 +807,15 @@ public class NativeHrSessionPlugin extends Plugin {
         Integer normal = call.getInt("normal");
         Integer elevated = call.getInt("elevated");
         Integer high = call.getInt("high");
+        // rmssdCritical is the user-configurable HRV-crash threshold. Other
+        // RMSSD stage cutoffs (20/35/60) are literature-grounded and hard-
+        // coded to match hr_monitor.html:getRMSSDStage.
+        Integer rmssdCritical = call.getInt("rmssdCritical");
         if (low != null) stageLow = low;
         if (normal != null) stageNormal = normal;
         if (elevated != null) stageElevated = elevated;
         if (high != null) stageHigh = high;
+        if (rmssdCritical != null) stageRmssdCritical = rmssdCritical;
         call.resolve();
     }
 
@@ -817,11 +827,19 @@ public class NativeHrSessionPlugin extends Plugin {
         return "stage-critical";
     }
 
+    // PARITY CRITICAL — MUST MATCH hr_monitor.html:getRMSSDStage (line ~2319).
+    // Prior thresholds here (40/25/15) didn't match the JS ones (60/35/20/
+    // user-critical); an RMSSD of 36 rendered orange on the native side and
+    // green on the JS side for the same reading. `critical` threshold is
+    // the user-configurable one, pushed via setRmssdStageThresholds so the
+    // monitor widget and the relay overlay agree on when to flag a crash.
+    private volatile int stageRmssdCritical = 15;  // default; overridden by setStageThresholds
     private String rmssdStage(double rmssd) {
-        if (rmssd >= 40) return "stage-normal";
-        if (rmssd >= 25) return "stage-elevated";
-        if (rmssd >= 15) return "stage-high";
-        return "stage-critical";
+        if (rmssd < stageRmssdCritical) return "stage-critical";
+        if (rmssd < 20) return "stage-high";
+        if (rmssd < 35) return "stage-elevated";
+        if (rmssd < 60) return "stage-normal";
+        return "stage-low";
     }
 
     /**

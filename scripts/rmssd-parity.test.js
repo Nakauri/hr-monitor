@@ -101,6 +101,46 @@ check('JS implementation', jsOut, EXPECTED_RMSSD);
 check('Java port (hand-ported)', javaOut, EXPECTED_RMSSD);
 check('JS vs Java parity', jsOut, javaOut);
 
+// -------- RMSSD stage classification parity ----
+// JS: hr_monitor.html:getRMSSDStage
+// Java: NativeHrSessionPlugin.java:rmssdStage
+// If these diverge, same RMSSD shows different colours on monitor vs relay
+// overlay — which happened at RMSSD=36 (JS normal/green, Java elevated/orange).
+function rmssdStage_js(rmssd, thresholdCritical) {
+  if (rmssd == null) return 'stage-normal';
+  if (rmssd < thresholdCritical) return 'stage-critical';
+  if (rmssd < 20) return 'stage-high';
+  if (rmssd < 35) return 'stage-elevated';
+  if (rmssd < 60) return 'stage-normal';
+  return 'stage-low';
+}
+function rmssdStage_javaPort(rmssd, thresholdCritical) {
+  if (rmssd < thresholdCritical) return 'stage-critical';
+  if (rmssd < 20) return 'stage-high';
+  if (rmssd < 35) return 'stage-elevated';
+  if (rmssd < 60) return 'stage-normal';
+  return 'stage-low';
+}
+
+function checkStage(label, rmssd, critical, expected) {
+  const js = rmssdStage_js(rmssd, critical);
+  const java = rmssdStage_javaPort(rmssd, critical);
+  const pass = js === expected && java === expected && js === java;
+  console.log(
+    `${pass ? 'OK   ' : 'FAIL '} ${label.padEnd(32)} ` +
+    `rmssd=${rmssd} critical=${critical} js=${js} java=${java} expected=${expected}`
+  );
+  if (!pass) ok = false;
+}
+
+console.log('\nStage classification parity:');
+checkStage('crash at user threshold', 10, 15, 'stage-critical');
+checkStage('just above critical',     16, 15, 'stage-high');
+checkStage('high range',              22, 15, 'stage-elevated');
+checkStage('elevated range',          36, 15, 'stage-normal');   // the reported mismatch
+checkStage('normal range',            55, 15, 'stage-normal');
+checkStage('excellent range',         80, 15, 'stage-low');
+
 if (!ok) {
   console.error('\nFAIL: RMSSD parity broken.');
   console.error('  - If JS is right: update NativeHrSessionPlugin.java:computeRmssd + the port above.');
