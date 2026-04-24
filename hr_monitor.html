@@ -259,6 +259,12 @@
     padding: 20px;
     display: flex;
     flex-direction: column;
+    /* .widget-row is width: fit-content (widget.css) so it's narrower than
+       the zone on full-width viewports. Centre horizontally so the gap
+       around the widget is even. This stays on monitor-only — overlay.html
+       keeps the default flex-start alignment because OBS source cropping
+       relies on the widget pinning to a predictable corner. */
+    align-items: center;
     gap: 16px;
     border-right: 1px solid var(--border);
     overflow: hidden;
