@@ -3364,7 +3364,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 4
+        || cached.__schemaV !== 5
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3488,35 +3488,53 @@
   // Rolling HR standard deviation flags high-volatility windows (possible shivering
   // EMG bleedthrough or fast autonomic storms the strap reads as jittery R-to-R).
   // Extracted so the viewer can re-run it with a user-chosen sensitivity threshold.
+  //
+  // High variance ALONE catches every REM cycle, every deep inhale, every
+  // posture shift. A real "chills" event has sympathetic activation, so HR
+  // also rises. Gate on (window-mean HR) > (session HR median) to drop the
+  // sleep-breathing false positives that used to produce 100+ markers on
+  // overnight sessions. Minimum window length raised from 12s to 30s —
+  // anything shorter is movement artefact.
   function detectChillsWindows(hr, ratioThreshold) {
     const out = [];
     if (!hr || !hr.length) return out;
-    const WIN_MIN = 0.5;    // 30-sec rolling window
-    const MIN_STD_ABS = 3;  // absolute floor so flat sessions don't trigger
+    const WIN_MIN = 0.5;       // 30-sec rolling window
+    const MIN_STD_ABS = 3;     // absolute floor so flat sessions don't trigger
+    const MIN_DURATION = 0.5;  // min 30s sustained (was 12s)
+    const hrVals = hr.filter(p => p.v != null).map(p => p.v);
+    const sortedHr = hrVals.slice().sort((a, b) => a - b);
+    const medHR = sortedHr.length ? sortedHr[Math.floor(sortedHr.length / 2)] : 0;
     const stds = [];
+    const winMeans = [];
     for (let i = 0; i < hr.length; i++) {
       const samples = [];
-      for (let j = i; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) samples.push(hr[j].v);
-      if (samples.length < 8) { stds.push(null); continue; }
+      for (let j = i; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) {
+        if (hr[j].v != null) samples.push(hr[j].v);
+      }
+      if (samples.length < 8) { stds.push(null); winMeans.push(null); continue; }
       const m = samples.reduce((a, b) => a + b, 0) / samples.length;
       const variance = samples.reduce((s, v) => s + (v - m) * (v - m), 0) / samples.length;
       stds.push(Math.sqrt(variance));
+      winMeans.push(m);
     }
     const nonNull = stds.filter(v => v != null).sort((a, b) => a - b);
     const medStd = nonNull.length ? nonNull[Math.floor(nonNull.length / 2)] : 0;
     let cur = null;
     for (let i = 0; i < hr.length; i++) {
       const s = stds[i];
-      const isChill = s != null && s >= Math.max(medStd * ratioThreshold, MIN_STD_ABS);
+      const m = winMeans[i];
+      const isChill = s != null && m != null
+        && s >= Math.max(medStd * ratioThreshold, MIN_STD_ABS)
+        && m >= medHR;  // sympathetic activation, not just variance
       if (isChill) {
         if (!cur) cur = { start: hr[i].t, end: hr[i].t, maxStd: s };
         else { cur.end = hr[i].t; if (s > cur.maxStd) cur.maxStd = s; }
       } else if (cur) {
-        if (cur.end - cur.start >= 0.2) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
+        if (cur.end - cur.start >= MIN_DURATION) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
         cur = null;
       }
     }
-    if (cur && cur.end - cur.start >= 0.2) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
+    if (cur && cur.end - cur.start >= MIN_DURATION) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
     return out;
   }
 
@@ -3613,13 +3631,19 @@
     }
     if (cur) palpClusters.push(cur);
 
-    // Warning segments: group same-type warnings within 1 min
-    const warnSegs = [];
+    // Warning segments: group same-type warnings within 1 min. Filter out
+    // single-event spans (< 5s sustained) since the monitor currently fires
+    // on single-reading threshold crossings — a stray 131 bpm beat shouldn't
+    // render as a warning stripe across the chart. Real physiological
+    // crossings keep firing across multiple consecutive samples.
+    const warnSegsRaw = [];
     for (const w of warnings) {
-      const last = warnSegs[warnSegs.length - 1];
+      const last = warnSegsRaw[warnSegsRaw.length - 1];
       if (last && last.type === w.type && w.t - last.end <= 1) last.end = w.t;
-      else warnSegs.push({ type: w.type, start: w.t, end: w.t });
+      else warnSegsRaw.push({ type: w.type, start: w.t, end: w.t });
     }
+    const WARN_MIN_DURATION = 5 / 60; // 5 seconds in minutes
+    const warnSegs = warnSegsRaw.filter(seg => (seg.end - seg.start) >= WARN_MIN_DURATION);
 
     // Connection gaps (disconnect -> next connect). For an open gap at end of
     // session, clamp end to at least start — otherwise a disconnect that fired
@@ -3670,42 +3694,50 @@
       smHR.push({ t: hr[i].t, v: sum / n });
     }
     // === Sympathetic flush detection ===
-    // Sympathetic flush detection. Previous thresholds (10 bpm / 25% RMSSD drop /
-    // 90 sec window / 2 min cooldown) fired on normal breathing RSA and single
-    // exhale vagal blips — flushes.jpg showed ~30 events per hour on quiet data.
-    // Real sympathetic activation (cold flush, sudden arousal, panic spike):
-    //   - HR rises 20+ bpm in under a minute
-    //   - RMSSD collapses 40%+
-    //   - Events don't fire every 2 minutes on normal physiology
-    //   - Null HR values (gaps in recording) must not register as "jumps"
-    // Edge windows: skip the first and last minute of the session (contact
-    // artefacts, strap settling, stop-button noise).
+    // Earlier iterations fired on breathing RSA, REM transitions, and
+    // dream-state HR ripples. Tightened so a flush has to look like a
+    // sympathetic event, not just a statistical blip:
+    //   - HR rises 25+ bpm in under a minute (was 20)
+    //   - Peak HR is meaningfully elevated, not just "above baseline"
+    //     (must exceed session median + 20, floor 95 bpm)
+    //   - RMSSD collapses 40%+ relative AND 10ms+ absolute
+    //   - 10-min cooldown between events (was 5) so one sustained flush
+    //     doesn't register as 3 consecutive ones
+    //   - Edge windows trimmed to skip strap-settling and stop noise
+    //   - Null HR values (gaps in recording) don't register as jumps
     const flushes = [];
     const FLUSH_WIN_MIN = 1.0;
-    const FLUSH_HR_MIN = 20;
-    const FLUSH_RMSSD_DROP = 0.40;
-    const FLUSH_COOLDOWN_MIN = 5;
+    const FLUSH_HR_MIN = 25;
+    const FLUSH_RMSSD_DROP_PCT = 0.40;
+    const FLUSH_RMSSD_DROP_ABS = 10;
+    const FLUSH_COOLDOWN_MIN = 10;
     const FLUSH_EDGE_MIN = 1;
+    const FLUSH_PEAK_FLOOR = 95;
+    const sortedHrVals = hr.filter(p => p.v != null).map(p => p.v).sort((a, b) => a - b);
+    const sessionMedHR = sortedHrVals.length ? sortedHrVals[Math.floor(sortedHrVals.length / 2)] : 0;
+    const peakFloor = Math.max(FLUSH_PEAK_FLOOR, sessionMedHR + 20);
     const hrLastT = hr.length ? hr[hr.length - 1].t : 0;
     let lastFlush = -Infinity;
     for (let i = 1; i < hr.length; i++) {
       const cur = hr[i];
-      if (cur.v == null) continue; // gap marker
+      if (cur.v == null) continue;
       if (cur.t < FLUSH_EDGE_MIN || cur.t > hrLastT - FLUSH_EDGE_MIN) continue;
       if (cur.t < lastFlush + FLUSH_COOLDOWN_MIN) continue;
+      if (cur.v < peakFloor) continue;
       let lowHR = cur.v, lowT = cur.t;
       for (let j = i - 1; j >= 0 && cur.t - hr[j].t <= FLUSH_WIN_MIN; j--) {
         const v = hr[j].v;
-        if (v == null) continue; // skip gap markers
+        if (v == null) continue;
         if (v < lowHR) { lowHR = v; lowT = hr[j].t; }
       }
       if (cur.v - lowHR < FLUSH_HR_MIN) continue;
       const rAtStart = rmssd.find(p => p.t >= lowT && p.v != null) || rmssd.find(p => p.v != null);
       const rAtEnd = [...rmssd].reverse().find(p => p.t <= cur.t && p.v != null);
       if (!rAtStart || !rAtEnd || rAtStart.v <= 0) continue;
-      const rDrop = (rAtStart.v - rAtEnd.v) / rAtStart.v;
-      if (rDrop < FLUSH_RMSSD_DROP) continue;
-      flushes.push({ start: lowT, end: cur.t, t: (lowT + cur.t) / 2, hrDelta: Math.round(cur.v - lowHR), rmssdDropPct: Math.round(rDrop * 100) });
+      const rDropAbs = rAtStart.v - rAtEnd.v;
+      const rDropPct = rDropAbs / rAtStart.v;
+      if (rDropPct < FLUSH_RMSSD_DROP_PCT || rDropAbs < FLUSH_RMSSD_DROP_ABS) continue;
+      flushes.push({ start: lowT, end: cur.t, t: (lowT + cur.t) / 2, hrDelta: Math.round(cur.v - lowHR), rmssdDropPct: Math.round(rDropPct * 100) });
       lastFlush = cur.t;
     }
 
@@ -3767,7 +3799,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 4,
+      __schemaV: 5,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
