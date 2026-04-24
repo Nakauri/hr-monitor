@@ -3365,7 +3365,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 5
+        || cached.__schemaV !== 6
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3486,56 +3486,129 @@
     return { rows, header };
   }
 
-  // Rolling HR standard deviation flags high-volatility windows (possible shivering
-  // EMG bleedthrough or fast autonomic storms the strap reads as jittery R-to-R).
-  // Extracted so the viewer can re-run it with a user-chosen sensitivity threshold.
+  // ===== Autonomic event detection (v2) =====
   //
-  // High variance ALONE catches every REM cycle, every deep inhale, every
-  // posture shift. A real "chills" event has sympathetic activation, so HR
-  // also rises. Gate on (window-mean HR) > (session HR median) to drop the
-  // sleep-breathing false positives that used to produce 100+ markers on
-  // overnight sessions. Minimum window length raised from 12s to 30s —
-  // anything shorter is movement artefact.
-  function detectChillsWindows(hr, ratioThreshold) {
+  // Both flush and chills detection are grounded in what the literature
+  // actually says these events look like in HR/HRV data, not in rolling
+  // statistical thresholds.
+  //
+  // Shared machinery: rolling 5-min trailing MEAN (baseline) per sample and
+  // nearest-value lookup between hr and rmssd series. Keeps everything O(n).
+
+  // Trailing-window rolling mean. For each series[i], returns the mean of
+  // v over (series[i].t - winMin, series[i].t). Excludes the current
+  // sample itself — baseline is where you're coming from, not where you
+  // are. Null values skipped. Returns null entries while the window isn't
+  // full (< winMin of history).
+  function rollingTrailingMean(series, winMin) {
+    const out = new Array(series.length).fill(null);
+    let sum = 0, count = 0;
+    let lo = 0;
+    for (let i = 0; i < series.length; i++) {
+      while (lo < i && series[lo].t < series[i].t - winMin) {
+        if (series[lo].v != null) { sum -= series[lo].v; count--; }
+        lo++;
+      }
+      if (count > 0 && series[i].t - series[lo].t >= winMin * 0.5) {
+        out[i] = sum / count;
+      }
+      if (series[i].v != null) { sum += series[i].v; count++; }
+    }
+    return out;
+  }
+
+  // Nearest RMSSD value at (or before) time t. Caller passes an index hint
+  // that monotonically advances, keeping the amortised cost O(1) per call.
+  function nearestRmssdAt(rmssd, t, hint) {
+    while (hint.idx + 1 < rmssd.length && rmssd[hint.idx + 1].t <= t) hint.idx++;
+    let j = hint.idx;
+    while (j >= 0 && rmssd[j].v == null) j--;
+    return j >= 0 ? rmssd[j].v : null;
+  }
+
+  // Chills / shivering. Literature: shivering drives metabolic HR UP, not
+  // just variable. RR variance is accompanied by HR elevation (metabolic)
+  // and RMSSD suppression (sympathetic). Event lasts minutes. A 30-sec
+  // high-variance window with no HR or RMSSD context is noise.
+  //
+  // Criteria (all required, sustained for ≥90 sec with 5-min cooldown):
+  //   - rolling 60-sec HR stdDev ≥ max(5 bpm abs, 2 × session median std)
+  //   - rolling 60-sec HR mean > (5-min trailing baseline + 10 bpm)
+  //   - nearest RMSSD < (5-min trailing RMSSD baseline × 0.75)
+  //
+  // ratioThreshold is kept on the API for the sensitivity slider but only
+  // multiplies the stdDev criterion; the HR-elevation and RMSSD gates are
+  // physiological and not user-tunable (they're what distinguishes real
+  // events from noise in the first place).
+  function detectChillsWindows(hr, ratioThreshold, rmssd) {
     const out = [];
-    if (!hr || !hr.length) return out;
-    const WIN_MIN = 0.5;       // 30-sec rolling window
-    const MIN_STD_ABS = 3;     // absolute floor so flat sessions don't trigger
-    const MIN_DURATION = 0.5;  // min 30s sustained (was 12s)
-    const hrVals = hr.filter(p => p.v != null).map(p => p.v);
-    const sortedHr = hrVals.slice().sort((a, b) => a - b);
-    const medHR = sortedHr.length ? sortedHr[Math.floor(sortedHr.length / 2)] : 0;
-    const stds = [];
-    const winMeans = [];
+    if (!hr || hr.length < 20) return out;
+    const WIN_MIN = 1.0;          // 60-sec rolling analysis window
+    const BASELINE_MIN = 5;       // 5-min trailing baseline
+    const MIN_STD_ABS = 5;        // absolute floor (was 3)
+    const MIN_HR_DELTA = 10;      // HR must exceed baseline by ≥10 bpm
+    const RMSSD_SUPPR = 0.75;     // RMSSD must be <75% of baseline
+    const MIN_DURATION = 1.5;     // sustained ≥90 sec (was 30 sec)
+    const COOLDOWN = 5;           // 5-min between events
+
+    const hrBaseline = rollingTrailingMean(hr, BASELINE_MIN);
+    const rmssdBaseline = rmssd ? rollingTrailingMean(rmssd, BASELINE_MIN) : null;
+
+    const stds = new Array(hr.length).fill(null);
+    const winMeans = new Array(hr.length).fill(null);
     for (let i = 0; i < hr.length; i++) {
       const samples = [];
       for (let j = i; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) {
         if (hr[j].v != null) samples.push(hr[j].v);
       }
-      if (samples.length < 8) { stds.push(null); winMeans.push(null); continue; }
+      if (samples.length < 10) continue;
       const m = samples.reduce((a, b) => a + b, 0) / samples.length;
       const variance = samples.reduce((s, v) => s + (v - m) * (v - m), 0) / samples.length;
-      stds.push(Math.sqrt(variance));
-      winMeans.push(m);
+      stds[i] = Math.sqrt(variance);
+      winMeans[i] = m;
     }
     const nonNull = stds.filter(v => v != null).sort((a, b) => a - b);
     const medStd = nonNull.length ? nonNull[Math.floor(nonNull.length / 2)] : 0;
+
+    const hint = { idx: 0 };
+    const rmssdHint = { idx: 0 };
     let cur = null;
+    let lastEmit = -Infinity;
+
     for (let i = 0; i < hr.length; i++) {
       const s = stds[i];
       const m = winMeans[i];
-      const isChill = s != null && m != null
-        && s >= Math.max(medStd * ratioThreshold, MIN_STD_ABS)
-        && m >= medHR;  // sympathetic activation, not just variance
+      const baseHR = hrBaseline[i];
+      if (s == null || m == null || baseHR == null) {
+        if (cur && cur.end - cur.start >= MIN_DURATION && cur.start >= lastEmit + COOLDOWN) {
+          out.push(cur); lastEmit = cur.end;
+        }
+        cur = null;
+        continue;
+      }
+      const stdOk = s >= Math.max(MIN_STD_ABS, medStd * ratioThreshold);
+      const hrOk = m >= baseHR + MIN_HR_DELTA;
+      let rmssdOk = true;
+      if (rmssd && rmssdBaseline) {
+        const rNow = nearestRmssdAt(rmssd, hr[i].t, rmssdHint);
+        // Find baseline RMSSD at the same hint point.
+        const baseRmssd = rmssdBaseline[rmssdHint.idx];
+        rmssdOk = (rNow != null && baseRmssd != null) ? (rNow < baseRmssd * RMSSD_SUPPR) : false;
+      }
+      const isChill = stdOk && hrOk && rmssdOk;
       if (isChill) {
-        if (!cur) cur = { start: hr[i].t, end: hr[i].t, maxStd: s };
-        else { cur.end = hr[i].t; if (s > cur.maxStd) cur.maxStd = s; }
+        if (!cur) cur = { start: hr[i].t, end: hr[i].t, maxStd: s, ratio: s / (medStd || 1) };
+        else { cur.end = hr[i].t; if (s > cur.maxStd) { cur.maxStd = s; cur.ratio = s / (medStd || 1); } }
       } else if (cur) {
-        if (cur.end - cur.start >= MIN_DURATION) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
+        if (cur.end - cur.start >= MIN_DURATION && cur.start >= lastEmit + COOLDOWN) {
+          out.push(cur); lastEmit = cur.end;
+        }
         cur = null;
       }
     }
-    if (cur && cur.end - cur.start >= MIN_DURATION) out.push({ start: cur.start, end: cur.end, std: cur.maxStd, ratio: cur.maxStd / (medStd || 1) });
+    if (cur && cur.end - cur.start >= MIN_DURATION && cur.start >= lastEmit + COOLDOWN) {
+      out.push(cur);
+    }
     return out;
   }
 
@@ -3694,56 +3767,110 @@
       for (let j = Math.max(0, i - 2); j < Math.min(hr.length, i + 3); j++) { sum += hr[j].v; n++; }
       smHR.push({ t: hr[i].t, v: sum / n });
     }
-    // === Sympathetic flush detection ===
-    // Earlier iterations fired on breathing RSA, REM transitions, and
-    // dream-state HR ripples. Tightened so a flush has to look like a
-    // sympathetic event, not just a statistical blip:
-    //   - HR rises 25+ bpm in under a minute (was 20)
-    //   - Peak HR is meaningfully elevated, not just "above baseline"
-    //     (must exceed session median + 20, floor 95 bpm)
-    //   - RMSSD collapses 40%+ relative AND 10ms+ absolute
-    //   - 10-min cooldown between events (was 5) so one sustained flush
-    //     doesn't register as 3 consecutive ones
-    //   - Edge windows trimmed to skip strap-settling and stop noise
-    //   - Null HR values (gaps in recording) don't register as jumps
+    // === Sympathetic flush detection (v2) ===
+    //
+    // A flush is a sympathetic surge. In POTS, the diagnostic criterion for
+    // orthostatic tachycardia uses a HR rise of ≥30 bpm SUSTAINED over the
+    // first 10 minutes of provocation, measured at multiple timepoints —
+    // "sustained" is doing the work, not "spike." The detector mirrors
+    // that clinical grounding:
+    //
+    // Criteria (all required):
+    //   1. Smoothed peak HR reaches max(baseline + 25, 100 bpm) — not
+    //      relative-to-session-median; that breaks on day-length sessions
+    //      where median is pulled down by sleep.
+    //   2. Onset: over the 2 min preceding the peak, HR rose ≥20 bpm from
+    //      the 5-min trailing baseline (verified on SMOOTHED HR so a single
+    //      bad beat in the backward scan can't satisfy the rise).
+    //   3. Sustain: smoothed HR stays ≥(baseline + 20) for ≥60 sec AFTER
+    //      the peak. This is the hard gate. One-minute spike = rejected.
+    //   4. RMSSD: trailing-baseline RMSSD vs RMSSD during the event must
+    //      drop ≥30%. Uses rolling baseline, not per-event start-point, so
+    //      a single RMSSD artifact can't inflate the drop.
+    //   5. 15-min cooldown between events — a real flush lasts 5-10 min.
     const flushes = [];
-    const FLUSH_WIN_MIN = 1.0;
-    const FLUSH_HR_MIN = 25;
-    const FLUSH_RMSSD_DROP_PCT = 0.40;
-    const FLUSH_RMSSD_DROP_ABS = 10;
-    const FLUSH_COOLDOWN_MIN = 10;
+    const FLUSH_PEAK_FLOOR = 100;
+    const FLUSH_DELTA_MIN = 20;          // rise from baseline
+    const FLUSH_ONSET_WIN = 2.0;         // peak must occur within 2 min of rise
+    const FLUSH_SUSTAIN_MIN = 1.0;       // HR stays elevated for ≥60s after peak
+    const FLUSH_SUSTAIN_DELTA = 20;      // "elevated" = baseline + 20
+    const FLUSH_RMSSD_DROP = 0.30;
+    const FLUSH_COOLDOWN_MIN = 15;
     const FLUSH_EDGE_MIN = 1;
-    const FLUSH_PEAK_FLOOR = 95;
-    const sortedHrVals = hr.filter(p => p.v != null).map(p => p.v).sort((a, b) => a - b);
-    const sessionMedHR = sortedHrVals.length ? sortedHrVals[Math.floor(sortedHrVals.length / 2)] : 0;
-    const peakFloor = Math.max(FLUSH_PEAK_FLOOR, sessionMedHR + 20);
+    const FLUSH_BASELINE_MIN = 5;        // 5-min trailing baseline
+
+    const hrBaselineSeries = rollingTrailingMean(hr, FLUSH_BASELINE_MIN);
+    const rmssdBaselineSeries = rollingTrailingMean(rmssd, FLUSH_BASELINE_MIN);
     const hrLastT = hr.length ? hr[hr.length - 1].t : 0;
     let lastFlush = -Infinity;
-    for (let i = 1; i < hr.length; i++) {
-      const cur = hr[i];
+    const rmssdHint = { idx: 0 };
+
+    for (let i = 0; i < smHR.length; i++) {
+      const cur = smHR[i];
       if (cur.v == null) continue;
       if (cur.t < FLUSH_EDGE_MIN || cur.t > hrLastT - FLUSH_EDGE_MIN) continue;
       if (cur.t < lastFlush + FLUSH_COOLDOWN_MIN) continue;
+
+      const baseHR = hrBaselineSeries[i];
+      if (baseHR == null) continue;
+
+      const peakFloor = Math.max(FLUSH_PEAK_FLOOR, baseHR + 25);
       if (cur.v < peakFloor) continue;
-      let lowHR = cur.v, lowT = cur.t;
-      for (let j = i - 1; j >= 0 && cur.t - hr[j].t <= FLUSH_WIN_MIN; j--) {
-        const v = hr[j].v;
-        if (v == null) continue;
-        if (v < lowHR) { lowHR = v; lowT = hr[j].t; }
+      if (cur.v - baseHR < FLUSH_DELTA_MIN) continue;
+
+      // Onset: at some point in the last FLUSH_ONSET_WIN minutes, smoothed
+      // HR was within 5 bpm of baseline. That tells us the rise is recent,
+      // not that HR has been elevated for 30 min already.
+      let onsetOk = false;
+      for (let j = i - 1; j >= 0 && cur.t - smHR[j].t <= FLUSH_ONSET_WIN; j--) {
+        if (smHR[j].v != null && smHR[j].v <= baseHR + 5) { onsetOk = true; break; }
       }
-      if (cur.v - lowHR < FLUSH_HR_MIN) continue;
-      const rAtStart = rmssd.find(p => p.t >= lowT && p.v != null) || rmssd.find(p => p.v != null);
-      const rAtEnd = [...rmssd].reverse().find(p => p.t <= cur.t && p.v != null);
-      if (!rAtStart || !rAtEnd || rAtStart.v <= 0) continue;
-      const rDropAbs = rAtStart.v - rAtEnd.v;
-      const rDropPct = rDropAbs / rAtStart.v;
-      if (rDropPct < FLUSH_RMSSD_DROP_PCT || rDropAbs < FLUSH_RMSSD_DROP_ABS) continue;
-      flushes.push({ start: lowT, end: cur.t, t: (lowT + cur.t) / 2, hrDelta: Math.round(cur.v - lowHR), rmssdDropPct: Math.round(rDropPct * 100) });
+      if (!onsetOk) continue;
+
+      // Sustain: smoothed HR stays at least (baseline + FLUSH_SUSTAIN_DELTA)
+      // for FLUSH_SUSTAIN_MIN minutes after the peak. Any dip below that
+      // floor kills the candidate — real sympathetic surges don't flicker.
+      let sustainReached = false;
+      let lastSustainT = cur.t;
+      let sustainBroken = false;
+      for (let j = i + 1; j < smHR.length && smHR[j].t <= cur.t + FLUSH_SUSTAIN_MIN + 0.5; j++) {
+        if (smHR[j].v == null) continue;
+        if (smHR[j].v < baseHR + FLUSH_SUSTAIN_DELTA) { sustainBroken = true; break; }
+        lastSustainT = smHR[j].t;
+        if (smHR[j].t >= cur.t + FLUSH_SUSTAIN_MIN) { sustainReached = true; break; }
+      }
+      if (sustainBroken || !sustainReached) continue;
+
+      // RMSSD: trailing baseline vs nearest during-event value.
+      const rNow = nearestRmssdAt(rmssd, cur.t, rmssdHint);
+      const rBase = rmssdBaselineSeries[rmssdHint.idx];
+      if (rNow == null || rBase == null || rBase <= 0) continue;
+      const rDropPct = (rBase - rNow) / rBase;
+      if (rDropPct < FLUSH_RMSSD_DROP) continue;
+
+      // Onset start: walk backward again to the actual crossing point, so
+      // the span on the chart reflects when the rise BEGAN.
+      let onsetStart = cur.t;
+      for (let j = i - 1; j >= 0 && cur.t - smHR[j].t <= FLUSH_ONSET_WIN; j--) {
+        if (smHR[j].v != null && smHR[j].v <= baseHR + 5) { onsetStart = smHR[j].t; break; }
+      }
+
+      flushes.push({
+        start: onsetStart,
+        end: lastSustainT,
+        t: cur.t,
+        hrDelta: Math.round(cur.v - baseHR),
+        rmssdDropPct: Math.round(rDropPct * 100),
+        peak: Math.round(cur.v),
+        baseline: Math.round(baseHR),
+      });
       lastFlush = cur.t;
     }
 
-    // Chills/shivering volatility (extracted for re-run in the viewer)
-    const chillsWindows = detectChillsWindows(hr, 2.5);
+    // Chills/shivering volatility (extracted for re-run in the viewer).
+    // rmssd passed so the detector can verify concurrent vagal withdrawal —
+    // real shivering is a sympathetic event, not just statistical variance.
+    const chillsWindows = detectChillsWindows(hr, 2.5, rmssd);
 
     const hrDeltas = [];
     // Thresholds are user-configurable (settings panel). Defaults match the
@@ -3800,7 +3927,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 5,
+      __schemaV: 6,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -5794,7 +5921,7 @@
     label.textContent = saved.toFixed(1) + '×';
     // Apply saved threshold immediately
     if (saved !== 2.5 && currentData && currentSummary) {
-      currentSummary.chillsWindows = detectChillsWindows(currentData.hr, saved);
+      currentSummary.chillsWindows = detectChillsWindows(currentData.hr, saved, currentData.rmssd);
       renderInsight(currentSummary);
       renderMarkerList(currentSummary);
       drawSessionChart(currentSummary, currentData);
@@ -5807,7 +5934,7 @@
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         if (!currentData || !currentSummary) return;
-        currentSummary.chillsWindows = detectChillsWindows(currentData.hr, v);
+        currentSummary.chillsWindows = detectChillsWindows(currentData.hr, v, currentData.rmssd);
         renderInsight(currentSummary);
         renderMarkerList(currentSummary);
         drawSessionChart(currentSummary, currentData);
