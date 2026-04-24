@@ -87,6 +87,20 @@
       setPrefs: function (prefs) {
         return plugin.setPrefs({ prefs: prefs || {} });
       },
+      setStageThresholds: function (t) {
+        // t = { low, normal, elevated, high }. Fed from hr_monitor.html
+        // colorThresholds + thresholds.high so native's hrStage() in the
+        // relay tick matches the monitor's own getHRStage(). Without this,
+        // the OBS overlay shows one colour and the phone shows another.
+        return plugin.setStageThresholds(t || {});
+      },
+      getSessionSnapshot: function () {
+        // Returns { filename, csv, sessionStartMs, sizeBytes } for the
+        // active session. Used by hr_monitor.html to rehydrate chart state
+        // when the WebView has been reclaimed mid-session. Rejects if no
+        // session is active.
+        return plugin.getSessionSnapshot();
+      },
       onHr: function (cb) {
         hrListeners.push(cb);
         return function remove() {

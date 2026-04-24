@@ -1235,7 +1235,10 @@
     color: var(--text-dim);
     letter-spacing: 0.05em;
   }
-  .legend-spacer { flex: 1; }
+  .legend-spacer { flex: 1 1 100%; min-width: 0; }
+  /* Push the timeline-mode toggle + reset-zoom to the right edge of the
+     legend row. margin-left: auto works even when the flex row wraps. */
+  #timeline-mode-toggle { margin-left: auto; }
   .legend-reset-zoom {
     padding: 4px 12px;
     font-size: 11px;
@@ -3361,7 +3364,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 3
+        || cached.__schemaV !== 4
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3667,25 +3670,38 @@
       smHR.push({ t: hr[i].t, v: sum / n });
     }
     // === Sympathetic flush detection ===
-    // Sharp HR rise (≥10 bpm) within ≤90 sec, with a concurrent RMSSD drop (≥25%).
-    // This maps to cold-flush / sympathetic-spike signatures — a fast-autonomic
-    // event shorter than a slow orthostatic HR shift.
+    // Sympathetic flush detection. Previous thresholds (10 bpm / 25% RMSSD drop /
+    // 90 sec window / 2 min cooldown) fired on normal breathing RSA and single
+    // exhale vagal blips — flushes.jpg showed ~30 events per hour on quiet data.
+    // Real sympathetic activation (cold flush, sudden arousal, panic spike):
+    //   - HR rises 20+ bpm in under a minute
+    //   - RMSSD collapses 40%+
+    //   - Events don't fire every 2 minutes on normal physiology
+    //   - Null HR values (gaps in recording) must not register as "jumps"
+    // Edge windows: skip the first and last minute of the session (contact
+    // artefacts, strap settling, stop-button noise).
     const flushes = [];
-    const FLUSH_WIN_MIN = 1.5;
-    const FLUSH_HR_MIN = 10;
-    const FLUSH_RMSSD_DROP = 0.25;
+    const FLUSH_WIN_MIN = 1.0;
+    const FLUSH_HR_MIN = 20;
+    const FLUSH_RMSSD_DROP = 0.40;
+    const FLUSH_COOLDOWN_MIN = 5;
+    const FLUSH_EDGE_MIN = 1;
+    const lastT = hr.length ? hr[hr.length - 1].t : 0;
     let lastFlush = -Infinity;
     for (let i = 1; i < hr.length; i++) {
       const cur = hr[i];
-      if (cur.t < lastFlush + 2) continue;
+      if (cur.v == null) continue; // gap marker
+      if (cur.t < FLUSH_EDGE_MIN || cur.t > lastT - FLUSH_EDGE_MIN) continue;
+      if (cur.t < lastFlush + FLUSH_COOLDOWN_MIN) continue;
       let lowHR = cur.v, lowT = cur.t;
       for (let j = i - 1; j >= 0 && cur.t - hr[j].t <= FLUSH_WIN_MIN; j--) {
-        if (hr[j].v < lowHR) { lowHR = hr[j].v; lowT = hr[j].t; }
+        const v = hr[j].v;
+        if (v == null) continue; // skip gap markers
+        if (v < lowHR) { lowHR = v; lowT = hr[j].t; }
       }
       if (cur.v - lowHR < FLUSH_HR_MIN) continue;
-      // RMSSD drop over the same window (find RMSSD values bracketing lowT and cur.t)
-      const rAtStart = rmssd.find(p => p.t >= lowT) || rmssd[0];
-      const rAtEnd = [...rmssd].reverse().find(p => p.t <= cur.t);
+      const rAtStart = rmssd.find(p => p.t >= lowT && p.v != null) || rmssd.find(p => p.v != null);
+      const rAtEnd = [...rmssd].reverse().find(p => p.t <= cur.t && p.v != null);
       if (!rAtStart || !rAtEnd || rAtStart.v <= 0) continue;
       const rDrop = (rAtStart.v - rAtEnd.v) / rAtStart.v;
       if (rDrop < FLUSH_RMSSD_DROP) continue;
@@ -3751,7 +3767,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 3,
+      __schemaV: 4,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -4571,7 +4587,7 @@
         <div class="day-hour-axis">${axisHtml}</div>
       </div>
 
-      ${buildAggregateReport('Daily', files)}
+      ${buildAggregateReport('Daily', files, iso)}
 
       <div class="day-sessions-head">
         <div class="section-head" style="margin: 0;">Sessions</div>
@@ -5790,11 +5806,21 @@
   // session summaries, and renders an accordion-style report in the same
   // visual format as the session-level report. Keeps the viewer's reports
   // consistent so switching views doesn't change how findings are presented.
-  function buildAggregateReport(scopeLabel, files) {
+  function buildAggregateReport(scopeLabel, files, dayIso) {
     const autonomicOn = isAutonomicOn();
     if (!files || !files.length) return '';
     const summaries = files.map(fn => sessionsIndex[fn]).filter(Boolean);
     if (!summaries.length) return '';
+
+    // For day-scoped aggregates, clip each session's contribution to the
+    // portion that actually falls within that day. Without this, an
+    // overnight session counts its full duration on BOTH days (start +
+    // continuation), producing "33 hours in one day" nonsense.
+    function effDuration(s) {
+      if (!dayIso) return s.duration;
+      const p = typeof sessionDayPortion === 'function' ? sessionDayPortion(s, dayIso) : null;
+      return p && p.durationMin > 0 ? p.durationMin : s.duration;
+    }
 
     let totalDur = 0;
     let weightedHR = 0, weightedRmssd = 0, rmssdDur = 0;
@@ -5806,9 +5832,10 @@
     const postureDur = { lying: 0, sitting: 0, standing: 0 };
     let sleepMin = 0;
     for (const s of summaries) {
-      totalDur += s.duration;
-      weightedHR += (s.hrAvg || 0) * s.duration;
-      if (s.rmssdAvg != null) { weightedRmssd += s.rmssdAvg * s.duration; rmssdDur += s.duration; }
+      const dur = effDuration(s);
+      totalDur += dur;
+      weightedHR += (s.hrAvg || 0) * dur;
+      if (s.rmssdAvg != null) { weightedRmssd += s.rmssdAvg * dur; rmssdDur += dur; }
       totalPalps += s.palpCount || 0;
       totalShifts += (s.hrDeltas || []).length;
       totalFlushes += (s.flushes || []).length;
@@ -5816,7 +5843,7 @@
       totalWarnings += s.warnCount || 0;
       totalGaps += (s.connGaps || []).length;
       totalGapDur += (s.connGaps || []).reduce((sum, g) => sum + (g.end - g.start), 0);
-      weightedTachy += (s.tachyPct || 0) * s.duration;
+      weightedTachy += (s.tachyPct || 0) * dur;
       if (s.hrMax && s.hrMax.v > maxHR) maxHR = s.hrMax.v;
       if (s.hrMin && s.hrMin.v < minHR) minHR = s.hrMin.v;
       if (!longest || s.duration > longest.duration) longest = s;
