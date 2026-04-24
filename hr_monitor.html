@@ -263,8 +263,14 @@
        the zone on full-width viewports. Centre horizontally so the gap
        around the widget is even. This stays on monitor-only — overlay.html
        keeps the default flex-start alignment because OBS source cropping
-       relies on the widget pinning to a predictable corner. */
-    align-items: center;
+       relies on the widget pinning to a predictable corner.
+       `unsafe` keyword is load-bearing: the ResizeObserver applies
+       --full-widgets-width as a min-width on widget-row after first
+       layout, which can make the row slightly wider than the zone (esp.
+       if fullWidgetsWidth was measured on a wider viewport). Default
+       "safe" centering silently falls back to flex-start on overflow,
+       producing the "centered for 1 frame then snaps left" flicker. */
+    align-items: unsafe center;
     gap: 16px;
     border-right: 1px solid var(--border);
     overflow: hidden;
@@ -4887,6 +4893,10 @@
           normal: colorThresholds.normal,
           elevated: colorThresholds.elevated,
           high: thresholds.high,
+          // rmssdCritical is the "HRV crash" alert threshold. Other RMSSD
+          // stage cutoffs (20/35/60) are hard-coded in both native and JS
+          // and must not drift — see getRMSSDStage / rmssdStage.
+          rmssdCritical: thresholds.rmssd,
         });
       }
     } catch (e) { /* ignore */ }

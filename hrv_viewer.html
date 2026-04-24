@@ -4839,11 +4839,11 @@
     el.innerHTML = `
       <div class="day-header">
         <a class="back-link" href="#/month/${year}-${month}" style="margin: 0;">← ${date.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</a>
-        <div class="day-title">${title}</div>
         <div class="cal-nav">
           <button id="day-prev" title="Previous day with data">&larr;</button>
           <button id="day-next" title="Next day with data">&rarr;</button>
         </div>
+        <div class="day-title">${title}</div>
         ${metricSwitchHTML()}
         <div style="margin-left: auto; color: var(--text-dim); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;">${files.length} session${files.length === 1 ? '' : 's'}</div>
       </div>
