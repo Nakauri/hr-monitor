@@ -59,6 +59,12 @@ Either sender writes to the relay; consumers don't care which. Both must emit th
     showWarning: boolean,
     warningAbove: boolean,
     broadcast: boolean,
+    // 'reactive' (default) plots per-beat with straight segments so RSA
+    // oscillation is visible. 'smooth' applies monotone-cubic interpolation
+    // through the same per-beat points. Overlay calls
+    // HRWidget.setLiveTraceStyle(chart, value) so monitor + OBS render
+    // identically. Ignore unknown values.
+    liveTraceStyle?: "reactive" | "smooth",
   }
 }
 ```
