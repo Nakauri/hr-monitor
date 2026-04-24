@@ -4850,6 +4850,7 @@
 
   function saveAlertThresholds() {
     try { localStorage.setItem('hr_monitor_alert_thresholds', JSON.stringify(thresholds)); } catch(e) {}
+    pushStageThresholdsToNative();
   }
   function loadAlertThresholds() {
     try {
@@ -4864,8 +4865,26 @@
     } catch(e) {}
   }
 
+  // Push current stage thresholds to the native plugin so its relay tick's
+  // hrStage matches what the monitor WebView computes. Called on any edit
+  // to colorThresholds or thresholds.high, and once on init.
+  function pushStageThresholdsToNative() {
+    try {
+      if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable
+          && typeof window.HRMNativeHrSession.setStageThresholds === 'function') {
+        window.HRMNativeHrSession.setStageThresholds({
+          low: colorThresholds.low,
+          normal: colorThresholds.normal,
+          elevated: colorThresholds.elevated,
+          high: thresholds.high,
+        });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function saveColorThresholds() {
     try { localStorage.setItem('hr_monitor_color_thresholds', JSON.stringify(colorThresholds)); } catch(e) {}
+    pushStageThresholdsToNative();
   }
 
   function loadColorThresholds() {
@@ -5131,6 +5150,20 @@
       });
     });
     loadColorThresholds();
+    // Seed the native plugin with current thresholds so its relay tick
+    // colours match the monitor's from tick one. Retry briefly if the
+    // shim isn't ready yet on cold start.
+    let pushTries = 0;
+    (function seedStageThresholds() {
+      try {
+        if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable
+            && typeof window.HRMNativeHrSession.setStageThresholds === 'function') {
+          pushStageThresholdsToNative();
+          return;
+        }
+      } catch (e) { /* ignore */ }
+      if (++pushTries < 40) setTimeout(seedStageThresholds, 100);
+    })();
   });
 
   function saveSectionStates() {

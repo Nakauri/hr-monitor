@@ -309,6 +309,45 @@ public class NativeHrSessionPlugin extends Plugin {
         call.resolve();
     }
 
+    // Returns the active session's CSV contents + start epoch so the WebView
+    // can rehydrate state.hrSeries / state.rmssdSeries after being reclaimed
+    // mid-session. Rejects if no session is active or the file is missing.
+    @PluginMethod
+    public void getSessionSnapshot(PluginCall call) {
+        executor().execute(() -> {
+            try {
+                if (!sessionActive.get() || csv == null) {
+                    call.reject("no_active_session");
+                    return;
+                }
+                java.io.File file = csv.getFile();
+                if (file == null || !file.exists()) {
+                    call.reject("no_csv_file");
+                    return;
+                }
+                long size = file.length();
+                byte[] bytes = new byte[(int) size];
+                try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+                    int read = 0;
+                    while (read < bytes.length) {
+                        int n = fis.read(bytes, read, bytes.length - read);
+                        if (n < 0) break;
+                        read += n;
+                    }
+                }
+                String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                JSObject ret = new JSObject();
+                ret.put("filename", csv.getFilename());
+                ret.put("csv", text);
+                ret.put("sessionStartMs", csv.getSessionStartMs());
+                ret.put("sizeBytes", bytes.length);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("getSessionSnapshot failed: " + e.getMessage(), e);
+            }
+        });
+    }
+
     // ---- Auth storage (Keystore-backed) ---------------------------------
     // JS sign-in flow: SocialLogin.login -> serverAuthCode -> POST
     // /api/auth/exchange -> storeAuthTokens(). Native background uploader
@@ -728,11 +767,35 @@ public class NativeHrSessionPlugin extends Plugin {
         relayLive.set(false);
     }
 
+    // User-configurable stage thresholds. Defaults match the web defaults
+    // (color-low 70, color-normal 90, color-elevated 110, alert-high 130).
+    // JS calls setStageThresholds() on load and whenever the user edits them
+    // so the relay tick's hrStage matches what the monitor's own WebView
+    // shows. Without this the OBS overlay and the phone UI show different
+    // colours for the same HR.
+    private volatile int stageLow = 70;
+    private volatile int stageNormal = 90;
+    private volatile int stageElevated = 110;
+    private volatile int stageHigh = 130;
+
+    @PluginMethod
+    public void setStageThresholds(PluginCall call) {
+        Integer low = call.getInt("low");
+        Integer normal = call.getInt("normal");
+        Integer elevated = call.getInt("elevated");
+        Integer high = call.getInt("high");
+        if (low != null) stageLow = low;
+        if (normal != null) stageNormal = normal;
+        if (elevated != null) stageElevated = elevated;
+        if (high != null) stageHigh = high;
+        call.resolve();
+    }
+
     private String hrStage(int hr) {
-        if (hr < 60) return "stage-low";
-        if (hr < 100) return "stage-normal";
-        if (hr < 140) return "stage-elevated";
-        if (hr < 170) return "stage-high";
+        if (hr <= stageLow) return "stage-low";
+        if (hr < stageNormal) return "stage-normal";
+        if (hr < stageElevated) return "stage-elevated";
+        if (hr < stageHigh) return "stage-high";
         return "stage-critical";
     }
 
