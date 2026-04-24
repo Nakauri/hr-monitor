@@ -5715,10 +5715,16 @@
   function detectNoteworthyMoments(hrSeries, rmssdSeries) {
     const out = [];
     if (!hrSeries || hrSeries.length < 20) return out;
+    // K_MAD was 1.5 — too loose. At 1.5 MADs, any sleep-vs-wake comparison
+    // on an overnight session is statistically "noteworthy" and the top-5
+    // list reads as "you were asleep between X and Y." 2.5 is the standard
+    // robust-z significance threshold and surfaces real excursions only.
+    // HR / HRV floors also raised so drifts that are within normal
+    // physiological range don't reach the report.
     const WINDOW_MIN = 3;             // rolling-window length (minutes)
-    const MIN_HR_DELTA = 10;          // floor in bpm — ignore smaller drifts
-    const MIN_RMSSD_DELTA_PCT = 0.35; // floor for HRV deviations
-    const K_MAD = 1.5;
+    const MIN_HR_DELTA = 15;          // floor in bpm (was 10)
+    const MIN_RMSSD_DELTA_PCT = 0.45; // floor for HRV deviations (was 0.35)
+    const K_MAD = 2.5;                // robust-z threshold (was 1.5)
     const seriesScan = (series, key, minDelta, minDeltaIsPct) => {
       if (!series || series.length < 20) return;
       const vals = series.map(p => p.v).filter(v => isFinite(v));
