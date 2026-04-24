@@ -81,13 +81,14 @@ public class NativeHrSessionPlugin extends Plugin {
     private static final UUID HR_MEASUREMENT = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb");
     private static final UUID CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    // RMSSD window — rolling 60 s of RR intervals, matching
-    // hr_monitor.html:~2634 (`cutoff = now - 1` minute). Earlier comment
-    // here incorrectly said 30 s; that was a doc bug. Shorter windows
-    // inflate RMSSD variance and made the phone's HRV drift from what
-    // Firefox saw on the relay.
+    // RMSSD window — rolling 30 s of RR intervals, matching
+    // hr_monitor.html:~2634 (`cutoff = now - 0.5` minute). 30 s is the
+    // responsive-monitoring choice: brief flushes / vagal bursts / chills
+    // show up visibly in the live number instead of being averaged out.
+    // 60 s would be steadier but hides the events this app is built to
+    // surface.
     // PARITY CRITICAL — see scripts/rmssd-parity.test.js.
-    private static final long RR_WINDOW_MS = 60_000L;
+    private static final long RR_WINDOW_MS = 30_000L;
     // Drive upload cadence — every 30 s. Same data pace as the JS auto-save.
     private static final long DRIVE_UPLOAD_INTERVAL_MS = 30_000L;
     // Buffers for the overlay charts. livePoints = 45 s of instantaneous
