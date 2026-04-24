@@ -22,41 +22,14 @@
   };
 
   // 45-second per-beat HR trace drawn on the left column of the compact widget.
-  // Both senders (web broadcastTick + native publishTick) already emit per-beat
-  // BPM (60000 / rr_ms) in livePoints. Rendering style is a pure Chart.js
-  // config flip — the underlying data is identical across modes.
-  //
-  //   smooth  : monotone cubic interpolation, curve through per-beat points.
-  //             Reads as a soft line that hides RSA oscillation.
-  //   reactive: straight linear segments between beats. RSA is visible —
-  //             HR speeds on inhale, slows on exhale, 3-5 beats/breath
-  //             cycle traces a clean sinusoid at rest.
-  //
-  // Default is 'reactive' — if a user prefers the smoothed look, the
-  // Widgets settings tab has a toggle. Called on chart creation; switch
-  // via setLiveTraceStyle(chart, style) when the pref changes.
-  function createLiveTraceChart(canvasCtx, style) {
-    const ds = {
-      data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.12)',
-      tension: 0, pointRadius: 0, borderWidth: 1.75, fill: true,
-    };
-    if ((style || 'reactive') === 'smooth') ds.cubicInterpolationMode = 'monotone';
+  // Monotone cubic + borderWidth 1.75 stop the line from overshooting its
+  // vertical bounds (otherwise it bleeds into the pips row below).
+  function createLiveTraceChart(canvasCtx) {
     return new Chart(canvasCtx, {
       type: 'line',
-      data: { datasets: [ds] },
+      data: { datasets: [{ data: [], borderColor: '#B8D97E', backgroundColor: 'rgba(184,217,126,0.12)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.75, fill: true }] },
       options: { ...baseOpts, scales: { x: { type: 'linear', display: false, min: 0, max: 45 }, y: { display: false, grace: '12%' } } },
     });
-  }
-
-  function setLiveTraceStyle(chart, style) {
-    if (!chart || !chart.data || !chart.data.datasets || !chart.data.datasets[0]) return;
-    const ds = chart.data.datasets[0];
-    if (style === 'smooth') {
-      ds.cubicInterpolationMode = 'monotone';
-    } else {
-      delete ds.cubicInterpolationMode;
-    }
-    try { chart.update('none'); } catch (e) {}
   }
 
   // 3-min HR + RMSSD dual-line trend across the full width at the bottom of
@@ -108,7 +81,6 @@
   window.HRWidget = {
     STAGE_COLORS,
     createLiveTraceChart,
-    setLiveTraceStyle,
     createCompactTrendChart,
     tintChart,
     hexToRgba,
