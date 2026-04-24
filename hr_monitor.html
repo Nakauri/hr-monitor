@@ -1854,6 +1854,10 @@
   const debugBLE = new URLSearchParams(location.search).get('debug') === '1';
   if (debugBLE) console.log('[HR] debug=1 — each BLE notification will be logged with raw hex.');
 
+  // PARITY CRITICAL — MUST MATCH NativeHrSessionPlugin.java:computeRmssd.
+  // The native plugin also ships RMSSD (to relay + CSV). If these drift,
+  // the same recording shows different HRV numbers on different surfaces.
+  // Change one, update the other, run `node scripts/rmssd-parity.test.js`.
   function computeRMSSD(rrs) {
     if (rrs.length < 2) return null;
     const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
