@@ -1235,9 +1235,9 @@
     color: var(--text-dim);
     letter-spacing: 0.05em;
   }
-  .legend-spacer { flex: 1 1 100%; min-width: 0; }
-  /* Push the timeline-mode toggle + reset-zoom to the right edge of the
-     legend row. margin-left: auto works even when the flex row wraps. */
+  /* Right-align the timeline-mode + reset-zoom buttons inline with the
+     legend row. margin-left: auto eats remaining flex space so the buttons
+     hug the chart's right edge without forcing a row break. */
   #timeline-mode-toggle { margin-left: auto; }
   .legend-reset-zoom {
     padding: 4px 12px;
@@ -5529,7 +5529,6 @@
               <div class="chart-legend-item toggleable" data-type="posture" title="Click to toggle"><span class="legend-swatch" style="background: rgba(200,168,230,0.15); border: 1px solid rgba(200,168,230,0.4);"></span>Posture</div>
               <div class="chart-legend-item toggleable" data-type="sleep" title="Click to toggle"><span class="legend-swatch" style="background: rgba(110,140,200,0.15); border: 1px dashed rgba(110,140,200,0.5);"></span>Sleep window</div>
               <div class="chart-legend-item"><span class="legend-swatch dot" style="background: #B8D97E; border: 1px solid #000;"></span>Max / Min HR</div>
-              <div class="legend-spacer"></div>
               <button class="legend-reset-zoom" id="timeline-mode-toggle" title="Switch between elapsed time and clock time on the timeline">⟳ <span id="timeline-mode-label">Clock time</span></button>
               <button class="legend-reset-zoom hidden" id="reset-zoom">Reset zoom</button>
             </div>

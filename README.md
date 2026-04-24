@@ -30,7 +30,3 @@ Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recordin
 Open `index.html` in any Chromium browser. No build step, no install. The three HTML files (`hr_monitor.html`, `hrv_viewer.html`, `overlay.html`) are self-contained.
 
 The relay is a small PartyKit project under `relay/`. The mobile Capacitor wrapper under `mobile/` builds the APK.
-
-## Who built this
-
-Kalen Crowe. POTS patient, built this because commercial HR overlays are either subscription-priced or miss the autonomic patterns that POTS streamers care about. Bug reports, strap test confirmations, and feedback welcome in Issues.
