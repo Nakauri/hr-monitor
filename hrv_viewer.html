@@ -3365,7 +3365,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 6
+        || cached.__schemaV !== 7
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3526,15 +3526,23 @@
     return j >= 0 ? rmssd[j].v : null;
   }
 
-  // Chills / shivering. Literature: shivering drives metabolic HR UP, not
-  // just variable. RR variance is accompanied by HR elevation (metabolic)
-  // and RMSSD suppression (sympathetic). Event lasts minutes. A 30-sec
-  // high-variance window with no HR or RMSSD context is noise.
+  // Chills detection catches TWO physiologically distinct events, both
+  // felt subjectively as "chills":
   //
-  // Criteria (all required, sustained for ≥90 sec with 5-min cooldown):
-  //   - rolling 60-sec HR stdDev ≥ max(5 bpm abs, 2 × session median std)
-  //   - rolling 60-sec HR mean > (5-min trailing baseline + 10 bpm)
-  //   - nearest RMSSD < (5-min trailing RMSSD baseline × 0.75)
+  // 1. Sympathetic / thermogenic (shivering, cold exposure with
+  //    metabolic response). HR up, RMSSD down, sustained minutes.
+  //    Literature: shivering drives metabolic HR up; RR variance
+  //    accompanied by HR elevation and RMSSD suppression.
+  //
+  // 2. Vagal / frisson (aesthetic chills, emotional peaks, cold-onset
+  //    diving-reflex response, ectopic-driven vagal bursts). RMSSD
+  //    spikes sharply; HR may or may not move; duration seconds to
+  //    ~2 min. RMSSD is a vagal-tone marker, so sudden rise = vagal
+  //    burst. Vagal bursts in structurally normal hearts also trigger
+  //    ectopic beats which further inflate RMSSD — same event, two
+  //    lenses.
+  //
+  // Both emitted into the same windows list with a `kind` field.
   //
   // ratioThreshold is kept on the API for the sensitivity slider but only
   // multiplies the stdDev criterion; the HR-elevation and RMSSD gates are
@@ -3597,7 +3605,7 @@
       }
       const isChill = stdOk && hrOk && rmssdOk;
       if (isChill) {
-        if (!cur) cur = { start: hr[i].t, end: hr[i].t, maxStd: s, ratio: s / (medStd || 1) };
+        if (!cur) cur = { start: hr[i].t, end: hr[i].t, maxStd: s, ratio: s / (medStd || 1), kind: 'sympathetic' };
         else { cur.end = hr[i].t; if (s > cur.maxStd) { cur.maxStd = s; cur.ratio = s / (medStd || 1); } }
       } else if (cur) {
         if (cur.end - cur.start >= MIN_DURATION && cur.start >= lastEmit + COOLDOWN) {
@@ -3609,6 +3617,68 @@
     if (cur && cur.end - cur.start >= MIN_DURATION && cur.start >= lastEmit + COOLDOWN) {
       out.push(cur);
     }
+
+    // ===== Vagal-burst pass =====
+    // RMSSD rising sharply above its own trailing baseline. Brief. Either
+    // a genuine vagal surge (frisson, aesthetic chills, cold-onset) or
+    // the RR-interval signature of ectopic beats, which vagally-mediated
+    // ectopic literature describes as functionally the same thing (vagal
+    // surge triggers the ectopic).
+    //
+    // Criteria:
+    //   - nearest RMSSD ≥ 2.5 × trailing-baseline RMSSD AND ≥ +20 ms absolute
+    //   - sustained for ≥5 seconds (single-sample spikes = artefact)
+    //   - max burst length 2 min (anything longer is a sustained vagal
+    //     state, not a "burst"; it belongs to autonomic interpretation)
+    //   - 2-min cooldown
+    if (rmssd && rmssdBaseline) {
+      const VAGAL_RATIO = 2.5;
+      const VAGAL_ABS_DELTA = 20;
+      const VAGAL_MIN_DURATION = 5 / 60;   // 5 seconds in minutes
+      const VAGAL_MAX_DURATION = 2;        // 2 min cap
+      const VAGAL_COOLDOWN = 2;
+      let vagalCur = null;
+      let vagalLastEmit = -Infinity;
+      for (let i = 0; i < rmssd.length; i++) {
+        const rNow = rmssd[i].v;
+        const rBase = rmssdBaseline[i];
+        if (rNow == null || rBase == null || rBase <= 0) {
+          if (vagalCur && vagalCur.end - vagalCur.start >= VAGAL_MIN_DURATION
+              && vagalCur.start >= vagalLastEmit + VAGAL_COOLDOWN) {
+            out.push(vagalCur); vagalLastEmit = vagalCur.end;
+          }
+          vagalCur = null;
+          continue;
+        }
+        const isVagal = rNow >= rBase * VAGAL_RATIO && rNow - rBase >= VAGAL_ABS_DELTA;
+        if (isVagal) {
+          if (!vagalCur) {
+            vagalCur = { start: rmssd[i].t, end: rmssd[i].t, peakRmssd: rNow, baseRmssd: rBase, kind: 'vagal' };
+          } else {
+            vagalCur.end = rmssd[i].t;
+            if (rNow > vagalCur.peakRmssd) vagalCur.peakRmssd = rNow;
+            // Close early if burst is running longer than VAGAL_MAX_DURATION
+            if (vagalCur.end - vagalCur.start > VAGAL_MAX_DURATION) {
+              if (vagalCur.start >= vagalLastEmit + VAGAL_COOLDOWN) {
+                out.push(vagalCur); vagalLastEmit = vagalCur.end;
+              }
+              vagalCur = null;
+            }
+          }
+        } else if (vagalCur) {
+          if (vagalCur.end - vagalCur.start >= VAGAL_MIN_DURATION
+              && vagalCur.start >= vagalLastEmit + VAGAL_COOLDOWN) {
+            out.push(vagalCur); vagalLastEmit = vagalCur.end;
+          }
+          vagalCur = null;
+        }
+      }
+      if (vagalCur && vagalCur.end - vagalCur.start >= VAGAL_MIN_DURATION
+          && vagalCur.start >= vagalLastEmit + VAGAL_COOLDOWN) {
+        out.push(vagalCur);
+      }
+    }
+
     return out;
   }
 
@@ -3927,7 +3997,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 6,
+      __schemaV: 7,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
