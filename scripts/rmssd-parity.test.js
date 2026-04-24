@@ -133,13 +133,56 @@ function checkStage(label, rmssd, critical, expected) {
   if (!pass) ok = false;
 }
 
-console.log('\nStage classification parity:');
+console.log('\nRMSSD stage classification parity:');
 checkStage('crash at user threshold', 10, 15, 'stage-critical');
 checkStage('just above critical',     16, 15, 'stage-high');
 checkStage('high range',              22, 15, 'stage-elevated');
 checkStage('elevated range',          36, 15, 'stage-normal');   // the reported mismatch
 checkStage('normal range',            55, 15, 'stage-normal');
 checkStage('excellent range',         80, 15, 'stage-low');
+
+// -------- HR stage classification parity ----
+// JS: hr_monitor.html:getHRStage
+// Java: NativeHrSessionPlugin.java:hrStage
+// Both use user-configurable thresholds pushed from JS via setStageThresholds.
+// Boundaries must match exactly (the `<=` on low is load-bearing).
+function hrStage_js(hr, t) {
+  if (hr == null) return 'stage-normal';
+  if (hr <= t.low) return 'stage-low';
+  if (hr < t.normal) return 'stage-normal';
+  if (hr < t.elevated) return 'stage-elevated';
+  if (hr < t.high) return 'stage-high';
+  return 'stage-critical';
+}
+function hrStage_javaPort(hr, t) {
+  if (hr <= t.low) return 'stage-low';
+  if (hr < t.normal) return 'stage-normal';
+  if (hr < t.elevated) return 'stage-elevated';
+  if (hr < t.high) return 'stage-high';
+  return 'stage-critical';
+}
+
+function checkHRStage(label, hr, t, expected) {
+  const js = hrStage_js(hr, t);
+  const java = hrStage_javaPort(hr, t);
+  const pass = js === expected && java === expected && js === java;
+  console.log(
+    `${pass ? 'OK   ' : 'FAIL '} ${label.padEnd(32)} ` +
+    `hr=${hr} t=${JSON.stringify(t)} js=${js} java=${java} expected=${expected}`
+  );
+  if (!pass) ok = false;
+}
+
+console.log('\nHR stage classification parity:');
+const T = { low: 70, normal: 90, elevated: 110, high: 130 };  // default user thresholds
+checkHRStage('below low boundary',    50, T, 'stage-low');
+checkHRStage('at low boundary',       70, T, 'stage-low');        // inclusive
+checkHRStage('just above low',        71, T, 'stage-normal');
+checkHRStage('at normal boundary',    89, T, 'stage-normal');
+checkHRStage('elevated range',        93, T, 'stage-elevated');   // user reported 93 green/orange mismatch
+checkHRStage('high range',           115, T, 'stage-high');
+checkHRStage('at high boundary',     129, T, 'stage-high');
+checkHRStage('critical',             130, T, 'stage-critical');   // strict: = high hits critical
 
 if (!ok) {
   console.error('\nFAIL: RMSSD parity broken.');

@@ -6526,11 +6526,23 @@
     }
 
     // 5. Chills signatures — INTERPRETIVE, only when autonomic on.
+    // Events are tagged { kind: 'sympathetic' | 'vagal' } by detectChillsWindows.
+    // Sympathetic carries `ratio` (std × baseline). Vagal carries `peakRmssd` +
+    // `baseRmssd`. Rendering must be kind-aware or one branch blows up.
     if (autonomicOn && s.chillsWindows && s.chillsWindows.length > 0) {
       const total = s.chillsWindows.reduce((x, c) => x + (c.end - c.start), 0);
+      const describe = (c) => {
+        if (c.kind === 'vagal' && c.peakRmssd != null && c.baseRmssd != null) {
+          const mult = c.baseRmssd > 0 ? (c.peakRmssd / c.baseRmssd) : null;
+          const multStr = mult != null ? `${mult.toFixed(1)}× baseline HRV` : 'HRV spike';
+          return `@ ${formatDuration(c.start)} · ${multStr} (vagal burst)`;
+        }
+        const ratio = typeof c.ratio === 'number' ? c.ratio.toFixed(1) + '× baseline volatility' : 'baseline volatility';
+        return `@ ${formatDuration(c.start)} · ${ratio}`;
+      };
       const lines = s.chillsWindows.slice(0, 3).map(c => ({
-        text: `${formatDuration(c.end - c.start)} window`,
-        sub: `@ ${formatDuration(c.start)} · ${c.ratio.toFixed(1)}× baseline volatility`,
+        text: `${formatDuration(c.end - c.start)} ${c.kind === 'vagal' ? 'vagal burst' : 'window'}`,
+        sub: describe(c),
         at: { t: c.start, label: `jump @ ${formatDuration(c.start)}` },
       }));
       sections.push({
@@ -7495,7 +7507,18 @@
           borderColor: 'rgba(133,183,235,0.6)',
           borderWidth: 1,
           drawTime: 'beforeDatasetsDraw',
-          enter: (ctx, evt) => annoEnter(c.start, `<b>Chills signature</b><br/>High HR volatility (std ${c.std.toFixed(1)} bpm, ${c.ratio.toFixed(1)}× session baseline)<br/><span style='color: var(--text-dim);'>Possible shivering EMG artifact or autonomic storm</span>`, evt),
+          enter: (ctx, evt) => {
+            let body;
+            if (c.kind === 'vagal' && c.peakRmssd != null && c.baseRmssd != null) {
+              const mult = c.baseRmssd > 0 ? (c.peakRmssd / c.baseRmssd).toFixed(1) : '—';
+              body = `<b>Vagal burst</b><br/>RMSSD spiked to ${Math.round(c.peakRmssd)} ms (${mult}× baseline)<br/><span style='color: var(--text-dim);'>Frisson, cold onset, or ectopic-driven vagal surge</span>`;
+            } else {
+              const std = typeof c.std === 'number' ? c.std.toFixed(1) : '—';
+              const ratio = typeof c.ratio === 'number' ? c.ratio.toFixed(1) : '—';
+              body = `<b>Chills signature</b><br/>High HR volatility (std ${std} bpm, ${ratio}× session baseline)<br/><span style='color: var(--text-dim);'>Possible shivering or thermoregulatory event</span>`;
+            }
+            annoEnter(c.start, body, evt);
+          },
           leave: annoLeave,
         };
       }
