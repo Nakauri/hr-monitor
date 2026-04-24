@@ -3856,22 +3856,27 @@
     // Match the shape loadFullSession returns: {x, y, ep}. The chart code and
     // several downstream helpers read .x / .y directly; using {t, v} silently
     // breaks chart rendering (the line never plots because points miss their x).
-    const hr = [];
-    const rmssd = [];
+    // Clip to this day's 24h window [0, 1440] minutes so midnight-crosser
+    // sessions don't leak yesterday's or tomorrow's points into this day's
+    // chart. Dedupe by epoch so dual-saves don't double-plot the same beat.
+    const hrByEp = new Map();
+    const rmssdByEp = new Map();
     for (const sd of loaded) {
       for (const p of sd.hr) {
         if (p.ep == null) continue;
         const x = (p.ep - startOfDay) / 60000;
-        hr.push({ x, y: p.y, ep: p.ep });
+        if (x < 0 || x > 1440) continue;
+        if (!hrByEp.has(p.ep)) hrByEp.set(p.ep, { x, y: p.y, ep: p.ep });
       }
       for (const p of sd.rmssd) {
         if (p.ep == null) continue;
         const x = (p.ep - startOfDay) / 60000;
-        rmssd.push({ x, y: p.y, ep: p.ep });
+        if (x < 0 || x > 1440) continue;
+        if (!rmssdByEp.has(p.ep)) rmssdByEp.set(p.ep, { x, y: p.y, ep: p.ep });
       }
     }
-    hr.sort((a, b) => a.x - b.x);
-    rmssd.sort((a, b) => a.x - b.x);
+    const hr = Array.from(hrByEp.values()).sort((a, b) => a.x - b.x);
+    const rmssd = Array.from(rmssdByEp.values()).sort((a, b) => a.x - b.x);
 
     // Walk each session's summary and shift its events into day-minute space.
     // Each event type has its own time-bearing fields: events use {t},
@@ -3935,7 +3940,32 @@
     }
     if (!isFinite(rmssdMin.v)) rmssdMin = { t: 0, v: 0 };
 
-    const duration = hr.length ? hr[hr.length - 1].x : 0;
+    // Duration = union of each session's in-day portion, capped at 24h.
+    // Summing portions double-counts overlap (dual-save dupes, rehydrate
+    // resumes) and can exceed 24h. Using just `hr[last].x` also ignores
+    // that recording may have started before 00:00 on this day.
+    const dayEndMs = startOfDay + 86400000;
+    const portionIntervals = [];
+    for (const fn of files) {
+      const s = sessionsIndex[fn];
+      if (!s || !s.startEpoch || !s.duration) continue;
+      const a = Math.max(s.startEpoch, startOfDay);
+      const b = Math.min(s.startEpoch + s.duration * 60000, dayEndMs);
+      if (b > a) portionIntervals.push([a, b]);
+    }
+    let duration = 0;
+    if (portionIntervals.length) {
+      portionIntervals.sort((x, y) => x[0] - y[0]);
+      let cs = portionIntervals[0][0], ce = portionIntervals[0][1];
+      for (let i = 1; i < portionIntervals.length; i++) {
+        if (portionIntervals[i][0] <= ce) ce = Math.max(ce, portionIntervals[i][1]);
+        else { duration += ce - cs; cs = portionIntervals[i][0]; ce = portionIntervals[i][1]; }
+      }
+      duration += ce - cs;
+      duration = duration / 60000;
+    } else if (hr.length) {
+      duration = hr[hr.length - 1].x - hr[0].x;
+    }
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
     const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
@@ -5330,6 +5360,23 @@
     const isVirtualDay = !!s.__virtualDay;
     const backHref = isVirtualDay ? ('#/day/' + s.__virtualDay) : '#/index';
     const backLabel = isVirtualDay ? ('← ' + s.__virtualDay) : '← All sessions';
+    // Day-to-day nav for the full-day timeline. Only dates that actually
+    // have sessions are eligible stops; stepping past the ends is a no-op
+    // (button disabled). Saves bouncing back to the month grid just to
+    // open the next day's timeline.
+    let dayNavPrev = null, dayNavNext = null;
+    if (isVirtualDay) {
+      const dayKeys = Object.keys(sessionsByDate).sort();
+      const idx = dayKeys.indexOf(s.__virtualDay);
+      if (idx > 0) dayNavPrev = dayKeys[idx - 1];
+      if (idx >= 0 && idx < dayKeys.length - 1) dayNavNext = dayKeys[idx + 1];
+    }
+    const dayNavHtml = isVirtualDay
+      ? `<div class="cal-nav" style="margin-left: 12px;">
+           <button id="session-day-prev" ${dayNavPrev ? '' : 'disabled'} title="Previous day with data">&larr;</button>
+           <button id="session-day-next" ${dayNavNext ? '' : 'disabled'} title="Next day with data">&rarr;</button>
+         </div>`
+      : '';
     // Short date format ("18 Apr") fits the big-number KPI style; the year +
     // time drop into the subtitle so the Date stat reads at the same height
     // as Duration / Avg HR / HRV etc. For day-timeline sessions we skip the
@@ -5345,6 +5392,7 @@
     el.innerHTML = `
       <div class="session-top-row">
         <a class="back-link" href="${backHref}">${backLabel}</a>
+        ${dayNavHtml}
         <div class="tags-inline">
           <span class="tags-inline-label">Tags:</span>
           <span id="tags-current"></span>
@@ -5498,6 +5546,12 @@
     document.getElementById('reset-zoom').addEventListener('click', resetZoom);
     updateResetZoomVisibility();
     wireTimelineModeToggle();
+    if (isVirtualDay) {
+      const prevBtn = document.getElementById('session-day-prev');
+      const nextBtn = document.getElementById('session-day-next');
+      if (prevBtn && dayNavPrev) prevBtn.addEventListener('click', () => setHash('session/day:' + dayNavPrev));
+      if (nextBtn && dayNavNext) nextBtn.addEventListener('click', () => setHash('session/day:' + dayNavNext));
+    }
     startAutoPoll();
   }
 
@@ -5822,6 +5876,36 @@
       return p && p.durationMin > 0 ? p.durationMin : s.duration;
     }
 
+    // Day-scoped display duration uses interval UNION, not sum. When two
+    // sessions overlap (dual-save dupes, rehydrate resume), summing
+    // portions double-counts the overlap; a single 24h day can't contain
+    // >24h of recording. Weighting divisions below still use the summed
+    // portion durations, which stays consistent with how weighted sums
+    // are accumulated per-session.
+    function dayUnionDuration() {
+      if (!dayIso) return summaries.reduce((s, x) => s + (x.duration || 0), 0);
+      const dayStart = new Date(dayIso + 'T00:00:00').getTime();
+      const dayEnd = dayStart + 86400000;
+      const intervals = [];
+      for (const s of summaries) {
+        if (!s) continue;
+        if (s.startEpoch && s.duration) {
+          const a = Math.max(s.startEpoch, dayStart);
+          const b = Math.min(s.startEpoch + s.duration * 60000, dayEnd);
+          if (b > a) intervals.push([a, b]);
+        }
+      }
+      if (!intervals.length) return 0;
+      intervals.sort((x, y) => x[0] - y[0]);
+      let total = 0, curStart = intervals[0][0], curEnd = intervals[0][1];
+      for (let i = 1; i < intervals.length; i++) {
+        if (intervals[i][0] <= curEnd) curEnd = Math.max(curEnd, intervals[i][1]);
+        else { total += curEnd - curStart; curStart = intervals[i][0]; curEnd = intervals[i][1]; }
+      }
+      total += curEnd - curStart;
+      return total / 60000;
+    }
+
     let totalDur = 0;
     let weightedHR = 0, weightedRmssd = 0, rmssdDur = 0;
     let totalPalps = 0, totalShifts = 0, totalFlushes = 0, totalChills = 0;
@@ -5861,11 +5945,13 @@
     const avgRmssd = rmssdDur > 0 ? Math.round(weightedRmssd / rmssdDur) : null;
     const avgTachy = totalDur > 0 ? Math.round(weightedTachy / totalDur) : 0;
 
+    const displayDur = dayIso ? dayUnionDuration() : totalDur;
+
     const sections = [];
     // Overview — always present.
     {
       const lines = [];
-      lines.push({ text: `${summaries.length} session${summaries.length === 1 ? '' : 's'}`, sub: `${formatDuration(totalDur)} total recorded` });
+      lines.push({ text: `${summaries.length} session${summaries.length === 1 ? '' : 's'}`, sub: `${formatDuration(displayDur)} total recorded` });
       if (avgHR != null) lines.push({ text: `Average HR: ${avgHR} bpm`, sub: `range across all sessions ${minHR}–${maxHR} bpm` });
       if (avgRmssd != null) lines.push({ text: `Average HRV (RMSSD): ${avgRmssd} ms`,
         what: 'HRV is how much the gap between heartbeats changes from beat to beat. Higher usually means relaxed or recovered. Lower can mean stressed, tired, or fighting off something. Most adults sit between 20 and 90 ms at rest.' });
