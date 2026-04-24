@@ -707,20 +707,38 @@ public class NativeHrSessionPlugin extends Plugin {
         RrEntry(int rrMs, long ts) { this.rrMs = rrMs; this.timestampMs = ts; }
     }
 
+    // PARITY CRITICAL — MUST MATCH hr_monitor.html:computeRMSSD (line ~1857).
+    //
+    // Both implementations ship RMSSD to end users (JS to the monitor
+    // widget, Java to the relay broadcast and the CSV writer). If they
+    // drift, the same recording shows different HRV numbers on different
+    // surfaces. Already happened once (see scripts/rmssd-parity.test.js
+    // for the golden vector and regression history).
+    //
+    // Both filters are standard HRV preprocessing:
+    //   - RR range 300..2000 ms (HR 30..200) drops obvious artefacts
+    //   - |successive-diff| >= 200 ms drops ectopic-beat jumps
+    //
+    // When you change either implementation, update the other and run
+    // `node scripts/rmssd-parity.test.js` to verify both still produce
+    // the golden-vector expected output.
     private static Double computeRmssd(Deque<RrEntry> window) {
         if (window.size() < 2) return null;
+        java.util.ArrayList<Integer> clean = new java.util.ArrayList<>();
+        for (RrEntry e : window) {
+            if (e.rrMs >= 300 && e.rrMs <= 2000) clean.add(e.rrMs);
+        }
+        if (clean.size() < 2) return null;
         double sumSq = 0.0;
         int count = 0;
-        Iterator<RrEntry> it = window.iterator();
-        int prev = it.next().rrMs;
-        while (it.hasNext()) {
-            int cur = it.next().rrMs;
-            double d = cur - prev;
-            sumSq += d * d;
-            count += 1;
-            prev = cur;
+        for (int i = 1; i < clean.size(); i++) {
+            int d = clean.get(i) - clean.get(i - 1);
+            if (Math.abs(d) < 200) {
+                sumSq += (double) d * d;
+                count += 1;
+            }
         }
-        if (count == 0) return null;
+        if (count < 1) return null;
         return Math.sqrt(sumSq / count);
     }
 
