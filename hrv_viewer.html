@@ -3940,10 +3940,21 @@
     }
     if (!isFinite(rmssdMin.v)) rmssdMin = { t: 0, v: 0 };
 
-    // Duration = union of each session's in-day portion, capped at 24h.
-    // Summing portions double-counts overlap (dual-save dupes, rehydrate
-    // resumes) and can exceed 24h. Using just `hr[last].x` also ignores
-    // that recording may have started before 00:00 on this day.
+    // Two different "duration" concepts that used to be one field:
+    //
+    //   duration       — chart x-axis max. Minutes from 00:00 to the last
+    //                    data point in the day. Drives scales.x.max in
+    //                    drawSessionChart so the full timeline is visible.
+    //                    Setting this to union-of-portions truncates the
+    //                    chart mid-afternoon when evening sessions exist.
+    //
+    //   activeDuration — summary-bar display. Union of each session's
+    //                    in-day portion across files, capped at 24h.
+    //                    Summing portions double-counts dual-save /
+    //                    rehydrate overlap (the ">24h in one day" bug).
+    //
+    // Both are needed. renderSession reads activeDuration for the stat
+    // card and falls back to duration for real single-session views.
     const dayEndMs = startOfDay + 86400000;
     const portionIntervals = [];
     for (const fn of files) {
@@ -3953,19 +3964,18 @@
       const b = Math.min(s.startEpoch + s.duration * 60000, dayEndMs);
       if (b > a) portionIntervals.push([a, b]);
     }
-    let duration = 0;
+    let activeDuration = 0;
     if (portionIntervals.length) {
       portionIntervals.sort((x, y) => x[0] - y[0]);
       let cs = portionIntervals[0][0], ce = portionIntervals[0][1];
       for (let i = 1; i < portionIntervals.length; i++) {
         if (portionIntervals[i][0] <= ce) ce = Math.max(ce, portionIntervals[i][1]);
-        else { duration += ce - cs; cs = portionIntervals[i][0]; ce = portionIntervals[i][1]; }
+        else { activeDuration += ce - cs; cs = portionIntervals[i][0]; ce = portionIntervals[i][1]; }
       }
-      duration += ce - cs;
-      duration = duration / 60000;
-    } else if (hr.length) {
-      duration = hr[hr.length - 1].x - hr[0].x;
+      activeDuration += ce - cs;
+      activeDuration = activeDuration / 60000;
     }
+    const duration = hr.length ? hr[hr.length - 1].x : activeDuration;
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
     const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
@@ -3996,6 +4006,7 @@
     const summary = {
       filename: 'day:' + iso,
       duration,
+      activeDuration,
       hrAvg, hrMax, hrMin,
       rmssdAvg, rmssdMax, rmssdMin,
       restingHR: null,
@@ -5350,7 +5361,10 @@
     brushMin = priorBrushMin;
     brushMax = priorBrushMax;
     const meta = parseSessionFilename(filename);
-    const dur = formatDuration(s.duration);
+    // Virtual-day summaries carry activeDuration = union-of-portions for
+    // display. s.duration on those summaries is the chart's x-axis span
+    // (first-to-last data point), not the same as total time recorded.
+    const dur = formatDuration(s.activeDuration != null ? s.activeDuration : s.duration);
 
     const hrStage = getHRStage(s.hrAvg);
     const maxStage = getHRStage(s.hrMax.v);
