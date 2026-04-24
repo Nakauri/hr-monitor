@@ -1617,12 +1617,6 @@
           <div class="widget-toggles">
             <label><input type="checkbox" id="toggle-hr" checked /> Heart rate</label>
             <label><input type="checkbox" id="toggle-live-hr" checked /> Live HR trace</label>
-            <label class="sub-option" title="Reactive: straight lines between beats so breath-by-breath oscillation (RSA) stays visible. Smooth: monotone-cubic curve through the same points; gentler look, hides beat-to-beat detail."><span style="padding-left: 18px; color: var(--text-dim); font-size: 11px;">Style</span>
-              <select id="live-trace-style" style="margin-left: 8px;">
-                <option value="reactive">Reactive (per-beat)</option>
-                <option value="smooth">Smooth</option>
-              </select>
-            </label>
             <label><input type="checkbox" id="toggle-hrv" checked /> HRV (RMSSD)</label>
             <label><input type="checkbox" id="toggle-inline-trends" checked /> Inline mini trends</label>
             <label><input type="checkbox" id="toggle-palp-chip" checked /> Palpitation chip</label>
@@ -1948,7 +1942,7 @@
     // Compact widget charts come from widget.js so the monitor and overlay
     // use identical configs. Any tweak to the live trace or compact trend
     // goes in widget.js, not here.
-    hrLiveTraceChart = HRWidget.createLiveTraceChart($('hr-live-trace').getContext('2d'), widgetPrefs.liveTraceStyle);
+    hrLiveTraceChart = HRWidget.createLiveTraceChart($('hr-live-trace').getContext('2d'));
     compactChart = HRWidget.createCompactTrendChart($('compact-chart').getContext('2d'));
     // Main chart - full detail
     mainChart = new Chart($('main-chart').getContext('2d'), {
@@ -3222,7 +3216,6 @@
         showPalpChip: widgetPrefs.showPalpChip,
         showWarning: widgetPrefs.showWarning,
         warningPlacement: widgetPrefs.warningPlacement || 'inside',
-        liveTraceStyle: widgetPrefs.liveTraceStyle || 'reactive',
       },
       // widgetSize is only sent when the user has customised it. Otherwise the
       // overlay would forcibly clamp #overlay-zone to the broadcaster's
@@ -4694,12 +4687,6 @@
     // values are what we tell OBS to use as its source size.
     customWidth: null,
     customHeight: null,
-    // Live HR trace render style. 'reactive' shows per-beat points
-    // connected by straight segments — RSA oscillation visible between
-    // breaths. 'smooth' applies monotone cubic interpolation, hides the
-    // beat-to-beat detail for a softer look. Synced to the overlay via
-    // relay tick prefs so monitor + OBS always match.
-    liveTraceStyle: 'reactive',
   };
 
   function getEffectiveSize() {
@@ -4792,14 +4779,6 @@
     b.classList.toggle('warning-above', widgetPrefs.warningPlacement === 'above');
     const wpSel = $('warning-placement');
     if (wpSel) wpSel.value = widgetPrefs.warningPlacement || 'inside';
-    // Live trace rendering style — per-beat line is either curved (smooth)
-    // or connected by straight segments (reactive, shows RSA). Synced to
-    // the overlay via the relay tick.
-    if (typeof hrLiveTraceChart !== 'undefined' && hrLiveTraceChart && HRWidget && HRWidget.setLiveTraceStyle) {
-      HRWidget.setLiveTraceStyle(hrLiveTraceChart, widgetPrefs.liveTraceStyle || 'reactive');
-    }
-    const ltsSel = $('live-trace-style');
-    if (ltsSel) ltsSel.value = widgetPrefs.liveTraceStyle || 'reactive';
     document.body.classList.add('shrink-to-fit');
     const toggles = { 'toggle-hr': 'showHr', 'toggle-hrv': 'showHrv', 'toggle-live-hr': 'showLiveHr', 'toggle-inline-trends': 'showInlineTrends', 'toggle-palp-chip': 'showPalpChip', 'toggle-warning': 'showWarning', 'toggle-broadcast': 'broadcast' };
     for (const [id, key] of Object.entries(toggles)) {
@@ -5150,14 +5129,6 @@
       saveWidgetPrefs();
       applyWidgetPrefs();
       pushPrefsToOverlay();
-    });
-    const lts = $('live-trace-style');
-    if (lts) lts.addEventListener('change', () => {
-      widgetPrefs.liveTraceStyle = lts.value === 'smooth' ? 'smooth' : 'reactive';
-      saveWidgetPrefs();
-      applyWidgetPrefs();
-      pushPrefsToOverlay();
-      try { if (typeof broadcastTick === 'function') broadcastTick(); } catch (e) {}
     });
     // Wire up section collapse toggles
     document.querySelectorAll('.section-header').forEach(header => {
