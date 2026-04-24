@@ -98,4 +98,5 @@ public class NativeCsvWriter {
 
     public File getFile() { return file; }
     public String getFilename() { return file.getName(); }
+    public long getSessionStartMs() { return sessionStartMs; }
 }

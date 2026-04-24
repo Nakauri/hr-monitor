@@ -3686,12 +3686,12 @@
     const FLUSH_RMSSD_DROP = 0.40;
     const FLUSH_COOLDOWN_MIN = 5;
     const FLUSH_EDGE_MIN = 1;
-    const lastT = hr.length ? hr[hr.length - 1].t : 0;
+    const hrLastT = hr.length ? hr[hr.length - 1].t : 0;
     let lastFlush = -Infinity;
     for (let i = 1; i < hr.length; i++) {
       const cur = hr[i];
       if (cur.v == null) continue; // gap marker
-      if (cur.t < FLUSH_EDGE_MIN || cur.t > lastT - FLUSH_EDGE_MIN) continue;
+      if (cur.t < FLUSH_EDGE_MIN || cur.t > hrLastT - FLUSH_EDGE_MIN) continue;
       if (cur.t < lastFlush + FLUSH_COOLDOWN_MIN) continue;
       let lowHR = cur.v, lowT = cur.t;
       for (let j = i - 1; j >= 0 && cur.t - hr[j].t <= FLUSH_WIN_MIN; j--) {
