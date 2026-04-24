@@ -1,45 +1,36 @@
-# HR Monitor
+# aorti.ca
 
-A simple browser app for live heart rate and HRV monitoring from a Bluetooth chest strap. Includes a session viewer for reviewing past recordings, with POTS-aware context.
+Live heart rate and HRV for streams and self. Pair a chest strap, watch it in real time, stream it to OBS, or come back later and read weeks of your own data. Free, no subscription, no account required.
 
-Built because commercial HR overlays are either subscription-based or miss autonomic patterns that matter to POTS streamers.
+Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recording available from the GitHub releases.
+
+## What you get
+
+- **Live monitor** (`hr_monitor.html`). Real-time HR and RMSSD, a live trace, audio alerts, posture logging, OBS-ready widget. Auto-saves every session as a CSV.
+- **Session viewer** (`hrv_viewer.html`). Month, week, day, and single-session views over every recording. Autonomic interpretation, palpitation clusters, sympathetic flushes, posture and sleep windows. Multiple sessions on the same day stitch into a single day timeline.
+- **OBS overlay** (`overlay.html`). Browser-source companion to the monitor. Chroma-key ready. Uses a broadcast key so one phone or laptop can publish and any OBS instance can subscribe.
+- **Android APK**. Native BLE plus a foreground service, so recording survives the screen going off, the phone locking, and the app being backgrounded. Drive sync in the background. Release-signed.
 
 ## Requirements
 
-- A Bluetooth chest strap that exposes the standard Heart Rate Service (0x180D) with RR intervals.
-- A Chromium browser (Chrome, Edge, Comet). Web Bluetooth does not work in Safari or Firefox.
-
-Tested with the Coospo H808S. Other straps that implement the standard spec should work but have not been verified.
-
-## What it does
-
-**Live monitor** (`hr_monitor.html`)
-- Pairs with the strap and shows real-time BPM, HRV (RMSSD), and a live HR trace.
-- Audio alerts when thresholds are crossed.
-- Auto-saves the session as a CSV to a folder you pick.
-- Optional Google Drive backup.
-- OBS overlay support via a Browser Source URL, with toggles to hide widgets you don't want on stream.
-
-**Session viewer** (`hrv_viewer.html`)
-- Reads the CSVs from the same folder.
-- Month, week, day, and single-session views.
-- Daily, weekly, and monthly summary reports.
-- Palpitation detection, autonomic interpretation, HR shift flags.
+- A Bluetooth HR chest strap that advertises the standard Heart Rate Service (0x180D) with RR intervals. Confirmed on the Coospo H808S. Polar H10, Wahoo TICKR, and Garmin HRM-Dual should work on the same spec but have not been individually tested. Apple Watch, Garmin Fenix, and Fitbit do not expose the BLE HR service and are not supported.
+- A Chromium browser for the desktop experience. Chrome, Edge, and Brave all work. Safari and Firefox do not implement Web Bluetooth.
+- Android 9 or newer for the APK.
 
 ## Data and privacy
 
-- No accounts, no sign-up, no analytics.
-- Session CSVs stay in the folder you picked. Nothing is uploaded by default.
-- Google Drive backup is opt-in. If signed in, sessions are copied to a Drive folder you choose.
-- OBS broadcast is opt-in. When enabled, live readings pass through a PartyKit relay so an OBS Browser Source in a different process can receive them. The relay does not store messages; it only forwards them to subscribers holding the broadcast key. Anyone with the key can subscribe, so treat it like a password.
-- Turn off broadcast and Drive, and no data leaves the browser.
+- No accounts needed. Anonymous mode keeps everything on the device.
+- Google sign-in is optional. When on, session CSVs sync to your Drive and the viewer reads them across devices.
+- Broadcasting to OBS is opt-in. When on, live ticks pass through a PartyKit relay to subscribers holding the broadcast key. The relay does not persist messages.
+- Turn off broadcast and sign out of Google, and nothing leaves the device.
+- Not a medical device. Interpretations are estimates. Talk to a clinician if numbers concern you.
 
-## Running it
+## Running it locally
 
-The hosted version is at [hr-monitor-topaz.vercel.app](https://hr-monitor-topaz.vercel.app).
+Open `index.html` in any Chromium browser. No build step, no install. The three HTML files (`hr_monitor.html`, `hrv_viewer.html`, `overlay.html`) are self-contained.
 
-To run locally, open `index.html` in Chrome or Edge. No build step, no install.
+The relay is a small PartyKit project under `relay/`. The mobile Capacitor wrapper under `mobile/` builds the APK.
 
-## Disclaimer
+## Who built this
 
-This is not a medical device. It is a visual tool for self-monitoring. Do not use it to diagnose or treat anything. If numbers concern you, talk to a clinician.
+Kalen Crowe. POTS patient, built this because commercial HR overlays are either subscription-priced or miss the autonomic patterns that POTS streamers care about. Bug reports, strap test confirmations, and feedback welcome in Issues.
