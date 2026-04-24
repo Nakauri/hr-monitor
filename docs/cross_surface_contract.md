@@ -37,6 +37,7 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 | `colorThresholds` (HR stage) | `hr_monitor.html` localStorage | Yes — via `setStageThresholds` | Pushed from JS; missing test — TODO |
 | `thresholds.rmssd` (HRV crash alert floor) | `hr_monitor.html` localStorage | Yes — via `setStageThresholds.rmssdCritical` | Pushed from JS; covered by stage parity test |
 | `thresholds.high` / `.low` (audio alert) | `hr_monitor.html` only | No | Audio alerts are JS-only, no drift surface |
+| `liveTraceStyle` (per-beat vs smoothed live trace) | `hr_monitor.html` localStorage | Yes — embedded in `prefs` of every relay tick | Single-source: rendering logic in `widget.js:setLiveTraceStyle` called by both monitor and overlay. Data (per-beat BPM) unchanged across modes — the style flip is purely Chart.js config |
 
 ## Viewer post-hoc detectors (single-implementation)
 

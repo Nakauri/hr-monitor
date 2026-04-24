@@ -270,6 +270,11 @@
       document.body.classList.toggle('no-warning', prefs.showWarning === false);
       document.body.classList.toggle('no-conn-dot', prefs.showConnDot === false);
       document.body.classList.toggle('warning-above', prefs.warningPlacement === 'above');
+      // Live-trace rendering style — sender decides, overlay mirrors.
+      // Ignore unknown values; default to the sender's behaviour on first tick.
+      if (prefs.liveTraceStyle === 'reactive' || prefs.liveTraceStyle === 'smooth') {
+        HRWidget.setLiveTraceStyle(hrLiveTrace, prefs.liveTraceStyle);
+      }
     }
     if (size && z && Number.isFinite(size.w) && Number.isFinite(size.h)) {
       // In embed mode the iframe viewport — not the broadcasting device — decides
