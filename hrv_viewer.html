@@ -4575,8 +4575,8 @@
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
-          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta && meta.date ? formatClockTime(cardStart) : (meta ? meta.isoTime : fn)} ${contNote}</div>
-          <div class="session-card-date">${meta && meta.date ? `${formatClockRange(cardStart, cardDurMin)} <span class="session-card-dur">(${formatDuration(cardDurMin)})</span>` : `${formatDuration(cardDurMin)} session`}</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${formatDuration(cardDurMin)} ${contNote}</div>
+          <div class="session-card-date">${meta && meta.date ? formatClockRange(cardStart, cardDurMin) : (meta ? meta.isoTime : fn)}</div>
           <div class="session-card-stats">
             <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
