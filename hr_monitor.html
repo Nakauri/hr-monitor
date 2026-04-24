@@ -2631,7 +2631,11 @@
 
     if (rrs.length > 0) {
       state.rrBuffer.push(...rrs.map(rr => ({ t: now, rr })));
-      const cutoff = now - 1;
+      // 30 s rolling RR window. PARITY CRITICAL — must match
+      // NativeHrSessionPlugin.java:RR_WINDOW_MS. 30 s is the responsive-
+      // monitoring choice; brief sympathetic / vagal events stay visible
+      // on the live RMSSD number instead of being averaged away.
+      const cutoff = now - 0.5;
       state.rrBuffer = state.rrBuffer.filter(r => r.t >= cutoff);
       const rmssd = computeRMSSD(state.rrBuffer.map(r => r.rr));
       if (rmssd != null) {
