@@ -1,5 +1,7 @@
 # aorti.ca
 
+> **Beta.** Solo-developed, actively changing, bugs expected. Please open an Issue if something breaks. Feature requests and strap test reports welcome.
+
 Live heart rate and HRV for streams and self. Pair a chest strap, watch it in real time, stream it to OBS, or come back later and read weeks of your own data. Free, no subscription, no account required.
 
 Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recording available from the GitHub releases.

@@ -1253,7 +1253,8 @@
     transition: color 0.15s, border-color 0.15s, background 0.15s, opacity 0.15s;
   }
   .legend-reset-zoom:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-input); }
-  .legend-reset-zoom:disabled, .legend-reset-zoom.hidden { opacity: 0; pointer-events: none; }
+  .legend-reset-zoom:disabled { opacity: 0; pointer-events: none; }
+  .legend-reset-zoom.hidden { display: none; }
   .chart-legend-item {
     display: flex;
     align-items: center;
