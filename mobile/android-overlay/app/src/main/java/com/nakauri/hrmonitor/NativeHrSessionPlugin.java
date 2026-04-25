@@ -135,7 +135,7 @@ public class NativeHrSessionPlugin extends Plugin {
     private final AtomicLong lastUploadMs = new AtomicLong(0);
 
     private OkHttpClient httpClient;
-    private WebSocket relaySocket;
+    private volatile WebSocket relaySocket;
     private final AtomicBoolean relayLive = new AtomicBoolean(false);
     // User toggle. When false, no relay socket is opened and publishTick is a no-op.
     private volatile boolean broadcastEnabled = true;
@@ -510,9 +510,13 @@ public class NativeHrSessionPlugin extends Plugin {
         if (enabled == null) { call.reject("enabled required"); return; }
         boolean prev = broadcastEnabled;
         broadcastEnabled = enabled;
+        // Cancel any pending reconnect immediately so a stale onClosed→
+        // scheduleRelayReconnect callback can't open a socket we just turned off.
+        mainHandler.removeCallbacks(relayReconnectRunnable);
         if (sessionActive.get() && enabled != prev) {
             mainHandler.post(() -> {
                 if (enabled && broadcastKey != null && !broadcastKey.isEmpty()) {
+                    relayReconnectAttempts = 0;
                     try { openRelaySocket(); } catch (Throwable ignored) {}
                 } else {
                     try { closeRelaySocket(); } catch (Throwable ignored) {}
@@ -1140,28 +1144,32 @@ public class NativeHrSessionPlugin extends Plugin {
 
     private void openRelaySocket() {
         if (broadcastKey == null) return;
+        if (!broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
-        final WebSocket[] selfRef = new WebSocket[1];
         Request req = new Request.Builder()
             .url("wss://hr-relay.nakauri.partykit.dev/parties/main/" + broadcastKey)
             .build();
-        WebSocket ws = httpClient.newWebSocket(req, new WebSocketListener() {
+        // Stale callbacks (from a socket we replaced or closed) compare ws to
+        // the volatile relaySocket field and bail. Required because OkHttp
+        // queues callbacks on a worker thread and they can fire after we've
+        // moved on.
+        relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
-                if (ws != selfRef[0]) return;  // stale callback
+                if (ws != relaySocket) return;
                 relayLive.set(true);
                 relayReconnectAttempts = 0;
                 Log.i(TAG, "Relay open");
                 emitState();
             }
             @Override public void onClosed(WebSocket ws, int code, String reason) {
-                if (ws != selfRef[0]) return;
+                if (ws != relaySocket) return;
                 relayLive.set(false);
                 emitState();
                 scheduleRelayReconnect();
             }
             @Override public void onFailure(WebSocket ws, Throwable t, Response r) {
-                if (ws != selfRef[0]) return;
+                if (ws != relaySocket) return;
                 relayLive.set(false);
                 Log.w(TAG, "Relay failure: " + (t != null ? t.getMessage() : "unknown"));
                 emitState();
@@ -1170,8 +1178,6 @@ public class NativeHrSessionPlugin extends Plugin {
             @Override public void onMessage(WebSocket ws, String text) { /* ignored */ }
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
-        selfRef[0] = ws;
-        relaySocket = ws;
     }
 
     private void closeRelaySocket() {
