@@ -79,6 +79,9 @@
     background: var(--bg-panel);
     height: 52px;
   }
+  /* Mobile-only compact indicators (drive sync dot + monitor link).
+     Desktop has the full status pills inline so these would be redundant. */
+  .mobile-compact-indicators { display: none; }
   .app-title {
     display: inline-flex;
     align-items: center;
@@ -2208,6 +2211,35 @@
     #watch-live-link {
       display: none;
     }
+    /* Always-visible mobile compact indicators. Drive sync dot + Monitor
+       link sit outside the hamburger so the user doesn't have to open the
+       menu to see whether sync is healthy or to jump back to the live
+       monitor. The full status text + Sign in / Sign out controls still
+       live inside the menu for cases that need them. */
+    .mobile-compact-indicators {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+    }
+    .mobile-compact-indicators + .mobile-menu-btn { margin-left: 0; }
+    .mobile-drive-dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: #5a5a5a; flex-shrink: 0;
+    }
+    .mobile-drive-dot.synced { background: #5DCAA5; }
+    .mobile-drive-dot.syncing { background: #F0C75E; animation: dot-pulse 1.2s ease-in-out infinite; }
+    .mobile-drive-dot.error { background: #E24B4A; }
+    @keyframes dot-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+    .mobile-monitor-link {
+      display: inline-flex; align-items: center;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-dim);
+      text-decoration: none;
+    }
+    .mobile-monitor-link:hover { color: var(--text); border-color: var(--border-strong); }
     /* Menu open: reveal the items as a stacked column below the header. */
     body.menu-open .app-nav-cross,
     body.menu-open .view-switcher,
@@ -2380,6 +2412,12 @@
     <span class="title-full">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span> <span class="accent">·</span> Viewer</span>
     <span class="title-short">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span></span>
   </a>
+  <span class="mobile-compact-indicators" aria-hidden="false">
+    <a class="mobile-monitor-link" href="./hr_monitor.html" title="Open the live monitor" aria-label="Open live monitor">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <span class="mobile-drive-dot" id="mobile-drive-dot" title="Drive sync: off"></span>
+  </span>
   <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu" aria-expanded="false">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
   </button>
@@ -2690,6 +2728,16 @@
     driveTokenExpiresAt = cached ? cached.expires_at : 0;
   }
 
+  // Mirror drive-status onto the mobile compact dot. Mobile users hide the
+  // full pill behind the hamburger; the dot is always visible so they can
+  // glance at sync health without opening the menu.
+  function setMobileDriveDot(state, title) {
+    const dot = document.getElementById('mobile-drive-dot');
+    if (!dot) return;
+    dot.classList.remove('synced', 'syncing', 'error');
+    if (state) dot.classList.add(state);
+    if (title) dot.title = 'Drive sync: ' + title;
+  }
   function driveUpdateUI() {
     const statusEl = document.getElementById('drive-status');
     const signIn = document.getElementById('drive-signin');
@@ -2707,10 +2755,13 @@
           ? 'Refreshing Drive session'
           : 'Signed in. Drive sessions sync automatically.';
         statusEl.classList.add('drive-syncing');
+        setMobileDriveDot(driveRefreshing ? 'syncing' : 'synced',
+          driveRefreshing ? 'refreshing session' : 'on (' + (email || 'signed in') + ')');
       } else {
         statusEl.textContent = '…';
         statusEl.title = 'Signed in, connecting to folder';
         statusEl.classList.add('drive-signedin');
+        setMobileDriveDot('syncing', 'connecting to folder');
       }
       signIn.style.display = 'none';
       signOut.style.display = '';
@@ -2720,6 +2771,7 @@
       statusEl.textContent = 'off';
       statusEl.title = 'Not signed in. Click Sign in to enable Drive sync.';
       statusEl.classList.add('drive-idle');
+      setMobileDriveDot('', 'off (not signed in)');
       signIn.style.display = '';
       signOut.style.display = 'none';
       syncBtn.style.display = 'none';
@@ -2743,6 +2795,7 @@
     statusEl.style.cursor = 'pointer';
     statusEl.title = 'Click for sign-in diagnostics + auth trace';
     statusEl.onclick = openDiagnosticsModal;
+    setMobileDriveDot('error', text || 'sync error');
   }
 
   function clearDriveErrorClick() {
