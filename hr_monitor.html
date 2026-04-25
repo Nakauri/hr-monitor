@@ -4516,14 +4516,22 @@
           const body =
             `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
             `--${boundary}\r\nContent-Type: text/csv\r\n\r\n${csvText}\r\n--${boundary}--`;
-          const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+          const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id';
+          const init = {
             method: 'POST',
             headers: {
               'Authorization': await driveAuthHeader(),
               'Content-Type': 'multipart/related; boundary=' + boundary,
             },
             body,
-          });
+          };
+          let resp = await fetch(url, init);
+          if (resp.status === 401) {
+            // Token expired between read and call. Force refresh + retry once.
+            await window.aortiAuth.refreshIfNeeded();
+            init.headers['Authorization'] = await driveAuthHeader();
+            resp = await fetch(url, init);
+          }
           if (!resp.ok) throw new Error('Drive create HTTP ' + resp.status);
           const data = await resp.json();
           driveFileIdForSession = data.id;
@@ -4531,11 +4539,18 @@
           // PATCH the existing file's contents. resp.ok must be checked —
           // a silent 401/403/5xx leaves the Drive copy stale without any
           // signal to the user, which gets discovered hours later.
-          const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + driveFileIdForSession + '?uploadType=media', {
+          const url = 'https://www.googleapis.com/upload/drive/v3/files/' + driveFileIdForSession + '?uploadType=media';
+          const init = {
             method: 'PATCH',
             headers: { 'Authorization': await driveAuthHeader(), 'Content-Type': 'text/csv' },
             body: csvText,
-          });
+          };
+          let resp = await fetch(url, init);
+          if (resp.status === 401) {
+            await window.aortiAuth.refreshIfNeeded();
+            init.headers['Authorization'] = await driveAuthHeader();
+            resp = await fetch(url, init);
+          }
           if (!resp.ok) throw new Error('Drive patch HTTP ' + resp.status);
         }
         // Surface success — clears any prior 'Drive error' status.
