@@ -3859,13 +3859,54 @@
   // transient GATT error that deserves retry, not a hard fail — treated
   // the same as any other disconnect cause here.
   let reconnectBackoffMs = 1000;
+  let _watchAdAbort = null;
   function resetReconnectBackoff() { reconnectBackoffMs = 1000; }
+  // Fast-path reconnect via Bluetooth advertisement watching. Works around
+  // Chromium crbug/1441206 (Windows BT spurious disconnects every 30-120 s):
+  // instead of polling reconnect attempts that each pop the picker, we
+  // passively listen for the strap to advertise itself and reconnect the
+  // moment it does. Typical reconnect time drops from "user notices" to
+  // 1-2 seconds, no UI flicker. Requires Chromium with watchAdvertisements
+  // available (Chrome 100+, behind chrome://flags/#enable-experimental-web-platform-features
+  // on some channels). Falls back silently to the polling reconnect.
+  async function startWatchingAdvertisements() {
+    if (!device || device._native) return false;
+    if (typeof device.watchAdvertisements !== 'function') return false;
+    if (_watchAdAbort) return true;  // already watching
+    try {
+      _watchAdAbort = new AbortController();
+      device.addEventListener('advertisementreceived', onAdvReceived, { signal: _watchAdAbort.signal });
+      await device.watchAdvertisements({ signal: _watchAdAbort.signal });
+      return true;
+    } catch (e) {
+      console.info('[reconnect] watchAdvertisements unavailable:', e.message || e);
+      _watchAdAbort = null;
+      return false;
+    }
+  }
+  function stopWatchingAdvertisements() {
+    if (_watchAdAbort) {
+      try { _watchAdAbort.abort(); } catch (e) {}
+      _watchAdAbort = null;
+    }
+  }
+  async function onAdvReceived() {
+    // Strap is advertising. If we're not already connected, jump on it.
+    if (!device || device._native) return;
+    if (device.gatt && device.gatt.connected) return;
+    try { await attachConnection(); state.lastDataTime = Date.now(); resetReconnectBackoff(); }
+    catch (e) { /* polling tryReconnect will pick up if this fails */ }
+  }
   async function tryReconnect() {
     if (!state.autoReconnect || !device) return;
     // Native plugin owns BLE + handles its own reconnection on Capacitor.
     // No Web Bluetooth work to do here.
     if (device._native) return;
     if (device.gatt.connected) return;
+    // Set up the advertisement watcher once so subsequent reconnects are
+    // instant. Polling stays as the fallback for browsers that don't
+    // support watchAdvertisements.
+    startWatchingAdvertisements();
     try {
       await attachConnection();
       state.lastDataTime = Date.now();
@@ -3898,6 +3939,9 @@
 
   async function disconnect() {
     state.autoReconnect = false;
+    // Stop passive advertisement watcher so it doesn't try to auto-reconnect
+    // after the user explicitly stopped the session.
+    stopWatchingAdvertisements();
     // Capture Drive-upload intent BEFORE we tear everything down so the
     // toast only fires when the session actually had a Drive target.
     const nativeWasPublishing = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing());
@@ -5035,7 +5079,8 @@
         $('color-low').value = colorThresholds.low;
         $('color-normal').value = colorThresholds.normal;
         $('color-elevated').value = colorThresholds.elevated;
-        $('color-high').value = colorThresholds.high;
+        // No #color-high input — `thresholds.high` (audio alert ceiling)
+        // doubles as the red-stage cutoff. See getHRStage.
       }
     } catch(e) {}
   }

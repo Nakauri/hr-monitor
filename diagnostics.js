@@ -287,6 +287,25 @@
       }
       .hrm-diag-legal-strip a:hover { color: #d8d8d8; border-color: #3a3a3a; background: #1a1a1a; }
       .hrm-diag-subtitle { font-size: 11px; color: #8a8a8a; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; margin: 14px 0 6px; }
+      /* Collapsible section. <details>/<summary> drives state — no JS. The
+         caret is drawn via CSS ::before so the browser's default ▶ doesn't
+         show, and the rotation gives a visual open/closed cue. */
+      .hrm-diag-section { margin: 0; }
+      .hrm-diag-section > summary {
+        font-size: 11px; color: #8a8a8a; letter-spacing: 0.1em; text-transform: uppercase;
+        font-weight: 700; margin: 14px 0 6px; cursor: pointer; list-style: none;
+        display: flex; align-items: center; gap: 8px;
+        user-select: none; -webkit-user-select: none;
+      }
+      .hrm-diag-section > summary::-webkit-details-marker { display: none; }
+      .hrm-diag-section > summary::before {
+        content: ''; display: inline-block; width: 6px; height: 6px;
+        border-right: 1.5px solid #8a8a8a; border-bottom: 1.5px solid #8a8a8a;
+        transform: rotate(-45deg); transition: transform 0.15s;
+      }
+      .hrm-diag-section[open] > summary::before { transform: rotate(45deg); }
+      .hrm-diag-section > summary:hover { color: #d8d8d8; }
+      .hrm-diag-section > summary:hover::before { border-color: #d8d8d8; }
       .hrm-diag-row {
         display: flex; justify-content: space-between; gap: 12px;
         padding: 6px 0; border-bottom: 1px solid #1a1a1a;
@@ -309,7 +328,7 @@
       .hrm-diag-log:empty::before { content: 'no events logged yet'; color: #5a5a5a; }
       .hrm-diag-actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
       .hrm-diag-actions button {
-        flex: 1; padding: 8px 12px; min-width: 100px;
+        flex: 1; padding: 10px 12px; min-width: 100px; min-height: 44px;
         background: #1a1a1a; color: #d8d8d8;
         border: 1px solid #2a2a2a; border-radius: 6px;
         font-size: 12px; cursor: pointer; letter-spacing: 0.03em;
@@ -398,9 +417,14 @@
     const okwarn = (cond, warn) => cond ? 'ok' : (warn ? 'warn' : 'err');
     const yn = (cond) => cond ? 'yes' : 'no';
 
+    // openByDefault: a small allow-list of sections that almost always
+    // matter on first glance. Everything else starts collapsed so the
+    // modal isn't a wall of text. User can twist any caret open.
+    const openByDefault = new Set(['Build', 'Runtime', 'Google Drive shim (step-by-step)', 'Bluetooth shim (step-by-step)']);
     const rows = (title, items) => {
       const body = items.map(([k, v, cls]) => `<div class="hrm-diag-row"><span class="k">${esc(k)}</span><span class="v ${cls||''}">${esc(v)}</span></div>`).join('');
-      return `<div class="hrm-diag-subtitle">${esc(title)}</div>${body}`;
+      const open = openByDefault.has(title) ? ' open' : '';
+      return `<details class="hrm-diag-section"${open}><summary>${esc(title)}</summary>${body}</details>`;
     };
 
     overlay.innerHTML = `
@@ -475,10 +499,14 @@
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
-        <div class="hrm-diag-subtitle">Auth trace (newest last)</div>
-        <pre class="hrm-diag-log" id="hrm-auth-trace"></pre>
-        <div class="hrm-diag-subtitle">Recent events (newest last)</div>
-        <pre class="hrm-diag-log" id="hrm-events-log">${esc(formatLog(readLog()))}</pre>
+        <details class="hrm-diag-section" open>
+          <summary>Auth trace (newest last)</summary>
+          <pre class="hrm-diag-log" id="hrm-auth-trace"></pre>
+        </details>
+        <details class="hrm-diag-section" open>
+          <summary>Recent events (newest last)</summary>
+          <pre class="hrm-diag-log" id="hrm-events-log">${esc(formatLog(readLog()))}</pre>
+        </details>
         <div class="hrm-diag-actions">
           <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
           <button id="hrm-diag-clearlog">Clear events</button>
