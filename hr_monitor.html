@@ -2994,13 +2994,11 @@
   // Called when the broadcast toggle flips. Open or close the relay socket to
   // match — saves bandwidth + privacy when user isn't streaming.
   function applyBroadcastPref() {
-    // Keep the relay socket open either way — we still want to receive presence
-    // heartbeats from other devices. Publishing is gated by isPublisherLive().
+    if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable
+        && typeof window.HRMNativeHrSession.setBroadcast === 'function') {
+      try { window.HRMNativeHrSession.setBroadcast(!!widgetPrefs.broadcast); } catch (e) {}
+    }
     if (!relaySocket || relaySocket.readyState === WebSocket.CLOSED) connectRelay();
-    // If the user just flipped broadcast OFF while we were live, emit a
-    // presence-end so other devices drop our row immediately instead of
-    // waiting for the 15-s stale cleanup. setConnState handles this on BLE
-    // drops; the toggle path wouldn't otherwise trigger it.
     if (!widgetPrefs.broadcast && relaySocket && relaySocket.readyState === WebSocket.OPEN) {
       const dev = getDeviceIdentity();
       try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {}
@@ -3529,6 +3527,7 @@
         broadcastKey: getOrCreateBroadcastKey(),
         senderId: ident.id,
         senderLabel: ident.label,
+        broadcast: !!widgetPrefs.broadcast,
       });
       device.gatt.connected = true;
       if (state.startTime === null) state.startTime = Date.now();
