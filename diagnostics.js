@@ -509,7 +509,7 @@
             <button id="hrm-cache-clear" style="flex: 1; padding: 8px 12px; background: #2a1616; color: #E89898; border: 1px solid #5a2a2a; border-radius: 6px; cursor: pointer; min-height: 36px;">Clear cache</button>
           </div>
           <div style="font-size: 11px; color: #6a6a6a; margin-top: 8px; line-height: 1.4;">
-            Local CSVs auto-clean after Drive sync (7 days) or after 30 days regardless. Hard cap 500 MB. Tap Clear to remove all but the active session.
+            Auto-cleanup respects the user. Signed in to Drive: keeps 7 days local + 14-day fallback, capped at 200 MB. Not signed in: keeps the most recent 3 sessions only, capped at 50 MB. The 3-session floor always wins so the viewer is never empty. Tap Clear to wipe everything except the active session.
           </div>
         </details>
         <details class="hrm-diag-section" open>
