@@ -85,14 +85,15 @@ public class NativeDriveUploader {
      *     never deletes a file Drive doesn't have.
      *
      *   Tier 2 (signed-out fallback) — AGE-ONLY. If Tier 1 couldn't run
-     *     (no token, listing failed, etc.) OR Tier 1 left files that are
-     *     older than AGE_DELETE_FALLBACK_MS (30 days), delete those. The
-     *     longer cutoff makes losing an orphan less likely.
+     *     (no token, listing failed, etc.) OR Tier 1 left files older than
+     *     the persona-aware fallback (AGE_FALLBACK_DRIVE = 14 days when the
+     *     user has Drive configured, AGE_FALLBACK_NO_DRIVE = 2 days
+     *     otherwise), delete those.
      *
-     *   Tier 3 (emergency cap) — BUDGET-CAP. If sessions/ still exceeds
-     *     HARD_CACHE_BUDGET_BYTES (500 MB), delete oldest first until
-     *     under cap. This is the "phone won't fill up" guarantee for users
-     *     who never sign in.
+     *   Tier 3 (emergency cap) — BYTE-CAP. If sessions/ still exceeds
+     *     CAP_BYTES_DRIVE (200 MB) or CAP_BYTES_NO_DRIVE (50 MB) depending
+     *     on persona, delete oldest first until under cap. KEEP_RECENT_FLOOR
+     *     (3) protects the most recent sessions from any tier's deletion.
      *
      * Active session is always skipped at every tier.
      *
