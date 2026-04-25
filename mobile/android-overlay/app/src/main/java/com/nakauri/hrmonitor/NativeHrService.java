@@ -87,6 +87,36 @@ public class NativeHrService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
+    /**
+     * Triggered when the user swipes the app away from the recent-apps
+     * tray. Fully terminates the session: flush CSV + final Drive upload,
+     * close GATT, close relay socket, drop the foreground notification.
+     *
+     * Without this override the FGS would survive the swipe (its job is to
+     * keep recording when the screen is off), and reopening the app would
+     * find a zombie state — notification still up, but the new plugin
+     * instance has lost the active-session flag, so the user lands on the
+     * home screen instead of the live monitor.
+     *
+     * The user's contract: swiping the app away = stop the session. If
+     * they want background recording, they leave the app open and lock
+     * the phone instead.
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        Log.i(TAG, "onTaskRemoved — swipe-to-stop, terminating session");
+        try {
+            if (NativeHrSessionPlugin.instance != null) {
+                NativeHrSessionPlugin.instance.stopSessionInternal();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "stopSessionInternal threw on task-remove: " + t.getMessage());
+        }
+        try { stopForeground(true); } catch (Throwable ignored) {}
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
+    }
+
     private void ensureChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
