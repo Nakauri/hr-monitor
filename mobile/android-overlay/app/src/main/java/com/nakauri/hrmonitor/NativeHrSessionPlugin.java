@@ -467,6 +467,8 @@ public class NativeHrSessionPlugin extends Plugin {
      * CSV is flushed and Drive gets a final push even when the user
      * kills the session without having the app open).
      */
+    public boolean isSessionActive() { return sessionActive.get(); }
+
     public void stopSessionInternal() {
         sessionActive.set(false);
         if (csv != null) {
@@ -969,17 +971,20 @@ public class NativeHrSessionPlugin extends Plugin {
     }
 
     private void stopNativeForegroundService() {
+        // Use stopService directly. startService(ACTION_STOP) was racy: the
+        // intent could queue and deliver to a future service instance after
+        // the user had started a new session, killing the fresh GATT.
         try {
-            Intent i = new Intent(getContext(), NativeHrService.class);
-            i.setAction(NativeHrService.ACTION_STOP);
-            getContext().startService(i);
-        } catch (Throwable t) {
-            try { getContext().stopService(new Intent(getContext(), NativeHrService.class)); } catch (Throwable ignored) {}
-        }
+            getContext().stopService(new Intent(getContext(), NativeHrService.class));
+        } catch (Throwable ignored) {}
     }
 
     private void closeGattQuietly() {
         if (currentGatt != null) {
+            StringBuilder sb = new StringBuilder("closeGattQuietly thread=" + Thread.currentThread().getName());
+            StackTraceElement[] st = new Throwable().getStackTrace();
+            for (int i = 0; i < Math.min(st.length, 8); i++) sb.append("\n  ").append(st[i].toString());
+            Log.i(TAG, sb.toString());
             try { currentGatt.disconnect(); } catch (Exception ignored) {}
             try { currentGatt.close(); } catch (Exception ignored) {}
             currentGatt = null;
