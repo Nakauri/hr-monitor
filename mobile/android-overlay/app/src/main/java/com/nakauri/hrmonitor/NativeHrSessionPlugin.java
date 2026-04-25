@@ -180,11 +180,12 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
-        // Activity / WebView going down. Clear the static so the
-        // NativeHrService notification handler doesn't dispatch into a dead
-        // plugin. The session itself keeps running because the FGS owns it
-        // independently — only the JS bridge handle is invalidated here.
-        if (instance == this) instance = null;
+        // Activity / WebView going down. Do NOT clear the static `instance`
+        // pointer here — the notification's Stop button (handled by
+        // NativeHrService.onStartCommand → instance.stopSessionInternal)
+        // needs the plugin alive to flush the CSV and close GATT cleanly.
+        // The plugin object is reused on the next Activity attach via
+        // load(); GC happens when the new instance overwrites the static.
         unregisterNetworkCallback();
         super.handleOnDestroy();
     }
