@@ -299,40 +299,49 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @SuppressLint("MissingPermission")
     private void doConnect(PluginCall call, String mac) {
-        // Use cached BluetoothDevice from scan if we have one — that handle
-        // has the correct address type (PUBLIC vs RANDOM) which the Coospo
-        // strap advertises as RANDOM. Without this, getRemoteDevice(mac)
-        // defaults to PUBLIC, the connection appears to succeed but
-        // notifications silently never fire and HR data never reaches the
-        // app. After a process restart scanResults is empty, so we
-        // proactively rescan for ~3s to repopulate the cache before falling
-        // through to the (often broken) PUBLIC-default getRemoteDevice.
-        BluetoothDevice device = findScannedDevice(mac);
-        if (device == null && scanner != null) {
-            Log.i(TAG, "connect: scan cache miss for " + mac + " — rescanning");
-            try {
-                rescanForMac(mac, 3000L);
-                device = findScannedDevice(mac);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-            } catch (Throwable t) {
-                Log.w(TAG, "rescanForMac threw: " + t.getMessage());
-            }
-        }
-        if (device == null) {
-            Log.w(TAG, "connect: falling back to getRemoteDevice (PUBLIC) for " + mac
-                + " — RANDOM-address straps may connect without notifications");
-            device = adapter.getRemoteDevice(mac);
-        }
-
-        closeGattQuietly();
+        // Outer try-catch ensures the PluginCall is always resolved or
+        // rejected. Without it, an unexpected throw in rescanForMac /
+        // getRemoteDevice / connectGatt leaves the JS caller hanging
+        // indefinitely.
         try {
-            currentGatt = device.connectGatt(getContext(), false, gattCallback);
-            JSObject ret = new JSObject();
-            ret.put("connecting", true);
-            call.resolve(ret);
-        } catch (SecurityException e) {
-            call.reject("BLUETOOTH_CONNECT denied: " + e.getMessage());
+            // Use cached BluetoothDevice from scan if we have one — that handle
+            // has the correct address type (PUBLIC vs RANDOM) which the Coospo
+            // strap advertises as RANDOM. Without this, getRemoteDevice(mac)
+            // defaults to PUBLIC, the connection appears to succeed but
+            // notifications silently never fire and HR data never reaches the
+            // app. After a process restart scanResults is empty, so we
+            // proactively rescan for ~3s to repopulate the cache before falling
+            // through to the (often broken) PUBLIC-default getRemoteDevice.
+            BluetoothDevice device = findScannedDevice(mac);
+            if (device == null && scanner != null) {
+                Log.i(TAG, "connect: scan cache miss for " + mac + " — rescanning");
+                try {
+                    rescanForMac(mac, 3000L);
+                    device = findScannedDevice(mac);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                } catch (Throwable t) {
+                    Log.w(TAG, "rescanForMac threw: " + t.getMessage());
+                }
+            }
+            if (device == null) {
+                Log.w(TAG, "connect: falling back to getRemoteDevice (PUBLIC) for " + mac
+                    + " — RANDOM-address straps may connect without notifications");
+                device = adapter.getRemoteDevice(mac);
+            }
+
+            closeGattQuietly();
+            try {
+                currentGatt = device.connectGatt(getContext(), false, gattCallback);
+                JSObject ret = new JSObject();
+                ret.put("connecting", true);
+                call.resolve(ret);
+            } catch (SecurityException e) {
+                call.reject("BLUETOOTH_CONNECT denied: " + e.getMessage());
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "doConnect failed: " + t.getMessage(), t);
+            call.reject("connect failed: " + t.getMessage());
         }
     }
 
@@ -1174,12 +1183,11 @@ public class NativeHrSessionPlugin extends Plugin {
     }
 
     // PARITY CRITICAL — MUST MATCH hr_monitor.html:getRMSSDStage (line ~2319).
-    // Prior thresholds here (40/25/15) didn't match the JS ones (60/35/20/
-    // user-critical); an RMSSD of 36 rendered orange on the native side and
-    // green on the JS side for the same reading. `critical` threshold is
-    // the user-configurable one, pushed via setRmssdStageThresholds so the
+    // Bands: <critical → stage-critical, <20 → stage-high, <35 →
+    // stage-elevated, <60 → stage-normal, >=60 → stage-low. The `critical`
+    // threshold is user-configurable, pushed via setStageThresholds so the
     // monitor widget and the relay overlay agree on when to flag a crash.
-    private volatile int stageRmssdCritical = 15;  // default; overridden by setStageThresholds
+    private volatile int stageRmssdCritical = 15;  // overridden by setStageThresholds
     private String rmssdStage(double rmssd) {
         if (rmssd < stageRmssdCritical) return "stage-critical";
         if (rmssd < 20) return "stage-high";

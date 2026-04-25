@@ -105,15 +105,22 @@ public class NativeHrService extends Service {
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         Log.i(TAG, "onTaskRemoved — swipe-to-stop, terminating session");
-        try {
-            if (NativeHrSessionPlugin.instance != null) {
-                NativeHrSessionPlugin.instance.stopSessionInternal();
+        // stopSessionInternal does file flush, WebSocket close, GATT close.
+        // Android delivers onTaskRemoved on a binder thread; running blocking
+        // I/O there can ANR the process and conflicts with the BLE callback
+        // also running on a binder thread. Post to the main looper so the
+        // close work runs on the same thread the plugin uses for everything
+        // else, then have the service stop after the work resolves.
+        final NativeHrSessionPlugin plugin = NativeHrSessionPlugin.instance;
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            try {
+                if (plugin != null) plugin.stopSessionInternal();
+            } catch (Throwable t) {
+                Log.w(TAG, "stopSessionInternal threw on task-remove: " + t.getMessage());
             }
-        } catch (Throwable t) {
-            Log.w(TAG, "stopSessionInternal threw on task-remove: " + t.getMessage());
-        }
-        try { stopForeground(true); } catch (Throwable ignored) {}
-        stopSelf();
+            try { stopForeground(true); } catch (Throwable ignored) {}
+            stopSelf();
+        });
         super.onTaskRemoved(rootIntent);
     }
 
