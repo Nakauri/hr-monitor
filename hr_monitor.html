@@ -3707,6 +3707,7 @@
       hrRows: state.hrSeries.length,
       rmssdRows: state.rmssdSeries.length,
       sizeBytes: snap.sizeBytes,
+      payloadBytes: snap.payloadBytes,
       keptMin: REHYDRATE_KEEP_MIN,
     });
     try { updateCharts(); } catch (e) {}
@@ -4527,9 +4528,9 @@
           const data = await resp.json();
           driveFileIdForSession = data.id;
         } else {
-          // PATCH the existing file's contents. Previously this didn't check
-          // resp.ok — 401/403/5xx silently passed and the user saw nothing
-          // until they noticed the Drive copy hadn't been touched in hours.
+          // PATCH the existing file's contents. resp.ok must be checked —
+          // a silent 401/403/5xx leaves the Drive copy stale without any
+          // signal to the user, which gets discovered hours later.
           const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + driveFileIdForSession + '?uploadType=media', {
             method: 'PATCH',
             headers: { 'Authorization': await driveAuthHeader(), 'Content-Type': 'text/csv' },

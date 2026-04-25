@@ -34,7 +34,6 @@ public class NativeHrService extends Service {
 
     public static final String ACTION_START = "com.nakauri.hrmonitor.NATIVE_HR_START";
     public static final String ACTION_STOP = "com.nakauri.hrmonitor.NATIVE_HR_STOP";
-    public static final String ACTION_UPDATE = "com.nakauri.hrmonitor.NATIVE_HR_UPDATE";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_BODY = "body";
 

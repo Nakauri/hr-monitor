@@ -46,15 +46,9 @@ public class NativeRelaySocketPlugin extends Plugin {
 
     @Override
     public void load() {
-        client = new OkHttpClient.Builder()
-            // Match the web client's keep-alive expectations (PartyKit
-            // server pings ~20 s; we ping back at the same cadence so an
-            // idle backgrounded socket stays warm under Doze when the FGS
-            // wake lock holds CPU.
-            .pingInterval(20, TimeUnit.SECONDS)
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS) // disable read timeout for long-lived sockets
-            .build();
+        // Shared client — matches NativeHrSessionPlugin's relay socket so
+        // both code paths use the same connection pool. See HttpClientHolder.
+        client = HttpClientHolder.webSocketClient();
     }
 
     @PluginMethod
