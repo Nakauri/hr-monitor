@@ -3296,7 +3296,10 @@
   }
   function saveLastStrap(dev) {
     try {
-      if (dev && dev.name) localStorage.setItem(LS_LAST_STRAP, JSON.stringify({ name: dev.name }));
+      if (dev && dev.name) {
+        const mac = dev._native ? dev.id : null;
+        localStorage.setItem(LS_LAST_STRAP, JSON.stringify({ name: dev.name, mac: mac }));
+      }
     } catch (e) {}
   }
   function updateConnectButtonLabel() {
@@ -3314,6 +3317,7 @@
   // Tracks an in-flight native picker Promise so the session toggle can
   // abort the scan if the user hits Cancel while we're still searching.
   let currentPicker = null;
+  let connectInFlight = false;
   function updateSessionToggle() {
     const btn = document.getElementById('session-toggle');
     if (!btn) return;
@@ -3482,16 +3486,22 @@
   // Capacitor path: native plugin owns BLE. JS just consumes 'hr' events
   // and drives the UI. No navigator.bluetooth involvement at all.
   async function connectNative() {
+    if (connectInFlight) return;
+    connectInFlight = true;
+    try {
     thresholds.high = parseInt($('thresh-high').value) || 130;
     thresholds.low = parseInt($('thresh-low').value) || 55;
     thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15;
     thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5;
     state.audioOn = $('audio-on').checked;
-    // If the native plugin is already publishing — the WebView got
-    // reloaded while the FGS kept the session alive — skip the picker
-    // and just resync the JS UI to "live". Otherwise tapping Start
-    // after a reload pops a picker even though we're still streaming.
-    if (window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing()) {
+    // Authoritative check: ask native directly. The cached isPublishing()
+    // flag is seeded async on shim init and races with a fast Start tap.
+    let sessionAlive = false;
+    try {
+      const s = await window.HRMNativeHrSession.status();
+      sessionAlive = !!(s && s.sessionActive && s.bleConnected);
+    } catch (e) {}
+    if (sessionAlive) {
       const last = getLastStrap();
       device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
       if (state.startTime === null) state.startTime = Date.now();
@@ -3503,22 +3513,30 @@
       updateSessionToggle();
       return;
     }
-    setStatus('Scanning for strap...');
+    let picked = null;
+    const lastNative = getLastStrap();
+    if (lastNative && lastNative.mac) {
+      picked = { mac: lastNative.mac, name: lastNative.name || 'HR Strap' };
+      setStatus('Connecting to ' + picked.name + '...');
+    } else {
+      setStatus('Scanning for strap...');
+    }
     try {
-      currentPicker = window.HRMNativeHrSession.showPicker();
-      updateSessionToggle();
-      let picked = null;
-      try {
-        picked = await currentPicker;
-      } finally {
-        currentPicker = null;
+      if (!picked) {
+        currentPicker = window.HRMNativeHrSession.showPicker();
         updateSessionToggle();
+        try {
+          picked = await currentPicker;
+        } finally {
+          currentPicker = null;
+          updateSessionToggle();
+        }
+        if (!picked || !picked.mac) {
+          setStatus('No strap selected.');
+          return;
+        }
+        setStatus('Connecting to ' + (picked.name || 'strap') + '...');
       }
-      if (!picked || !picked.mac) {
-        setStatus('No strap selected.');
-        return;
-      }
-      setStatus('Connecting to ' + (picked.name || 'strap') + '...');
       // Virtual device stand-in so downstream code (device.name, etc.) works.
       device = { name: picked.name || 'HR Strap', id: picked.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
       await window.HRMNativeHrSession.connect(picked.mac);
@@ -3543,11 +3561,12 @@
       updateSessionToggle();
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
-      // User-cancelled is a normal outcome, not an error — quiet status
-      // so we don't flash red text that makes it look like something broke.
       if (/cancelled/i.test(msg)) setStatus('Search cancelled.');
       else setStatus('Connection failed: ' + msg, 'error');
       updateSessionToggle();
+    }
+    } finally {
+      connectInFlight = false;
     }
   }
 

@@ -83,9 +83,11 @@ public class NativeHrService extends Service {
         super.onTaskRemoved(rootIntent);
     }
 
-    private void ensureChannel() {
+    private void ensureChannel() { ensureChannelStatic(this); }
+
+    static void ensureChannelStatic(Context ctx) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
         NotificationChannel existing = nm.getNotificationChannel(CHANNEL_ID);
         if (existing != null) return;
@@ -96,27 +98,33 @@ public class NativeHrService extends Service {
         nm.createNotificationChannel(ch);
     }
 
-    private Notification buildNotification(String title, String body) {
-        Intent launch = new Intent(this, MainActivity.class);
+    static Notification buildNotificationStatic(Context ctx, String title, String body) {
+        Intent launch = new Intent(ctx, MainActivity.class);
         launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         launch.putExtra("route", "monitor");
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
             | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
-        PendingIntent content = PendingIntent.getActivity(this, 0, launch, piFlags);
+        PendingIntent content = PendingIntent.getActivity(ctx, 0, launch, piFlags);
 
-        Intent stop = new Intent(this, NativeHrService.class);
+        Intent stop = new Intent(ctx, NativeHrService.class);
         stop.setAction(ACTION_STOP);
-        PendingIntent stopPi = PendingIntent.getService(this, 1, stop, piFlags);
+        PendingIntent stopPi = PendingIntent.getService(ctx, 1, stop, piFlags);
 
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        return new NotificationCompat.Builder(ctx, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
-            .setSmallIcon(getResources().getIdentifier("ic_stat_hr", "drawable", getPackageName()))
+            .setSmallIcon(ctx.getResources().getIdentifier("ic_stat_hr", "drawable", ctx.getPackageName()))
             .setContentIntent(content)
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .addAction(0, "Stop session", stopPi)
             .build();
+    }
+
+    static int getNotificationId() { return NOTIFICATION_ID; }
+
+    private Notification buildNotification(String title, String body) {
+        return buildNotificationStatic(this, title, body);
     }
 }
