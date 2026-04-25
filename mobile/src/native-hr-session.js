@@ -165,7 +165,8 @@
               label.textContent = d.name || d.mac;
               const meta = document.createElement('div');
               meta.style.cssText = 'font-size:11px;color:#8a8a8a;margin-top:3px;font-family:Consolas,Monaco,monospace;';
-              meta.textContent = d.mac + ' • ' + d.rssi + ' dBm' + (d.isHr ? ' • HR strap' : '');
+              const rssiPart = d.bonded ? 'paired' : (d.rssi + ' dBm');
+              meta.textContent = d.mac + ' • ' + rssiPart + (d.isHr ? ' • HR strap' : '');
               btn.appendChild(label);
               btn.appendChild(meta);
               btn.addEventListener('click', function () {
