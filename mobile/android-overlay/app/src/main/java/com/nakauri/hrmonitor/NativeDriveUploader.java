@@ -62,43 +62,16 @@ public class NativeDriveUploader {
         sessionFilenameRef.set(null);
     }
 
-    // Storage limits differ by user persona:
-    //   - Drive signed in: local cache is a viewer-speed accelerator, Drive
-    //     holds the durable copy. 200 MB cap, 14-day age fallback.
-    //   - No Drive: user isn't backing up. Local is ephemeral; keep just
-    //     enough for the viewer to feel populated. 50 MB cap, 2-day age,
-    //     but always preserve the most recent KEEP_RECENT_FLOOR sessions
-    //     so even a once-a-month user has something to browse.
+    // Persona-aware retention. Drive users get generous limits (Drive holds
+    // durable copy); no-Drive users get tight limits (local is ephemeral).
     private static final long CAP_BYTES_DRIVE       = 200L * 1024L * 1024L;
     private static final long CAP_BYTES_NO_DRIVE    =  50L * 1024L * 1024L;
     private static final long AGE_FALLBACK_DRIVE    = 14L * 24L * 60L * 60L * 1000L;
     private static final long AGE_FALLBACK_NO_DRIVE =  2L * 24L * 60L * 60L * 1000L;
     private static final int  KEEP_RECENT_FLOOR     = 3;
 
-    /**
-     * Three-tier cleanup of local CSVs. Each tier is independently safe;
-     * later tiers only act on what earlier ones leave behind:
-     *
-     *   Tier 1 (preferred) — DRIVE-VERIFIED. If the user is signed in and
-     *     the Drive folder listing succeeds, delete files older than
-     *     minAgeMs whose names appear in the Drive listing. Conservative:
-     *     never deletes a file Drive doesn't have.
-     *
-     *   Tier 2 (signed-out fallback) — AGE-ONLY. If Tier 1 couldn't run
-     *     (no token, listing failed, etc.) OR Tier 1 left files older than
-     *     the persona-aware fallback (AGE_FALLBACK_DRIVE = 14 days when the
-     *     user has Drive configured, AGE_FALLBACK_NO_DRIVE = 2 days
-     *     otherwise), delete those.
-     *
-     *   Tier 3 (emergency cap) — BYTE-CAP. If sessions/ still exceeds
-     *     CAP_BYTES_DRIVE (200 MB) or CAP_BYTES_NO_DRIVE (50 MB) depending
-     *     on persona, delete oldest first until under cap. KEEP_RECENT_FLOOR
-     *     (3) protects the most recent sessions from any tier's deletion.
-     *
-     * Active session is always skipped at every tier.
-     *
-     * Runs on the upload executor — async, non-blocking. Errors logged.
-     */
+    // Three-tier cleanup: 1) Drive-verified delete, 2) age fallback, 3) byte cap.
+    // KEEP_RECENT_FLOOR + active session are protected at every tier.
     public void cleanupLocalCachedAsync(File sessionsDir, long minAgeMs) {
         if (sessionsDir == null || !sessionsDir.isDirectory()) return;
         executor.submit(() -> {
@@ -116,11 +89,6 @@ public class NativeDriveUploader {
         String activeName = sessionFilenameRef.get();
         long now = System.currentTimeMillis();
 
-        // Tier 0 — figure out who the user is. Drive sign-in determines
-        // whether we're in "viewer-cache for a backed-up user" mode (more
-        // generous limits) or "ephemeral local for a casual user" mode
-        // (much tighter — they have no other copy and no expectation of
-        // long retention).
         java.util.Set<String> driveNames = null;
         boolean driveActive = false;
         try {
@@ -145,8 +113,6 @@ public class NativeDriveUploader {
         long ageCutoff     = now - minAgeMs;
         long fallbackCutoff = now - fallbackMs;
 
-        // Build a sorted view (newest-first) so the keep-floor logic can
-        // protect the most recent N sessions from any deletion path.
         java.util.List<File> csvList = new java.util.ArrayList<>();
         for (File f : localFiles) {
             if (f.isFile() && f.getName().endsWith(".csv")) csvList.add(f);
@@ -163,9 +129,6 @@ public class NativeDriveUploader {
 
         for (File f : csvList) {
             if (keepFloor.contains(f.getName())) continue;
-            // Tier 1: Drive-verified — file is on Drive AND older than the
-            // user-configurable retention window. Only runs when Drive is
-            // signed in.
             if (driveNames != null
                 && f.lastModified() <= ageCutoff
                 && driveNames.contains(f.getName())) {
@@ -173,17 +136,12 @@ public class NativeDriveUploader {
                 if (f.delete()) { tier1++; freedT1 += len; }
                 continue;
             }
-            // Tier 2: age-only fallback — anything older than the persona-
-            // appropriate cutoff. 14 days for Drive users, 2 days for the
-            // casual no-Drive user (who doesn't expect retention anyway).
             if (f.lastModified() <= fallbackCutoff) {
                 long len = f.length();
                 if (f.delete()) { tier2++; freedT2 += len; }
             }
         }
 
-        // Tier 3: emergency byte-budget cap. Sort survivors oldest-first
-        // (keep-floor still respected) and delete until under cap.
         File[] remaining = sessionsDir.listFiles();
         long total = 0;
         if (remaining != null) for (File f : remaining) if (f.isFile()) total += f.length();
@@ -206,11 +164,7 @@ public class NativeDriveUploader {
             + " budget-cap=" + tier3 + " (" + freedT3 + "B)");
     }
 
-    /**
-     * Snapshot of local sessions/ for diagnostics. Returns total file count,
-     * total bytes, and the timestamp of the oldest file. JS surfaces this
-     * in the diagnostics modal so users can see what's accumulating.
-     */
+    // Returns [count, bytes, oldestMs] of CSVs in sessions/.
     public static long[] cacheStats(File sessionsDir) {
         if (sessionsDir == null || !sessionsDir.isDirectory()) return new long[] { 0, 0, 0 };
         File[] files = sessionsDir.listFiles();
@@ -226,12 +180,7 @@ public class NativeDriveUploader {
         return new long[] { count, bytes, oldest };
     }
 
-    /**
-     * Manual clear-all triggered from the UI. Deletes every CSV in the
-     * sessions/ directory EXCEPT the active session. Use as a "free up
-     * space" action; users can always re-pull from Drive. Returns the
-     * count of files deleted.
-     */
+    // Deletes every non-active CSV. Returns count.
     public int clearLocalCache(File sessionsDir) {
         if (sessionsDir == null || !sessionsDir.isDirectory()) return 0;
         File[] files = sessionsDir.listFiles();

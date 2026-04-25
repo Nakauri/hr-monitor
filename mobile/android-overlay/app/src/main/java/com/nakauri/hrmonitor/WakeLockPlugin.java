@@ -9,24 +9,11 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-/**
- * PARTIAL_WAKE_LOCK around the foreground-service lifetime. The capawesome
- * FGS plugin declares the WAKE_LOCK permission but never acquires one, so
- * Android Doze still throttles CPU after ~5 minutes of screen-off even
- * with a valid foreground service running. This plugin lets the JS shim
- * acquire the wake lock when the FGS starts and release it when it stops.
- *
- * Non-reference-counted: one acquire pairs with one release no matter how
- * many times acquire() is called. Simpler lifecycle, no leak risk.
- */
+// PARTIAL_WAKE_LOCK around the foreground service. Non-ref-counted.
 @CapacitorPlugin(name = "WakeLock")
 public class WakeLockPlugin extends Plugin {
     private static final String LOCK_TAG = "HRMonitor:FGS";
-    // Static so the lock survives plugin reloads (renderer crash recovery,
-    // route changes that re-instantiate the plugin). If the field were
-    // per-instance, a reload mid-session would orphan the held lock and the
-    // garbage-collected plugin would never release it — battery drain until
-    // process death.
+    // static: survives plugin reload so the lock isn't orphaned.
     private static PowerManager.WakeLock wakeLock;
 
     @PluginMethod
@@ -74,9 +61,6 @@ public class WakeLockPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    // Static release so other plugins (e.g. NativeHrSessionPlugin during
-    // forced cleanup) or the Activity destroy hook can drop the lock without
-    // needing a plugin instance handle.
     public static void releaseStatic() {
         if (wakeLock != null && wakeLock.isHeld()) {
             try { wakeLock.release(); } catch (Exception ignored) {}
@@ -86,9 +70,6 @@ public class WakeLockPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
-        // Activity is going down. If a wake lock is still held (caller forgot
-        // to release, or the WebView crashed after acquire but before
-        // release), drop it now so we don't keep the CPU on after teardown.
         releaseStatic();
         super.handleOnDestroy();
     }

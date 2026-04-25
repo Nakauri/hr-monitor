@@ -13,20 +13,8 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
-/**
- * Foreground Service owned by NativeHrSessionPlugin. Lives for the duration
- * of an active HR session, anchors the process so Android doesn't kill us
- * while backgrounded with the screen off, and displays the recording
- * notification the user expects.
- *
- * Intentionally thin — BLE + relay + CSV + Drive all live in the plugin
- * instance. This class exists solely to satisfy Android's "you must run a
- * foreground service to do long-lived work in the background" contract.
- *
- * Replaces our prior use of the @capawesome FGS plugin which crashed with
- * "Context.startForegroundService() did not then call Service.startForeground()"
- * during the session teardown path.
- */
+// Foreground service for active HR sessions. Owns only the notification +
+// process anchor; BLE / relay / CSV / Drive live in NativeHrSessionPlugin.
 public class NativeHrService extends Service {
     private static final String TAG = "NativeHrService";
     private static final String CHANNEL_ID = "hr_monitor_native";
@@ -47,13 +35,7 @@ public class NativeHrService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : ACTION_START;
 
-        // CRITICAL: any service started via startForegroundService() MUST call
-        // startForeground() within 5 seconds, regardless of the action. If the
-        // FIRST onStartCommand for a service instance is ACTION_STOP (e.g. the
-        // user taps Stop right after launching, or the system spawned a fresh
-        // instance to deliver the stop intent), early-returning before
-        // startForeground crashes the process with RemoteServiceException.
-        // Always startForeground first; stop right after if STOP was requested.
+        // startForeground must run within 5 s of startForegroundService, even on STOP.
         String title = intent != null && intent.getStringExtra(EXTRA_TITLE) != null
             ? intent.getStringExtra(EXTRA_TITLE) : "HR Monitor";
         String body = intent != null && intent.getStringExtra(EXTRA_BODY) != null
@@ -66,10 +48,6 @@ public class NativeHrService extends Service {
         }
 
         if (ACTION_STOP.equals(action)) {
-            // Tell the plugin to flush CSV + final Drive upload + close
-            // relay + close GATT before the service dies. Without this,
-            // tapping Stop from the notification would abruptly kill the
-            // session with no final upload.
             try {
                 if (NativeHrSessionPlugin.instance != null) {
                     NativeHrSessionPlugin.instance.stopSessionInternal();
@@ -87,36 +65,17 @@ public class NativeHrService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
-    /**
-     * Triggered when the user swipes the app away from the recent-apps
-     * tray. Fully terminates the session: flush CSV + final Drive upload,
-     * close GATT, close relay socket, drop the foreground notification.
-     *
-     * Without this override the FGS would survive the swipe (its job is to
-     * keep recording when the screen is off), and reopening the app would
-     * find a zombie state — notification still up, but the new plugin
-     * instance has lost the active-session flag, so the user lands on the
-     * home screen instead of the live monitor.
-     *
-     * The user's contract: swiping the app away = stop the session. If
-     * they want background recording, they leave the app open and lock
-     * the phone instead.
-     */
+    // Swipe-to-stop: terminate the session. Posted to main thread because
+    // onTaskRemoved fires on a binder thread (would ANR + race BLE callback).
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        Log.i(TAG, "onTaskRemoved — swipe-to-stop, terminating session");
-        // stopSessionInternal does file flush, WebSocket close, GATT close.
-        // Android delivers onTaskRemoved on a binder thread; running blocking
-        // I/O there can ANR the process and conflicts with the BLE callback
-        // also running on a binder thread. Post to the main looper so the
-        // close work runs on the same thread the plugin uses for everything
-        // else, then have the service stop after the work resolves.
+        Log.i(TAG, "onTaskRemoved — terminating session");
         final NativeHrSessionPlugin plugin = NativeHrSessionPlugin.instance;
         new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
             try {
                 if (plugin != null) plugin.stopSessionInternal();
             } catch (Throwable t) {
-                Log.w(TAG, "stopSessionInternal threw on task-remove: " + t.getMessage());
+                Log.w(TAG, "stopSessionInternal threw: " + t.getMessage());
             }
             try { stopForeground(true); } catch (Throwable ignored) {}
             stopSelf();
@@ -138,9 +97,6 @@ public class NativeHrService extends Service {
     }
 
     private Notification buildNotification(String title, String body) {
-        // Tap the notification body to return to the app. Route hint is
-        // read by MainActivity so we land on the monitor page, not the
-        // landing page, when a session is active.
         Intent launch = new Intent(this, MainActivity.class);
         launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         launch.putExtra("route", "monitor");
@@ -148,8 +104,6 @@ public class NativeHrService extends Service {
             | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
         PendingIntent content = PendingIntent.getActivity(this, 0, launch, piFlags);
 
-        // Stop action: direct broadcast to the plugin so the user can kill
-        // a running session without navigating into the app.
         Intent stop = new Intent(this, NativeHrService.class);
         stop.setAction(ACTION_STOP);
         PendingIntent stopPi = PendingIntent.getService(this, 1, stop, piFlags);

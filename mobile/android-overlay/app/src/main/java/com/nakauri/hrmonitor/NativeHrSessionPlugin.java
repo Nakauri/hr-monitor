@@ -29,11 +29,13 @@ import com.getcapacitor.annotation.Permission;
 
 import org.json.JSONArray;
 
+import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -110,6 +112,9 @@ public class NativeHrSessionPlugin extends Plugin {
     private BluetoothGattCharacteristic hrChar;
     private final List<DiscoveredDevice> scanResults = new ArrayList<>();
     private ScanCallback scanCallback;
+    // 2 consecutive CCCD failures on a bonded handle = stale bond; trigger removeBond.
+    private int cccdAttempts = 0;
+    private boolean usingBondedHandle = false;
 
     // Session state
     private String broadcastKey;
@@ -120,44 +125,23 @@ public class NativeHrSessionPlugin extends Plugin {
 
     // RR + RMSSD
     private final Deque<RrEntry> rrWindow = new ArrayDeque<>();
-    // Rolling buffers for the overlay chart payloads. See LIVE_WINDOW_MS
-    // and TREND_WINDOW_MS above. Each entry keeps the wall-clock ms and
-    // the value; the publish path converts to seconds / minutes since
-    // sessionStartMs at emit time.
     private final Deque<double[]> liveBuffer = new ArrayDeque<>();
     private final Deque<double[]> trendHrBuffer = new ArrayDeque<>();
     private final Deque<double[]> trendRmssdBuffer = new ArrayDeque<>();
 
-    // Recording + Drive. csv is volatile because the BLE binder thread reads
-    // it (handleHrReading → csv.appendHrRow) while the main thread can null
-    // it on session stop. NativeCsvWriter.appendHrRow is itself synchronized,
-    // so the inner call is safe; volatile just prevents the dereference race
-    // (binder sees non-null, main thread nulls + closes, binder dereferences
-    // the closed writer → IOException, currently swallowed).
+    // volatile: BLE binder thread reads while main thread can null on stop.
     private volatile NativeCsvWriter csv;
     private NativeDriveUploader uploader;
     private final AtomicLong lastUploadMs = new AtomicLong(0);
 
-    // Relay WebSocket — owned by this plugin so publishing happens
-    // entirely in native code, immune to WebView pause.
     private OkHttpClient httpClient;
     private WebSocket relaySocket;
     private final AtomicBoolean relayLive = new AtomicBoolean(false);
 
-    // Throttle notification updates to 1 Hz (HR ticks come in at ~1/s anyway,
-    // but guard against bursts).
     private long lastNotifUpdateMs = 0;
-
-    // Widget prefs mirror. JS pushes this via setPrefs() whenever the
-    // user toggles a widget checkbox. publishTick splices it into every
-    // outgoing relay message so overlay.html can resize / hide the same
-    // way whether the sender is the web app or the native plugin.
     private volatile String prefsJson = null;
 
-    // Static ref so NativeHrService (separate Android component) can ask
-    // us to clean up when the user taps Stop from the notification.
-    // volatile so concurrent reads from the service thread see a consistent
-    // value when load()/handleOnDestroy() race with notification taps.
+    // Static ref for NativeHrService Stop button. volatile for cross-thread reads.
     public static volatile NativeHrSessionPlugin instance;
 
     @Override
@@ -168,9 +152,6 @@ public class NativeHrSessionPlugin extends Plugin {
             adapter = bm.getAdapter();
             if (adapter != null) scanner = adapter.getBluetoothLeScanner();
         }
-        // Shared singleton tuned for long-lived WebSockets. Reuses the
-        // process-wide connection pool + dispatcher rather than spinning
-        // its own — see HttpClientHolder.
         httpClient = HttpClientHolder.webSocketClient();
         uploader = new NativeDriveUploader(getContext());
         registerNetworkCallback();
@@ -178,22 +159,12 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
-        // Activity / WebView going down. Do NOT clear the static `instance`
-        // pointer here — the notification's Stop button (handled by
-        // NativeHrService.onStartCommand → instance.stopSessionInternal)
-        // needs the plugin alive to flush the CSV and close GATT cleanly.
-        // The plugin object is reused on the next Activity attach via
-        // load(); GC happens when the new instance overwrites the static.
+        // Don't null `instance`; the notification Stop button needs it alive.
         unregisterNetworkCallback();
         super.handleOnDestroy();
     }
 
-    // ---- Network change handling ----------------------------------------
-    // OkHttp WebSocket with readTimeout(0) (= forever) silently stalls when
-    // Wi-Fi / cellular hand off underneath. Listen for ConnectivityManager
-    // NetworkCallback events and force a relay socket reconnect on every
-    // network transition so the session recovers within seconds instead of
-    // hanging until something else times out.
+    // Force relay reconnect on Wi-Fi/cellular handoff (OkHttp readTimeout=0 stalls).
     private android.net.ConnectivityManager.NetworkCallback networkCallback;
     private android.net.Network lastActiveNetwork;
 
@@ -290,29 +261,21 @@ public class NativeHrSessionPlugin extends Plugin {
         final String mac = call.getString("mac");
         if (mac == null) { call.reject("mac required"); return; }
         if (adapter == null) { call.reject("Bluetooth adapter unavailable"); return; }
-        // Connect work runs off the bridge thread because the rescan path
-        // can block for ~3 seconds while it waits for the strap to advertise.
+        // Off-bridge: rescan can block ~3 s.
         executor().execute(() -> doConnect(call, mac));
     }
 
     @SuppressLint("MissingPermission")
     private void doConnect(PluginCall call, String mac) {
-        // Outer try-catch ensures the PluginCall is always resolved or
-        // rejected. Without it, an unexpected throw in rescanForMac /
-        // getRemoteDevice / connectGatt leaves the JS caller hanging
-        // indefinitely.
         try {
-            // Use cached BluetoothDevice from scan if we have one — that handle
-            // has the correct address type (PUBLIC vs RANDOM) which the Coospo
-            // strap advertises as RANDOM. Without this, getRemoteDevice(mac)
-            // defaults to PUBLIC, the connection appears to succeed but
-            // notifications silently never fire and HR data never reaches the
-            // app. After a process restart scanResults is empty, so we
-            // proactively rescan for ~3s to repopulate the cache before falling
-            // through to the (often broken) PUBLIC-default getRemoteDevice.
-            BluetoothDevice device = findScannedDevice(mac);
+            // Handle resolution: bond cache → scan cache → rescan → PUBLIC fallback.
+            // Coospo straps advertise as RANDOM; PUBLIC fallback connects but never
+            // delivers notifications. See docs/ble-connect.md.
+            usingBondedHandle = false;
+            BluetoothDevice device = findBondedDevice(mac);
+            if (device != null) usingBondedHandle = true;
+            if (device == null) device = findScannedDevice(mac);
             if (device == null && scanner != null) {
-                Log.i(TAG, "connect: scan cache miss for " + mac + " — rescanning");
                 try {
                     rescanForMac(mac, 3000L);
                     device = findScannedDevice(mac);
@@ -323,16 +286,17 @@ public class NativeHrSessionPlugin extends Plugin {
                 }
             }
             if (device == null) {
-                Log.w(TAG, "connect: falling back to getRemoteDevice (PUBLIC) for " + mac
-                    + " — RANDOM-address straps may connect without notifications");
+                Log.w(TAG, "connect: PUBLIC fallback for " + mac);
                 device = adapter.getRemoteDevice(mac);
             }
 
             closeGattQuietly();
             try {
-                currentGatt = device.connectGatt(getContext(), false, gattCallback);
+                // autoConnect=true so the OS queues the request when the strap is busy.
+                currentGatt = device.connectGatt(getContext(), true, gattCallback);
                 JSObject ret = new JSObject();
                 ret.put("connecting", true);
+                ret.put("bonded", usingBondedHandle);
                 call.resolve(ret);
             } catch (SecurityException e) {
                 call.reject("BLUETOOTH_CONNECT denied: " + e.getMessage());
@@ -340,6 +304,39 @@ public class NativeHrSessionPlugin extends Plugin {
         } catch (Throwable t) {
             Log.e(TAG, "doConnect failed: " + t.getMessage(), t);
             call.reject("connect failed: " + t.getMessage());
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private BluetoothDevice findBondedDevice(String mac) {
+        if (adapter == null || mac == null) return null;
+        try {
+            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+            if (bonded == null) return null;
+            for (BluetoothDevice d : bonded) {
+                if (mac.equalsIgnoreCase(d.getAddress())) return d;
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "getBondedDevices: " + e.getMessage());
+        } catch (Throwable t) {
+            Log.w(TAG, "findBondedDevice threw: " + t.getMessage());
+        }
+        return null;
+    }
+
+    // removeBond is hidden API; reflection is the canonical workaround.
+    @SuppressLint("MissingPermission")
+    private boolean removeBondViaReflection(BluetoothDevice device) {
+        if (device == null) return false;
+        try {
+            Method m = device.getClass().getMethod("removeBond");
+            Object result = m.invoke(device);
+            boolean ok = (result instanceof Boolean) && (Boolean) result;
+            Log.i(TAG, "removeBond reflection: ok=" + ok + " mac=" + device.getAddress());
+            return ok;
+        } catch (Throwable t) {
+            Log.w(TAG, "removeBond reflection failed: " + t.getMessage());
+            return false;
         }
     }
 
@@ -701,12 +698,6 @@ public class NativeHrSessionPlugin extends Plugin {
                 hrChar = null;
                 if (csv != null) csv.appendConnectionRow("disconnected", System.currentTimeMillis());
                 emitState();
-                // Auto-reconnect if the session is still active. Android
-                // supervision timeout (status 8) + short link flicks happen
-                // all the time — phone in pocket, body in the way, brief RF
-                // contention — and we want to recover without user action.
-                // gatt.connect() reuses the existing binding, so this is
-                // cheaper than building a new BluetoothGatt.
                 if (sessionActive.get()) {
                     final BluetoothGatt g = gatt;
                     mainHandler.postDelayed(() -> {
@@ -740,11 +731,8 @@ public class NativeHrSessionPlugin extends Plugin {
                 Log.w(TAG, "HR measurement characteristic missing");
                 return;
             }
-            // Enable notifications — both register callback locally AND
-            // write CCCD. The "connected" CSV row is deferred to
-            // onDescriptorWrite so it only fires after the CCCD ack lands.
-            // Without that gate a silent CCCD failure would mark the
-            // session "connected" while no HR notifications ever arrive.
+            cccdAttempts = 0;
+            // "connected" CSV row + priority bump are deferred to onDescriptorWrite ack.
             gatt.setCharacteristicNotification(hrChar, true);
             BluetoothGattDescriptor desc = hrChar.getDescriptor(CCCD);
             if (desc != null) {
@@ -753,37 +741,47 @@ public class NativeHrSessionPlugin extends Plugin {
             } else {
                 Log.w(TAG, "CCCD descriptor missing on HR characteristic");
             }
-            // requestConnectionPriority(HIGH) is deferred to onDescriptorWrite
-            // success. Firing it here can race the CCCD write on flaky strap
-            // firmwares — radio contention from the priority change has been
-            // observed to NACK the descriptor write on the first attempt.
         }
 
         @Override
+        @SuppressLint("MissingPermission")
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
             if (!CCCD.equals(descriptor.getUuid())) return;
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i(TAG, "CCCD write OK — notifications live");
-                NativeCsvWriter w = csv;  // snapshot the volatile field
+                cccdAttempts = 0;
+                NativeCsvWriter w = csv;
                 if (w != null) w.appendConnectionRow("connected", System.currentTimeMillis());
-                // Bump connection priority now that notifications are armed.
-                // HIGH (~11-15 ms interval) vs default BALANCED (~50-100 ms);
-                // the native-only path is noticeably less jittery on HIGH.
                 try {
                     gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
                 } catch (Throwable t) {
                     Log.w(TAG, "requestConnectionPriority failed: " + t.getMessage());
                 }
+                BluetoothDevice dev = gatt.getDevice();
+                if (dev != null && dev.getBondState() == BluetoothDevice.BOND_NONE) {
+                    try { dev.createBond(); }
+                    catch (Throwable t) { Log.w(TAG, "createBond threw: " + t.getMessage()); }
+                }
             } else {
-                Log.w(TAG, "CCCD write FAILED status=" + status + " — retrying once");
-                // One retry; some strap firmwares NACK the first write under
-                // heavy RF and accept the second. If both fail the user sees
-                // the strap as not-connected which surfaces in the UI.
-                try {
-                    descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                    gatt.writeDescriptor(descriptor);
-                } catch (Throwable t) {
-                    Log.w(TAG, "CCCD retry threw: " + t.getMessage());
+                cccdAttempts++;
+                if (cccdAttempts < 2) {
+                    Log.w(TAG, "CCCD write FAILED status=" + status + " — retry " + cccdAttempts);
+                    try {
+                        descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        gatt.writeDescriptor(descriptor);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "CCCD retry threw: " + t.getMessage());
+                    }
+                } else {
+                    Log.w(TAG, "CCCD failed twice. bondedHandle=" + usingBondedHandle);
+                    if (usingBondedHandle && gatt.getDevice() != null
+                        && gatt.getDevice().getBondState() == BluetoothDevice.BOND_BONDED) {
+                        removeBondViaReflection(gatt.getDevice());
+                    }
+                    JSObject err = new JSObject();
+                    err.put("reason", "cccd-failed");
+                    err.put("staleBondCleared", usingBondedHandle);
+                    notifyListeners("bleError", err);
                 }
             }
         }
@@ -800,18 +798,12 @@ public class NativeHrSessionPlugin extends Plugin {
 
     private void handleHrReading(HrParse p) {
         long now = System.currentTimeMillis();
-        // Update RR window. All four buffers (rrWindow + liveBuffer +
-        // trendHrBuffer + trendRmssdBuffer) are read by publishTick on the
-        // main thread via appendLiveArray / appendTrendArray; mutating them
-        // on the BLE binder thread without locking would race the iteration.
-        // Lock on each buffer's monitor — same monitor used by the snapshot
-        // helpers above.
+        // synchronized: BLE binder writes, main thread reads in publishTick.
         Double rmssd;
         synchronized (rrWindow) {
             if (p.rrMs != null) {
                 for (int rr : p.rrMs) rrWindow.addLast(new RrEntry(rr, now));
             }
-            // Prune anything older than RR_WINDOW_MS
             long cutoff = now - RR_WINDOW_MS;
             Iterator<RrEntry> it = rrWindow.iterator();
             while (it.hasNext()) {
@@ -821,8 +813,6 @@ public class NativeHrSessionPlugin extends Plugin {
             rmssd = computeRmssd(rrWindow);
         }
 
-        // Grow the overlay-chart buffers.
-        // livePoints: per-RR instantaneous BPM, 45 s window.
         synchronized (liveBuffer) {
             if (p.rrMs != null) {
                 for (int rr : p.rrMs) {
@@ -849,14 +839,9 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         }
 
-        // CSV append (per-row flush ensures persistence under process kill).
-        // Snapshot the volatile field to a local so a concurrent stop on the
-        // main thread doesn't null csv between the check and the call.
         NativeCsvWriter writer = csv;
         if (writer != null) {
             writer.appendHrRow(p.hr, rmssd != null ? rmssd : 0.0, now);
-            // Surface a csvError event the first time consecutive failures
-            // cross the threshold. Don't spam — only fire on the boundary.
             int consec = writer.getConsecutiveFailures();
             if (consec == CSV_FAIL_ALERT_THRESHOLD) {
                 JSObject err = new JSObject();
@@ -867,11 +852,8 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         }
 
-        // Tick payload — minimal subset matching the wire shape overlay.html
-        // expects. Trends + livePoints omitted; overlay falls back gracefully.
         publishTick(p.hr, rmssd, p.contactOff, now);
 
-        // Live event for JS UI (when foregrounded)
         JSObject ev = new JSObject();
         ev.put("hr", p.hr);
         if (rmssd != null) ev.put("rmssd", rmssd);
@@ -1146,12 +1128,7 @@ public class NativeHrSessionPlugin extends Plugin {
         relayLive.set(false);
     }
 
-    // User-configurable stage thresholds. Defaults match the web defaults
-    // (color-low 70, color-normal 90, color-elevated 110, alert-high 130).
-    // JS calls setStageThresholds() on load and whenever the user edits them
-    // so the relay tick's hrStage matches what the monitor's own WebView
-    // shows. Without this the OBS overlay and the phone UI show different
-    // colours for the same HR.
+    // PARITY CRITICAL — defaults must match hr_monitor.html stage bands.
     private volatile int stageLow = 70;
     private volatile int stageNormal = 90;
     private volatile int stageElevated = 110;
@@ -1163,9 +1140,6 @@ public class NativeHrSessionPlugin extends Plugin {
         Integer normal = call.getInt("normal");
         Integer elevated = call.getInt("elevated");
         Integer high = call.getInt("high");
-        // rmssdCritical is the user-configurable HRV-crash threshold. Other
-        // RMSSD stage cutoffs (20/35/60) are literature-grounded and hard-
-        // coded to match hr_monitor.html:getRMSSDStage.
         Integer rmssdCritical = call.getInt("rmssdCritical");
         if (low != null) stageLow = low;
         if (normal != null) stageNormal = normal;
@@ -1183,12 +1157,8 @@ public class NativeHrSessionPlugin extends Plugin {
         return "stage-critical";
     }
 
-    // PARITY CRITICAL — MUST MATCH hr_monitor.html:getRMSSDStage (line ~2319).
-    // Bands: <critical → stage-critical, <20 → stage-high, <35 →
-    // stage-elevated, <60 → stage-normal, >=60 → stage-low. The `critical`
-    // threshold is user-configurable, pushed via setStageThresholds so the
-    // monitor widget and the relay overlay agree on when to flag a crash.
-    private volatile int stageRmssdCritical = 15;  // overridden by setStageThresholds
+    // PARITY CRITICAL — MUST MATCH hr_monitor.html:getRMSSDStage.
+    private volatile int stageRmssdCritical = 15;
     private String rmssdStage(double rmssd) {
         if (rmssd < stageRmssdCritical) return "stage-critical";
         if (rmssd < 20) return "stage-high";

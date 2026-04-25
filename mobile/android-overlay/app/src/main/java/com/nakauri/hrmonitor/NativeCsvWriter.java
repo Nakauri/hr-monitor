@@ -13,22 +13,8 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
 
-/**
- * Per-session CSV writer matching the schema produced by hr_monitor.html's
- * buildSessionCSV() exactly. Writing happens natively (not via JS) so
- * recording continues uninterrupted while the WebView is paused in
- * background.
- *
- * Schema:
- *   time_min, epoch_ms, hr_bpm, rmssd_ms, palpitation, event,
- *   warning, connection, posture
- *
- * Files land in app-private files dir
- * (/data/data/com.nakauri.hrmonitor/files/sessions/) so they survive across
- * app upgrades and sit alongside Drive's own copy. Filename matches
- * `hrv_session_YYYY-MM-DDTHH-MM-SS.csv` so hrv_viewer.html parses them
- * with no schema changes.
- */
+// PARITY CRITICAL — schema must match hr_monitor.html buildSessionCSV().
+// Schema: time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture
 public class NativeCsvWriter {
     private static final String TAG = "NativeCsvWriter";
     private static final String HEADER =
@@ -42,15 +28,7 @@ public class NativeCsvWriter {
         this.sessionStartMs = sessionStartMs;
         File dir = new File(context.getFilesDir(), "sessions");
         if (!dir.exists()) dir.mkdirs();
-        // Filename timestamp is the device's local time. The viewer treats
-        // this as a display hint only and uses the CSV's epoch_ms column
-        // for the authoritative session start. Keeping it local-time is
-        // backward-compatible with every Android session the user has
-        // already recorded; the viewer handles the ambiguity centrally.
-        // Millisecond suffix prevents collision when the user does a quick
-        // stop+start within the same second; without it the new FileWriter
-        // would truncate the previous session's CSV. Viewer's filename regex
-        // tolerates the optional `.NNN` suffix.
+        // .SSS prevents same-second collision; viewer regex tolerates it.
         SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss.SSS", Locale.US);
         fmt.setTimeZone(TimeZone.getDefault());
         String filename = "hrv_session_" + fmt.format(new Date(sessionStartMs)) + ".csv";
@@ -62,9 +40,6 @@ public class NativeCsvWriter {
         Log.i(TAG, "Opened: " + file.getAbsolutePath());
     }
 
-    // Track consecutive write failures. Resets on every successful write.
-    // Total session-failure count survives so callers can surface "this
-    // session lost N rows" diagnostics. Public so the plugin can read it.
     private int consecutiveFailures = 0;
     private int totalFailures = 0;
     public int getConsecutiveFailures() { return consecutiveFailures; }
@@ -78,8 +53,6 @@ public class NativeCsvWriter {
                 "%.4f,%d,%d,%.2f,,,,,",
                 tMin, timestampMs, hr, rmssd));
             writer.newLine();
-            // Flush every row — small files, low cost, ensures data is on
-            // disk if the process gets killed mid-session.
             writer.flush();
             consecutiveFailures = 0;
         } catch (IOException e) {
