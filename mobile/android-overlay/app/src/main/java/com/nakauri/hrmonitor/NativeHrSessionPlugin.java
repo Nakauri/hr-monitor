@@ -91,6 +91,11 @@ public class NativeHrSessionPlugin extends Plugin {
     private static final long RR_WINDOW_MS = 30_000L;
     // Drive upload cadence — every 30 s. Same data pace as the JS auto-save.
     private static final long DRIVE_UPLOAD_INTERVAL_MS = 30_000L;
+    // Fire a csvError event once after this many consecutive write failures.
+    // Below this threshold a single transient error is silently retried; at
+    // the threshold the UI gets one signal so it can show a banner. Resets
+    // on the next successful write — won't re-fire until another N-streak.
+    private static final int CSV_FAIL_ALERT_THRESHOLD = 5;
     // Buffers for the overlay charts. livePoints = 45 s of instantaneous
     // per-beat BPM; trend = 3 min of per-second HR + RMSSD. These match
     // what hr_monitor.html's broadcastTick emits so overlay.html renders
@@ -125,8 +130,13 @@ public class NativeHrSessionPlugin extends Plugin {
     private final Deque<double[]> trendHrBuffer = new ArrayDeque<>();
     private final Deque<double[]> trendRmssdBuffer = new ArrayDeque<>();
 
-    // Recording + Drive
-    private NativeCsvWriter csv;
+    // Recording + Drive. csv is volatile because the BLE binder thread reads
+    // it (handleHrReading → csv.appendHrRow) while the main thread can null
+    // it on session stop. NativeCsvWriter.appendHrRow is itself synchronized,
+    // so the inner call is safe; volatile just prevents the dereference race
+    // (binder sees non-null, main thread nulls + closes, binder dereferences
+    // the closed writer → IOException, currently swallowed).
+    private volatile NativeCsvWriter csv;
     private NativeDriveUploader uploader;
     private final AtomicLong lastUploadMs = new AtomicLong(0);
 
@@ -148,7 +158,9 @@ public class NativeHrSessionPlugin extends Plugin {
 
     // Static ref so NativeHrService (separate Android component) can ask
     // us to clean up when the user taps Stop from the notification.
-    public static NativeHrSessionPlugin instance;
+    // volatile so concurrent reads from the service thread see a consistent
+    // value when load()/handleOnDestroy() race with notification taps.
+    public static volatile NativeHrSessionPlugin instance;
 
     @Override
     public void load() {
@@ -163,6 +175,69 @@ public class NativeHrSessionPlugin extends Plugin {
             .readTimeout(0, TimeUnit.SECONDS)
             .build();
         uploader = new NativeDriveUploader(getContext());
+        registerNetworkCallback();
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        // Activity / WebView going down. Clear the static so the
+        // NativeHrService notification handler doesn't dispatch into a dead
+        // plugin. The session itself keeps running because the FGS owns it
+        // independently — only the JS bridge handle is invalidated here.
+        if (instance == this) instance = null;
+        unregisterNetworkCallback();
+        super.handleOnDestroy();
+    }
+
+    // ---- Network change handling ----------------------------------------
+    // OkHttp WebSocket with readTimeout(0) (= forever) silently stalls when
+    // Wi-Fi / cellular hand off underneath. Listen for ConnectivityManager
+    // NetworkCallback events and force a relay socket reconnect on every
+    // network transition so the session recovers within seconds instead of
+    // hanging until something else times out.
+    private android.net.ConnectivityManager.NetworkCallback networkCallback;
+    private android.net.Network lastActiveNetwork;
+
+    private void registerNetworkCallback() {
+        if (networkCallback != null) return;
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return;
+            networkCallback = new android.net.ConnectivityManager.NetworkCallback() {
+                @Override public void onAvailable(android.net.Network network) {
+                    if (lastActiveNetwork != null && !network.equals(lastActiveNetwork) && sessionActive.get()) {
+                        Log.i(TAG, "Network changed — forcing relay reconnect");
+                        relayReconnectAttempts = 0;  // reset so backoff doesn't punish a real transition
+                        mainHandler.post(() -> {
+                            try { closeRelaySocket(); } catch (Throwable ignored) {}
+                            try { openRelaySocket(); } catch (Throwable ignored) {}
+                        });
+                    }
+                    lastActiveNetwork = network;
+                }
+                @Override public void onLost(android.net.Network network) {
+                    if (network.equals(lastActiveNetwork)) lastActiveNetwork = null;
+                }
+            };
+            android.net.NetworkRequest req = new android.net.NetworkRequest.Builder()
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build();
+            cm.registerNetworkCallback(req, networkCallback);
+        } catch (Throwable t) {
+            Log.w(TAG, "registerNetworkCallback failed: " + t.getMessage());
+            networkCallback = null;
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (networkCallback == null) return;
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) cm.unregisterNetworkCallback(networkCallback);
+        } catch (Throwable t) { /* ignore — process is going away */ }
+        networkCallback = null;
     }
 
     // ---- Plugin methods --------------------------------------------------
@@ -245,10 +320,10 @@ public class NativeHrSessionPlugin extends Plugin {
             return;
         }
         sessionStartMs = System.currentTimeMillis();
-        rrWindow.clear();
-        liveBuffer.clear();
-        trendHrBuffer.clear();
-        trendRmssdBuffer.clear();
+        synchronized (rrWindow) { rrWindow.clear(); }
+        synchronized (liveBuffer) { liveBuffer.clear(); }
+        synchronized (trendHrBuffer) { trendHrBuffer.clear(); }
+        synchronized (trendRmssdBuffer) { trendRmssdBuffer.clear(); }
         lastUploadMs.set(0);
 
         // CSV
@@ -299,6 +374,17 @@ public class NativeHrSessionPlugin extends Plugin {
         closeRelaySocket();
         closeGattQuietly();
         stopNativeForegroundService();
+        // Fire-and-forget local CSV cleanup. Only deletes files that have
+        // been verified-uploaded to Drive AND are at least 7 days old —
+        // never touches the just-stopped session or anything Drive doesn't
+        // already have. Runs on the upload executor; doesn't block stop.
+        try {
+            if (uploader != null) {
+                java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
+                long sevenDaysMs = 7L * 24L * 60L * 60L * 1000L;
+                uploader.cleanupLocalCachedAsync(sessionsDir, sevenDaysMs);
+            }
+        } catch (Throwable t) { /* cleanup is best-effort; never block stop */ }
         emitState();
     }
 
@@ -526,14 +612,48 @@ public class NativeHrSessionPlugin extends Plugin {
                 return;
             }
             // Enable notifications — both register callback locally AND
-            // write CCCD. Standard pattern; works on Coospo + Polar + Wahoo.
+            // write CCCD. The "connected" CSV row is now deferred to
+            // onDescriptorWrite so it only fires after the CCCD ack lands;
+            // previously a silent CCCD failure would mark the session
+            // "connected" but no HR notifications would ever arrive.
             gatt.setCharacteristicNotification(hrChar, true);
             BluetoothGattDescriptor desc = hrChar.getDescriptor(CCCD);
             if (desc != null) {
                 desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                 gatt.writeDescriptor(desc);
+            } else {
+                Log.w(TAG, "CCCD descriptor missing on HR characteristic");
             }
-            if (csv != null) csv.appendConnectionRow("connected", System.currentTimeMillis());
+            // Bump the connection priority to HIGH (~11-15 ms interval) for
+            // the lowest-jitter HR cadence the strap supports. Default is
+            // BALANCED (~50-100 ms), which made the native-only path
+            // noticeably more jittery than the JS path on the same strap.
+            try {
+                gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
+            } catch (Throwable t) {
+                Log.w(TAG, "requestConnectionPriority failed: " + t.getMessage());
+            }
+        }
+
+        @Override
+        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+            if (!CCCD.equals(descriptor.getUuid())) return;
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.i(TAG, "CCCD write OK — notifications live");
+                NativeCsvWriter w = csv;  // snapshot the volatile field
+                if (w != null) w.appendConnectionRow("connected", System.currentTimeMillis());
+            } else {
+                Log.w(TAG, "CCCD write FAILED status=" + status + " — retrying once");
+                // One retry; some strap firmwares NACK the first write under
+                // heavy RF and accept the second. If both fail the user sees
+                // the strap as not-connected which surfaces in the UI.
+                try {
+                    descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                    gatt.writeDescriptor(descriptor);
+                } catch (Throwable t) {
+                    Log.w(TAG, "CCCD retry threw: " + t.getMessage());
+                }
+            }
         }
 
         @Override
@@ -548,41 +668,72 @@ public class NativeHrSessionPlugin extends Plugin {
 
     private void handleHrReading(HrParse p) {
         long now = System.currentTimeMillis();
-        // Update RR window
-        if (p.rrMs != null) {
-            for (int rr : p.rrMs) rrWindow.addLast(new RrEntry(rr, now));
+        // Update RR window. All four buffers (rrWindow + liveBuffer +
+        // trendHrBuffer + trendRmssdBuffer) are read by publishTick on the
+        // main thread via appendLiveArray / appendTrendArray; mutating them
+        // on the BLE binder thread without locking would race the iteration.
+        // Lock on each buffer's monitor — same monitor used by the snapshot
+        // helpers above.
+        Double rmssd;
+        synchronized (rrWindow) {
+            if (p.rrMs != null) {
+                for (int rr : p.rrMs) rrWindow.addLast(new RrEntry(rr, now));
+            }
+            // Prune anything older than RR_WINDOW_MS
+            long cutoff = now - RR_WINDOW_MS;
+            Iterator<RrEntry> it = rrWindow.iterator();
+            while (it.hasNext()) {
+                if (it.next().timestampMs < cutoff) it.remove();
+                else break;
+            }
+            rmssd = computeRmssd(rrWindow);
         }
-        // Prune anything older than RR_WINDOW_MS
-        long cutoff = now - RR_WINDOW_MS;
-        Iterator<RrEntry> it = rrWindow.iterator();
-        while (it.hasNext()) {
-            if (it.next().timestampMs < cutoff) it.remove();
-            else break;
-        }
-        Double rmssd = computeRmssd(rrWindow);
 
         // Grow the overlay-chart buffers.
         // livePoints: per-RR instantaneous BPM, 45 s window.
-        if (p.rrMs != null) {
-            for (int rr : p.rrMs) {
-                if (rr > 0) {
-                    double instantBpm = 60000.0 / rr;
-                    liveBuffer.addLast(new double[] { now, instantBpm });
+        synchronized (liveBuffer) {
+            if (p.rrMs != null) {
+                for (int rr : p.rrMs) {
+                    if (rr > 0) {
+                        double instantBpm = 60000.0 / rr;
+                        liveBuffer.addLast(new double[] { now, instantBpm });
+                    }
                 }
             }
+            long liveCutoff = now - LIVE_WINDOW_MS;
+            while (!liveBuffer.isEmpty() && liveBuffer.peekFirst()[0] < liveCutoff) liveBuffer.pollFirst();
         }
-        long liveCutoff = now - LIVE_WINDOW_MS;
-        while (!liveBuffer.isEmpty() && liveBuffer.peekFirst()[0] < liveCutoff) liveBuffer.pollFirst();
 
         // trendHR / trendRmssd: per-tick HR + RMSSD, 3 min window.
-        trendHrBuffer.addLast(new double[] { now, p.hr });
-        if (rmssd != null) trendRmssdBuffer.addLast(new double[] { now, rmssd });
         long trendCutoff = now - TREND_WINDOW_MS;
-        while (!trendHrBuffer.isEmpty() && trendHrBuffer.peekFirst()[0] < trendCutoff) trendHrBuffer.pollFirst();
-        while (!trendRmssdBuffer.isEmpty() && trendRmssdBuffer.peekFirst()[0] < trendCutoff) trendRmssdBuffer.pollFirst();
+        synchronized (trendHrBuffer) {
+            trendHrBuffer.addLast(new double[] { now, p.hr });
+            while (!trendHrBuffer.isEmpty() && trendHrBuffer.peekFirst()[0] < trendCutoff) trendHrBuffer.pollFirst();
+        }
+        if (rmssd != null) {
+            synchronized (trendRmssdBuffer) {
+                trendRmssdBuffer.addLast(new double[] { now, rmssd });
+                while (!trendRmssdBuffer.isEmpty() && trendRmssdBuffer.peekFirst()[0] < trendCutoff) trendRmssdBuffer.pollFirst();
+            }
+        }
 
-        // CSV append (per-row flush ensures persistence under process kill)
-        if (csv != null) csv.appendHrRow(p.hr, rmssd != null ? rmssd : 0.0, now);
+        // CSV append (per-row flush ensures persistence under process kill).
+        // Snapshot the volatile field to a local so a concurrent stop on the
+        // main thread doesn't null csv between the check and the call.
+        NativeCsvWriter writer = csv;
+        if (writer != null) {
+            writer.appendHrRow(p.hr, rmssd != null ? rmssd : 0.0, now);
+            // Surface a csvError event the first time consecutive failures
+            // cross the threshold. Don't spam — only fire on the boundary.
+            int consec = writer.getConsecutiveFailures();
+            if (consec == CSV_FAIL_ALERT_THRESHOLD) {
+                JSObject err = new JSObject();
+                err.put("kind", "csv");
+                err.put("totalFailures", writer.getTotalFailures());
+                err.put("consecutiveFailures", consec);
+                notifyListeners("csvError", err);
+            }
+        }
 
         // Tick payload — minimal subset matching the wire shape overlay.html
         // expects. Trends + livePoints omitted; overlay falls back gracefully.
@@ -794,6 +945,40 @@ public class NativeHrSessionPlugin extends Plugin {
 
     // ---- Relay WebSocket --------------------------------------------------
 
+    // Reconnect backoff. Previous behaviour was a fixed 2-second delay with
+    // no jitter and no max-retry — a server outage hammered PartyKit at
+    // 0.5 Hz indefinitely and multiple devices behind the same outage all
+    // synchronised their reconnect attempts. Exponential backoff up to 60 s
+    // + ±25 % jitter spreads the load and gives the server room to recover.
+    private int relayReconnectAttempts = 0;
+    private static final long RELAY_RECONNECT_BASE_MS = 2_000L;
+    private static final long RELAY_RECONNECT_MAX_MS = 60_000L;
+    // After this many consecutive failures, surface the situation to JS so
+    // the UI can show "relay unreachable" instead of just sitting silent.
+    private static final int RELAY_RECONNECT_NOTIFY_AFTER = 10;
+
+    private long nextRelayBackoffMs() {
+        long base = Math.min(RELAY_RECONNECT_MAX_MS,
+                             RELAY_RECONNECT_BASE_MS * (1L << Math.min(relayReconnectAttempts, 5)));
+        // ±25 % jitter so devices don't sync up after a network partition.
+        double jitter = 1.0 + (Math.random() * 0.5 - 0.25);
+        return (long) (base * jitter);
+    }
+
+    private void scheduleRelayReconnect() {
+        if (!sessionActive.get()) return;
+        relayReconnectAttempts++;
+        long delay = nextRelayBackoffMs();
+        Log.i(TAG, "Relay reconnect scheduled in " + delay + "ms (attempt " + relayReconnectAttempts + ")");
+        if (relayReconnectAttempts == RELAY_RECONNECT_NOTIFY_AFTER) {
+            JSObject ev = new JSObject();
+            ev.put("kind", "relayUnreachable");
+            ev.put("attempts", relayReconnectAttempts);
+            notifyListeners("relayError", ev);
+        }
+        mainHandler.postDelayed(NativeHrSessionPlugin.this::openRelaySocket, delay);
+    }
+
     private void openRelaySocket() {
         if (broadcastKey == null) return;
         closeRelaySocket();
@@ -803,24 +988,20 @@ public class NativeHrSessionPlugin extends Plugin {
         relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
                 relayLive.set(true);
+                relayReconnectAttempts = 0;  // reset on successful open
                 Log.i(TAG, "Relay open");
                 emitState();
             }
             @Override public void onClosed(WebSocket ws, int code, String reason) {
                 relayLive.set(false);
                 emitState();
-                if (sessionActive.get()) {
-                    // Reconnect after a beat
-                    mainHandler.postDelayed(NativeHrSessionPlugin.this::openRelaySocket, 2000);
-                }
+                scheduleRelayReconnect();
             }
             @Override public void onFailure(WebSocket ws, Throwable t, Response r) {
                 relayLive.set(false);
                 Log.w(TAG, "Relay failure: " + (t != null ? t.getMessage() : "unknown"));
                 emitState();
-                if (sessionActive.get()) {
-                    mainHandler.postDelayed(NativeHrSessionPlugin.this::openRelaySocket, 2000);
-                }
+                scheduleRelayReconnect();
             }
             @Override public void onMessage(WebSocket ws, String text) { /* ignored */ }
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
@@ -944,10 +1125,19 @@ public class NativeHrSessionPlugin extends Plugin {
         relaySocket.send(sb.toString());
     }
 
+    // Snapshot the deque before iterating. ArrayDeque is not thread-safe;
+    // BLE callbacks (binder thread) addLast on liveBuffer / trendHrBuffer /
+    // trendRmssdBuffer at the same moment publishTick (main thread) walks
+    // them. Today the call chain happens to serialise, but a future caller
+    // off either thread would hit ConcurrentModificationException. Cheap
+    // toArray copy avoids the race for the lifetime of the iteration.
     private void appendLiveArray(StringBuilder sb, long nowMs) {
         sb.append(",\"livePoints\":[");
+        Object[] snap;
+        synchronized (liveBuffer) { snap = liveBuffer.toArray(); }
         boolean first = true;
-        for (double[] e : liveBuffer) {
+        for (Object o : snap) {
+            double[] e = (double[]) o;
             double xSec = (e[0] - sessionStartMs) / 1000.0;
             if (!first) sb.append(',');
             first = false;
@@ -959,8 +1149,11 @@ public class NativeHrSessionPlugin extends Plugin {
 
     private void appendTrendArray(StringBuilder sb, String name, Deque<double[]> buf) {
         sb.append(",\"").append(name).append("\":[");
+        Object[] snap;
+        synchronized (buf) { snap = buf.toArray(); }
         boolean first = true;
-        for (double[] e : buf) {
+        for (Object o : snap) {
+            double[] e = (double[]) o;
             double xMin = (e[0] - sessionStartMs) / 60000.0;
             if (!first) sb.append(',');
             first = false;

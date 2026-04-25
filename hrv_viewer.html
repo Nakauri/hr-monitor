@@ -3285,7 +3285,9 @@
     // hrv_session_2026-04-17T14-32-00.csv — filename timestamps come from
     // toISOString() in the writer, i.e. UTC. Append 'Z' so Date() parses as UTC,
     // then getHours()/getMinutes() give local time for display.
-    const m = fn.match(/^hrv_session_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})\.csv$/);
+    // Optional millisecond suffix `.NNN` tolerated for native writes that
+    // disambiguate quick stop+start collisions within the same second.
+    const m = fn.match(/^hrv_session_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(?:\.\d{3})?\.csv$/);
     if (m) {
       const date = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`);
       // Recompute isoDate + isoTime in the user's LOCAL timezone so session cards
@@ -3756,13 +3758,24 @@
     const hrVals = hr.map(p => p.v);
     const rmssdVals = rmssd.map(p => p.v);
 
-    // Max/min with timestamps
-    let maxHR = hr[0], minHR = hr[0];
-    for (const p of hr) { if (p.v > maxHR.v) maxHR = p; if (p.v < minHR.v) minHR = p; }
+    // Max/min with timestamps. Skip null gap-marker entries — without this,
+    // null < anyNumber returns true (null coerces to 0) so hrMin gets set to
+    // {v: null}, which downstream renders as "null bpm" in summary cards.
+    let maxHR = null, minHR = null;
+    for (const p of hr) {
+      if (p.v == null) continue;
+      if (maxHR == null || p.v > maxHR.v) maxHR = p;
+      if (minHR == null || p.v < minHR.v) minHR = p;
+    }
+    if (maxHR == null) maxHR = { t: 0, v: 0 };
+    if (minHR == null) minHR = { t: 0, v: 0 };
     let maxRM = null, minRM = null;
     if (rmssd.length) {
-      maxRM = rmssd[0]; minRM = rmssd[0];
-      for (const p of rmssd) { if (p.v > maxRM.v) maxRM = p; if (p.v < minRM.v) minRM = p; }
+      for (const p of rmssd) {
+        if (p.v == null) continue;
+        if (maxRM == null || p.v > maxRM.v) maxRM = p;
+        if (minRM == null || p.v < minRM.v) minRM = p;
+      }
     }
 
     // Palpitation clustering: consecutive palps within 0.5 min -> one cluster
@@ -4037,11 +4050,30 @@
     return summary;
   }
 
+  // LRU cache for parsed full-session data. Auto-poll re-renders + day-view
+  // rebuilds re-open the same files repeatedly; without a cache each open
+  // re-runs readSessionText (IDB get) + parseCSV (string split + float parse
+  // on a multi-MB CSV). For an overnight session that's 1-2 sec of main-
+  // thread work per re-open. Cap is small because parsed sessions are heavy
+  // (10-30 MB each in JS object form).
+  const _SESSION_CACHE_MAX = 8;
+  const _sessionCache = new Map(); // filename -> { hr, rmssd }
+  function _sessionCacheTouch(filename, value) {
+    if (_sessionCache.has(filename)) _sessionCache.delete(filename); // re-insert at tail
+    _sessionCache.set(filename, value);
+    while (_sessionCache.size > _SESSION_CACHE_MAX) {
+      const oldest = _sessionCache.keys().next().value;
+      _sessionCache.delete(oldest);
+    }
+    return value;
+  }
+
   // Full per-beat data (only loaded when rendering session view)
   async function loadFullSession(filename) {
     // Virtual day sessions are pre-built by buildDaySession() and cached in
     // virtualSessions; skip the CSV read path entirely for those.
     if (virtualSessions[filename]) return virtualSessions[filename].data;
+    if (_sessionCache.has(filename)) return _sessionCacheTouch(filename, _sessionCache.get(filename));
     const text = await readSessionText(filename);
     const { rows, header } = parseCSV(text);
     const idx = {};
@@ -4060,7 +4092,7 @@
       if (r[idx.hr_bpm] !== '') hr.push({ x: t, y: parseFloat(r[idx.hr_bpm]), ep });
       if (r[idx.rmssd_ms] !== '') rmssd.push({ x: t, y: parseFloat(r[idx.rmssd_ms]), ep });
     }
-    return { hr, rmssd };
+    return _sessionCacheTouch(filename, { hr, rmssd });
   }
 
   // Build a virtual "day session" that merges every session on a given date
@@ -4157,14 +4189,18 @@
     // convention consumed by renderSession).
     const hrVals = hr.map(p => p.y);
     const rmssdVals = rmssd.map(p => p.y);
+    // Skip null gap-marker points; null coerces to 0 in <comparisons and
+    // would silently set hrMin to {v: null}, rendering as "null bpm".
     let hrMax = { t: 0, v: 0 }, hrMin = { t: 0, v: Infinity };
     for (const p of hr) {
+      if (p.y == null) continue;
       if (p.y > hrMax.v) hrMax = { t: p.x, v: p.y };
       if (p.y < hrMin.v) hrMin = { t: p.x, v: p.y };
     }
     if (!isFinite(hrMin.v)) hrMin = { t: 0, v: 0 };
     let rmssdMax = { t: 0, v: 0 }, rmssdMin = { t: 0, v: Infinity };
     for (const p of rmssd) {
+      if (p.y == null) continue;
       if (p.y > rmssdMax.v) rmssdMax = { t: p.x, v: p.y };
       if (p.y < rmssdMin.v) rmssdMin = { t: p.x, v: p.y };
     }
@@ -5050,6 +5086,18 @@
     }
   }
 
+  // Destroy any existing Chart.js instance bound to the canvas before
+  // creating a new one. Without this, every renderAll / drawDaySparkline
+  // re-render leaks the previous Chart in Chart.instances and its callbacks
+  // keep firing on resize. Use for any chart that gets re-created on the
+  // SAME canvas (the main session chart + context chart already do this
+  // explicitly via currentChart.destroy()).
+  function freshChart(canvas, config) {
+    if (!canvas) return null;
+    try { Chart.getChart(canvas)?.destroy(); } catch (e) {}
+    return new Chart(canvas.getContext('2d'), config);
+  }
+
   async function drawDaySparkline(canvas, files, morningHR) {
     // Build a single-day 24-hr HR trace by stitching all sessions' HR series
     // (downsampled) on a shared 24-hr x-axis. Fast-read only - uses cached summaries
@@ -5075,7 +5123,7 @@
     points.sort((a, b) => a.x - b.x);
     const hrStage = getHRStage(morningHR);
     const color = STAGE_COLORS[hrStage];
-    new Chart(canvas.getContext('2d'), {
+    freshChart(canvas, {
       type: 'line',
       data: { datasets: [{ data: points, borderColor: color, backgroundColor: color + '20', tension: 0, pointRadius: 0, borderWidth: 1.2, fill: true }] },
       options: {
@@ -5217,7 +5265,7 @@
     });
 
     // Avg HR + Resting baseline (two lines)
-    new Chart(document.getElementById('all-morning-hr').getContext('2d'), {
+    freshChart(document.getElementById('all-morning-hr'), {
       type: 'line',
       data: { datasets: [
         { label: 'Avg HR', data: hrAvgAgg, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.08)', tension: 0, pointRadius: 2, borderWidth: 1.5, fill: true },
@@ -5234,7 +5282,7 @@
     });
 
     // Rolling RMSSD
-    new Chart(document.getElementById('all-rmssd-roll').getContext('2d'), {
+    freshChart(document.getElementById('all-rmssd-roll'), {
       type: 'line',
       data: { datasets: [
         { label: granLabel, data: rmssdAgg, borderColor: 'rgba(93,202,165,0.35)', backgroundColor: 'transparent', tension: 0, pointRadius: 1.5, borderWidth: 1 },
@@ -5251,7 +5299,7 @@
     });
 
     // Warnings bar
-    new Chart(document.getElementById('all-warn-bar').getContext('2d'), {
+    freshChart(document.getElementById('all-warn-bar'), {
       type: 'bar',
       data: { labels: warnAgg.map(w => w.x), datasets: [{ label: 'Warnings', data: warnAgg.map(w => w.y), backgroundColor: warnAgg.map(w => w.y > 0 ? '#BA7517' : '#2a2a2a'), borderWidth: 0 }] },
       options: {
@@ -5265,7 +5313,7 @@
     });
 
     // Palpitations by hour of day (polar bar)
-    new Chart(document.getElementById('all-palp-hour').getContext('2d'), {
+    freshChart(document.getElementById('all-palp-hour'), {
       type: 'polarArea',
       data: {
         labels: Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')),
@@ -5281,7 +5329,7 @@
     });
 
     // Sympathetic-stress % (avg per bucket of the 'high-low' quadrant)
-    new Chart(document.getElementById('all-sympathetic').getContext('2d'), {
+    freshChart(document.getElementById('all-sympathetic'), {
       type: 'bar',
       data: {
         labels: sympAgg.map(p => p.x),
@@ -5298,7 +5346,7 @@
     });
 
     // Autonomic events (stacked)
-    new Chart(document.getElementById('all-auto-events').getContext('2d'), {
+    freshChart(document.getElementById('all-auto-events'), {
       type: 'bar',
       data: {
         labels: bucketKeysUnion,
@@ -5873,7 +5921,16 @@
   // "High RMSSD" = above the session median.
   function detectSleepWindows(s, hrSeries, rmssdSeries) {
     if (!hrSeries || !hrSeries.length || !rmssdSeries || !rmssdSeries.length) return [];
-    const restBase = s.restingHR || Math.min(...hrSeries.map(p => p.v));
+    // Math.min(...arr.map(...)) on a long-session series spreads thousands of
+    // arguments per call. Manual reduction is allocation-free and skips the
+    // null gap markers that would otherwise coerce to 0 and corrupt restBase.
+    let computedMin = Infinity;
+    for (const p of hrSeries) {
+      const v = p.v;
+      if (v == null || isNaN(v)) continue;
+      if (v < computedMin) computedMin = v;
+    }
+    const restBase = s.restingHR || (isFinite(computedMin) ? computedMin : 0);
     const rmssdVals = rmssdSeries.map(p => p.v).sort((a, b) => a - b);
     const rmssdMedian = rmssdVals[Math.floor(rmssdVals.length / 2)];
     // Walk samples; a sample "looks like sleep" if HR <= restBase+5 AND RMSSD >= median.
@@ -7692,7 +7749,15 @@
     });
   }
 
+  // Module-scope handle so each wireBrush call disconnects the previous
+  // ResizeObserver before creating a new one. Without this, every session
+  // open leaks an observer (callback keeps firing on every resize forever).
+  let _brushResizeObserver = null;
   function wireBrush(s) {
+    if (_brushResizeObserver) {
+      try { _brushResizeObserver.disconnect(); } catch (e) {}
+      _brushResizeObserver = null;
+    }
     const overlay = document.getElementById('context-overlay');
     const brush = document.getElementById('context-brush');
     const duration = s.duration;
@@ -7740,8 +7805,8 @@
     // panels expand/collapse — positions are pixel-based off overlay.clientWidth
     // so any width change invalidates them.
     if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => renderBrush());
-      ro.observe(overlay);
+      _brushResizeObserver = new ResizeObserver(() => renderBrush());
+      _brushResizeObserver.observe(overlay);
     }
 
     // Pointer events unify mouse + touch — mouse-only handlers before this

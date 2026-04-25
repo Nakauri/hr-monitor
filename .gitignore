@@ -72,6 +72,7 @@ CLAUDE.md
 TODO.md
 docs/MOBILE_LAUNCH_PLAN.md
 docs/baseline_thresholds_plan.md
+docs/autonomic_events_research.md
 
 # Organised local-only directories created during the rebrand cleanup.
 # backups/ holds the pre-rebrand HTML snapshots (diff / revert source).
