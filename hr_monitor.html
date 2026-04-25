@@ -4211,6 +4211,10 @@
   function updateAutoSaveUI() {
     const nameEl = $('autosave-folder-name');
     const toggleBtn = $('autosave-toggle');
+    // Native plugin owns CSV writing on Capacitor — surface that so the user
+    // doesn't expect their picked folder to receive copies (it won't, to
+    // avoid duplicate storage on the phone).
+    const nativeOwnsCsv = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable);
     if (autoSaveDirHandle) {
       nameEl.textContent = autoSaveDirHandle.name || 'selected';
       if (toggleBtn) {
@@ -4218,12 +4222,19 @@
         toggleBtn.setAttribute('data-state', 'set');
         toggleBtn.title = 'Clear the auto-save folder';
       }
+      if (nativeOwnsCsv) {
+        setAutoSaveStatus('native handles CSV — folder unused on this device', '');
+      }
     } else {
-      nameEl.textContent = 'Tap to pick a folder';
+      nameEl.textContent = nativeOwnsCsv
+        ? 'Not needed — native handles CSV'
+        : 'Tap to pick a folder';
       if (toggleBtn) {
         toggleBtn.classList.remove('has-folder');
         toggleBtn.setAttribute('data-state', 'unset');
-        toggleBtn.title = 'Choose a folder to auto-save sessions';
+        toggleBtn.title = nativeOwnsCsv
+          ? 'On Android the native recorder writes the session CSV directly + uploads to Drive — no folder needed.'
+          : 'Choose a folder to auto-save sessions';
       }
       setAutoSaveStatus('', '');
     }
@@ -4282,8 +4293,19 @@
   const AUTOSAVE_FAIL_GIVEUP = 3;
   async function writeAutoSave() {
     if (!autoSaveFileHandle && !driveAccessToken) return;
+    // When the native plugin is publishing (Capacitor only), it writes the
+    // CSV per-HR-notification straight to disk in app-private storage AND
+    // uploads to Drive. The JS-side autosave would write the SAME data to
+    // the user's picked folder — duplicate storage, plus the JS copy is
+    // lower quality (state drifts from native during pause/dropout cycles).
+    // Skip the JS-side local write in that case; the user gets the
+    // authoritative copy on Drive and can pull it back to any device. Same
+    // gate already protects the Drive upload below.
+    const nativeDriveActive = !!(window.HRMNativeHrSession
+        && window.HRMNativeHrSession.isPublishing
+        && window.HRMNativeHrSession.isPublishing());
     const { csv, filename } = buildSessionCSV();
-    if (autoSaveFileHandle) {
+    if (autoSaveFileHandle && !nativeDriveActive) {
       try {
         const writable = await autoSaveFileHandle.createWritable();
         await writable.write(csv);
@@ -4303,14 +4325,9 @@
       }
     }
     // Dual-save to Drive if signed in. Fires in parallel with the local write.
-    // BUT: skip on Capacitor when the native uploader is running — otherwise
-    // we end up with two files per session on Drive (one JS, one native),
-    // same session, divergent stats (JS state drifts from native during
-    // visibility pauses / event drops on resume). Native is authoritative;
-    // it writes per-HR-notification directly to disk.
-    const nativeDriveActive = !!(window.HRMNativeHrSession
-        && window.HRMNativeHrSession.isPublishing
-        && window.HRMNativeHrSession.isPublishing());
+    // Same `nativeDriveActive` gate as the local autosave above — when native
+    // is publishing it owns both the CSV write and the Drive upload, JS would
+    // produce a duplicate-and-lower-quality copy. Native is authoritative.
     if (driveAccessToken && driveFolderId && !nativeDriveActive) {
       driveUploadSession(filename, csv);
     }
