@@ -110,8 +110,13 @@
 
   NativeRelayWebSocket.prototype.send = function(data) {
     if (this.readyState !== 1) {
-      // Match browser behaviour: throw if not OPEN.
-      throw new Error('InvalidStateError: WebSocket not open');
+      // Match the native plugin's contract: drop silently when not OPEN.
+      // Previous JS-shim threw on closed sockets which surfaced as
+      // unhandled promise rejections in relay code that expects fire-and-
+      // forget semantics. Native side returns { queued: false } in the
+      // same situation; keeping both consistent removes one drift surface.
+      console.debug('[native-relay-socket] send dropped — readyState=' + this.readyState);
+      return;
     }
     const text = typeof data === 'string' ? data : (data && typeof data === 'object' ? JSON.stringify(data) : String(data));
     plugin.send({ text: text }).catch(function(e) {

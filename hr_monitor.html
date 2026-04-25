@@ -2111,10 +2111,21 @@
       $('min-hr').textContent = '—';
       return;
     }
-    const hrs = state.hrSeries.map(p => p.v);
-    $('avg-hr').textContent = Math.round(hrs.reduce((a,b) => a+b, 0) / hrs.length);
-    $('max-hr').textContent = Math.max(...hrs);
-    $('min-hr').textContent = Math.min(...hrs);
+    // Math.max/min(...arr) spreads a 5000-element array as call arguments —
+    // both wasteful (allocates an arguments array per call) and risks engine
+    // limits at very large series. reduce is O(n) without the spread overhead.
+    let maxH = -Infinity, minH = Infinity, sumH = 0, nH = 0;
+    for (const p of state.hrSeries) {
+      const v = p.v;
+      if (v == null || isNaN(v)) continue;
+      if (v > maxH) maxH = v;
+      if (v < minH) minH = v;
+      sumH += v;
+      nH++;
+    }
+    $('avg-hr').textContent = nH ? Math.round(sumH / nH) : '—';
+    $('max-hr').textContent = nH ? maxH : '—';
+    $('min-hr').textContent = nH ? minH : '—';
     if (state.rmssdSeries.length > 0) {
       const rmssds = state.rmssdSeries.map(p => p.v);
       $('avg-rmssd').textContent = Math.round(rmssds.reduce((a,b) => a+b, 0) / rmssds.length);
@@ -2772,7 +2783,25 @@
   // - listening: WS open, not a publisher (broadcast off or no Web Bluetooth)
   // - ready: publisher configured but strap isn't currently streaming
   // - live: publisher + strap streaming HR right now
+  // When the native plugin owns the relay socket (Capacitor), the JS-side
+  // socket is just for receiving presence messages from other devices.
+  // It can fall to "error" after a long sleep while the native socket
+  // reconnects fine and keeps publishing — pill should reflect what's
+  // actually going to the relay, not the JS-side observer.
+  let _nativeRelayLive = null;  // null = no signal; bool = latest state event
   function refreshRelayStatus() {
+    const nativePub = !!(window.HRMNativeHrSession
+        && window.HRMNativeHrSession.isPublishing
+        && window.HRMNativeHrSession.isPublishing());
+    if (nativePub && _nativeRelayLive !== null) {
+      // Native plugin is the source of truth on Capacitor.
+      if (_nativeRelayLive) {
+        setStreamingStatus(state.connState === 'live' ? 'live' : 'ready');
+      } else {
+        setStreamingStatus('connecting');
+      }
+      return;
+    }
     if (!relaySocket) { setStreamingStatus('offline'); return; }
     if (relaySocket.readyState === WebSocket.CONNECTING) { setStreamingStatus('connecting'); return; }
     if (relaySocket.readyState !== WebSocket.OPEN) { setStreamingStatus('offline'); return; }
@@ -3160,8 +3189,30 @@
   // The native plugin's publishTick (Android) MUST emit the same fields.
   // When adding or renaming a field, update all three: this function,
   // NativeHrSessionPlugin.publishTick, and overlay.html's handleTick.
+  // Throttle floor: don't send relay ticks more often than this. Some
+  // straps deliver per-RR ticks at 4 Hz on a fast HR; without a floor
+  // we hammer the relay (and the overlay's render loop) at 4× the
+  // necessary rate. 250 ms still feels real-time to the eye.
+  let _lastBroadcastTickMs = 0;
+  let _broadcastTickPending = null;
+  const BROADCAST_TICK_MIN_MS = 250;
   function broadcastTick() {
     if (!overlayChannel) return;
+    const now = Date.now();
+    const elapsed = now - _lastBroadcastTickMs;
+    if (elapsed < BROADCAST_TICK_MIN_MS) {
+      // Coalesce — schedule the latest state to fire on the next gate
+      // boundary instead of firing immediately. Subsequent calls within
+      // the same gate window collapse into a single trailing tick.
+      if (_broadcastTickPending == null) {
+        _broadcastTickPending = setTimeout(() => {
+          _broadcastTickPending = null;
+          broadcastTick();
+        }, BROADCAST_TICK_MIN_MS - elapsed);
+      }
+      return;
+    }
+    _lastBroadcastTickMs = now;
     const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;
     // Prepare live HR trace points for the overlay's mini chart (45-sec window)
     let livePoints = [];
@@ -3515,6 +3566,19 @@
         // Web-BLE-style contactSupported/contactDetected pair.
         processHRData(d.hr || 0, rrs, true, !d.contactOff);
       });
+      // Listen for native plugin state events so the relay-status pill
+      // reflects what's actually going to the relay (native socket), not
+      // the JS-side observer socket. Without this the pill shows "error"
+      // after a long sleep even though native is happily publishing.
+      if (typeof window.HRMNativeHrSession.onState === 'function') {
+        window.HRMNativeHrSession.onState(function (s) {
+          if (!s) return;
+          if (typeof s.relay === 'boolean') {
+            _nativeRelayLive = s.relay;
+            try { refreshRelayStatus(); } catch (e) {}
+          }
+        });
+      }
       if (window.HRMLog) window.HRMLog.event('native-hr handler attached');
       return true;
     } catch (e) {
@@ -4162,6 +4226,10 @@
     writeAutoSave();
   }
 
+  // Track consecutive autosave failures so a single transient FS error doesn't
+  // tear down the whole interval. Reset on every success.
+  let autoSaveFailStreak = 0;
+  const AUTOSAVE_FAIL_GIVEUP = 3;
   async function writeAutoSave() {
     if (!autoSaveFileHandle && !driveAccessToken) return;
     const { csv, filename } = buildSessionCSV();
@@ -4170,11 +4238,18 @@
         const writable = await autoSaveFileHandle.createWritable();
         await writable.write(csv);
         await writable.close();
+        autoSaveFailStreak = 0;
       } catch (e) {
-        console.error('Auto-save write failed:', e);
-        setAutoSaveStatus('write error', 'error');
-        autoSaveFileHandle = null;
-        if (autoSaveInterval && !driveAccessToken) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+        autoSaveFailStreak++;
+        console.error('Auto-save write failed (streak=' + autoSaveFailStreak + '):', e);
+        setAutoSaveStatus('write error (' + autoSaveFailStreak + '/' + AUTOSAVE_FAIL_GIVEUP + ')', 'error');
+        // Give up only after N consecutive failures, not the first one. A
+        // transient FS error (file locked by reader, brief permission blip)
+        // shouldn't kill the autosave for the rest of the session.
+        if (autoSaveFailStreak >= AUTOSAVE_FAIL_GIVEUP) {
+          autoSaveFileHandle = null;
+          if (autoSaveInterval && !driveAccessToken) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+        }
       }
     }
     // Dual-save to Drive if signed in. Fires in parallel with the local write.
@@ -4448,18 +4523,25 @@
             },
             body,
           });
+          if (!resp.ok) throw new Error('Drive create HTTP ' + resp.status);
           const data = await resp.json();
           driveFileIdForSession = data.id;
         } else {
-          // PATCH the existing file's contents
-          await fetch('https://www.googleapis.com/upload/drive/v3/files/' + driveFileIdForSession + '?uploadType=media', {
+          // PATCH the existing file's contents. Previously this didn't check
+          // resp.ok — 401/403/5xx silently passed and the user saw nothing
+          // until they noticed the Drive copy hadn't been touched in hours.
+          const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + driveFileIdForSession + '?uploadType=media', {
             method: 'PATCH',
             headers: { 'Authorization': await driveAuthHeader(), 'Content-Type': 'text/csv' },
             body: csvText,
           });
+          if (!resp.ok) throw new Error('Drive patch HTTP ' + resp.status);
         }
+        // Surface success — clears any prior 'Drive error' status.
+        if (typeof setAutoSaveStatus === 'function') setAutoSaveStatus('synced', 'ok');
       } catch (e) {
         console.error('Drive upload failed:', e);
+        if (typeof setAutoSaveStatus === 'function') setAutoSaveStatus('drive error: ' + (e.message || e), 'error');
       } finally {
         driveUploadInFlight = null;
       }

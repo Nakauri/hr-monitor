@@ -47,7 +47,11 @@ public class NativeCsvWriter {
         // for the authoritative session start. Keeping it local-time is
         // backward-compatible with every Android session the user has
         // already recorded; the viewer handles the ambiguity centrally.
-        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss", Locale.US);
+        // Millisecond suffix prevents collision when the user does a quick
+        // stop+start within the same second; without it the new FileWriter
+        // would truncate the previous session's CSV. Viewer's filename regex
+        // tolerates the optional `.NNN` suffix.
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss.SSS", Locale.US);
         fmt.setTimeZone(TimeZone.getDefault());
         String filename = "hrv_session_" + fmt.format(new Date(sessionStartMs)) + ".csv";
         this.file = new File(dir, filename);
@@ -57,6 +61,14 @@ public class NativeCsvWriter {
         writer.flush();
         Log.i(TAG, "Opened: " + file.getAbsolutePath());
     }
+
+    // Track consecutive write failures. Resets on every successful write.
+    // Total session-failure count survives so callers can surface "this
+    // session lost N rows" diagnostics. Public so the plugin can read it.
+    private int consecutiveFailures = 0;
+    private int totalFailures = 0;
+    public int getConsecutiveFailures() { return consecutiveFailures; }
+    public int getTotalFailures() { return totalFailures; }
 
     public synchronized void appendHrRow(int hr, double rmssd, long timestampMs) {
         if (writer == null) return;
@@ -69,8 +81,11 @@ public class NativeCsvWriter {
             // Flush every row — small files, low cost, ensures data is on
             // disk if the process gets killed mid-session.
             writer.flush();
+            consecutiveFailures = 0;
         } catch (IOException e) {
-            Log.w(TAG, "appendHrRow failed: " + e.getMessage());
+            consecutiveFailures++;
+            totalFailures++;
+            Log.w(TAG, "appendHrRow failed (consec=" + consecutiveFailures + " total=" + totalFailures + "): " + e.getMessage());
         }
     }
 
@@ -83,8 +98,11 @@ public class NativeCsvWriter {
                 tMin, timestampMs, connState));
             writer.newLine();
             writer.flush();
+            consecutiveFailures = 0;
         } catch (IOException e) {
-            Log.w(TAG, "appendConnectionRow failed: " + e.getMessage());
+            consecutiveFailures++;
+            totalFailures++;
+            Log.w(TAG, "appendConnectionRow failed (consec=" + consecutiveFailures + " total=" + totalFailures + "): " + e.getMessage());
         }
     }
 

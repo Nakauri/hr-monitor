@@ -206,7 +206,10 @@
         if (et) lastETag = et;
       } catch (e) { /* network blip — try again next tick */ }
     }
-    setTimeout(checkForOverlayUpdate, 30 * 1000);
+    // 5-minute interval is enough — earlier code also had a one-shot 30 s
+    // setTimeout for "fast first check" but it just doubled up the cadence
+    // for no real benefit. The first interval tick fires 5 min after
+    // load, which is fine for a long-lived OBS source.
     setInterval(checkForOverlayUpdate, 5 * 60 * 1000);
   }
 

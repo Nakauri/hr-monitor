@@ -478,7 +478,7 @@
         <div class="hrm-diag-subtitle">Auth trace (newest last)</div>
         <pre class="hrm-diag-log" id="hrm-auth-trace"></pre>
         <div class="hrm-diag-subtitle">Recent events (newest last)</div>
-        <pre class="hrm-diag-log">${esc(formatLog(readLog()))}</pre>
+        <pre class="hrm-diag-log" id="hrm-events-log">${esc(formatLog(readLog()))}</pre>
         <div class="hrm-diag-actions">
           <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
           <button id="hrm-diag-clearlog">Clear events</button>
@@ -525,9 +525,17 @@
     const clearBtn = document.getElementById('hrm-diag-clearlog');
     if (clearBtn) {
       clearBtn.addEventListener('click', () => {
+        // Clear BOTH event stores. The previous handler called writeLog([])
+        // (which only clears hrm_log_v1) plus document.querySelector('.hrm-diag-log')
+        // — which returns the FIRST .hrm-diag-log node (the auth pane), so the
+        // events pane stayed visually full while the auth pane went blank.
+        // hrm_auth_trace localStorage was never cleared by anything.
         writeLog([]);
-        const pane = document.querySelector('.hrm-diag-log');
-        if (pane) pane.textContent = '';
+        try { localStorage.removeItem('hrm_auth_trace'); } catch (e) {}
+        const eventsPane = document.getElementById('hrm-events-log');
+        if (eventsPane) eventsPane.textContent = '';
+        const tracePane = document.getElementById('hrm-auth-trace');
+        if (tracePane) tracePane.textContent = 'no auth events yet';
       });
     }
     const clearAuthBtn = document.getElementById('hrm-diag-clearauth');
@@ -538,6 +546,11 @@
           if (window.aortiAuth) await window.aortiAuth.signOut({ local: true, remote: false });
         } catch (e) { /* ignore */ }
         try { localStorage.removeItem('hr_monitor_drive_token'); } catch (e) {}
+        // Also clear the auth trace — otherwise stale auth events from the
+        // pre-signout state stick around and confuse subsequent debugging.
+        try { localStorage.removeItem('hrm_auth_trace'); } catch (e) {}
+        const tracePane = document.getElementById('hrm-auth-trace');
+        if (tracePane) tracePane.textContent = 'no auth events yet';
         clearAuthBtn.textContent = 'Cleared — reload page';
         clearAuthBtn.disabled = true;
       });

@@ -88,6 +88,16 @@ public final class AuthStorage {
      * Synchronous: must be invoked from a background thread.
      */
     public static synchronized String getValidAccessToken(Context ctx) {
+        return getValidAccessToken(ctx, false);
+    }
+
+    /**
+     * Same as the no-arg variant but with a forceRefresh flag. When true,
+     * skip the cached-access-token path and refresh unconditionally. Used
+     * by callers that hit a 401 with the cached token (race between expiry
+     * check and the actual API call landing).
+     */
+    public static synchronized String getValidAccessToken(Context ctx, boolean forceRefresh) {
         try {
             SharedPreferences p = prefs(ctx);
             String accessCt = p.getString(PREF_ACCESS, null);
@@ -95,7 +105,7 @@ public final class AuthStorage {
             long expiresAt = p.getLong(PREF_EXPIRES_AT, 0);
             SecretKey key = getKey();
             if (key == null || refreshCt == null) return null;
-            if (accessCt != null && System.currentTimeMillis() < expiresAt - REFRESH_THRESHOLD_MS) {
+            if (!forceRefresh && accessCt != null && System.currentTimeMillis() < expiresAt - REFRESH_THRESHOLD_MS) {
                 return decrypt(key, accessCt);
             }
             String refreshToken = decrypt(key, refreshCt);
