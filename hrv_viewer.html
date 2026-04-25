@@ -929,7 +929,11 @@
   /* WEEK VIEW */
   .week-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    /* minmax(0, 1fr) — without the explicit min:0 the implicit min:auto
+       lets a track grow beyond 1/7 of the container when its content
+       (e.g. the big-number HR + tabular-nums label) is wide, which
+       pushes the whole grid past the viewport edge. */
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 12px;
   }
   .week-col {
@@ -2350,7 +2354,7 @@
     .cal-session-count { display: none; }
     .cal-badges { display: none; }
     .cal-dow { font-size: 9px; padding: 4px 0; letter-spacing: 0.08em; }
-    .week-grid { grid-template-columns: 1fr 1fr; }
+    .week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tags-inline { width: 100%; margin-left: 0; }
     .chart-legend { font-size: 10px; gap: 10px; }
     input, select, textarea { font-size: 16px !important; }
@@ -5933,9 +5937,11 @@
       setTimelineMode(timelineMode === 'clock' ? 'duration' : 'clock');
       refresh();
       // Swap the tick label function in place — same linear scale, just
-      // different labels — so we don't reset brush / zoom state.
+      // different labels — so we don't reset brush / zoom state. Prefer
+      // s.startEpoch over filename for clock-time correctness on Android.
       if (currentChart && currentChart.options && currentChart.options.scales && currentChart.options.scales.x) {
         const startEpoch = (() => {
+          if (currentSummary && currentSummary.startEpoch) return currentSummary.startEpoch;
           const m = parseSessionFilename(currentFilename);
           return m && m.date ? m.date.getTime() : null;
         })();
@@ -7454,10 +7460,13 @@
     const hr = downsample(data.hr, 2000);
     const rmssd = downsample(data.rmssd, 2000);
     // Session start epoch — lets the x-axis flip between MM:SS duration and
-    // absolute wall-clock time. Null if filename doesn't parse (e.g. virtual
-    // day rows), in which case clock-mode falls back to duration ticks.
+    // absolute wall-clock time. Prefer the CSV's epoch_ms column (s.startEpoch)
+    // since the filename string is UTC for web-recorded sessions but LOCAL
+    // for native Android — parsing it as UTC adds a timezone offset to every
+    // clock-time tick. Falls back to filename only when there's no epoch_ms.
     const sessionMeta = parseSessionFilename(currentFilename);
-    const sessionStartEpoch = sessionMeta && sessionMeta.date ? sessionMeta.date.getTime() : null;
+    const sessionStartEpochMs = (s && s.startEpoch)
+      || (sessionMeta && sessionMeta.date ? sessionMeta.date.getTime() : null);
 
     // Palpitation cluster dots (one dot per cluster, sized by count)
     const palpDots = activeFilters.palp ? s.palpClusters.map(c => {
@@ -7774,7 +7783,7 @@
             type: 'linear',
             min: brushMin !== null ? brushMin : 0,
             max: brushMax !== null ? brushMax : s.duration,
-            ticks: { color: '#9a9a9a', font: { size: 12 }, callback: makeTimeTickFormatter(sessionStartEpoch) },
+            ticks: { color: '#9a9a9a', font: { size: 12 }, callback: makeTimeTickFormatter(sessionStartEpochMs) },
             grid: { color: 'rgba(255,255,255,0.04)' },
           },
           y: {
