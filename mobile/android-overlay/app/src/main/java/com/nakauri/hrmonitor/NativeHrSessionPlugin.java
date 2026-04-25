@@ -252,19 +252,14 @@ public class NativeHrSessionPlugin extends Plugin {
                     obj.put("bonded", false);
                     arr.put(obj);
                 }
-                // Add bonded HR-likely devices that the live scan missed.
-                // Strap stops advertising while connected to another app, so
-                // without this the user can't pick a strap that's in use elsewhere.
+                // Bonded BLE fallback: strap doesn't advertise while connected
+                // to another app, so include every bonded LE device the scan missed.
                 try {
                     for (BluetoothDevice b : adapter.getBondedDevices()) {
                         if (seen.contains(b.getAddress())) continue;
+                        int type = b.getType();
+                        if (type == BluetoothDevice.DEVICE_TYPE_CLASSIC) continue;
                         String n = b.getName();
-                        boolean looksHr = n != null && (n.contains("H808")
-                            || n.toLowerCase(java.util.Locale.US).contains("hr")
-                            || n.toLowerCase(java.util.Locale.US).contains("polar")
-                            || n.toLowerCase(java.util.Locale.US).contains("coospo")
-                            || n.toLowerCase(java.util.Locale.US).contains("wahoo"));
-                        if (!looksHr) continue;
                         JSObject obj = new JSObject();
                         obj.put("mac", b.getAddress());
                         obj.put("name", n != null ? n : b.getAddress());
@@ -955,16 +950,17 @@ public class NativeHrSessionPlugin extends Plugin {
     }
 
     private void updateNativeForegroundService(String title, String body) {
+        // Direct NotificationManager.notify avoids the FGS-contract crash
+        // that startForegroundService() triggers if the service is mid-stop.
+        if (!sessionActive.get()) return;
         try {
-            Intent i = new Intent(getContext(), NativeHrService.class);
-            i.setAction(NativeHrService.ACTION_START);
-            i.putExtra(NativeHrService.EXTRA_TITLE, title);
-            i.putExtra(NativeHrService.EXTRA_BODY, body);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                getContext().startForegroundService(i);
-            } else {
-                getContext().startService(i);
-            }
+            android.content.Context ctx = getContext();
+            NativeHrService.ensureChannelStatic(ctx);
+            android.app.NotificationManager nm = (android.app.NotificationManager)
+                ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            android.app.Notification n = NativeHrService.buildNotificationStatic(ctx, title, body);
+            nm.notify(NativeHrService.getNotificationId(), n);
         } catch (Throwable t) { /* non-fatal */ }
     }
 
