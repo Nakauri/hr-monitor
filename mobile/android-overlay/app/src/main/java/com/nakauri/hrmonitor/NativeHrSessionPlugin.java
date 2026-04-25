@@ -137,6 +137,8 @@ public class NativeHrSessionPlugin extends Plugin {
     private OkHttpClient httpClient;
     private WebSocket relaySocket;
     private final AtomicBoolean relayLive = new AtomicBoolean(false);
+    // User toggle. When false, no relay socket is opened and publishTick is a no-op.
+    private volatile boolean broadcastEnabled = true;
 
     private long lastNotifUpdateMs = 0;
     private volatile String prefsJson = null;
@@ -176,9 +178,10 @@ public class NativeHrSessionPlugin extends Plugin {
             if (cm == null) return;
             networkCallback = new android.net.ConnectivityManager.NetworkCallback() {
                 @Override public void onAvailable(android.net.Network network) {
-                    if (lastActiveNetwork != null && !network.equals(lastActiveNetwork) && sessionActive.get()) {
+                    if (lastActiveNetwork != null && !network.equals(lastActiveNetwork)
+                            && sessionActive.get() && broadcastEnabled) {
                         Log.i(TAG, "Network changed — forcing relay reconnect");
-                        relayReconnectAttempts = 0;  // reset so backoff doesn't punish a real transition
+                        relayReconnectAttempts = 0;
                         mainHandler.post(() -> {
                             try { closeRelaySocket(); } catch (Throwable ignored) {}
                             try { openRelaySocket(); } catch (Throwable ignored) {}
@@ -381,10 +384,10 @@ public class NativeHrSessionPlugin extends Plugin {
         broadcastKey = call.getString("broadcastKey");
         senderId = call.getString("senderId", "android");
         senderLabel = call.getString("senderLabel", "HR Monitor Android");
-        if (broadcastKey == null || broadcastKey.isEmpty()) {
-            call.reject("broadcastKey required");
-            return;
-        }
+        Boolean broadcastOpt = call.getBoolean("broadcast");
+        broadcastEnabled = (broadcastOpt == null) ? true : broadcastOpt;
+        // Relay needs a broadcastKey; offline mode runs without one.
+        boolean canBroadcast = broadcastEnabled && broadcastKey != null && !broadcastKey.isEmpty();
         sessionStartMs = System.currentTimeMillis();
         synchronized (rrWindow) { rrWindow.clear(); }
         synchronized (liveBuffer) { liveBuffer.clear(); }
@@ -414,8 +417,7 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         } catch (Throwable t) { /* never block session start */ }
 
-        // Relay WebSocket
-        openRelaySocket();
+        if (canBroadcast) openRelaySocket();
 
         // Start our own foreground service so Android keeps the process
         // alive + BLE callbacks firing while backgrounded. Replaces the
@@ -477,6 +479,26 @@ public class NativeHrSessionPlugin extends Plugin {
     public void setPrefs(PluginCall call) {
         JSObject p = call.getObject("prefs");
         prefsJson = p != null ? p.toString() : null;
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setBroadcast(PluginCall call) {
+        Boolean enabled = call.getBoolean("enabled");
+        if (enabled == null) { call.reject("enabled required"); return; }
+        boolean prev = broadcastEnabled;
+        broadcastEnabled = enabled;
+        if (sessionActive.get() && enabled != prev) {
+            mainHandler.post(() -> {
+                if (enabled && broadcastKey != null && !broadcastKey.isEmpty()) {
+                    try { openRelaySocket(); } catch (Throwable ignored) {}
+                } else {
+                    try { closeRelaySocket(); } catch (Throwable ignored) {}
+                    relayLive.set(false);
+                    emitState();
+                }
+            });
+        }
         call.resolve();
     }
 
@@ -1078,7 +1100,7 @@ public class NativeHrSessionPlugin extends Plugin {
     }
 
     private void scheduleRelayReconnect() {
-        if (!sessionActive.get()) return;
+        if (!sessionActive.get() || !broadcastEnabled) return;
         relayReconnectAttempts++;
         long delay = nextRelayBackoffMs();
         Log.i(TAG, "Relay reconnect scheduled in " + delay + "ms (attempt " + relayReconnectAttempts + ")");
@@ -1175,6 +1197,7 @@ public class NativeHrSessionPlugin extends Plugin {
      * hr_monitor.html broadcastTick, and overlay.html handleTick.
      */
     private void publishTick(int hr, Double rmssd, boolean contactOff, long nowMs) {
+        if (!broadcastEnabled) return;
         if (relaySocket == null || !relayLive.get()) return;
         double tMin = Math.max(0, nowMs - sessionStartMs) / 60_000.0;
         // Construct minimal JSON manually — avoids extra dep on org.json

@@ -83,6 +83,10 @@
       setPrefs: function (prefs) {
         return plugin.setPrefs({ prefs: prefs || {} });
       },
+      setBroadcast: function (enabled) {
+        if (typeof plugin.setBroadcast !== 'function') return Promise.resolve();
+        return plugin.setBroadcast({ enabled: !!enabled });
+      },
       setStageThresholds: function (t) {
         return plugin.setStageThresholds(t || {});
       },
