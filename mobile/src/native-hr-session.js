@@ -1,12 +1,5 @@
-// native-hr-session.js — JS adapter for NativeHrSession Capacitor plugin.
-//
-// The plugin owns the BLE connection, publishes ticks via its own OkHttp
-// WebSocket, writes CSV natively, and uploads to Drive — all outside the
-// WebView, so the data path survives Chromium's background-tab JS throttling.
-// JS only consumes the 'hr' event to update the live UI while foregrounded.
-//
-// When active, the rest of hr_monitor.html's publishToRelay / WebSocket
-// code becomes a no-op (gated on window.HRMNativeHrSession.isPublishing()).
+// JS adapter for NativeHrSession plugin. Plugin owns BLE/relay/CSV/Drive;
+// JS only consumes events for live UI. See docs/architecture.md.
 
 (function () {
   function setMarker(v) { try { window.__hrMonitorNativeHrSessionRanInit = v; } catch (e) {} }
@@ -28,12 +21,9 @@
     let csvFilename = null;
     const hrListeners = [];
     const stateListeners = [];
+    const errorListeners = [];
 
-    // Seed JS-side publishing flag from the real plugin state on every
-    // load. Without this, a WebView reload (e.g. from tapping the FGS
-    // notification or Android killing the renderer) would leave the flag
-    // at false even though the native session is still running, and any
-    // UI restore path gated on isPublishing() would never fire.
+    // Seed publishing flag from native state so WebView reload doesn't lose it.
     try {
       if (typeof plugin.status === 'function') {
         plugin.status().then(function (s) {
@@ -55,6 +45,12 @@
     });
     plugin.addListener('state', function (data) {
       for (const cb of stateListeners) {
+        try { cb(data); } catch (e) {}
+      }
+    });
+    plugin.addListener('bleError', function (data) {
+      console.warn('[native-hr-session] bleError', data);
+      for (const cb of errorListeners) {
         try { cb(data); } catch (e) {}
       }
     });
@@ -88,39 +84,19 @@
         return plugin.setPrefs({ prefs: prefs || {} });
       },
       setStageThresholds: function (t) {
-        // t = { low, normal, elevated, high }. Fed from hr_monitor.html
-        // colorThresholds + thresholds.high so native's hrStage() in the
-        // relay tick matches the monitor's own getHRStage(). Without this,
-        // the OBS overlay shows one colour and the phone shows another.
         return plugin.setStageThresholds(t || {});
       },
       getSessionSnapshot: function (opts) {
-        // Returns { filename, csv, sessionStartMs, sizeBytes } for the
-        // active session. Used by hr_monitor.html to rehydrate chart state
-        // when the WebView has been reclaimed mid-session. Rejects if no
-        // session is active.
-        //
-        // opts: { tailMinutes?: number } — when provided, native returns
-        // only the trailing ~N minutes of the CSV instead of the full
-        // file. Saves a 1-3 MB disk read + IPC + parse on long sessions
-        // where rehydrate only keeps the last 3 min anyway. Older APKs
-        // without tailMinutes support ignore the arg (full read), so the
-        // caller still works — just slower.
+        // opts.tailMinutes: trailing minutes only; older APKs ignore.
         return plugin.getSessionSnapshot(opts || {});
       },
       getCacheStats: function () {
-        // Returns { count, bytes, oldestMs } describing the local
-        // sessions/ folder. Diagnostics UI uses this to show "N files
-        // (M MB) · oldest YYYY-MM-DD" so users can see what's
-        // accumulating without poking around in app-private storage.
         if (typeof plugin.getCacheStats !== 'function') {
           return Promise.resolve({ count: 0, bytes: 0, oldestMs: 0, unsupported: true });
         }
         return plugin.getCacheStats();
       },
       clearLocalCache: function () {
-        // Manual cache clear from the diagnostics UI. Deletes every CSV
-        // in sessions/ except the active session. Returns { deleted }.
         if (typeof plugin.clearLocalCache !== 'function') {
           return Promise.resolve({ deleted: 0, unsupported: true });
         }
@@ -140,13 +116,14 @@
           if (i >= 0) stateListeners.splice(i, 1);
         };
       },
-      /**
-       * Render a simple picker modal so the user can choose from scan
-       * results. Returns a Promise resolving to { mac, name } or rejecting
-       * if the user cancels. The returned promise also carries a `.cancel()`
-       * method so callers can abort the scan/picker from outside (e.g. when
-       * the user taps a UI-level Cancel while the scan is still running).
-       */
+      onError: function (cb) {
+        errorListeners.push(cb);
+        return function remove() {
+          const i = errorListeners.indexOf(cb);
+          if (i >= 0) errorListeners.splice(i, 1);
+        };
+      },
+      // Picker modal. Returns Promise<{mac, name}> with a .cancel() method.
       showPicker: function () {
         let cancelFn = null;
         let cancelled = false;
