@@ -48,18 +48,29 @@ public class NativeHrService extends Service {
         }
 
         if (ACTION_STOP.equals(action)) {
-            try {
-                if (NativeHrSessionPlugin.instance != null) {
-                    NativeHrSessionPlugin.instance.stopSessionInternal();
-                }
-            } catch (Throwable t) {
-                Log.w(TAG, "plugin.stopSessionInternal threw: " + t.getMessage());
+            // Stale-intent guard: if no session is active, this is a queued
+            // intent from a prior session that delivered after the user
+            // started a new one. Tear down the FGS but do not call
+            // stopSessionInternal (which would close the fresh GATT).
+            NativeHrSessionPlugin plugin = NativeHrSessionPlugin.instance;
+            boolean sessionLive = plugin != null && plugin.isSessionActive();
+            if (sessionLive) {
+                try { plugin.stopSessionInternal(); }
+                catch (Throwable t) { Log.w(TAG, "stopSessionInternal threw: " + t.getMessage()); }
+            } else {
+                Log.i(TAG, "ACTION_STOP ignored — no active session (stale intent).");
             }
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
         }
         return START_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        try { stopForeground(true); } catch (Throwable ignored) {}
+        super.onDestroy();
     }
 
     @Override
