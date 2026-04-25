@@ -108,6 +108,24 @@
         // caller still works — just slower.
         return plugin.getSessionSnapshot(opts || {});
       },
+      getCacheStats: function () {
+        // Returns { count, bytes, oldestMs } describing the local
+        // sessions/ folder. Diagnostics UI uses this to show "N files
+        // (M MB) · oldest YYYY-MM-DD" so users can see what's
+        // accumulating without poking around in app-private storage.
+        if (typeof plugin.getCacheStats !== 'function') {
+          return Promise.resolve({ count: 0, bytes: 0, oldestMs: 0, unsupported: true });
+        }
+        return plugin.getCacheStats();
+      },
+      clearLocalCache: function () {
+        // Manual cache clear from the diagnostics UI. Deletes every CSV
+        // in sessions/ except the active session. Returns { deleted }.
+        if (typeof plugin.clearLocalCache !== 'function') {
+          return Promise.resolve({ deleted: 0, unsupported: true });
+        }
+        return plugin.clearLocalCache();
+      },
       onHr: function (cb) {
         hrListeners.push(cb);
         return function remove() {

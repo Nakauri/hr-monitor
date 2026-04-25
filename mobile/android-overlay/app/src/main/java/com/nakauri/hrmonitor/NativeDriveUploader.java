@@ -62,62 +62,163 @@ public class NativeDriveUploader {
         sessionFilenameRef.set(null);
     }
 
+    // Hard storage budget. If sessions/ exceeds this, we delete oldest first
+    // regardless of Drive verification. Last-resort safety net for users who
+    // never sign in to Drive — without it, a daily user accumulates ~1 GB/yr
+    // of CSVs in app-private storage and the app eventually contributes to a
+    // "your phone is full" dialog. 500 MB ≈ 6 months of typical use.
+    private static final long HARD_CACHE_BUDGET_BYTES = 500L * 1024L * 1024L;
+    // Files older than this get age-deleted even when Drive verification
+    // isn't possible (signed out, offline, listing failed). Trades the
+    // very-low chance of orphan-without-Drive-copy losing data for the
+    // certainty that a never-signed-in user's storage doesn't grow forever.
+    private static final long AGE_DELETE_FALLBACK_MS = 30L * 24L * 60L * 60L * 1000L;
+
     /**
-     * Conservative cleanup of local CSVs after Drive upload. Only deletes a
-     * local file when ALL of these are true:
-     *   - file is older than minAgeMs (so we don't touch fresh sessions)
-     *   - file is NOT the currently-active session (sessionFilenameRef)
-     *   - filename appears in the Drive sessions folder (verified upload)
+     * Three-tier cleanup of local CSVs. Each tier is independently safe;
+     * later tiers only act on what earlier ones leave behind:
      *
-     * Runs on the upload executor so it doesn't block the BLE / main threads.
-     * Returns asynchronously; caller doesn't wait. Errors are logged + ignored.
+     *   Tier 1 (preferred) — DRIVE-VERIFIED. If the user is signed in and
+     *     the Drive folder listing succeeds, delete files older than
+     *     minAgeMs whose names appear in the Drive listing. Conservative:
+     *     never deletes a file Drive doesn't have.
+     *
+     *   Tier 2 (signed-out fallback) — AGE-ONLY. If Tier 1 couldn't run
+     *     (no token, listing failed, etc.) OR Tier 1 left files that are
+     *     older than AGE_DELETE_FALLBACK_MS (30 days), delete those. The
+     *     longer cutoff makes losing an orphan less likely.
+     *
+     *   Tier 3 (emergency cap) — BUDGET-CAP. If sessions/ still exceeds
+     *     HARD_CACHE_BUDGET_BYTES (500 MB), delete oldest first until
+     *     under cap. This is the "phone won't fill up" guarantee for users
+     *     who never sign in.
+     *
+     * Active session is always skipped at every tier.
+     *
+     * Runs on the upload executor — async, non-blocking. Errors logged.
      */
     public void cleanupLocalCachedAsync(File sessionsDir, long minAgeMs) {
         if (sessionsDir == null || !sessionsDir.isDirectory()) return;
         executor.submit(() -> {
             try {
-                String token = AuthStorage.getValidAccessToken(context);
-                if (token == null) {
-                    Log.i(TAG, "cleanup: no Drive token, skipping");
-                    return;
-                }
-                String folderId = folderIdRef.get();
-                if (folderId == null) {
-                    folderId = ensureFolder(token);
-                    if (folderId == null) {
-                        Log.w(TAG, "cleanup: could not resolve sessions folder");
-                        return;
-                    }
-                    folderIdRef.set(folderId);
-                }
-                java.util.Set<String> driveNames = listDriveFilenames(token, folderId);
-                if (driveNames == null) {
-                    Log.w(TAG, "cleanup: Drive listing failed, skipping");
-                    return;
-                }
-                File[] localFiles = sessionsDir.listFiles();
-                if (localFiles == null) return;
-                long cutoff = System.currentTimeMillis() - minAgeMs;
-                String activeName = sessionFilenameRef.get();
-                int deleted = 0, kept = 0, skipped = 0;
-                long bytesFreed = 0;
-                for (File f : localFiles) {
-                    if (!f.isFile()) continue;
-                    if (!f.getName().endsWith(".csv")) continue;
-                    if (activeName != null && f.getName().equals(activeName)) { skipped++; continue; }
-                    if (f.lastModified() > cutoff) { kept++; continue; }
-                    if (!driveNames.contains(f.getName())) { kept++; continue; }
-                    long len = f.length();
-                    if (f.delete()) {
-                        deleted++;
-                        bytesFreed += len;
-                    }
-                }
-                Log.i(TAG, "cleanup: deleted=" + deleted + " kept=" + kept + " active-skip=" + skipped + " bytesFreed=" + bytesFreed);
+                runCleanup(sessionsDir, minAgeMs);
             } catch (Throwable t) {
                 Log.w(TAG, "cleanup threw: " + t.getMessage());
             }
         });
+    }
+
+    private void runCleanup(File sessionsDir, long minAgeMs) {
+        File[] localFiles = sessionsDir.listFiles();
+        if (localFiles == null) return;
+        String activeName = sessionFilenameRef.get();
+        long now = System.currentTimeMillis();
+
+        // Tier 1 — Drive-verified deletion (best effort).
+        java.util.Set<String> driveNames = null;
+        try {
+            String token = AuthStorage.getValidAccessToken(context);
+            if (token != null) {
+                String folderId = folderIdRef.get();
+                if (folderId == null) {
+                    folderId = ensureFolder(token);
+                    if (folderId != null) folderIdRef.set(folderId);
+                }
+                if (folderId != null) driveNames = listDriveFilenames(token, folderId);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "cleanup: Drive lookup failed, falling through to age-only: " + t.getMessage());
+        }
+
+        long ageCutoff = now - minAgeMs;
+        long fallbackCutoff = now - AGE_DELETE_FALLBACK_MS;
+        int tier1 = 0, tier2 = 0;
+        long freedT1 = 0, freedT2 = 0;
+
+        for (File f : localFiles) {
+            if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
+            if (activeName != null && f.getName().equals(activeName)) continue;
+
+            // Tier 1: Drive-verified — file is on Drive AND older than the
+            // user-configurable retention window.
+            if (driveNames != null
+                && f.lastModified() <= ageCutoff
+                && driveNames.contains(f.getName())) {
+                long len = f.length();
+                if (f.delete()) { tier1++; freedT1 += len; }
+                continue;
+            }
+            // Tier 2: age-only fallback — anything older than 30 days
+            // gets deleted regardless of Drive verification. Catches the
+            // never-signed-in user's slow accumulation.
+            if (f.lastModified() <= fallbackCutoff) {
+                long len = f.length();
+                if (f.delete()) { tier2++; freedT2 += len; }
+            }
+        }
+
+        // Tier 3: emergency byte-budget cap. Remaining files are sorted
+        // oldest-first and deleted until the directory is under budget.
+        File[] remaining = sessionsDir.listFiles();
+        long total = 0;
+        if (remaining != null) for (File f : remaining) if (f.isFile()) total += f.length();
+        int tier3 = 0;
+        long freedT3 = 0;
+        if (remaining != null && total > HARD_CACHE_BUDGET_BYTES) {
+            java.util.List<File> csvList = new java.util.ArrayList<>();
+            for (File f : remaining) if (f.isFile() && f.getName().endsWith(".csv")) csvList.add(f);
+            java.util.Collections.sort(csvList, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            for (File f : csvList) {
+                if (total <= HARD_CACHE_BUDGET_BYTES) break;
+                if (activeName != null && f.getName().equals(activeName)) continue;
+                long len = f.length();
+                if (f.delete()) { tier3++; freedT3 += len; total -= len; }
+            }
+        }
+
+        Log.i(TAG, "cleanup: drive-verified=" + tier1 + " (" + freedT1 + "B), "
+            + "age-fallback=" + tier2 + " (" + freedT2 + "B), "
+            + "budget-cap=" + tier3 + " (" + freedT3 + "B)");
+    }
+
+    /**
+     * Snapshot of local sessions/ for diagnostics. Returns total file count,
+     * total bytes, and the timestamp of the oldest file. JS surfaces this
+     * in the diagnostics modal so users can see what's accumulating.
+     */
+    public static long[] cacheStats(File sessionsDir) {
+        if (sessionsDir == null || !sessionsDir.isDirectory()) return new long[] { 0, 0, 0 };
+        File[] files = sessionsDir.listFiles();
+        if (files == null) return new long[] { 0, 0, 0 };
+        long count = 0, bytes = 0, oldest = 0;
+        for (File f : files) {
+            if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
+            count++;
+            bytes += f.length();
+            long mt = f.lastModified();
+            if (oldest == 0 || mt < oldest) oldest = mt;
+        }
+        return new long[] { count, bytes, oldest };
+    }
+
+    /**
+     * Manual clear-all triggered from the UI. Deletes every CSV in the
+     * sessions/ directory EXCEPT the active session. Use as a "free up
+     * space" action; users can always re-pull from Drive. Returns the
+     * count of files deleted.
+     */
+    public int clearLocalCache(File sessionsDir) {
+        if (sessionsDir == null || !sessionsDir.isDirectory()) return 0;
+        File[] files = sessionsDir.listFiles();
+        if (files == null) return 0;
+        String activeName = sessionFilenameRef.get();
+        int deleted = 0;
+        for (File f : files) {
+            if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
+            if (activeName != null && f.getName().equals(activeName)) continue;
+            if (f.delete()) deleted++;
+        }
+        return deleted;
     }
 
     private java.util.Set<String> listDriveFilenames(String token, String folderId) throws IOException {

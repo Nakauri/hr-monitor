@@ -397,6 +397,19 @@ public class NativeHrSessionPlugin extends Plugin {
         }
         if (uploader != null) uploader.resetSession();
 
+        // Pre-session cleanup pass. Catches orphan CSVs from previous
+        // sessions that ended unclean (process kill, OEM battery saver
+        // killed FGS before stopSessionInternal could run, force-stop
+        // from Settings). Without a start-time hook those files would
+        // sit forever for users whose stop path never runs cleanly.
+        try {
+            if (uploader != null) {
+                java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
+                long sevenDaysMs = 7L * 24L * 60L * 60L * 1000L;
+                uploader.cleanupLocalCachedAsync(sessionsDir, sevenDaysMs);
+            }
+        } catch (Throwable t) { /* never block session start */ }
+
         // Relay WebSocket
         openRelaySocket();
 
@@ -461,6 +474,50 @@ public class NativeHrSessionPlugin extends Plugin {
         JSObject p = call.getObject("prefs");
         prefsJson = p != null ? p.toString() : null;
         call.resolve();
+    }
+
+    /**
+     * Snapshot of local CSV cache for the diagnostics modal. JS surfaces
+     * count + bytes so the user can see what's accumulating, and an
+     * "oldest" timestamp so they can decide whether to clear.
+     */
+    @PluginMethod
+    public void getCacheStats(PluginCall call) {
+        executor().execute(() -> {
+            try {
+                java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
+                long[] stats = NativeDriveUploader.cacheStats(sessionsDir);
+                JSObject ret = new JSObject();
+                ret.put("count", stats[0]);
+                ret.put("bytes", stats[1]);
+                ret.put("oldestMs", stats[2]);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                call.reject("getCacheStats failed: " + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Manual cache clear from the diagnostics UI. Deletes every CSV in
+     * the sessions/ directory except the active session. Returns the
+     * count of files removed so the UI can confirm.
+     */
+    @PluginMethod
+    public void clearLocalCache(PluginCall call) {
+        executor().execute(() -> {
+            try {
+                java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
+                int deleted = uploader != null
+                    ? uploader.clearLocalCache(sessionsDir)
+                    : 0;
+                JSObject ret = new JSObject();
+                ret.put("deleted", deleted);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                call.reject("clearLocalCache failed: " + t.getMessage());
+            }
+        });
     }
 
     // Returns the active session's CSV contents + start epoch so the WebView

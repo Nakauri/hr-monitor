@@ -499,6 +499,19 @@
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
+        <details class="hrm-diag-section">
+          <summary>Local session cache</summary>
+          <div class="hrm-diag-row"><span class="k">Files</span><span class="v" id="hrm-cache-count">…</span></div>
+          <div class="hrm-diag-row"><span class="k">Size</span><span class="v" id="hrm-cache-bytes">…</span></div>
+          <div class="hrm-diag-row"><span class="k">Oldest</span><span class="v" id="hrm-cache-oldest">…</span></div>
+          <div style="margin-top: 10px; display: flex; gap: 8px;">
+            <button id="hrm-cache-refresh" style="flex: 1; padding: 8px 12px; background: #1a1a1a; color: #d8d8d8; border: 1px solid #2a2a2a; border-radius: 6px; cursor: pointer; min-height: 36px;">Refresh</button>
+            <button id="hrm-cache-clear" style="flex: 1; padding: 8px 12px; background: #2a1616; color: #E89898; border: 1px solid #5a2a2a; border-radius: 6px; cursor: pointer; min-height: 36px;">Clear cache</button>
+          </div>
+          <div style="font-size: 11px; color: #6a6a6a; margin-top: 8px; line-height: 1.4;">
+            Local CSVs auto-clean after Drive sync (7 days) or after 30 days regardless. Hard cap 500 MB. Tap Clear to remove all but the active session.
+          </div>
+        </details>
         <details class="hrm-diag-section" open>
           <summary>Auth trace (newest last)</summary>
           <pre class="hrm-diag-log" id="hrm-auth-trace"></pre>
@@ -539,6 +552,61 @@
         }
       }
     } catch (e) { /* ignore */ }
+
+    // Local CSV cache — visible byte usage + manual clear. Calls into the
+    // native plugin via the JS shim; no-op on web (plugin reports unsupported).
+    const fmtBytes = (b) => {
+      if (!b || b < 0) return '0 B';
+      if (b < 1024) return b + ' B';
+      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+      if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+      return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+    };
+    async function refreshCacheStats() {
+      const countEl = document.getElementById('hrm-cache-count');
+      const bytesEl = document.getElementById('hrm-cache-bytes');
+      const oldestEl = document.getElementById('hrm-cache-oldest');
+      if (!countEl) return;
+      if (!window.HRMNativeHrSession || typeof window.HRMNativeHrSession.getCacheStats !== 'function') {
+        countEl.textContent = '—';
+        bytesEl.textContent = 'native only';
+        oldestEl.textContent = '—';
+        return;
+      }
+      try {
+        const s = await window.HRMNativeHrSession.getCacheStats();
+        countEl.textContent = String(s.count || 0);
+        bytesEl.textContent = fmtBytes(s.bytes || 0);
+        if (s.oldestMs && s.oldestMs > 0) {
+          const d = new Date(s.oldestMs);
+          oldestEl.textContent = d.toLocaleString();
+        } else {
+          oldestEl.textContent = 'no files';
+        }
+      } catch (e) {
+        countEl.textContent = '?';
+        bytesEl.textContent = 'error';
+        oldestEl.textContent = '—';
+      }
+    }
+    refreshCacheStats();
+    const cacheRefreshBtn = document.getElementById('hrm-cache-refresh');
+    if (cacheRefreshBtn) cacheRefreshBtn.addEventListener('click', refreshCacheStats);
+    const cacheClearBtn = document.getElementById('hrm-cache-clear');
+    if (cacheClearBtn) {
+      cacheClearBtn.addEventListener('click', async () => {
+        if (!confirm('Delete all local session CSVs except the active one?\n\nThe sessions stay on Google Drive — this only frees up phone storage. You can re-pull them in the viewer if you sign in to Drive.')) return;
+        if (!window.HRMNativeHrSession || typeof window.HRMNativeHrSession.clearLocalCache !== 'function') return;
+        try {
+          const r = await window.HRMNativeHrSession.clearLocalCache();
+          cacheClearBtn.textContent = (r && r.deleted != null) ? `Cleared ${r.deleted}` : 'Cleared';
+          setTimeout(() => { cacheClearBtn.textContent = 'Clear cache'; refreshCacheStats(); }, 1200);
+        } catch (e) {
+          cacheClearBtn.textContent = 'Failed';
+        }
+      });
+    }
+
     document.getElementById('hrm-diag-copy').addEventListener('click', async () => {
       const text = buildCopyText(d, v);
       try {
