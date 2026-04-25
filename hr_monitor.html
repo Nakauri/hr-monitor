@@ -3019,18 +3019,23 @@
     // `https://localhost` and the resulting URL is useless from any other
     // browser (i.e. OBS). Hardcode the production hostname when native, so
     // the user can paste the URL into OBS on their desktop.
+    //
+    // For the desktop web case, use the URL constructor for relative
+    // resolution. String concatenation breaks on Vercel cleanUrls
+    // domains where location.pathname is "/hr_monitor" (no .html
+    // extension) — naive `pathname.replace(/hr_monitor\.html$/, '') +
+    // 'overlay.html'` produces "/hr_monitoroverlay.html" because the
+    // regex doesn't match the extension-less path.
     const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-    const origin = isNative
-      ? 'https://aorti.ca/'
-      : location.origin + location.pathname.replace(/hr_monitor\.html$/, '');
-    const params = new URLSearchParams();
-    params.set('key', getOrCreateBroadcastKey());
-    params.set('bg', 'transparent');
-    if (!widgetPrefs.showHr) params.set('hide_hr', '1');
-    if (!widgetPrefs.showHrv) params.set('hide_hrv', '1');
-    if (!widgetPrefs.showLiveHr) params.set('hide_live_hr', '1');
-    if (!widgetPrefs.showInlineTrends) params.set('hide_inline', '1');
-    return origin + 'overlay.html?' + params.toString();
+    const base = isNative ? 'https://aorti.ca/' : location.href;
+    const url = new URL('overlay.html', base);
+    url.searchParams.set('key', getOrCreateBroadcastKey());
+    url.searchParams.set('bg', 'transparent');
+    if (!widgetPrefs.showHr) url.searchParams.set('hide_hr', '1');
+    if (!widgetPrefs.showHrv) url.searchParams.set('hide_hrv', '1');
+    if (!widgetPrefs.showLiveHr) url.searchParams.set('hide_live_hr', '1');
+    if (!widgetPrefs.showInlineTrends) url.searchParams.set('hide_inline', '1');
+    return url.toString();
   }
   // Shim for legacy callers; measurement is driven by ResizeObserver below.
   function computeObsSize() {
