@@ -1117,13 +1117,15 @@ public class NativeHrSessionPlugin extends Plugin {
     private long nextRelayBackoffMs() {
         long base = Math.min(RELAY_RECONNECT_MAX_MS,
                              RELAY_RECONNECT_BASE_MS * (1L << Math.min(relayReconnectAttempts, 5)));
-        // ±25 % jitter so devices don't sync up after a network partition.
         double jitter = 1.0 + (Math.random() * 0.5 - 0.25);
         return (long) (base * jitter);
     }
 
+    private final Runnable relayReconnectRunnable = this::openRelaySocket;
+
     private void scheduleRelayReconnect() {
         if (!sessionActive.get() || !broadcastEnabled) return;
+        mainHandler.removeCallbacks(relayReconnectRunnable);
         relayReconnectAttempts++;
         long delay = nextRelayBackoffMs();
         Log.i(TAG, "Relay reconnect scheduled in " + delay + "ms (attempt " + relayReconnectAttempts + ")");
@@ -1133,28 +1135,33 @@ public class NativeHrSessionPlugin extends Plugin {
             ev.put("attempts", relayReconnectAttempts);
             notifyListeners("relayError", ev);
         }
-        mainHandler.postDelayed(NativeHrSessionPlugin.this::openRelaySocket, delay);
+        mainHandler.postDelayed(relayReconnectRunnable, delay);
     }
 
     private void openRelaySocket() {
         if (broadcastKey == null) return;
+        mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
+        final WebSocket[] selfRef = new WebSocket[1];
         Request req = new Request.Builder()
             .url("wss://hr-relay.nakauri.partykit.dev/parties/main/" + broadcastKey)
             .build();
-        relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
+        WebSocket ws = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
+                if (ws != selfRef[0]) return;  // stale callback
                 relayLive.set(true);
-                relayReconnectAttempts = 0;  // reset on successful open
+                relayReconnectAttempts = 0;
                 Log.i(TAG, "Relay open");
                 emitState();
             }
             @Override public void onClosed(WebSocket ws, int code, String reason) {
+                if (ws != selfRef[0]) return;
                 relayLive.set(false);
                 emitState();
                 scheduleRelayReconnect();
             }
             @Override public void onFailure(WebSocket ws, Throwable t, Response r) {
+                if (ws != selfRef[0]) return;
                 relayLive.set(false);
                 Log.w(TAG, "Relay failure: " + (t != null ? t.getMessage() : "unknown"));
                 emitState();
@@ -1163,9 +1170,12 @@ public class NativeHrSessionPlugin extends Plugin {
             @Override public void onMessage(WebSocket ws, String text) { /* ignored */ }
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
+        selfRef[0] = ws;
+        relaySocket = ws;
     }
 
     private void closeRelaySocket() {
+        mainHandler.removeCallbacks(relayReconnectRunnable);
         if (relaySocket != null) {
             try { relaySocket.close(1000, "session stop"); } catch (Exception ignored) {}
             relaySocket = null;
