@@ -3582,7 +3582,11 @@
       if (window.HRMLog) window.HRMLog.event('rehydrate skipped', 'shim or method missing');
       return;
     }
-    const snap = await window.HRMNativeHrSession.getSessionSnapshot();
+    // tailMinutes = REHYDRATE_KEEP_MIN + 2 buffer. Native returns only the
+    // trailing slice, saving the full-file read + IPC for long sessions.
+    // Older APKs that don't recognize the param fall back to a full read —
+    // this code still works, just slower until the APK is rebuilt.
+    const snap = await window.HRMNativeHrSession.getSessionSnapshot({ tailMinutes: REHYDRATE_KEEP_MIN + 2 });
     if (!snap || !snap.csv) {
       if (window.HRMLog) window.HRMLog.event('rehydrate empty snapshot', snap);
       return;

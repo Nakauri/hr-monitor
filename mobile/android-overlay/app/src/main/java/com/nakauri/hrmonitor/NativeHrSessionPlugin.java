@@ -320,6 +320,11 @@ public class NativeHrSessionPlugin extends Plugin {
     // mid-session. Rejects if no session is active or the file is missing.
     @PluginMethod
     public void getSessionSnapshot(PluginCall call) {
+        // Optional tailMinutes — when set, only read the trailing ~N minutes of
+        // the CSV instead of the full file. Saves a 1-3 MB disk read + JSON
+        // IPC + JS parse on long sessions where rehydrate only keeps the last
+        // 3 min anyway. Omitting the arg = legacy behaviour (read the full file).
+        final Integer tailMinutes = call.getInt("tailMinutes");
         executor().execute(() -> {
             try {
                 if (!sessionActive.get() || csv == null) {
@@ -332,21 +337,60 @@ public class NativeHrSessionPlugin extends Plugin {
                     return;
                 }
                 long size = file.length();
-                byte[] bytes = new byte[(int) size];
-                try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
-                    int read = 0;
-                    while (read < bytes.length) {
-                        int n = fis.read(bytes, read, bytes.length - read);
-                        if (n < 0) break;
-                        read += n;
+                String text;
+                if (tailMinutes != null && tailMinutes > 0 && size > 0) {
+                    // Estimate: ~80 bytes per CSV row × 60 rows/min × tailMinutes
+                    // + a 4 KB safety slack so we always overshoot rather than
+                    // miss the first targeted row. Capped at file size.
+                    long bytesToRead = Math.min(size, (long) tailMinutes * 60L * 80L + 4096L);
+                    long offset = Math.max(0L, size - bytesToRead);
+                    int chunk = (int) bytesToRead;
+                    byte[] bytes = new byte[chunk];
+                    try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
+                        raf.seek(offset);
+                        int read = 0;
+                        while (read < chunk) {
+                            int n = raf.read(bytes, read, chunk - read);
+                            if (n < 0) break;
+                            read += n;
+                        }
+                        if (read < chunk) {
+                            byte[] trimmed = new byte[read];
+                            System.arraycopy(bytes, 0, trimmed, 0, read);
+                            bytes = trimmed;
+                        }
                     }
+                    text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                    // If we seeked into the middle of a row, drop the partial first
+                    // line. Prepend a placeholder so callers that "skip line 0"
+                    // (the CSV header convention) keep working without special-casing
+                    // tail mode. When offset == 0 we have the real header already.
+                    if (offset > 0) {
+                        int nl = text.indexOf('\n');
+                        if (nl >= 0) {
+                            text = "tail\n" + text.substring(nl + 1);
+                        }
+                    }
+                } else {
+                    byte[] bytes = new byte[(int) size];
+                    try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+                        int read = 0;
+                        while (read < bytes.length) {
+                            int n = fis.read(bytes, read, bytes.length - read);
+                            if (n < 0) break;
+                            read += n;
+                        }
+                    }
+                    text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
                 }
-                String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
                 JSObject ret = new JSObject();
                 ret.put("filename", csv.getFilename());
                 ret.put("csv", text);
                 ret.put("sessionStartMs", csv.getSessionStartMs());
-                ret.put("sizeBytes", bytes.length);
+                // sizeBytes = full on-disk file size (diagnostic only, JS logs it).
+                // In tail mode the actual transferred payload is ~tailMinutes worth,
+                // not this — but the caller cares about total file size.
+                ret.put("sizeBytes", size);
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("getSessionSnapshot failed: " + e.getMessage(), e);
