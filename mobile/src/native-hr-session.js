@@ -94,12 +94,19 @@
         // the OBS overlay shows one colour and the phone shows another.
         return plugin.setStageThresholds(t || {});
       },
-      getSessionSnapshot: function () {
+      getSessionSnapshot: function (opts) {
         // Returns { filename, csv, sessionStartMs, sizeBytes } for the
         // active session. Used by hr_monitor.html to rehydrate chart state
         // when the WebView has been reclaimed mid-session. Rejects if no
         // session is active.
-        return plugin.getSessionSnapshot();
+        //
+        // opts: { tailMinutes?: number } — when provided, native returns
+        // only the trailing ~N minutes of the CSV instead of the full
+        // file. Saves a 1-3 MB disk read + IPC + parse on long sessions
+        // where rehydrate only keeps the last 3 min anyway. Older APKs
+        // without tailMinutes support ignore the arg (full read), so the
+        // caller still works — just slower.
+        return plugin.getSessionSnapshot(opts || {});
       },
       onHr: function (cb) {
         hrListeners.push(cb);
