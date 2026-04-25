@@ -241,13 +241,40 @@ public class NativeHrSessionPlugin extends Plugin {
             mainHandler.postDelayed(() -> {
                 try { scanner.stopScan(scanCallback); } catch (Exception ignored) {}
                 JSArray arr = new JSArray();
+                java.util.Set<String> seen = new java.util.HashSet<>();
                 for (DiscoveredDevice d : scanResults) {
+                    seen.add(d.mac);
                     JSObject obj = new JSObject();
                     obj.put("mac", d.mac);
                     obj.put("name", d.name);
                     obj.put("rssi", d.rssi);
                     obj.put("isHr", d.isHr);
+                    obj.put("bonded", false);
                     arr.put(obj);
+                }
+                // Add bonded HR-likely devices that the live scan missed.
+                // Strap stops advertising while connected to another app, so
+                // without this the user can't pick a strap that's in use elsewhere.
+                try {
+                    for (BluetoothDevice b : adapter.getBondedDevices()) {
+                        if (seen.contains(b.getAddress())) continue;
+                        String n = b.getName();
+                        boolean looksHr = n != null && (n.contains("H808")
+                            || n.toLowerCase(java.util.Locale.US).contains("hr")
+                            || n.toLowerCase(java.util.Locale.US).contains("polar")
+                            || n.toLowerCase(java.util.Locale.US).contains("coospo")
+                            || n.toLowerCase(java.util.Locale.US).contains("wahoo"));
+                        if (!looksHr) continue;
+                        JSObject obj = new JSObject();
+                        obj.put("mac", b.getAddress());
+                        obj.put("name", n != null ? n : b.getAddress());
+                        obj.put("rssi", -127);
+                        obj.put("isHr", true);
+                        obj.put("bonded", true);
+                        arr.put(obj);
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "bonded enumeration failed: " + t.getMessage());
                 }
                 JSObject ret = new JSObject();
                 ret.put("devices", arr);
@@ -295,8 +322,8 @@ public class NativeHrSessionPlugin extends Plugin {
 
             closeGattQuietly();
             try {
-                // autoConnect=true so the OS queues the request when the strap is busy.
-                currentGatt = device.connectGatt(getContext(), true, gattCallback);
+                // autoConnect=false joins existing ACL links; =true waits on advertisements.
+                currentGatt = device.connectGatt(getContext(), false, gattCallback);
                 JSObject ret = new JSObject();
                 ret.put("connecting", true);
                 ret.put("bonded", usingBondedHandle);
