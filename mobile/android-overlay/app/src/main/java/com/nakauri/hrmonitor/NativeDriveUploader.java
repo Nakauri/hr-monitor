@@ -62,17 +62,18 @@ public class NativeDriveUploader {
         sessionFilenameRef.set(null);
     }
 
-    // Hard storage budget. If sessions/ exceeds this, we delete oldest first
-    // regardless of Drive verification. Last-resort safety net for users who
-    // never sign in to Drive — without it, a daily user accumulates ~1 GB/yr
-    // of CSVs in app-private storage and the app eventually contributes to a
-    // "your phone is full" dialog. 500 MB ≈ 6 months of typical use.
-    private static final long HARD_CACHE_BUDGET_BYTES = 500L * 1024L * 1024L;
-    // Files older than this get age-deleted even when Drive verification
-    // isn't possible (signed out, offline, listing failed). Trades the
-    // very-low chance of orphan-without-Drive-copy losing data for the
-    // certainty that a never-signed-in user's storage doesn't grow forever.
-    private static final long AGE_DELETE_FALLBACK_MS = 30L * 24L * 60L * 60L * 1000L;
+    // Storage limits differ by user persona:
+    //   - Drive signed in: local cache is a viewer-speed accelerator, Drive
+    //     holds the durable copy. 200 MB cap, 14-day age fallback.
+    //   - No Drive: user isn't backing up. Local is ephemeral; keep just
+    //     enough for the viewer to feel populated. 50 MB cap, 2-day age,
+    //     but always preserve the most recent KEEP_RECENT_FLOOR sessions
+    //     so even a once-a-month user has something to browse.
+    private static final long CAP_BYTES_DRIVE       = 200L * 1024L * 1024L;
+    private static final long CAP_BYTES_NO_DRIVE    =  50L * 1024L * 1024L;
+    private static final long AGE_FALLBACK_DRIVE    = 14L * 24L * 60L * 60L * 1000L;
+    private static final long AGE_FALLBACK_NO_DRIVE =  2L * 24L * 60L * 60L * 1000L;
+    private static final int  KEEP_RECENT_FLOOR     = 3;
 
     /**
      * Three-tier cleanup of local CSVs. Each tier is independently safe;
@@ -114,8 +115,13 @@ public class NativeDriveUploader {
         String activeName = sessionFilenameRef.get();
         long now = System.currentTimeMillis();
 
-        // Tier 1 — Drive-verified deletion (best effort).
+        // Tier 0 — figure out who the user is. Drive sign-in determines
+        // whether we're in "viewer-cache for a backed-up user" mode (more
+        // generous limits) or "ephemeral local for a casual user" mode
+        // (much tighter — they have no other copy and no expectation of
+        // long retention).
         java.util.Set<String> driveNames = null;
+        boolean driveActive = false;
         try {
             String token = AuthStorage.getValidAccessToken(context);
             if (token != null) {
@@ -124,23 +130,41 @@ public class NativeDriveUploader {
                     folderId = ensureFolder(token);
                     if (folderId != null) folderIdRef.set(folderId);
                 }
-                if (folderId != null) driveNames = listDriveFilenames(token, folderId);
+                if (folderId != null) {
+                    driveNames = listDriveFilenames(token, folderId);
+                    driveActive = (driveNames != null);
+                }
             }
         } catch (Throwable t) {
-            Log.w(TAG, "cleanup: Drive lookup failed, falling through to age-only: " + t.getMessage());
+            Log.w(TAG, "cleanup: Drive lookup failed, treating as no-Drive: " + t.getMessage());
         }
 
-        long ageCutoff = now - minAgeMs;
-        long fallbackCutoff = now - AGE_DELETE_FALLBACK_MS;
-        int tier1 = 0, tier2 = 0;
-        long freedT1 = 0, freedT2 = 0;
+        long capBytes      = driveActive ? CAP_BYTES_DRIVE      : CAP_BYTES_NO_DRIVE;
+        long fallbackMs    = driveActive ? AGE_FALLBACK_DRIVE   : AGE_FALLBACK_NO_DRIVE;
+        long ageCutoff     = now - minAgeMs;
+        long fallbackCutoff = now - fallbackMs;
 
+        // Build a sorted view (newest-first) so the keep-floor logic can
+        // protect the most recent N sessions from any deletion path.
+        java.util.List<File> csvList = new java.util.ArrayList<>();
         for (File f : localFiles) {
-            if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
-            if (activeName != null && f.getName().equals(activeName)) continue;
+            if (f.isFile() && f.getName().endsWith(".csv")) csvList.add(f);
+        }
+        java.util.Collections.sort(csvList, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        java.util.Set<String> keepFloor = new java.util.HashSet<>();
+        for (int i = 0; i < Math.min(KEEP_RECENT_FLOOR, csvList.size()); i++) {
+            keepFloor.add(csvList.get(i).getName());
+        }
+        if (activeName != null) keepFloor.add(activeName);
 
+        int tier1 = 0, tier2 = 0, tier3 = 0;
+        long freedT1 = 0, freedT2 = 0, freedT3 = 0;
+
+        for (File f : csvList) {
+            if (keepFloor.contains(f.getName())) continue;
             // Tier 1: Drive-verified — file is on Drive AND older than the
-            // user-configurable retention window.
+            // user-configurable retention window. Only runs when Drive is
+            // signed in.
             if (driveNames != null
                 && f.lastModified() <= ageCutoff
                 && driveNames.contains(f.getName())) {
@@ -148,37 +172,37 @@ public class NativeDriveUploader {
                 if (f.delete()) { tier1++; freedT1 += len; }
                 continue;
             }
-            // Tier 2: age-only fallback — anything older than 30 days
-            // gets deleted regardless of Drive verification. Catches the
-            // never-signed-in user's slow accumulation.
+            // Tier 2: age-only fallback — anything older than the persona-
+            // appropriate cutoff. 14 days for Drive users, 2 days for the
+            // casual no-Drive user (who doesn't expect retention anyway).
             if (f.lastModified() <= fallbackCutoff) {
                 long len = f.length();
                 if (f.delete()) { tier2++; freedT2 += len; }
             }
         }
 
-        // Tier 3: emergency byte-budget cap. Remaining files are sorted
-        // oldest-first and deleted until the directory is under budget.
+        // Tier 3: emergency byte-budget cap. Sort survivors oldest-first
+        // (keep-floor still respected) and delete until under cap.
         File[] remaining = sessionsDir.listFiles();
         long total = 0;
         if (remaining != null) for (File f : remaining) if (f.isFile()) total += f.length();
-        int tier3 = 0;
-        long freedT3 = 0;
-        if (remaining != null && total > HARD_CACHE_BUDGET_BYTES) {
-            java.util.List<File> csvList = new java.util.ArrayList<>();
-            for (File f : remaining) if (f.isFile() && f.getName().endsWith(".csv")) csvList.add(f);
-            java.util.Collections.sort(csvList, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
-            for (File f : csvList) {
-                if (total <= HARD_CACHE_BUDGET_BYTES) break;
-                if (activeName != null && f.getName().equals(activeName)) continue;
+        if (remaining != null && total > capBytes) {
+            java.util.List<File> survivors = new java.util.ArrayList<>();
+            for (File f : remaining) if (f.isFile() && f.getName().endsWith(".csv")) survivors.add(f);
+            java.util.Collections.sort(survivors, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            for (File f : survivors) {
+                if (total <= capBytes) break;
+                if (keepFloor.contains(f.getName())) continue;
                 long len = f.length();
                 if (f.delete()) { tier3++; freedT3 += len; total -= len; }
             }
         }
 
-        Log.i(TAG, "cleanup: drive-verified=" + tier1 + " (" + freedT1 + "B), "
-            + "age-fallback=" + tier2 + " (" + freedT2 + "B), "
-            + "budget-cap=" + tier3 + " (" + freedT3 + "B)");
+        Log.i(TAG, "cleanup persona=" + (driveActive ? "drive" : "no-drive")
+            + " cap=" + capBytes + " keep-floor=" + KEEP_RECENT_FLOOR
+            + " drive-verified=" + tier1 + " (" + freedT1 + "B)"
+            + " age-fallback=" + tier2 + " (" + freedT2 + "B)"
+            + " budget-cap=" + tier3 + " (" + freedT3 + "B)");
     }
 
     /**
