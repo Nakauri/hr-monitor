@@ -289,16 +289,41 @@ public class NativeHrSessionPlugin extends Plugin {
     @PluginMethod
     @SuppressLint("MissingPermission")
     public void connect(PluginCall call) {
-        String mac = call.getString("mac");
+        final String mac = call.getString("mac");
         if (mac == null) { call.reject("mac required"); return; }
         if (adapter == null) { call.reject("Bluetooth adapter unavailable"); return; }
-        // Use cached BluetoothDevice from scan if we have one — has correct
-        // address type (PUBLIC vs RANDOM). Falls back to getRemoteDevice.
-        BluetoothDevice device = null;
-        for (DiscoveredDevice d : scanResults) {
-            if (d.mac.equals(mac)) { device = d.btDevice; break; }
+        // Connect work runs off the bridge thread because the rescan path
+        // can block for ~3 seconds while it waits for the strap to advertise.
+        executor().execute(() -> doConnect(call, mac));
+    }
+
+    @SuppressLint("MissingPermission")
+    private void doConnect(PluginCall call, String mac) {
+        // Use cached BluetoothDevice from scan if we have one — that handle
+        // has the correct address type (PUBLIC vs RANDOM) which the Coospo
+        // strap advertises as RANDOM. Without this, getRemoteDevice(mac)
+        // defaults to PUBLIC, the connection appears to succeed but
+        // notifications silently never fire and HR data never reaches the
+        // app. After a process restart scanResults is empty, so we
+        // proactively rescan for ~3s to repopulate the cache before falling
+        // through to the (often broken) PUBLIC-default getRemoteDevice.
+        BluetoothDevice device = findScannedDevice(mac);
+        if (device == null && scanner != null) {
+            Log.i(TAG, "connect: scan cache miss for " + mac + " — rescanning");
+            try {
+                rescanForMac(mac, 3000L);
+                device = findScannedDevice(mac);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            } catch (Throwable t) {
+                Log.w(TAG, "rescanForMac threw: " + t.getMessage());
+            }
         }
-        if (device == null) device = adapter.getRemoteDevice(mac);
+        if (device == null) {
+            Log.w(TAG, "connect: falling back to getRemoteDevice (PUBLIC) for " + mac
+                + " — RANDOM-address straps may connect without notifications");
+            device = adapter.getRemoteDevice(mac);
+        }
 
         closeGattQuietly();
         try {
@@ -309,6 +334,42 @@ public class NativeHrSessionPlugin extends Plugin {
         } catch (SecurityException e) {
             call.reject("BLUETOOTH_CONNECT denied: " + e.getMessage());
         }
+    }
+
+    private BluetoothDevice findScannedDevice(String mac) {
+        for (DiscoveredDevice d : scanResults) {
+            if (d.mac.equals(mac)) return d.btDevice;
+        }
+        return null;
+    }
+
+    /**
+     * Targeted scan to repopulate scanResults with a specific MAC, blocking
+     * up to timeoutMs. Fires only when the cache is cold (process restart)
+     * and the user is reconnecting via cached MAC. Re-uses the existing
+     * scanCallback so ingestScanResult() de-dupes into scanResults.
+     */
+    @SuppressLint("MissingPermission")
+    private void rescanForMac(String mac, long timeoutMs) throws InterruptedException {
+        if (scanner == null) return;
+        if (scanCallback == null) {
+            scanCallback = new ScanCallback() {
+                @Override public void onScanResult(int callbackType, ScanResult result) { ingestScanResult(result); }
+                @Override public void onScanFailed(int errorCode) { Log.w(TAG, "Scan failed errorCode=" + errorCode); }
+            };
+        }
+        try {
+            scanner.startScan(scanCallback);
+        } catch (SecurityException e) {
+            Log.w(TAG, "rescanForMac: scan permission denied");
+            return;
+        }
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (findScannedDevice(mac) != null) break;
+            Thread.sleep(50);
+        }
+        try { scanner.stopScan(scanCallback); } catch (Throwable ignored) {}
     }
 
     @PluginMethod
