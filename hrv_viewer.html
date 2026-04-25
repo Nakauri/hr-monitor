@@ -3055,14 +3055,36 @@
 
     drivePersistMeta();
     try { localStorage.setItem('hrv_viewer_drive_lastsync', String(Date.now())); } catch (e) {}
+
+    // Evict orphan cache entries: anything in IDB_DRIVE_STORE that's no
+    // longer in the Drive listing AND not in the local folder. Without
+    // this the IDB cache grows monotonically — each user-side delete on
+    // Drive (or via the viewer) leaves stale blobs behind. CSVs are
+    // typically 1-3 MB each; 100 orphans = 100-300 MB unnecessary IDB.
+    let evicted = 0;
+    try {
+      const cachedKeys = await idbKeys(IDB_DRIVE_STORE);
+      for (const key of cachedKeys) {
+        if (typeof key !== 'string') continue;
+        if (driveFiles.has(key)) continue;
+        if (localNames.has(key)) continue;
+        await idbDelete(key, IDB_DRIVE_STORE);
+        if (driveMetaCache[key]) delete driveMetaCache[key];
+        if (sessionsIndex[key]) delete sessionsIndex[key];
+        evicted++;
+      }
+      if (evicted > 0) drivePersistMeta();
+    } catch (e) { console.warn('[driveSync] orphan eviction failed', e); }
+
     const parts = [];
     if (pulled) parts.push(`${pulled} pulled`);
     if (uploaded) parts.push(`${uploaded} uploaded`);
     if (written) parts.push(`${written} written`);
+    if (evicted) parts.push(`${evicted} evicted`);
     if (!parts.length) parts.push(skipped === 0 ? 'nothing to sync' : 'in sync');
     setDriveProgress(parts.join(' · '));
 
-    if (pulled + uploaded + written > 0) {
+    if (pulled + uploaded + written + evicted > 0) {
       persistIndex();
       await loadSessions();
       // Only re-route if the current view's backing data is actually

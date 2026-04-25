@@ -64,7 +64,9 @@ public final class AuthStorage {
     private static final String APP_ORIGIN = "https://localhost";
     private static final long REFRESH_THRESHOLD_MS = 2L * 60L * 1000L;
 
-    private static final OkHttpClient HTTP = new OkHttpClient();
+    // Shared with NativeDriveUploader — see HttpClientHolder. Token
+    // refreshes are one-shot HTTP, no WebSocket-specific tuning needed.
+    private static OkHttpClient http() { return HttpClientHolder.http(); }
 
     private AuthStorage() {}
 
@@ -152,7 +154,7 @@ public final class AuthStorage {
             .header("Origin", APP_ORIGIN)
             .post(RequestBody.create(MediaType.parse("application/json"), body.toString()))
             .build();
-        try (Response resp = HTTP.newCall(req).execute()) {
+        try (Response resp = http().newCall(req).execute()) {
             if (resp.code() == 401) {
                 Log.w(TAG, "Refresh token revoked, clearing auth");
                 clear(ctx);

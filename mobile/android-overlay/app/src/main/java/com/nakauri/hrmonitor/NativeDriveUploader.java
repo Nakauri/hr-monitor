@@ -50,7 +50,9 @@ public class NativeDriveUploader {
 
     public NativeDriveUploader(Context context) {
         this.context = context.getApplicationContext();
-        this.client = new OkHttpClient();
+        // Shared HTTP client; each Drive request is one-shot so we use
+        // the default-timeout variant rather than the WebSocket one.
+        this.client = HttpClientHolder.http();
         this.executor = Executors.newSingleThreadExecutor();
     }
 

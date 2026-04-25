@@ -170,10 +170,10 @@ public class NativeHrSessionPlugin extends Plugin {
             adapter = bm.getAdapter();
             if (adapter != null) scanner = adapter.getBluetoothLeScanner();
         }
-        httpClient = new OkHttpClient.Builder()
-            .pingInterval(20, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS)
-            .build();
+        // Shared singleton tuned for long-lived WebSockets. Reuses the
+        // process-wide connection pool + dispatcher rather than spinning
+        // its own — see HttpClientHolder.
+        httpClient = HttpClientHolder.webSocketClient();
         uploader = new NativeDriveUploader(getContext());
         registerNetworkCallback();
     }
@@ -473,10 +473,13 @@ public class NativeHrSessionPlugin extends Plugin {
                 ret.put("filename", csv.getFilename());
                 ret.put("csv", text);
                 ret.put("sessionStartMs", csv.getSessionStartMs());
-                // sizeBytes = full on-disk file size (diagnostic only, JS logs it).
-                // In tail mode the actual transferred payload is ~tailMinutes worth,
-                // not this — but the caller cares about total file size.
+                // sizeBytes  = full on-disk file size.
+                // payloadBytes = chars in the response text (≈ bytes for ASCII
+                //               CSV). In tail mode payloadBytes << sizeBytes;
+                //               JS logs both so a regression where tail mode
+                //               accidentally reads the whole file is visible.
                 ret.put("sizeBytes", size);
+                ret.put("payloadBytes", text != null ? text.length() : 0);
                 call.resolve(ret);
             } catch (Exception e) {
                 call.reject("getSessionSnapshot failed: " + e.getMessage(), e);
@@ -612,10 +615,10 @@ public class NativeHrSessionPlugin extends Plugin {
                 return;
             }
             // Enable notifications — both register callback locally AND
-            // write CCCD. The "connected" CSV row is now deferred to
-            // onDescriptorWrite so it only fires after the CCCD ack lands;
-            // previously a silent CCCD failure would mark the session
-            // "connected" but no HR notifications would ever arrive.
+            // write CCCD. The "connected" CSV row is deferred to
+            // onDescriptorWrite so it only fires after the CCCD ack lands.
+            // Without that gate a silent CCCD failure would mark the
+            // session "connected" while no HR notifications ever arrive.
             gatt.setCharacteristicNotification(hrChar, true);
             BluetoothGattDescriptor desc = hrChar.getDescriptor(CCCD);
             if (desc != null) {
@@ -945,11 +948,9 @@ public class NativeHrSessionPlugin extends Plugin {
 
     // ---- Relay WebSocket --------------------------------------------------
 
-    // Reconnect backoff. Previous behaviour was a fixed 2-second delay with
-    // no jitter and no max-retry — a server outage hammered PartyKit at
-    // 0.5 Hz indefinitely and multiple devices behind the same outage all
-    // synchronised their reconnect attempts. Exponential backoff up to 60 s
-    // + ±25 % jitter spreads the load and gives the server room to recover.
+    // Reconnect backoff. 2s → 4s → 8s ... capped at 60s, with ±25% jitter
+    // so devices behind the same outage don't synchronise their retries
+    // and so a hard server outage isn't hammered at 0.5 Hz indefinitely.
     private int relayReconnectAttempts = 0;
     private static final long RELAY_RECONNECT_BASE_MS = 2_000L;
     private static final long RELAY_RECONNECT_MAX_MS = 60_000L;
