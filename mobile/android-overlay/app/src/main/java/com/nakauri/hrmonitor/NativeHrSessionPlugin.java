@@ -81,12 +81,10 @@ public class NativeHrSessionPlugin extends Plugin {
     private static final UUID HR_MEASUREMENT = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb");
     private static final UUID CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    // RMSSD window — rolling 30 s of RR intervals, matching
-    // hr_monitor.html:~2634 (`cutoff = now - 0.5` minute). 30 s is the
-    // responsive-monitoring choice: brief flushes / vagal bursts / chills
-    // show up visibly in the live number instead of being averaged out.
-    // 60 s would be steadier but hides the events this app is built to
-    // surface.
+    // RMSSD window — rolling 30 s of RR intervals. Matches the JS
+    // monitor's `cutoff = now - 0.5` minute window. Brief flushes / vagal
+    // bursts / chills show up in the live number; 60 s would be steadier
+    // but hides the events this app is built to surface.
     // PARITY CRITICAL — see scripts/rmssd-parity.test.js.
     private static final long RR_WINDOW_MS = 30_000L;
     // Drive upload cadence — every 30 s. Same data pace as the JS auto-save.
@@ -755,15 +753,10 @@ public class NativeHrSessionPlugin extends Plugin {
             } else {
                 Log.w(TAG, "CCCD descriptor missing on HR characteristic");
             }
-            // Bump the connection priority to HIGH (~11-15 ms interval) for
-            // the lowest-jitter HR cadence the strap supports. Default is
-            // BALANCED (~50-100 ms), which made the native-only path
-            // noticeably more jittery than the JS path on the same strap.
-            try {
-                gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
-            } catch (Throwable t) {
-                Log.w(TAG, "requestConnectionPriority failed: " + t.getMessage());
-            }
+            // requestConnectionPriority(HIGH) is deferred to onDescriptorWrite
+            // success. Firing it here can race the CCCD write on flaky strap
+            // firmwares — radio contention from the priority change has been
+            // observed to NACK the descriptor write on the first attempt.
         }
 
         @Override
@@ -773,6 +766,14 @@ public class NativeHrSessionPlugin extends Plugin {
                 Log.i(TAG, "CCCD write OK — notifications live");
                 NativeCsvWriter w = csv;  // snapshot the volatile field
                 if (w != null) w.appendConnectionRow("connected", System.currentTimeMillis());
+                // Bump connection priority now that notifications are armed.
+                // HIGH (~11-15 ms interval) vs default BALANCED (~50-100 ms);
+                // the native-only path is noticeably less jittery on HIGH.
+                try {
+                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
+                } catch (Throwable t) {
+                    Log.w(TAG, "requestConnectionPriority failed: " + t.getMessage());
+                }
             } else {
                 Log.w(TAG, "CCCD write FAILED status=" + status + " — retrying once");
                 // One retry; some strap firmwares NACK the first write under
