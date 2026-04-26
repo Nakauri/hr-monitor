@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /$
+Allow: /legal
+Disallow: /hr_monitor
+Disallow: /hrv_viewer
+Disallow: /overlay
+Disallow: /app-home
+
+Sitemap: https://aorti.ca/sitemap.xml

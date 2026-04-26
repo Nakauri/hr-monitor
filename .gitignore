@@ -21,6 +21,7 @@ service-account*.json
 *.jpg
 *.png
 !icon.png
+!apple-touch-icon.png
 !/assets/**
 
 
