@@ -87,6 +87,10 @@
         if (typeof plugin.setBroadcast !== 'function') return Promise.resolve();
         return plugin.setBroadcast({ enabled: !!enabled });
       },
+      exportCsv: function (filename, csv) {
+        if (typeof plugin.exportCsv !== 'function') return Promise.reject(new Error('unsupported'));
+        return plugin.exportCsv({ filename: filename, csv: csv });
+      },
       setStageThresholds: function (t) {
         return plugin.setStageThresholds(t || {});
       },

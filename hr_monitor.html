@@ -4662,11 +4662,22 @@
   }
 
   async function downloadCSV({ csv, filename }) {
+    // Capacitor: write directly to public Downloads via native plugin.
+    // navigator.share with files is unreliable in the WebView (canShare
+    // often returns false even on Chrome-based shells), so we don't trust it.
+    try {
+      if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable
+          && typeof window.HRMNativeHrSession.exportCsv === 'function') {
+        const r = await window.HRMNativeHrSession.exportCsv(filename, csv);
+        setStatus('Saved to Downloads: ' + (r && r.filename || filename));
+        return;
+      }
+    } catch (e) {
+      console.warn('native exportCsv failed; falling back', e);
+    }
+    // Web fallback. Try share sheet first (desktop Chrome / mobile Safari);
+    // <a download> for everything else.
     const blob = new Blob([csv], { type: 'text/csv' });
-    // Capacitor WebView ignores <a download>. Prefer the OS share sheet via
-    // navigator.share with a File payload — user can save to Downloads, mail
-    // it, hand it to Drive/Dropbox, etc. Falls back to the legacy link on
-    // browsers without share-files support.
     try {
       if (typeof navigator !== 'undefined' && navigator.canShare) {
         const file = new File([blob], filename, { type: 'text/csv' });

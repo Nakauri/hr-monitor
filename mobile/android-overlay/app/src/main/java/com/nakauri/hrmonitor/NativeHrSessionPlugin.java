@@ -517,6 +517,53 @@ public class NativeHrSessionPlugin extends Plugin {
         call.resolve();
     }
 
+    // Writes a CSV string to the public Downloads folder. On API 29+ uses
+    // MediaStore.Downloads (sandboxed, no permissions required); on older
+    // devices falls back to Environment.DIRECTORY_DOWNLOADS. Returns the
+    // resulting display name. Replaces the JS `<a download>` flow which
+    // doesn't work in Capacitor's WebView.
+    @PluginMethod
+    public void exportCsv(PluginCall call) {
+        final String filename = call.getString("filename");
+        final String csv = call.getString("csv");
+        if (filename == null || csv == null) { call.reject("filename + csv required"); return; }
+        executor().execute(() -> {
+            try {
+                android.content.Context ctx = getContext();
+                if (Build.VERSION.SDK_INT >= 29) {
+                    android.content.ContentValues v = new android.content.ContentValues();
+                    v.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename);
+                    v.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/csv");
+                    v.put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS);
+                    android.net.Uri uri = ctx.getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                    if (uri == null) { call.reject("MediaStore insert returned null"); return; }
+                    try (java.io.OutputStream os = ctx.getContentResolver().openOutputStream(uri)) {
+                        if (os == null) { call.reject("openOutputStream returned null"); return; }
+                        os.write(csv.getBytes("UTF-8"));
+                        os.flush();
+                    }
+                } else {
+                    java.io.File downloads = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS);
+                    if (!downloads.exists()) downloads.mkdirs();
+                    java.io.File f = new java.io.File(downloads, filename);
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
+                        fos.write(csv.getBytes("UTF-8"));
+                        fos.flush();
+                    }
+                }
+                JSObject ret = new JSObject();
+                ret.put("filename", filename);
+                ret.put("location", "Downloads");
+                call.resolve(ret);
+            } catch (Throwable t) {
+                Log.w(TAG, "exportCsv failed: " + t.getMessage(), t);
+                call.reject("exportCsv failed: " + t.getMessage());
+            }
+        });
+    }
+
     @PluginMethod
     public void setBroadcast(PluginCall call) {
         Boolean enabled = call.getBoolean("enabled");
