@@ -4661,8 +4661,23 @@
     return { csv, filename };
   }
 
-  function downloadCSV({ csv, filename }) {
+  async function downloadCSV({ csv, filename }) {
     const blob = new Blob([csv], { type: 'text/csv' });
+    // Capacitor WebView ignores <a download>. Prefer the OS share sheet via
+    // navigator.share with a File payload — user can save to Downloads, mail
+    // it, hand it to Drive/Dropbox, etc. Falls back to the legacy link on
+    // browsers without share-files support.
+    try {
+      if (typeof navigator !== 'undefined' && navigator.canShare) {
+        const file = new File([blob], filename, { type: 'text/csv' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: filename });
+          return;
+        }
+      }
+    } catch (e) {
+      if (/abort/i.test(e && e.name || '')) return;
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

@@ -91,9 +91,21 @@ public class MainActivity extends BridgeActivity {
                 this.bridge.getWebView().onResume();
             }
         } catch (Throwable t) {
-            // Defensive: if Capacitor changes Bridge API in the future and
-            // breaks this override, fail open — Activity pause still
-            // succeeded above, we just lose the keep-alive optimization.
+            // Fail open if Capacitor's Bridge API shifts.
         }
+    }
+
+    // Hardware back press: navigate WebView history if possible; otherwise
+    // background the Activity instead of finishing it. finish() destroys the
+    // bridge + JS context, killing the active session UI.
+    @Override
+    public void onBackPressed() {
+        try {
+            if (bridge != null && bridge.getWebView() != null && bridge.getWebView().canGoBack()) {
+                bridge.getWebView().goBack();
+                return;
+            }
+        } catch (Throwable ignored) {}
+        moveTaskToBack(true);
     }
 }
