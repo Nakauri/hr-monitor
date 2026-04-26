@@ -4662,34 +4662,22 @@
   }
 
   async function downloadCSV({ csv, filename }) {
-    // Capacitor: write directly to public Downloads via native plugin.
-    // navigator.share with files is unreliable in the WebView (canShare
-    // often returns false even on Chrome-based shells), so we don't trust it.
-    try {
-      if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable
-          && typeof window.HRMNativeHrSession.exportCsv === 'function') {
-        const r = await window.HRMNativeHrSession.exportCsv(filename, csv);
-        setStatus('Saved to Downloads: ' + (r && r.filename || filename));
-        return;
+    console.info('[downloadCSV]', filename, csv.length + ' bytes');
+    const native = window.HRMNativeHrSession;
+    if (native && native.isAvailable && typeof native.exportCsv === 'function') {
+      try {
+        await native.exportCsv(filename, csv);
+        showToast('CSV saved.', 2500);
+      } catch (e) {
+        const msg = e && e.message || String(e);
+        if (/cancel/i.test(msg)) return;  // user backed out of save dialog
+        console.error('[downloadCSV] native export failed:', e);
+        showToast('Export failed: ' + msg, 4000);
       }
-    } catch (e) {
-      console.warn('native exportCsv failed; falling back', e);
+      return;
     }
-    // Web fallback. Try share sheet first (desktop Chrome / mobile Safari);
-    // <a download> for everything else.
-    const blob = new Blob([csv], { type: 'text/csv' });
-    try {
-      if (typeof navigator !== 'undefined' && navigator.canShare) {
-        const file = new File([blob], filename, { type: 'text/csv' });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: filename });
-          return;
-        }
-      }
-    } catch (e) {
-      if (/abort/i.test(e && e.name || '')) return;
-    }
-    const url = URL.createObjectURL(blob);
+    // Browser: <a download> works everywhere except Capacitor (handled above).
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;

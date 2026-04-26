@@ -517,49 +517,48 @@ public class NativeHrSessionPlugin extends Plugin {
         call.resolve();
     }
 
-    // Writes a CSV string to the public Downloads folder. On API 29+ uses
-    // MediaStore.Downloads (sandboxed, no permissions required); on older
-    // devices falls back to Environment.DIRECTORY_DOWNLOADS. Returns the
-    // resulting display name. Replaces the JS `<a download>` flow which
-    // doesn't work in Capacitor's WebView.
+    // SAF "Save as" dialog. User picks the destination (Downloads, Drive,
+    // anywhere). Works on every Android version with no permissions; the
+    // alternatives (MediaStore.Downloads on 29+, WRITE_EXTERNAL_STORAGE on
+    // ≤28) require version-specific code AND a runtime permission flow on
+    // older OSes. SAF sidesteps both.
+    private String pendingExportCsv;
     @PluginMethod
     public void exportCsv(PluginCall call) {
         final String filename = call.getString("filename");
         final String csv = call.getString("csv");
         if (filename == null || csv == null) { call.reject("filename + csv required"); return; }
+        pendingExportCsv = csv;
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("text/csv");
+        i.putExtra(Intent.EXTRA_TITLE, filename);
+        startActivityForResult(call, i, "exportCsvResult");
+    }
+
+    @com.getcapacitor.annotation.ActivityCallback
+    private void exportCsvResult(PluginCall call, androidx.activity.result.ActivityResult result) {
+        String csv = pendingExportCsv;
+        pendingExportCsv = null;
+        if (csv == null) { call.reject("export state lost"); return; }
+        if (result == null || result.getResultCode() != android.app.Activity.RESULT_OK) {
+            call.reject("user_cancelled");
+            return;
+        }
+        Intent data = result.getData();
+        android.net.Uri uri = data != null ? data.getData() : null;
+        if (uri == null) { call.reject("no_uri_returned"); return; }
         executor().execute(() -> {
-            try {
-                android.content.Context ctx = getContext();
-                if (Build.VERSION.SDK_INT >= 29) {
-                    android.content.ContentValues v = new android.content.ContentValues();
-                    v.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename);
-                    v.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/csv");
-                    v.put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS);
-                    android.net.Uri uri = ctx.getContentResolver().insert(
-                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
-                    if (uri == null) { call.reject("MediaStore insert returned null"); return; }
-                    try (java.io.OutputStream os = ctx.getContentResolver().openOutputStream(uri)) {
-                        if (os == null) { call.reject("openOutputStream returned null"); return; }
-                        os.write(csv.getBytes("UTF-8"));
-                        os.flush();
-                    }
-                } else {
-                    java.io.File downloads = android.os.Environment.getExternalStoragePublicDirectory(
-                        android.os.Environment.DIRECTORY_DOWNLOADS);
-                    if (!downloads.exists()) downloads.mkdirs();
-                    java.io.File f = new java.io.File(downloads, filename);
-                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
-                        fos.write(csv.getBytes("UTF-8"));
-                        fos.flush();
-                    }
-                }
+            try (java.io.OutputStream os = getContext().getContentResolver().openOutputStream(uri)) {
+                if (os == null) { call.reject("openOutputStream null"); return; }
+                os.write(csv.getBytes("UTF-8"));
+                os.flush();
                 JSObject ret = new JSObject();
-                ret.put("filename", filename);
-                ret.put("location", "Downloads");
+                ret.put("uri", uri.toString());
                 call.resolve(ret);
             } catch (Throwable t) {
-                Log.w(TAG, "exportCsv failed: " + t.getMessage(), t);
-                call.reject("exportCsv failed: " + t.getMessage());
+                Log.w(TAG, "exportCsv write failed: " + t.getMessage(), t);
+                call.reject("write_failed: " + t.getMessage());
             }
         });
     }
