@@ -5064,7 +5064,10 @@
     for (let i = 0; i < 7; i++) {
       const d = new Date(weekStart);
       d.setDate(weekStart.getDate() + i);
-      const iso = d.toISOString().slice(0, 10);
+      // Build ISO from local fields. d.toISOString() uses UTC; for users
+      // west of UTC the Sunday-midnight-local date serialises to Saturday's
+      // UTC date, breaking the sessionsByDate lookup for Sunday cells.
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const files = sessionsByDate[iso] || [];
       // Duration-weighted avg HR across the day's sessions — more representative than
       // picking one session's average or using morning-only resting HR.
@@ -5141,11 +5144,11 @@
     const dayMs = 86400000;
     document.getElementById('week-prev').addEventListener('click', () => {
       const d = new Date(weekStart.getTime() - 7 * dayMs);
-      setHash('week/' + d.toISOString().slice(0, 10));
+      setHash('week/' + `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     });
     document.getElementById('week-next').addEventListener('click', () => {
       const d = new Date(weekStart.getTime() + 7 * dayMs);
-      setHash('week/' + d.toISOString().slice(0, 10));
+      setHash('week/' + `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     });
     document.getElementById('week-today').addEventListener('click', () => {
       setHash('week/' + todayStr);
@@ -6126,12 +6129,15 @@
     const slider = document.getElementById('chills-tune-slider');
     const label = document.getElementById('chills-tune-value');
     if (!slider || !label) return;
+    // detectChillsWindows expects {t,v} (summary shape); currentData uses
+    // {x,y,ep} (loadFullSession shape). Without this remap the detector
+    // reads undefined and returns zero events at every threshold.
+    const toDetectorShape = (arr) => (arr || []).map(p => ({ t: p.x, v: p.y }));
     const saved = parseFloat(localStorage.getItem('hrv_viewer_chills_ratio') || '2.5');
     slider.value = saved;
     label.textContent = saved.toFixed(1) + '×';
-    // Apply saved threshold immediately
     if (saved !== 2.5 && currentData && currentSummary) {
-      currentSummary.chillsWindows = detectChillsWindows(currentData.hr, saved, currentData.rmssd);
+      currentSummary.chillsWindows = detectChillsWindows(toDetectorShape(currentData.hr), saved, toDetectorShape(currentData.rmssd));
       renderInsight(currentSummary);
       renderMarkerList(currentSummary);
       drawSessionChart(currentSummary, currentData);
@@ -6144,7 +6150,7 @@
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         if (!currentData || !currentSummary) return;
-        currentSummary.chillsWindows = detectChillsWindows(currentData.hr, v, currentData.rmssd);
+        currentSummary.chillsWindows = detectChillsWindows(toDetectorShape(currentData.hr), v, toDetectorShape(currentData.rmssd));
         renderInsight(currentSummary);
         renderMarkerList(currentSummary);
         drawSessionChart(currentSummary, currentData);
@@ -7133,10 +7139,36 @@
       return;
     }
     const q = classifyQuadrant(s.hrAvg, s.rmssdAvg);
-    document.getElementById('interp-current').innerHTML =
+    // Dominant quadrant by time share — surfaces the real shape of the
+    // session. Average-based classification almost always lands in the
+    // middle ("neutral") because session means rarely cross both axes.
+    const QUAD_LABELS = {
+      'low-high':  { label: 'Low HR · High HRV',  tone: 'Rest or recovery mode. Strong parasympathetic tone.' },
+      'high-high': { label: 'High HR · High HRV', tone: 'Post-exertion rebound or regulated arousal.' },
+      'low-low':   { label: 'Low HR · Low HRV',   tone: 'Fatigue or under-recovery pattern.' },
+      'high-low':  { label: 'High HR · Low HRV',  tone: 'Sympathetic stress. Classic flare or orthostatic pattern.' },
+    };
+    const totalSession = s.duration || 1;
+    let dominant = null, dominantPct = 0;
+    if (currentQuadRanges) {
+      for (const key of Object.keys(QUAD_LABELS)) {
+        const ranges = currentQuadRanges[key] || [];
+        const min = ranges.reduce((x, r) => x + (r.end - r.start), 0);
+        const pct = (min / totalSession) * 100;
+        if (pct > dominantPct) { dominantPct = pct; dominant = key; }
+      }
+    }
+    let html =
       `<div style="font-size: 11px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px;">Session average</div>` +
-      `<div style="font-size: 16px;">${q.label} — <span style="color: var(--text-dim); font-weight: 500;">${q.tone}</span></div>` +
-      `<div style="font-size: 11px; color: var(--text-dim); margin-top: 8px;">Click a card below to highlight the time ranges on the chart that match that quadrant.</div>`;
+      `<div style="font-size: 16px;">${q.label} — <span style="color: var(--text-dim); font-weight: 500;">${q.tone}</span></div>`;
+    if (q.key === 'neutral' && dominant && dominantPct >= 25) {
+      const dq = QUAD_LABELS[dominant];
+      html +=
+        `<div style="font-size: 11px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; margin: 12px 0 4px;">Most time in</div>` +
+        `<div style="font-size: 16px;">${dq.label} <span style="color: var(--text-dim); font-weight: 500;">(${Math.round(dominantPct)}% of session)</span> — <span style="color: var(--text-dim); font-weight: 500;">${dq.tone}</span></div>`;
+    }
+    html += `<div style="font-size: 11px; color: var(--text-dim); margin-top: 8px;">Click a card below to highlight the time ranges on the chart that match that quadrant.</div>`;
+    document.getElementById('interp-current').innerHTML = html;
     // Decorate each cell: show percent of session time, total duration, span count.
     // Empty cells get "none in this session" and are non-clickable.
     const totalSession = s.duration || 1;

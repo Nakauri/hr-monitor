@@ -115,6 +115,11 @@ public class NativeHrSessionPlugin extends Plugin {
     // 2 consecutive CCCD failures on a bonded handle = stale bond; trigger removeBond.
     private int cccdAttempts = 0;
     private boolean usingBondedHandle = false;
+    // Heartbeat: if no HR notification for STALE_HR_THRESHOLD_MS, force a reconnect.
+    private volatile long lastHrAtMs = 0;
+    private int gattReconnectAttempts = 0;
+    private static final long STALE_HR_THRESHOLD_MS = 60_000L;
+    private static final long HEARTBEAT_INTERVAL_MS = 15_000L;
 
     // Session state
     private String broadcastKey;
@@ -448,6 +453,10 @@ public class NativeHrSessionPlugin extends Plugin {
         startNativeForegroundService("HR Monitor", "Recording");
 
         sessionActive.set(true);
+        lastHrAtMs = 0;
+        gattReconnectAttempts = 0;
+        mainHandler.removeCallbacks(heartbeatRunnable);
+        mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
         emitState();
         JSObject ret = new JSObject();
         ret.put("started", true);
@@ -471,6 +480,8 @@ public class NativeHrSessionPlugin extends Plugin {
 
     public void stopSessionInternal() {
         sessionActive.set(false);
+        mainHandler.removeCallbacks(heartbeatRunnable);
+        mainHandler.removeCallbacks(gattReconnectRunnable);
         if (csv != null) {
             csv.close();
             if (uploader != null) uploader.uploadAsync(csv.getFile());
@@ -748,19 +759,7 @@ public class NativeHrSessionPlugin extends Plugin {
                 hrChar = null;
                 if (csv != null) csv.appendConnectionRow("disconnected", System.currentTimeMillis());
                 emitState();
-                if (sessionActive.get()) {
-                    final BluetoothGatt g = gatt;
-                    mainHandler.postDelayed(() -> {
-                        try {
-                            if (sessionActive.get() && g == currentGatt) {
-                                Log.i(TAG, "Attempting GATT reconnect…");
-                                g.connect();
-                            }
-                        } catch (Throwable t) {
-                            Log.w(TAG, "gatt reconnect failed: " + t.getMessage());
-                        }
-                    }, 2000);
-                }
+                if (sessionActive.get()) scheduleGattReconnect();
             }
         }
 
@@ -848,6 +847,8 @@ public class NativeHrSessionPlugin extends Plugin {
 
     private void handleHrReading(HrParse p) {
         long now = System.currentTimeMillis();
+        lastHrAtMs = now;
+        gattReconnectAttempts = 0;
         // synchronized: BLE binder writes, main thread reads in publishTick.
         Double rmssd;
         synchronized (rrWindow) {
@@ -978,6 +979,73 @@ public class NativeHrSessionPlugin extends Plugin {
             getContext().stopService(new Intent(getContext(), NativeHrService.class));
         } catch (Throwable ignored) {}
     }
+
+    // Backoff reconnect: 2 → 4 → 8 → 16 → 30 s, capped. After 5 attempts on
+    // the cached gatt, do a full reconnect (close + new connectGatt) which
+    // recovers from a borked GATT object that gatt.connect() can't reset.
+    private final Runnable gattReconnectRunnable = this::doGattReconnect;
+    private void scheduleGattReconnect() {
+        if (!sessionActive.get()) return;
+        mainHandler.removeCallbacks(gattReconnectRunnable);
+        gattReconnectAttempts++;
+        long base = Math.min(30_000L, 2_000L * (1L << Math.min(gattReconnectAttempts - 1, 4)));
+        long delay = (long) (base * (1.0 + (Math.random() * 0.4 - 0.2)));
+        Log.i(TAG, "GATT reconnect scheduled in " + delay + "ms (attempt " + gattReconnectAttempts + ")");
+        mainHandler.postDelayed(gattReconnectRunnable, delay);
+    }
+    @SuppressLint("MissingPermission")
+    private void doGattReconnect() {
+        if (!sessionActive.get()) return;
+        BluetoothGatt g = currentGatt;
+        if (gattReconnectAttempts > 5 || g == null) {
+            Log.i(TAG, "GATT reconnect: full reconnect (attempts=" + gattReconnectAttempts + ")");
+            fullReconnectGatt();
+            return;
+        }
+        try {
+            Log.i(TAG, "GATT reconnect: gatt.connect()");
+            g.connect();
+        } catch (Throwable t) {
+            Log.w(TAG, "gatt.connect() threw: " + t.getMessage());
+            fullReconnectGatt();
+        }
+    }
+    @SuppressLint("MissingPermission")
+    private void fullReconnectGatt() {
+        if (!sessionActive.get()) return;
+        if (adapter == null) return;
+        String mac = null;
+        if (currentGatt != null && currentGatt.getDevice() != null) {
+            mac = currentGatt.getDevice().getAddress();
+        }
+        if (mac == null) return;
+        BluetoothDevice device = findBondedDevice(mac);
+        if (device == null) device = findScannedDevice(mac);
+        if (device == null) {
+            try { device = adapter.getRemoteDevice(mac); } catch (Throwable ignored) {}
+        }
+        if (device == null) return;
+        closeGattQuietly();
+        try {
+            currentGatt = device.connectGatt(getContext(), false, gattCallback);
+        } catch (Throwable t) {
+            Log.w(TAG, "fullReconnectGatt connectGatt failed: " + t.getMessage());
+        }
+    }
+
+    // Heartbeat: catches silent BLE drops Doze can produce (no onConnectionStateChange
+    // fires). If no HR for STALE_HR_THRESHOLD_MS, force a reconnect.
+    private final Runnable heartbeatRunnable = new Runnable() {
+        @Override public void run() {
+            if (!sessionActive.get()) return;
+            long now = System.currentTimeMillis();
+            if (lastHrAtMs > 0 && now - lastHrAtMs > STALE_HR_THRESHOLD_MS) {
+                Log.w(TAG, "Heartbeat: no HR for " + (now - lastHrAtMs) + "ms — forcing reconnect");
+                scheduleGattReconnect();
+            }
+            mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
+        }
+    };
 
     private void closeGattQuietly() {
         if (currentGatt != null) {
