@@ -3458,7 +3458,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 8
+        || cached.__schemaV !== 9
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3920,20 +3920,26 @@
 
     // Resting HR proxy: the LOWEST 5-min rolling mean across the session. Unlike
     // "morning HR" this works for non-24 / odd schedules — it finds the calmest
-    // stretch regardless of when in the day the session happened.
+    // stretch regardless of when in the day the session happened. Skip null
+    // gap-markers; they coerce to 0 in arithmetic and pull the average down.
     const ROLL_MIN = 5;
     let restingHR = null;
     for (let i = 0; i < hr.length; i++) {
+      if (hr[i].v == null) continue;
       const windowVals = [];
-      for (let j = i; j < hr.length && hr[j].t - hr[i].t <= ROLL_MIN; j++) windowVals.push(hr[j].v);
+      for (let j = i; j < hr.length && hr[j].t - hr[i].t <= ROLL_MIN; j++) {
+        if (hr[j].v != null) windowVals.push(hr[j].v);
+      }
       if (windowVals.length < 10) continue;
       const m = windowVals.reduce((a, b) => a + b, 0) / windowVals.length;
       if (restingHR == null || m < restingHR) restingHR = m;
     }
     restingHR = restingHR != null ? Math.round(restingHR) : null;
 
-    // Time in tachycardia (HR > 100) - approximate, assume uniform sampling
-    const tachy = hr.filter(p => p.v > 100).length / hr.length;
+    // Time in tachycardia (HR > 100). Denominator is real samples only;
+    // gap-markers count as neither tachy nor not-tachy.
+    const realHrCount = hrVals.length;
+    const tachy = realHrCount > 0 ? hr.filter(p => p.v != null && p.v > 100).length / realHrCount : 0;
 
     // HR delta events — sustained rises/drops of >=20 bpm within any window up to
     // 10 min (POTS tilt-test criterion is 30 bpm in 10 min of standing). The
@@ -3941,9 +3947,13 @@
     // HR with a 5-beat mean first so single-beat noise doesn't trigger false events.
     const smHR = [];
     for (let i = 0; i < hr.length; i++) {
+      if (hr[i].v == null) { smHR.push({ t: hr[i].t, v: null }); continue; }
       let sum = 0, n = 0;
-      for (let j = Math.max(0, i - 2); j < Math.min(hr.length, i + 3); j++) { sum += hr[j].v; n++; }
-      smHR.push({ t: hr[i].t, v: sum / n });
+      for (let j = Math.max(0, i - 2); j < Math.min(hr.length, i + 3); j++) {
+        if (hr[j].v == null) continue;
+        sum += hr[j].v; n++;
+      }
+      smHR.push({ t: hr[i].t, v: n > 0 ? sum / n : null });
     }
     // === Sympathetic flush detection (v2) ===
     //
@@ -4105,7 +4115,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 8,
+      __schemaV: 9,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
