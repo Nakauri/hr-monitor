@@ -550,20 +550,21 @@
   }
   .mode-inline-link:hover { border-bottom-color: var(--text); }
   .mode-inline-demo {
-    margin-top: 12px;
-    font-size: 12px;
-    color: var(--accent-rmssd);
+    margin-top: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0a0a0a;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 10px;
-    border: 1px solid rgba(93,202,165,0.35);
+    padding: 9px 16px;
+    border: 1px solid var(--accent-rmssd);
     border-radius: 999px;
-    background: rgba(93,202,165,0.08);
+    background: var(--accent-rmssd);
     align-self: flex-start;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
   }
-  .mode-inline-demo:hover { background: rgba(93,202,165,0.15); border-color: var(--accent-rmssd); }
+  .mode-inline-demo:hover { background: #6fd9b3; border-color: #6fd9b3; }
   .mode-disclaimer {
     margin: 28px 0 0;
     font-size: 12px;
@@ -1526,7 +1527,7 @@
       <h3 class="mode-inline-title">Session viewer</h3>
       <p class="mode-inline-desc">Review every past recording with autonomic interpretation, palpitation clusters, posture overlays, and month, week, or day timelines.</p>
       <a class="mode-inline-link" href="./hrv_viewer.html">Open viewer →</a>
-      <a class="mode-inline-demo" href="./hrv_viewer.html?demo=1">Try with sample data — no sign-in needed →</a>
+      <a class="mode-inline-demo" href="./hrv_viewer.html?demo=1">Try with sample data. No sign-in needed →</a>
     </div>
   </div>
   <p class="mode-disclaimer">Not a medical tool. Interpretations are estimated.</p>
