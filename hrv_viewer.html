@@ -3443,6 +3443,28 @@
     return m ? m.date.getTime() : 0;
   }
 
+  // Given a session summary and an ISO date, return the portion of the
+  // session that falls within that day's local-time boundaries. Used by
+  // day-view rendering. Top-level so it's available regardless of which
+  // load path populated sessionsIndex (real, demo, or empty).
+  function sessionDayPortion(s, dateIso) {
+    if (!s || !s.startEpoch || !s.duration) return null;
+    const dayStart = new Date(dateIso + 'T00:00:00').getTime();
+    const dayEnd = dayStart + 86400000;
+    const sessStart = s.startEpoch;
+    const sessEnd = sessStart + s.duration * 60000;
+    const start = Math.max(sessStart, dayStart);
+    const end = Math.min(sessEnd, dayEnd);
+    return {
+      start, end,
+      durationMin: Math.max(0, (end - start) / 60000),
+      isContinuation: sessStart < dayStart,
+      continuesNext: sessEnd > dayEnd,
+      fullStart: sessStart,
+      fullDurationMin: s.duration,
+    };
+  }
+
   async function loadSessions() {
     loadCachedIndex();
     const filenames = await collectAvailableSessionFilenames();
@@ -3529,26 +3551,6 @@
       }
     }
 
-    // Helper: given a session summary and an ISO date, return the portion
-    // of the session that falls within that day's local-time boundaries.
-    // Returns { start, end, durationMin, isContinuation, continuesNext }.
-    window.sessionDayPortion = function (s, dateIso) {
-      if (!s || !s.startEpoch || !s.duration) return null;
-      const dayStart = new Date(dateIso + 'T00:00:00').getTime();
-      const dayEnd = dayStart + 86400000;
-      const sessStart = s.startEpoch;
-      const sessEnd = sessStart + s.duration * 60000;
-      const start = Math.max(sessStart, dayStart);
-      const end = Math.min(sessEnd, dayEnd);
-      return {
-        start, end,
-        durationMin: Math.max(0, (end - start) / 60000),
-        isContinuation: sessStart < dayStart,
-        continuesNext: sessEnd > dayEnd,
-        fullStart: sessStart,
-        fullDurationMin: s.duration,
-      };
-    };
     for (const d of Object.keys(sessionsByDate)) {
       sessionsByDate[d].sort();
     }
@@ -8156,23 +8158,25 @@
     } catch (e) { return false; }
   }
   async function loadDemoSessions() {
-    const manifest = await fetch('./demo/manifest.json', { cache: 'no-cache' }).then(r => r.json());
+    const manifest = await fetch('./demo/manifest.json').then(r => r.json());
     const files = (manifest && manifest.files) || [];
     sessionsIndex = {};
     sessionsByDate = {};
-    for (const fn of files) {
+    // Parallel fetch + parse — the 12 demo CSVs are independent. Sequential
+    // awaits added a multi-second delay where there's no need for one.
+    const results = await Promise.all(files.map(async fn => {
       try {
-        const text = await fetch('./demo/' + fn, { cache: 'no-cache' }).then(r => r.text());
-        const summary = summarizeCSV(fn, text);
-        if (!summary) continue;
-        sessionsIndex[fn] = summary;
+        const text = await fetch('./demo/' + fn).then(r => r.text());
+        return { fn, summary: summarizeCSV(fn, text) };
       } catch (e) {
         console.warn('[demo] failed to load', fn, e);
+        return { fn, summary: null };
       }
+    }));
+    for (const { fn, summary } of results) {
+      if (summary) sessionsIndex[fn] = summary;
     }
     rebuildSessionsByDate();
-    persistIndex();
-    if (typeof renderIndex === 'function') renderIndex();
   }
   function showDemoBanner() {
     if (document.getElementById('demo-banner')) return;
@@ -8188,17 +8192,27 @@
     for (const fn of Object.keys(sessionsIndex)) {
       const s = sessionsIndex[fn];
       if (!s) continue;
-      let key;
+      let startKey;
       if (s.startEpoch) {
         const d = new Date(s.startEpoch);
-        key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        startKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
       } else {
         const meta = parseSessionFilename(fn);
         if (!meta) continue;
-        key = meta.isoDate;
+        startKey = meta.isoDate;
       }
-      if (!sessionsByDate[key]) sessionsByDate[key] = [];
-      sessionsByDate[key].push(fn);
+      if (!sessionsByDate[startKey]) sessionsByDate[startKey] = [];
+      sessionsByDate[startKey].push(fn);
+      // Midnight-crossing session — also bucket onto the end date.
+      if (s.startEpoch && s.duration) {
+        const endMs = s.startEpoch + s.duration * 60000;
+        const ed = new Date(endMs);
+        const endKey = ed.getFullYear() + '-' + String(ed.getMonth() + 1).padStart(2, '0') + '-' + String(ed.getDate()).padStart(2, '0');
+        if (endKey !== startKey) {
+          if (!sessionsByDate[endKey]) sessionsByDate[endKey] = [];
+          sessionsByDate[endKey].push(fn);
+        }
+      }
     }
     for (const d of Object.keys(sessionsByDate)) sessionsByDate[d].sort();
   }
@@ -8207,6 +8221,12 @@
   async function init() {
     const demo = isDemoMode();
     if (demo) {
+      // Hide the "pick a folder / sign in" empty-state IMMEDIATELY so it
+      // doesn't flash through while demo CSVs are still parsing. The
+      // showOnly() call later (after route()) does the same job, but only
+      // once data is loaded — which can take a second or two.
+      const es = document.getElementById('empty-state');
+      if (es) es.style.display = 'none';
       showDemoBanner();
       try { await loadDemoSessions(); } catch (e) { console.error('[demo] load failed', e); }
     } else {
