@@ -1,5 +1,6 @@
 # Local data and backups (don't ever commit session CSVs)
 *.csv
+!/demo/*.csv
 CSV Dates/
 _local_snapshot_*/
 
