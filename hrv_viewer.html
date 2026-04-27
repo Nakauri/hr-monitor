@@ -3204,6 +3204,10 @@
         menu.addEventListener('click', (e) => e.stopPropagation());
         menu.querySelector('[data-action="delete"]').addEventListener('click', async () => {
           closeAllSessionCardMenus();
+          if (isDemoMode()) {
+            alert('Delete is disabled in the demo.');
+            return;
+          }
           const pretty = prettyFilename(fn);
           if (!confirm('Delete this session?\n\n' + pretty + '\n\nRemoved from this device' + (driveAccessToken ? ' and Google Drive' : '') + '. This cannot be undone.')) return;
           try {
@@ -8191,51 +8195,56 @@
 
   // ===== Init =====
   async function init() {
-    if (isDemoMode()) {
+    const demo = isDemoMode();
+    if (demo) {
       showDemoBanner();
       try { await loadDemoSessions(); } catch (e) { console.error('[demo] load failed', e); }
-      route();
-      window.addEventListener('hashchange', route);
-      return;
-    }
-    await restoreFolder();
-    driveLoadMeta();
-    driveUpdateUI();
-    updateWatchLiveUI();
-    initDriveUI();
-    if (dirHandle) {
-      // Try silent permission check first
-      const perm = await dirHandle.queryPermission({ mode: 'read' });
-      if (perm === 'granted') {
+    } else {
+      await restoreFolder();
+      driveLoadMeta();
+      driveUpdateUI();
+      updateWatchLiveUI();
+      initDriveUI();
+      if (dirHandle) {
+        // Try silent permission check first
+        const perm = await dirHandle.queryPermission({ mode: 'read' });
+        if (perm === 'granted') {
+          await loadSessions();
+        }
+        // If not granted, user will need to click pick / an interaction to re-grant
+      } else {
+        // No local folder — still try loading from Drive cache so the user sees
+        // any previously-synced sessions without needing to pick a folder.
         await loadSessions();
       }
-      // If not granted, user will need to click pick / an interaction to re-grant
-    } else {
-      // No local folder — still try loading from Drive cache so the user sees
-      // any previously-synced sessions without needing to pick a folder.
-      await loadSessions();
     }
     // If nothing happens yet, route() will show empty-state
     route();
 
     window.addEventListener('hashchange', route);
-    // Hide local-folder UI entirely on browsers without File System Access
-    // (Firefox, Safari, mobile). These users sync via Drive exclusively — the
-    // viewer stays fully functional, the folder picker just isn't shown.
-    if (!window.showDirectoryPicker) {
-      document.querySelectorAll('.fsa-only').forEach(el => el.hidden = true);
-      const emptyPick = document.getElementById('empty-pick');
-      if (emptyPick) emptyPick.hidden = true;
+    if (demo) {
+      // In demo mode, hide all Drive + folder UI so the header isn't cluttered
+      // with controls that would either no-op or break demo state.
+      document.querySelectorAll('.fi-folder, .fi-drive, .drive-sep').forEach(el => el.style.display = 'none');
     } else {
-      document.getElementById('folder-pick').addEventListener('click', pickFolder);
-      document.getElementById('empty-pick').addEventListener('click', pickFolder);
+      // Hide local-folder UI entirely on browsers without File System Access
+      // (Firefox, Safari, mobile). These users sync via Drive exclusively — the
+      // viewer stays fully functional, the folder picker just isn't shown.
+      if (!window.showDirectoryPicker) {
+        document.querySelectorAll('.fsa-only').forEach(el => el.hidden = true);
+        const emptyPick = document.getElementById('empty-pick');
+        if (emptyPick) emptyPick.hidden = true;
+      } else {
+        document.getElementById('folder-pick').addEventListener('click', pickFolder);
+        document.getElementById('empty-pick').addEventListener('click', pickFolder);
+      }
+      document.getElementById('empty-drive').addEventListener('click', driveSignIn);
+      document.getElementById('drive-signin').addEventListener('click', driveSignIn);
+      document.getElementById('drive-signout').addEventListener('click', driveSignOut);
+      document.getElementById('drive-sync').addEventListener('click', () => {
+        driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
+      });
     }
-    document.getElementById('empty-drive').addEventListener('click', driveSignIn);
-    document.getElementById('drive-signin').addEventListener('click', driveSignIn);
-    document.getElementById('drive-signout').addEventListener('click', driveSignOut);
-    document.getElementById('drive-sync').addEventListener('click', () => {
-      driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
-    });
     // Mobile hamburger. Toggles body.menu-open which reveals the stacked nav
     // beneath the logo. Any nav link click closes the menu so it doesn't stay
     // open after the user picks a view.
