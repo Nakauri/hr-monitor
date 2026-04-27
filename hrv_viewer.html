@@ -400,7 +400,7 @@
   .empty-panel .hint { margin-top: 22px; font-size: 11px; color: var(--text-faint); line-height: 1.6; }
   .empty-choices {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 10px;
     margin-bottom: 4px;
   }
@@ -1851,7 +1851,7 @@
   .filter-chip.type-event.active { border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
   .filter-chip.type-warning.active { border-color: var(--warn-crash); color: var(--warn-crash); }
   .filter-chip.type-palp.active { border-color: var(--warn-palp); color: var(--warn-palp); }
-  .filter-chip.type-delta.active { border-color: #8BB4FF; color: #8BB4FF; }
+  .filter-chip.type-delta.active { border-color: #B48CFF; color: #B48CFF; }
   .filter-chip.type-disconnect.active { border-color: var(--text-dim); color: var(--text-dim); }
   .marker-list {
     overflow-y: auto;
@@ -1887,7 +1887,7 @@
   .marker-item.type-event { border-left-color: var(--accent-rmssd); }
   .marker-item.type-warning { border-left-color: var(--warn-crash); }
   .marker-item.type-palp { border-left-color: var(--warn-palp); }
-  .marker-item.type-delta { border-left-color: #8BB4FF; }
+  .marker-item.type-delta { border-left-color: #B48CFF; }
   .marker-item.type-disconnect { border-left-color: var(--text-dim); }
   .marker-time {
     color: var(--text-dim);
@@ -2498,6 +2498,13 @@
           <span class="empty-choice-title">Sign in with Google</span>
           <span class="empty-choice-sub">Sync sessions across devices.</span>
         </button>
+        <a id="empty-demo" href="./hrv_viewer.html?demo=1" class="empty-choice">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12h3l3-7 4 14 3-7h5"/>
+          </svg>
+          <span class="empty-choice-title">See sample data</span>
+          <span class="empty-choice-sub">Two weeks of demo sessions, no sign-in needed.</span>
+        </a>
       </div>
       <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically. Drive sessions are cached here for faster loads.</div>
     </div>
@@ -3299,6 +3306,11 @@
   // granted), then falls back to the Drive IndexedDB cache. Throws if
   // neither source has the file.
   async function readSessionText(filename) {
+    if (isDemoMode()) {
+      const r = await fetch('./demo/' + filename, { cache: 'force-cache' });
+      if (r.ok) return await r.text();
+      throw new Error('Demo session not found: ' + filename);
+    }
     if (dirHandle) {
       try {
         const fh = await dirHandle.getFileHandle(filename);
@@ -3344,6 +3356,7 @@
   }
 
   function persistIndex() {
+    if (isDemoMode()) return;  // demo data is in-memory only; never pollute the user's index
     try { localStorage.setItem(LS_INDEX, JSON.stringify(sessionsIndex)); } catch (e) {}
   }
 
@@ -4943,7 +4956,7 @@
             <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Palps</span><span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-faint)'};">${s.palpCount}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#8BB4FF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#B48CFF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>
             <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable."><span class="session-card-stat-label">Uptime</span><span class="session-card-stat-value" style="color: ${uptimeColor(computeUptimePct(s))};">${computeUptimePct(s) != null ? computeUptimePct(s) + '%' : '—'}</span></div>${autonomicCols}
           </div>
         </div>`;
@@ -5442,7 +5455,7 @@
           { label: 'Flushes', data: bucketKeysUnion.map(k => fMap[k] || 0), backgroundColor: '#E8A858', borderWidth: 0 },
           { label: 'Chills', data: bucketKeysUnion.map(k => cMap[k] || 0), backgroundColor: '#85B7EB', borderWidth: 0 },
           { label: 'Palp clusters', data: bucketKeysUnion.map(k => pMap[k] || 0), backgroundColor: '#D76CBA', borderWidth: 0 },
-          { label: 'HR shifts', data: bucketKeysUnion.map(k => sMap[k] || 0), backgroundColor: '#8BB4FF', borderWidth: 0 },
+          { label: 'HR shifts', data: bucketKeysUnion.map(k => sMap[k] || 0), backgroundColor: '#B48CFF', borderWidth: 0 },
         ],
       },
       options: {
@@ -5857,7 +5870,7 @@
               <div class="chart-legend-item toggleable" data-type="disconnect" title="Click to toggle"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>BLE gap</div>
               <div class="chart-legend-item toggleable" data-type="event" title="Click to toggle · manual symptom markers added during a recording"><span class="legend-swatch vline"></span>Event marker</div>
               <div class="chart-legend-item toggleable" data-type="palp" title="Click to toggle"><span class="legend-swatch dot" style="background: #D76CBA;"></span>Palpitation cluster</div>
-              <div class="chart-legend-item toggleable" data-type="delta" title="Click to toggle"><span class="legend-swatch" style="background: rgba(139,180,255,0.2); border: 1px solid rgba(139,180,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
+              <div class="chart-legend-item toggleable" data-type="delta" title="Click to toggle"><span class="legend-swatch" style="background: rgba(180,140,255,0.2); border: 1px solid rgba(180,140,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
               <div class="chart-legend-item toggleable" data-type="flush" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,168,88,0.2); border: 1px solid rgba(232,168,88,0.6);"></span>Sympathetic flush</div>
               <div class="chart-legend-item toggleable" data-type="chills" title="Click to toggle"><span class="legend-swatch" style="background: rgba(133,183,235,0.2); border: 1px solid rgba(133,183,235,0.6);"></span>Chills / volatility</div>
               <div class="chart-legend-item toggleable" data-type="posture" title="Click to toggle"><span class="legend-swatch" style="background: rgba(200,168,230,0.15); border: 1px solid rgba(200,168,230,0.4);"></span>Posture</div>
@@ -7591,8 +7604,8 @@
     if (activeFilters.delta && s.hrDeltas) {
       for (const d of s.hrDeltas) {
         const arrow = d.direction === 'rise' ? '↑' : '↓';
-        const color = d.direction === 'rise' ? 'rgba(139,180,255,0.35)' : 'rgba(180,140,255,0.35)';
-        const fill = d.direction === 'rise' ? 'rgba(139,180,255,0.10)' : 'rgba(180,140,255,0.10)';
+        const color = 'rgba(180,140,255,0.35)';
+        const fill = 'rgba(180,140,255,0.10)';
         annotations['delta_' + idCounter++] = {
           type: 'box',
           xScaleID: 'x',
@@ -8125,8 +8138,73 @@
     return d.innerHTML;
   }
 
+  // ===== Demo mode =====
+  // Loads /demo/manifest.json + each CSV through the same parseCSV →
+  // summarizeCSV pipeline as a real session, so behaviour is identical.
+  // Skips Drive sync, disables persistence, shows a banner.
+  function isDemoMode() {
+    try {
+      const usp = new URLSearchParams(location.search);
+      return usp.get('demo') === '1' || /(?:^|[?&#])demo=1/.test(location.hash);
+    } catch (e) { return false; }
+  }
+  async function loadDemoSessions() {
+    const manifest = await fetch('./demo/manifest.json', { cache: 'no-cache' }).then(r => r.json());
+    const files = (manifest && manifest.files) || [];
+    sessionsIndex = {};
+    sessionsByDate = {};
+    for (const fn of files) {
+      try {
+        const text = await fetch('./demo/' + fn, { cache: 'no-cache' }).then(r => r.text());
+        const summary = summarizeCSV(fn, text);
+        if (!summary) continue;
+        sessionsIndex[fn] = summary;
+      } catch (e) {
+        console.warn('[demo] failed to load', fn, e);
+      }
+    }
+    rebuildSessionsByDate();
+    persistIndex();
+    if (typeof renderIndex === 'function') renderIndex();
+  }
+  function showDemoBanner() {
+    if (document.getElementById('demo-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'demo-banner';
+    bar.style.cssText = 'position:sticky;top:0;z-index:9000;display:flex;gap:12px;align-items:center;padding:8px 16px;background:#1a1410;border-bottom:1px solid #3a2818;color:#e8c068;font-size:13px;font-weight:500;';
+    bar.innerHTML = '<span style="flex:1">Demo data — what your viewer would look like with real sessions.</span>'
+      + '<a href="./hrv_viewer.html" style="color:inherit;text-decoration:underline;">Exit demo</a>';
+    document.body.insertBefore(bar, document.body.firstChild);
+  }
+  function rebuildSessionsByDate() {
+    sessionsByDate = {};
+    for (const fn of Object.keys(sessionsIndex)) {
+      const s = sessionsIndex[fn];
+      if (!s) continue;
+      let key;
+      if (s.startEpoch) {
+        const d = new Date(s.startEpoch);
+        key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      } else {
+        const meta = parseSessionFilename(fn);
+        if (!meta) continue;
+        key = meta.isoDate;
+      }
+      if (!sessionsByDate[key]) sessionsByDate[key] = [];
+      sessionsByDate[key].push(fn);
+    }
+    for (const d of Object.keys(sessionsByDate)) sessionsByDate[d].sort();
+  }
+
   // ===== Init =====
   async function init() {
+    if (isDemoMode()) {
+      showDemoBanner();
+      try { await loadDemoSessions(); } catch (e) { console.error('[demo] load failed', e); }
+      route();
+      window.addEventListener('hashchange', route);
+      return;
+    }
     await restoreFolder();
     driveLoadMeta();
     driveUpdateUI();
@@ -8160,6 +8238,14 @@
       document.getElementById('empty-pick').addEventListener('click', pickFolder);
     }
     document.getElementById('empty-drive').addEventListener('click', driveSignIn);
+    // Hide demo entry on Capacitor — mobile users have their own data and the
+    // demo CSV bundle isn't shipped in the APK.
+    try {
+      if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+        const demo = document.getElementById('empty-demo');
+        if (demo) demo.hidden = true;
+      }
+    } catch (e) {}
     document.getElementById('drive-signin').addEventListener('click', driveSignIn);
     document.getElementById('drive-signout').addEventListener('click', driveSignOut);
     document.getElementById('drive-sync').addEventListener('click', () => {
