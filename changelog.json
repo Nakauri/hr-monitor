@@ -2,28 +2,28 @@
   "items": [
     {
       "date": "2026-04-26",
-      "title": "Viewer demo + colour fix",
-      "body": "Try the viewer with two weeks of sample data, no sign-in required. HR shifts now render in purple everywhere so they're easy to tell apart from chills."
+      "title": "Try the viewer with sample data",
+      "body": "You can now check out the viewer before signing in. There's a button on the home page that loads two weeks of fake sessions so you can see what your own data would look like."
     },
     {
       "date": "2026-04-26",
-      "title": "Overnight reliability + battery",
-      "body": "Heartbeat watchdog re-checks before re-scheduling, CSV writes batch every 60 rows or 30 seconds, WebSocket pings stretched to 60 seconds, Drive uploads every 5 minutes. Activity back-press uses the new dispatcher so Android 14 swipe-back keeps the session alive."
+      "title": "Stays connected through the night",
+      "body": "The app is much better at recovering when the strap briefly drops out, like when you roll over in your sleep. Long sessions also use less battery and data."
     },
     {
       "date": "2026-04-26",
       "title": "Viewer fixes",
-      "body": "Chills sensitivity slider now actually scales the visible count by event ratio. Autonomic verdict surfaces the dominant quadrant when the session average lands in the middle. Avg HR no longer reads null on sessions with BLE gaps. Sunday cells in the week view navigate correctly."
+      "body": "The chills slider in the viewer actually does something now — drag it to see more or fewer events. Sundays in the week view open properly. The autonomic summary card no longer always says Neutral when one zone clearly dominated. HR shifts are easier to spot too — they're purple now instead of looking the same blue as chills."
     },
     {
       "date": "2026-04-25",
-      "title": "BLE coexistence with sleep-tracking apps",
-      "body": "Aorti can now share the strap with Sleep As Android (or any other BLE app) in either direction. Bonded device cache + autoConnect=false join the existing link cleanly. The picker also shows already-paired straps even when they aren't currently advertising."
+      "title": "Works alongside Sleep As Android",
+      "body": "Aorti can now share your strap with sleep-tracking apps at the same time. You don't have to disconnect one to use the other."
     },
     {
       "date": "2026-04-25",
-      "title": "Broadcast toggle, offline mode, CSV export",
-      "body": "The relay-broadcast switch actually disables publishing now. Sessions can record locally without ever opening the relay. Export CSV opens the system Save-as dialog so the file lands in Downloads (or wherever you pick)."
+      "title": "Save CSV anywhere, broadcast on/off, offline mode",
+      "body": "Tapping Export CSV now opens a save dialog so the file goes wherever you want. The relay-broadcast switch actually turns broadcasting on and off. You can also record a private session without broadcasting at all."
     }
   ]
 }
