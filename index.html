@@ -1946,53 +1946,31 @@
     tick();
   })();
 
-  // GitHub Releases → "What's new". Strictly user-facing: skip the
-  // rolling android-latest pointer, skip commit/branch chatter, surface
-  // the release title + the first real sentence of the release body.
-  // If that sentence still sounds dev-y (contains words like 'commit',
-  // 'branch', 'signed', 'main'), we fall through to the next line and
-  // then finally to a generic "update" label so users never see the
-  // raw release-automation boilerplate.
+  // Hand-curated changelog at /changelog.json. Was previously GitHub
+  // Releases, but the CI's rolling-build releases polluted the list with
+  // dev-y entries. The JSON file is editable in one place.
   (function () {
     const el = document.getElementById('changelog');
     if (!el) return;
-
-    const NOISY_TAG = /^(main|master|android-latest|draft|auto|head)$/i;
-    const DEV_NOISE = /\b(commit|branch|signed|main branch|ci\b|rolling|apk asset|release-drafter|freshly)/i;
-    const fmtDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-
-    function pickBlurb(body, name) {
-      if (!body) return name || '';
-      const lines = body.split('\n').map(l => l.trim()).filter(Boolean).filter(l => !l.startsWith('#'));
-      for (const l of lines) {
-        if (!DEV_NOISE.test(l)) return l.replace(/^[-*]\s*/, '').replace(/\s+\(#\d+\)$/, '');
-      }
-      return name || 'Update';
-    }
-
-    fetch('https://api.github.com/repos/Nakauri/hr-monitor/releases?per_page=8', { cache: 'default' })
-      .then(r => r.ok ? r.json() : [])
-      .then(rels => {
-        const items = (rels || [])
-          .filter(r => r.tag_name && !NOISY_TAG.test(r.tag_name) && !(r.name && NOISY_TAG.test(r.name)))
-          .map(r => ({
-            when: r.published_at ? new Date(r.published_at) : null,
-            title: r.name || r.tag_name,
-            body: pickBlurb(r.body, r.name),
-          }))
-          .sort((a, b) => (b.when || 0) - (a.when || 0))
-          .slice(0, 5);
-
+    const fmtDate = iso => {
+      const d = new Date(iso + 'T00:00:00');
+      return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    };
+    const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+    fetch('./changelog.json', { cache: 'default' })
+      .then(r => r.ok ? r.json() : { items: [] })
+      .then(data => {
+        const items = ((data && data.items) || []).slice(0, 6);
         if (!items.length) {
-          el.innerHTML = '<div class="changelog-empty">No updates yet. Check back after the next build.</div>';
+          el.innerHTML = '<div class="changelog-empty">No updates yet.</div>';
           return;
         }
-        el.innerHTML = items.map(it => {
-          const when = it.when ? fmtDate(it.when) : '';
-          const safe = (it.body || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])).slice(0, 160);
-          const title = (it.title || 'Update').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
-          return '<div class="changelog-item"><span class="changelog-date">' + when + '</span><span class="changelog-body"><strong>' + title + '</strong>. ' + safe + '</span></div>';
-        }).join('');
+        el.innerHTML = items.map(it =>
+          '<div class="changelog-item">'
+          + '<span class="changelog-date">' + esc(fmtDate(it.date)) + '</span>'
+          + '<span class="changelog-body"><strong>' + esc(it.title) + '</strong>. ' + esc(it.body) + '</span>'
+          + '</div>'
+        ).join('');
       })
       .catch(() => {
         el.innerHTML = '<div class="changelog-empty">Couldn\'t load updates right now.</div>';
