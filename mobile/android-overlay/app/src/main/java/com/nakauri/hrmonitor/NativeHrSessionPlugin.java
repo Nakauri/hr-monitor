@@ -1027,8 +1027,11 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         }
 
-        // Notification update (1 Hz)
-        if (now - lastNotifUpdateMs >= 1000 && sessionActive.get()) {
+        // Notification update (every 5 s). 1 Hz used to fire 28,800 nm.notify
+        // calls over an 8-hr session; the user doesn't watch the duration
+        // counter tick, so 5-sec precision is fine for a "Recording · 3:42:15"
+        // body and saves 4/5 of the calls.
+        if (now - lastNotifUpdateMs >= 5000 && sessionActive.get()) {
             lastNotifUpdateMs = now;
             long elapsedMs = now - sessionStartMs;
             long mm = elapsedMs / 60000L;
