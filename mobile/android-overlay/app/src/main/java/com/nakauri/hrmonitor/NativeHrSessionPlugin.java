@@ -140,6 +140,7 @@ public class NativeHrSessionPlugin extends Plugin {
     // volatile: BLE binder thread reads while main thread can null on stop.
     private volatile NativeCsvWriter csv;
     private NativeDriveUploader uploader;
+    private NativeDriveResumableUploader resumable;
     private final AtomicLong lastUploadMs = new AtomicLong(0);
 
     private OkHttpClient httpClient;
@@ -164,6 +165,7 @@ public class NativeHrSessionPlugin extends Plugin {
         }
         httpClient = HttpClientHolder.webSocketClient();
         uploader = new NativeDriveUploader(getContext());
+        resumable = new NativeDriveResumableUploader(getContext(), uploader);
         registerNetworkCallback();
     }
 
@@ -439,6 +441,20 @@ public class NativeHrSessionPlugin extends Plugin {
             csv = null;
         }
         if (uploader != null) uploader.resetSession();
+        if (resumable != null) {
+            resumable.resetSession();
+            if (csv != null) {
+                // Stamp the active filename on the regular uploader so the
+                // cleanup pass knows not to delete the in-progress CSV even
+                // if the resumable path is doing all the actual uploads.
+                if (uploader != null) uploader.markActiveSessionFilename(csv.getFile().getName());
+                // Open the resumable session up-front. Async; callers later
+                // read isReady() to decide chunk-vs-fallback. If openSession
+                // fails or auth isn't ready yet, the periodic upload path
+                // falls back to full PATCH transparently.
+                resumable.startSessionAsync(csv.getFile().getName());
+            }
+        }
 
         // Pre-session cleanup pass. Catches orphan CSVs from previous
         // sessions that ended unclean (process kill, OEM battery saver
@@ -493,7 +509,18 @@ public class NativeHrSessionPlugin extends Plugin {
         mainHandler.removeCallbacks(gattReconnectRunnable);
         if (csv != null) {
             csv.close();
-            if (uploader != null) uploader.uploadAsync(csv.getFile());
+            // Prefer the resumable finalize path. Sends only the bytes since
+            // the last 256 KB-aligned chunk + commits with the actual total.
+            // If resumable is broken or never opened (offline, auth fail),
+            // fall back to the existing full-PATCH upload so the session
+            // still ends up on Drive.
+            boolean finalized = false;
+            if (resumable != null && resumable.isReady()) {
+                finalized = resumable.finalizeSync(csv.getFile());
+            }
+            if (!finalized && uploader != null) {
+                uploader.uploadAsync(csv.getFile());
+            }
             csv = null;
         }
         closeRelaySocket();
@@ -973,12 +1000,30 @@ public class NativeHrSessionPlugin extends Plugin {
         }
         notifyListeners("hr", ev);
 
-        // Periodic Drive upload
-        if (csv != null && uploader != null) {
+        // Periodic Drive upload. Prefer the resumable trickle path: opens
+        // a single Drive upload session at startSession and trickles only
+        // the new bytes (256 KB-aligned chunks) instead of re-uploading
+        // the whole CSV every interval. ~50x cellular bytes saved on a
+        // long sleep session. If the resumable session FAILED (auth fail,
+        // network blip during open POST), fall back to the full-file
+        // PATCH path so there's still a Drive backup growing. If the
+        // resumable session is still INITIALIZING (in-flight, not yet
+        // ready and not yet broken), skip this interval — we'd otherwise
+        // create a duplicate Drive file with the same filename.
+        if (csv != null) {
             long since = now - lastUploadMs.get();
             if (since >= DRIVE_UPLOAD_INTERVAL_MS) {
-                lastUploadMs.set(now);
-                uploader.uploadAsync(csv.getFile());
+                if (resumable != null && resumable.isReady()) {
+                    lastUploadMs.set(now);
+                    resumable.appendChunkIfReadyAsync(csv.getFile());
+                } else if (resumable != null && resumable.isBroken() && uploader != null) {
+                    lastUploadMs.set(now);
+                    uploader.uploadAsync(csv.getFile());
+                } else if (resumable == null && uploader != null) {
+                    lastUploadMs.set(now);
+                    uploader.uploadAsync(csv.getFile());
+                }
+                // else: resumable is initializing — skip this tick, retry next interval.
             }
         }
 

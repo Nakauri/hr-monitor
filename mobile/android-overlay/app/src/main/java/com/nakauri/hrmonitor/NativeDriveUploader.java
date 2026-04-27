@@ -62,6 +62,27 @@ public class NativeDriveUploader {
         sessionFilenameRef.set(null);
     }
 
+    /**
+     * Stamp the active session filename. Used by cleanupLocalCachedAsync
+     * to avoid deleting the session that's currently being recorded.
+     * Normally set inside doUpload, but the resumable path bypasses
+     * doUpload entirely, so the plugin marks it manually at startSession.
+     */
+    public void markActiveSessionFilename(String name) {
+        sessionFilenameRef.set(name);
+    }
+
+    /** Shared folder lookup for sibling uploaders (e.g. resumable). Caches per-process. */
+    public String getOrFetchFolderIdSync(String token) throws IOException {
+        String fid = folderIdRef.get();
+        if (fid != null) return fid;
+        fid = ensureFolder(token);
+        if (fid != null) folderIdRef.set(fid);
+        return fid;
+    }
+
+    public OkHttpClient getHttpClient() { return client; }
+
     // Persona-aware retention. Drive users get generous limits (Drive holds
     // durable copy); no-Drive users get tight limits (local is ephemeral).
     private static final long CAP_BYTES_DRIVE       = 200L * 1024L * 1024L;
