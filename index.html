@@ -188,6 +188,11 @@
     transition: color 0.15s, border-color 0.15s;
   }
   .nav-link:hover { color: var(--text); border-bottom-color: var(--text); }
+  .nav-link.nav-demo {
+    color: var(--accent-rmssd);
+    border-bottom-color: rgba(93,202,165,0.4);
+  }
+  .nav-link.nav-demo:hover { color: #6fd9b3; border-bottom-color: #6fd9b3; }
   .nav-signin {
     display: inline-flex;
     align-items: center;
@@ -549,22 +554,6 @@
     align-self: flex-start;
   }
   .mode-inline-link:hover { border-bottom-color: var(--text); }
-  .mode-inline-demo {
-    margin-top: 14px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #0a0a0a;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 9px 16px;
-    border: 1px solid var(--accent-rmssd);
-    border-radius: 999px;
-    background: var(--accent-rmssd);
-    align-self: flex-start;
-    letter-spacing: 0.01em;
-  }
-  .mode-inline-demo:hover { background: #6fd9b3; border-color: #6fd9b3; }
   .mode-disclaimer {
     margin: 28px 0 0;
     font-size: 12px;
@@ -1316,6 +1305,7 @@
 
     .nav-inner { padding: 12px 18px; gap: 12px; }
     .nav-link { display: none; }
+    .nav-link.nav-demo { display: inline-flex; }
 
     .hero {
       padding: 32px 18px 24px;
@@ -1381,6 +1371,7 @@
       <span>aorti<span class="brand-dot">.</span><span class="brand-ca">ca</span></span>
     </a>
     <div class="nav-links">
+      <a class="nav-link nav-demo" href="./hrv_viewer.html?demo=1">Demo</a>
       <a class="nav-link" href="./hrv_viewer.html">Viewer</a>
       <a class="nav-link" href="./hr_monitor.html?mode=offline">Offline</a>
       <a class="nav-signin" href="./hr_monitor.html?mode=online">
@@ -1527,7 +1518,6 @@
       <h3 class="mode-inline-title">Session viewer</h3>
       <p class="mode-inline-desc">Review every past recording with autonomic interpretation, palpitation clusters, posture overlays, and month, week, or day timelines.</p>
       <a class="mode-inline-link" href="./hrv_viewer.html">Open viewer →</a>
-      <a class="mode-inline-demo" href="./hrv_viewer.html?demo=1">Try with sample data. No sign-in needed →</a>
     </div>
   </div>
   <p class="mode-disclaimer">Not a medical tool. Interpretations are estimated.</p>

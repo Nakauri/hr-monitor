@@ -2498,13 +2498,6 @@
           <span class="empty-choice-title">Sign in with Google</span>
           <span class="empty-choice-sub">Sync sessions across devices.</span>
         </button>
-        <a id="empty-demo" href="./hrv_viewer.html?demo=1" class="empty-choice">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 12h3l3-7 4 14 3-7h5"/>
-          </svg>
-          <span class="empty-choice-title">See sample data</span>
-          <span class="empty-choice-sub">Two weeks of demo sessions, no sign-in needed.</span>
-        </a>
       </div>
       <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically. Drive sessions are cached here for faster loads.</div>
     </div>
@@ -8172,7 +8165,7 @@
     const bar = document.createElement('div');
     bar.id = 'demo-banner';
     bar.style.cssText = 'position:sticky;top:0;z-index:9000;display:flex;gap:12px;align-items:center;padding:8px 16px;background:#1a1410;border-bottom:1px solid #3a2818;color:#e8c068;font-size:13px;font-weight:500;';
-    bar.innerHTML = '<span style="flex:1">Demo data — what your viewer would look like with real sessions.</span>'
+    bar.innerHTML = '<span style="flex:1">Demo data. This is what the viewer looks like with real sessions.</span>'
       + '<a href="./hrv_viewer.html" style="color:inherit;text-decoration:underline;">Exit demo</a>';
     document.body.insertBefore(bar, document.body.firstChild);
   }
@@ -8238,14 +8231,6 @@
       document.getElementById('empty-pick').addEventListener('click', pickFolder);
     }
     document.getElementById('empty-drive').addEventListener('click', driveSignIn);
-    // Hide demo entry on Capacitor — mobile users have their own data and the
-    // demo CSV bundle isn't shipped in the APK.
-    try {
-      if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
-        const demo = document.getElementById('empty-demo');
-        if (demo) demo.hidden = true;
-      }
-    } catch (e) {}
     document.getElementById('drive-signin').addEventListener('click', driveSignIn);
     document.getElementById('drive-signout').addEventListener('click', driveSignOut);
     document.getElementById('drive-sync').addEventListener('click', () => {
