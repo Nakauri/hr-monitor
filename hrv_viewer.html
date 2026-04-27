@@ -3636,18 +3636,11 @@
     if (!hr || hr.length < 20) return out;
     const WIN_MIN = 1.0;          // 60-sec rolling analysis window
     const BASELINE_MIN = 5;       // 5-min trailing baseline
+    const MIN_STD_ABS = 3;        // permissive floor — slider filters by ratio post-detect
+    const MIN_HR_DELTA = 8;       // permissive — slider filters by ratio post-detect
+    const RMSSD_SUPPR = 0.85;     // permissive — slider filters by ratio post-detect
     const MIN_DURATION = 1.5;     // sustained ≥90 sec
     const COOLDOWN = 5;           // 5-min between events
-    // Slider scales every gate, not just the std ratio. Otherwise low-variance
-    // sessions saturate the absolute floor and the slider does nothing.
-    // Scale factor relative to the default 2.5×: 1.5→0.6, 2.5→1.0, 4.0→1.6.
-    const sensScale = ratioThreshold / 2.5;
-    const MIN_STD_ABS = 5 * sensScale;      // 3 / 5 / 8
-    const MIN_HR_DELTA = 10 * sensScale;    // 6 / 10 / 16 bpm above baseline
-    const RMSSD_SUPPR = 0.75 / sensScale;   // 1.25 / 0.75 / 0.47 — looser at sensitive end
-    // Cap RMSSD_SUPPR at 1.0 (otherwise a value >1 would require RMSSD to be
-    // ABOVE baseline, which contradicts "vagal withdrawal during chills").
-    const rmssdSupprEff = Math.min(0.95, RMSSD_SUPPR);
 
     const hrBaseline = rollingTrailingMean(hr, BASELINE_MIN);
     const rmssdBaseline = rmssd ? rollingTrailingMean(rmssd, BASELINE_MIN) : null;
@@ -3691,7 +3684,7 @@
         const rNow = nearestRmssdAt(rmssd, hr[i].t, rmssdHint);
         // Find baseline RMSSD at the same hint point.
         const baseRmssd = rmssdBaseline[rmssdHint.idx];
-        rmssdOk = (rNow != null && baseRmssd != null) ? (rNow < baseRmssd * rmssdSupprEff) : false;
+        rmssdOk = (rNow != null && baseRmssd != null) ? (rNow < baseRmssd * RMSSD_SUPPR) : false;
       }
       const isChill = stdOk && hrOk && rmssdOk;
       if (isChill) {
@@ -3743,10 +3736,10 @@
         const isVagal = rNow >= rBase * VAGAL_RATIO && rNow - rBase >= VAGAL_ABS_DELTA;
         if (isVagal) {
           if (!vagalCur) {
-            vagalCur = { start: rmssd[i].t, end: rmssd[i].t, peakRmssd: rNow, baseRmssd: rBase, kind: 'vagal' };
+            vagalCur = { start: rmssd[i].t, end: rmssd[i].t, peakRmssd: rNow, baseRmssd: rBase, ratio: rNow / (rBase || 1), kind: 'vagal' };
           } else {
             vagalCur.end = rmssd[i].t;
-            if (rNow > vagalCur.peakRmssd) vagalCur.peakRmssd = rNow;
+            if (rNow > vagalCur.peakRmssd) { vagalCur.peakRmssd = rNow; vagalCur.ratio = rNow / (vagalCur.baseRmssd || 1); }
             // Close early if burst is running longer than VAGAL_MAX_DURATION
             if (vagalCur.end - vagalCur.start > VAGAL_MAX_DURATION) {
               if (vagalCur.start >= vagalLastEmit + VAGAL_COOLDOWN) {
@@ -6140,15 +6133,24 @@
     const slider = document.getElementById('chills-tune-slider');
     const label = document.getElementById('chills-tune-value');
     if (!slider || !label) return;
+    // Detector returns ALL candidate events (using permissive defaults baked
+    // into detectChillsWindows). The slider then filters that pool by each
+    // event's `ratio` field — guaranteed to scale visible count even on
+    // sessions where every event is intense enough to pass the gates.
     // detectChillsWindows expects {t,v} (summary shape); currentData uses
-    // {x,y,ep} (loadFullSession shape). Without this remap the detector
-    // reads undefined and returns zero events at every threshold.
+    // {x,y,ep} (loadFullSession shape).
     const toDetectorShape = (arr) => (arr || []).map(p => ({ t: p.x, v: p.y }));
+    const filterByRatio = (events, threshold) =>
+      (events || []).filter(e => (typeof e.ratio === 'number' ? e.ratio : Infinity) >= threshold);
     const saved = parseFloat(localStorage.getItem('hrv_viewer_chills_ratio') || '2.5');
     slider.value = saved;
     label.textContent = saved.toFixed(1) + '×';
-    if (saved !== 2.5 && currentData && currentSummary) {
-      currentSummary.chillsWindows = detectChillsWindows(toDetectorShape(currentData.hr), saved, toDetectorShape(currentData.rmssd));
+    if (currentData && currentSummary) {
+      // Detect candidate pool ONCE per session. The slider filters this pool.
+      // The detector's `ratioThreshold` arg only affects the per-sample stdOk
+      // gate; we pass 1.0 to be maximally permissive at the gate level.
+      currentSummary._chillsAll = detectChillsWindows(toDetectorShape(currentData.hr), 1.0, toDetectorShape(currentData.rmssd));
+      currentSummary.chillsWindows = filterByRatio(currentSummary._chillsAll, saved);
       renderInsight(currentSummary);
       renderMarkerList(currentSummary);
       drawSessionChart(currentSummary, currentData);
@@ -6160,12 +6162,12 @@
       localStorage.setItem('hrv_viewer_chills_ratio', v.toString());
       clearTimeout(debounce);
       debounce = setTimeout(() => {
-        if (!currentData || !currentSummary) return;
-        currentSummary.chillsWindows = detectChillsWindows(toDetectorShape(currentData.hr), v, toDetectorShape(currentData.rmssd));
+        if (!currentSummary || !currentSummary._chillsAll) return;
+        currentSummary.chillsWindows = filterByRatio(currentSummary._chillsAll, v);
         renderInsight(currentSummary);
         renderMarkerList(currentSummary);
         drawSessionChart(currentSummary, currentData);
-      }, 180);
+      }, 80);
     });
   }
 
