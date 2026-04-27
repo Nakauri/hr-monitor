@@ -3448,7 +3448,7 @@
     for (const fn of filenames) {
       const cached = sessionsIndex[fn];
       const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 7
+        || cached.__schemaV !== 8
         || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
         || !('quadPct' in cached) || !('restingHR' in cached);
       // (postureSpans absence is fine — older CSVs may not have a posture column)
@@ -3636,11 +3636,18 @@
     if (!hr || hr.length < 20) return out;
     const WIN_MIN = 1.0;          // 60-sec rolling analysis window
     const BASELINE_MIN = 5;       // 5-min trailing baseline
-    const MIN_STD_ABS = 5;        // absolute floor (was 3)
-    const MIN_HR_DELTA = 10;      // HR must exceed baseline by ≥10 bpm
-    const RMSSD_SUPPR = 0.75;     // RMSSD must be <75% of baseline
-    const MIN_DURATION = 1.5;     // sustained ≥90 sec (was 30 sec)
+    const MIN_DURATION = 1.5;     // sustained ≥90 sec
     const COOLDOWN = 5;           // 5-min between events
+    // Slider scales every gate, not just the std ratio. Otherwise low-variance
+    // sessions saturate the absolute floor and the slider does nothing.
+    // Scale factor relative to the default 2.5×: 1.5→0.6, 2.5→1.0, 4.0→1.6.
+    const sensScale = ratioThreshold / 2.5;
+    const MIN_STD_ABS = 5 * sensScale;      // 3 / 5 / 8
+    const MIN_HR_DELTA = 10 * sensScale;    // 6 / 10 / 16 bpm above baseline
+    const RMSSD_SUPPR = 0.75 / sensScale;   // 1.25 / 0.75 / 0.47 — looser at sensitive end
+    // Cap RMSSD_SUPPR at 1.0 (otherwise a value >1 would require RMSSD to be
+    // ABOVE baseline, which contradicts "vagal withdrawal during chills").
+    const rmssdSupprEff = Math.min(0.95, RMSSD_SUPPR);
 
     const hrBaseline = rollingTrailingMean(hr, BASELINE_MIN);
     const rmssdBaseline = rmssd ? rollingTrailingMean(rmssd, BASELINE_MIN) : null;
@@ -3684,7 +3691,7 @@
         const rNow = nearestRmssdAt(rmssd, hr[i].t, rmssdHint);
         // Find baseline RMSSD at the same hint point.
         const baseRmssd = rmssdBaseline[rmssdHint.idx];
-        rmssdOk = (rNow != null && baseRmssd != null) ? (rNow < baseRmssd * RMSSD_SUPPR) : false;
+        rmssdOk = (rNow != null && baseRmssd != null) ? (rNow < baseRmssd * rmssdSupprEff) : false;
       }
       const isChill = stdOk && hrOk && rmssdOk;
       if (isChill) {
@@ -3836,8 +3843,12 @@
     // of how the filename was stamped.
     const startEpoch = (hr[0] && hr[0].ep) ? hr[0].ep : fileStartEpoch;
 
-    const hrVals = hr.map(p => p.v);
-    const rmssdVals = rmssd.map(p => p.v);
+    // Drop null gap-markers before averaging. Without the filter, reduce
+    // treats null as 0 and divides by the inflated length — sessions with
+    // BLE gaps end up with hrAvg pulled toward zero (or 0 outright when
+    // every row is a gap marker).
+    const hrVals = hr.map(p => p.v).filter(v => v != null);
+    const rmssdVals = rmssd.map(p => p.v).filter(v => v != null);
 
     // Max/min with timestamps. Skip null gap-marker entries — without this,
     // null < anyNumber returns true (null coerces to 0) so hrMin gets set to
@@ -4069,7 +4080,7 @@
       startEpoch,
       hrCount: hr.length,
       duration: hr[hr.length - 1].t,
-      hrAvg: Math.round(hrVals.reduce((s, v) => s + v, 0) / hrVals.length),
+      hrAvg: hrVals.length ? Math.round(hrVals.reduce((s, v) => s + v, 0) / hrVals.length) : 0,
       hrMax: maxHR,
       hrMin: minHR,
       rmssdAvg: rmssdVals.length ? Math.round(rmssdVals.reduce((s, v) => s + v, 0) / rmssdVals.length) : null,
@@ -4091,7 +4102,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 7,
+      __schemaV: 8,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -7171,7 +7182,6 @@
     document.getElementById('interp-current').innerHTML = html;
     // Decorate each cell: show percent of session time, total duration, span count.
     // Empty cells get "none in this session" and are non-clickable.
-    const totalSession = s.duration || 1;
     document.querySelectorAll('.interp-cell').forEach(cell => {
       const key = cell.dataset.quad;
       const ranges = (currentQuadRanges && currentQuadRanges[key]) || [];
