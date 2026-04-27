@@ -36,7 +36,9 @@ public final class HttpClientHolder {
                 c = ws;
                 if (c == null) {
                     c = http().newBuilder()
-                        .pingInterval(20, TimeUnit.SECONDS)
+                        // 60s is well below PartyKit/Cloudflare's ~100s idle timeout
+                        // and 3× lighter on battery in Doze than 20s.
+                        .pingInterval(60, TimeUnit.SECONDS)
                         .readTimeout(0, TimeUnit.SECONDS)
                         .build();
                     ws = c;

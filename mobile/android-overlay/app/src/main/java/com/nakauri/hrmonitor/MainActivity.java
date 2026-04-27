@@ -30,13 +30,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeHrSessionPlugin.class);
         super.onCreate(savedInstanceState);
 
-        // Wrap Capacitor's WebViewClient with one that handles renderer
-        // crashes by reloading the page in place instead of letting Android
-        // tear down the Activity. Long sessions can blow Chromium's
-        // renderer memory budget; without this override an OOM kills the
-        // entire app + foreground service. The native plugin keeps writing
-        // CSV throughout, so on reload the rehydrate path picks up where
-        // the chart left off.
+        // Renderer-recovery WebViewClient. Long sessions can OOM Chromium's
+        // renderer; reloading the page in place beats Activity teardown.
         try {
             if (bridge != null && bridge.getWebView() != null) {
                 bridge.getWebView().setWebViewClient(new HrMonitorWebViewClient(bridge));
@@ -44,6 +39,22 @@ public class MainActivity extends BridgeActivity {
         } catch (Throwable t) {
             Log.w(TAG, "Could not install renderer-recovery WebViewClient: " + t.getMessage());
         }
+
+        // Back navigation. Use OnBackPressedDispatcher so Android 14+
+        // predictive-back gestures route through us; the legacy onBackPressed()
+        // override is bypassed by the new gesture API.
+        getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                try {
+                    if (bridge != null && bridge.getWebView() != null && bridge.getWebView().canGoBack()) {
+                        bridge.getWebView().goBack();
+                        return;
+                    }
+                } catch (Throwable ignored) {}
+                moveTaskToBack(true);
+            }
+        });
     }
 
     private static class HrMonitorWebViewClient extends BridgeWebViewClient {
@@ -95,17 +106,4 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // Hardware back press: navigate WebView history if possible; otherwise
-    // background the Activity instead of finishing it. finish() destroys the
-    // bridge + JS context, killing the active session UI.
-    @Override
-    public void onBackPressed() {
-        try {
-            if (bridge != null && bridge.getWebView() != null && bridge.getWebView().canGoBack()) {
-                bridge.getWebView().goBack();
-                return;
-            }
-        } catch (Throwable ignored) {}
-        moveTaskToBack(true);
-    }
 }
