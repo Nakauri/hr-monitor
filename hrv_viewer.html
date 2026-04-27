@@ -4399,12 +4399,35 @@
 
   function downsample(series, target) {
     if (series.length <= target) return series;
-    const step = series.length / target;
+    // Min/max-preserving bucket downsample. For each bucket we emit both
+    // the minimum and the maximum (in time order) so brief dips and spikes
+    // survive into the rendered line. A naive strided pick hides genuine
+    // extremes — e.g. a 58 bpm dip between two 67 bpm samples vanishes
+    // and the summary card disagrees with the chart. Null gap-markers
+    // pass through unchanged so chart breaks stay at their real times.
+    const buckets = Math.max(1, Math.floor(target / 2));
+    const step = series.length / buckets;
     const out = [];
-    for (let i = 0; i < target; i++) {
-      out.push(series[Math.floor(i * step)]);
+    for (let i = 0; i < buckets; i++) {
+      const lo = Math.floor(i * step);
+      const hi = Math.min(series.length, Math.floor((i + 1) * step));
+      let minP = null, maxP = null;
+      const nulls = [];
+      for (let j = lo; j < hi; j++) {
+        const p = series[j];
+        if (!p) continue;
+        if (p.v == null) { nulls.push(p); continue; }
+        if (minP == null || p.v < minP.v) minP = p;
+        if (maxP == null || p.v > maxP.v) maxP = p;
+      }
+      const bucketOut = [];
+      if (minP && maxP && minP !== maxP) { bucketOut.push(minP, maxP); }
+      else if (minP) { bucketOut.push(minP); }
+      for (const n of nulls) bucketOut.push(n);
+      bucketOut.sort((a, b) => a.t - b.t);
+      for (const p of bucketOut) out.push(p);
     }
-    out.push(series[series.length - 1]);
+    if (series.length > 0) out.push(series[series.length - 1]);
     return out;
   }
 
