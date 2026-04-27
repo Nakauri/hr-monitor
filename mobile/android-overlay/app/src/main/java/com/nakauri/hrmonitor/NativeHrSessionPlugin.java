@@ -90,7 +90,10 @@ public class NativeHrSessionPlugin extends Plugin {
     // PARITY CRITICAL — see scripts/rmssd-parity.test.js.
     private static final long RR_WINDOW_MS = 30_000L;
     // Drive upload cadence — every 30 s. Same data pace as the JS auto-save.
-    private static final long DRIVE_UPLOAD_INTERVAL_MS = 30_000L;
+    // 5 min during a session. Final upload happens at stopSessionInternal.
+    // Crash loss = 5 min Drive lag; local CSV is always intact and re-uploads
+    // on next session-stop or reopen.
+    private static final long DRIVE_UPLOAD_INTERVAL_MS = 300_000L;
     // Fire a csvError event once after this many consecutive write failures.
     // Below this threshold a single transient error is silently retried; at
     // the threshold the UI gets one signal so it can show a banner. Resets
@@ -168,6 +171,12 @@ public class NativeHrSessionPlugin extends Plugin {
     protected void handleOnDestroy() {
         // Don't null `instance`; the notification Stop button needs it alive.
         unregisterNetworkCallback();
+        synchronized (this) {
+            if (authExecutor != null) {
+                authExecutor.shutdown();
+                authExecutor = null;
+            }
+        }
         super.handleOnDestroy();
     }
 
@@ -522,13 +531,15 @@ public class NativeHrSessionPlugin extends Plugin {
     // alternatives (MediaStore.Downloads on 29+, WRITE_EXTERNAL_STORAGE on
     // ≤28) require version-specific code AND a runtime permission flow on
     // older OSes. SAF sidesteps both.
-    private String pendingExportCsv;
+    // Map keyed by Capacitor's per-call ID so two rapid Export taps can't
+    // overwrite each other's CSV.
+    private final java.util.Map<String, String> pendingExports = new java.util.concurrent.ConcurrentHashMap<>();
     @PluginMethod
     public void exportCsv(PluginCall call) {
         final String filename = call.getString("filename");
         final String csv = call.getString("csv");
         if (filename == null || csv == null) { call.reject("filename + csv required"); return; }
-        pendingExportCsv = csv;
+        pendingExports.put(call.getCallbackId(), csv);
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("text/csv");
@@ -538,8 +549,7 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @com.getcapacitor.annotation.ActivityCallback
     private void exportCsvResult(PluginCall call, androidx.activity.result.ActivityResult result) {
-        String csv = pendingExportCsv;
-        pendingExportCsv = null;
+        String csv = pendingExports.remove(call.getCallbackId());
         if (csv == null) { call.reject("export state lost"); return; }
         if (result == null || result.getResultCode() != android.app.Activity.RESULT_OK) {
             call.reject("user_cancelled");
@@ -1089,7 +1099,8 @@ public class NativeHrSessionPlugin extends Plugin {
                 Log.w(TAG, "Heartbeat: no HR for " + (now - lastHrAtMs) + "ms — forcing reconnect");
                 scheduleGattReconnect();
             }
-            mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
+            // Re-check before re-posting: sessionActive may have flipped during this run.
+            if (sessionActive.get()) mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
         }
     };
 

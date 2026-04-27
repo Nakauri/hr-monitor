@@ -45,6 +45,14 @@ public class NativeCsvWriter {
     public int getConsecutiveFailures() { return consecutiveFailures; }
     public int getTotalFailures() { return totalFailures; }
 
+    // Batched fsync: flush every FLUSH_EVERY_N_ROWS or FLUSH_AFTER_MS, whichever
+    // comes first. Connection rows force a flush (they're rare + significant).
+    // close() always flushes. Crash loss is bounded by FLUSH_AFTER_MS.
+    private static final int FLUSH_EVERY_N_ROWS = 60;
+    private static final long FLUSH_AFTER_MS = 30_000L;
+    private int rowsSinceFlush = 0;
+    private long lastFlushAtMs = 0;
+
     public synchronized void appendHrRow(int hr, double rmssd, long timestampMs) {
         if (writer == null) return;
         double tMin = Math.max(0, (timestampMs - sessionStartMs)) / 60_000.0;
@@ -53,7 +61,14 @@ public class NativeCsvWriter {
                 "%.4f,%d,%d,%.2f,,,,,",
                 tMin, timestampMs, hr, rmssd));
             writer.newLine();
-            writer.flush();
+            rowsSinceFlush++;
+            long now = System.currentTimeMillis();
+            if (lastFlushAtMs == 0) lastFlushAtMs = now;
+            if (rowsSinceFlush >= FLUSH_EVERY_N_ROWS || (now - lastFlushAtMs) >= FLUSH_AFTER_MS) {
+                writer.flush();
+                rowsSinceFlush = 0;
+                lastFlushAtMs = now;
+            }
             consecutiveFailures = 0;
         } catch (IOException e) {
             consecutiveFailures++;
@@ -70,7 +85,11 @@ public class NativeCsvWriter {
                 "%.4f,%d,,,,,,%s,",
                 tMin, timestampMs, connState));
             writer.newLine();
+            // Connection events are rare + meaningful. Flush immediately so a
+            // crash mid-session preserves the last-known link state on disk.
             writer.flush();
+            rowsSinceFlush = 0;
+            lastFlushAtMs = System.currentTimeMillis();
             consecutiveFailures = 0;
         } catch (IOException e) {
             consecutiveFailures++;
