@@ -1167,6 +1167,17 @@
     flex-wrap: wrap;
     position: relative;
   }
+  .summary-bar-title {
+    display: none;
+    align-items: center;
+    min-height: 44px;
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 600;
+    flex: 0 0 auto;
+  }
   .summary-bar-toggle {
     display: none;
     position: absolute;
@@ -2380,12 +2391,15 @@
     .session-sidebar { max-height: none; }
     .session-sidebar .marker-list { max-height: 65vh; min-height: 320px; }
     .sidebar-toggle { display: none; }
-    .summary-bar { gap: 14px; padding: 14px 56px 14px 14px; cursor: pointer; }
+    .summary-bar { gap: 14px; padding: 14px 56px 14px 14px; cursor: pointer; min-height: 60px; align-items: center; }
     .summary-stat-value { font-size: 22px; }
     .summary-stat { min-width: 74px; }
+    .summary-bar-title { display: inline-flex; }
     .summary-bar-toggle { display: inline-flex; }
-    .summary-bar.collapsed { padding-bottom: 14px; }
-    .summary-bar.collapsed .summary-stat:not(:first-child) { display: none; }
+    /* When collapsed: hide every stat (not just non-first). The Summary
+       title carries the bar; the user expands to see the data. */
+    .summary-bar.collapsed { padding: 0 56px 0 14px; min-height: 56px; }
+    .summary-bar.collapsed .summary-stat { display: none; }
     .chart-wrap { min-height: 260px; }
     .interp-grid { grid-template-columns: 1fr; }
     .sessions-grid { grid-template-columns: 1fr; }
@@ -2451,6 +2465,9 @@
        waiting to happen. Bump to 44 while keeping the pill shape. */
     .filter-chip { min-height: 44px; padding: 10px 14px; }
     .filter-chips { gap: 8px; }
+    /* View-nav dropdown items live inside .view-switcher.open .view-nav.
+       Same min-height contract as everything else. */
+    .view-nav a { min-height: 44px; padding: 12px 14px; display: flex; align-items: center; }
   }
 
   @media (max-width: 480px) {
@@ -2461,7 +2478,7 @@
     .session-top-row { flex-direction: column; align-items: flex-start; gap: 8px; }
     .chart-panel { padding: 12px 14px; }
     .week-grid { grid-template-columns: 1fr; }
-    .view-nav a { padding: 5px 8px; font-size: 10px; }
+    .view-nav a { padding: 12px 12px; font-size: 12px; min-height: 44px; }
     .cal-cell { padding: 4px; border-radius: 6px; }
     .cal-cell .cal-hr { font-size: 14px; }
     .cal-day-num { font-size: 10px; }
@@ -5931,6 +5948,7 @@
         </div>
       </div>
       <div class="summary-bar" id="summary-bar">
+        <span class="summary-bar-title">Summary</span>
         <button class="summary-bar-toggle" id="summary-bar-toggle" type="button" aria-label="Collapse summary" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <div class="summary-stat">
           <span class="summary-stat-label">Date</span>
@@ -8185,18 +8203,17 @@
     if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
     if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
     if (currentChart) {
-      // Chart.js 4.x: write to BOTH the options object and the live scale's
-      // options. options.scales.x is what the chart was constructed with;
-      // scales.x.options is the parsed-and-active scale config the renderer
-      // actually reads. Updating only one was the previous bug — context
-      // strip moved (DOM math) but the main chart stayed at full range.
       currentChart.options.scales.x.min = brushMin;
       currentChart.options.scales.x.max = brushMax;
       if (currentChart.scales && currentChart.scales.x) {
         currentChart.scales.x.options.min = brushMin;
         currentChart.scales.x.options.max = brushMax;
       }
-      currentChart.update('none');
+      // Default mode (no arg) — full re-layout so the scale picks up the
+      // new bounds. 'none' was sometimes leaving the rendered axis range
+      // stale on the day-timeline view.
+      currentChart.update();
+      console.log('[paintBrush] applied', { brushMin, brushMax, scaleMin: currentChart.scales.x.min, scaleMax: currentChart.scales.x.max });
     }
     updateResetZoomVisibility();
   }
@@ -8207,6 +8224,7 @@
     const halfSpan = (span || Math.max(0.5, s.duration * 0.04)) / 2;
     brushMin = Math.max(0, t - halfSpan);
     brushMax = Math.min(s.duration, t + halfSpan);
+    console.log('[zoomTo]', { t, span, halfSpan, brushMin, brushMax, duration: s.duration });
     paintBrush();
   }
 
