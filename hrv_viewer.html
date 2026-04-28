@@ -2798,6 +2798,13 @@
           const m = JSON.parse(ev.data);
           if (m && m.type === 'tick') {
             watchLiveLastTick = Date.now();
+            // Diagnostic for the "viewer says LIVE but nothing is broadcasting"
+            // bug — log who's actually publishing on this relay key. Throttled
+            // so the console doesn't drown if a publisher is firing at 1 Hz.
+            if (Date.now() - (window.__lastTickLogAt || 0) > 5000) {
+              window.__lastTickLogAt = Date.now();
+              console.log('[viewer] live tick from', m.senderLabel || '?', 'id=' + (m.senderId || '?'), 'hr=' + m.hr);
+            }
             updateWatchLiveUI();
           }
         } catch (e) {}
