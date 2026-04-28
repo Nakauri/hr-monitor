@@ -1165,7 +1165,31 @@
     border-radius: 14px;
     padding: 18px 22px;
     flex-wrap: wrap;
+    position: relative;
   }
+  .summary-bar-toggle {
+    display: none;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 44px;
+    height: 44px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: var(--text-faint);
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .summary-bar-toggle svg {
+    width: 18px;
+    height: 18px;
+    transition: transform 0.18s ease;
+  }
+  .summary-bar.collapsed .summary-bar-toggle svg { transform: rotate(-90deg); }
+  .summary-bar-toggle:hover { color: var(--text); background: rgba(255,255,255,0.04); }
   .summary-stat {
     display: flex;
     flex-direction: column;
@@ -1869,6 +1893,9 @@
     flex-wrap: wrap;
   }
   .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     padding: 5px 12px;
     font-size: 11px;
     letter-spacing: 0.06em;
@@ -1880,6 +1907,7 @@
     user-select: none;
     color: var(--text-dim);
     transition: transform 0.1s;
+    line-height: 1;
   }
   .filter-chip:hover { transform: translateY(-1px); }
   .filter-chip.active {
@@ -2352,9 +2380,12 @@
     .session-sidebar { max-height: none; }
     .session-sidebar .marker-list { max-height: 65vh; min-height: 320px; }
     .sidebar-toggle { display: none; }
-    .summary-bar { gap: 14px; padding: 14px; }
+    .summary-bar { gap: 14px; padding: 14px 56px 14px 14px; cursor: pointer; }
     .summary-stat-value { font-size: 22px; }
     .summary-stat { min-width: 74px; }
+    .summary-bar-toggle { display: inline-flex; }
+    .summary-bar.collapsed { padding-bottom: 14px; }
+    .summary-bar.collapsed .summary-stat:not(:first-child) { display: none; }
     .chart-wrap { min-height: 260px; }
     .interp-grid { grid-template-columns: 1fr; }
     .sessions-grid { grid-template-columns: 1fr; }
@@ -2375,9 +2406,9 @@
       flex: 1 1 auto;
       letter-spacing: 0.01em;
     }
-    .cal-nav { flex: 0 0 auto; }
-    .cal-nav button { width: 30px; height: 30px; font-size: 13px; }
-    .cal-today-btn { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; }
+    .cal-nav { flex: 0 0 auto; gap: 8px; }
+    .cal-nav button { width: 44px; height: 44px; font-size: 13px; }
+    .cal-today-btn { flex: 0 0 auto; padding: 10px 16px; font-size: 12px; min-height: 44px; }
     /* Force metric switch + legend + any extra action onto their own row. */
     .cal-header .metric-switch,
     .cal-header .chart-legend,
@@ -2399,7 +2430,27 @@
     .tags-inline { width: 100%; margin-left: 0; }
     .chart-legend { font-size: 10px; gap: 10px; }
     input, select, textarea { font-size: 16px !important; }
-    button { min-height: 38px; }
+
+    /* Mobile tap targets — 44 px floor (WCAG 2.5.5 / Apple HIG / monitor's
+       baseline). Same approach the monitor uses: bump every text button,
+       size icon buttons explicitly, and add 8 px gap between adjacent
+       targets. icon-btn is sized as a square so the SVG stays centered. */
+    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.mobile-menu-btn):not(.cal-today-btn):not(.day-timeline-btn):not(.filter-chip):not(.view-switcher-btn):not(.index-pager-btn) {
+      min-height: 44px;
+      padding: 10px 16px;
+    }
+    .mobile-menu-btn { width: 44px; height: 44px; padding: 0; }
+    .folder-info .icon-btn { width: 44px; height: 44px; }
+    .folder-info .icon-btn svg { width: 18px; height: 18px; }
+    .session-card-kebab { width: 44px; height: 44px; top: 6px; right: 6px; }
+    .interp-kebab { width: 44px; height: 44px; }
+    .view-switcher-btn { min-height: 44px; padding: 10px 14px; }
+    .index-pager-btn { min-height: 44px; padding: 10px 16px; }
+    .day-timeline-btn { min-height: 44px; padding: 10px 16px; }
+    /* Filter chips are small by convention but a 23 px target is a miss
+       waiting to happen. Bump to 44 while keeping the pill shape. */
+    .filter-chip { min-height: 44px; padding: 10px 14px; }
+    .filter-chips { gap: 8px; }
   }
 
   @media (max-width: 480px) {
@@ -4670,9 +4721,9 @@
 
     const pager = pageCount > 1 ? `
       <div class="index-pager">
-        <button class="index-pager-btn" data-page="prev"${indexState.page === 0 ? ' disabled' : ''}>← Prev</button>
+        <button class="index-pager-btn" data-page="prev"${indexState.page === 0 ? ' disabled' : ''}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="vertical-align:middle"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Prev</button>
         <span class="index-pager-info">Page ${indexState.page + 1} of ${pageCount} · showing ${showing}</span>
-        <button class="index-pager-btn" data-page="next"${indexState.page >= pageCount - 1 ? ' disabled' : ''}>Next →</button>
+        <button class="index-pager-btn" data-page="next"${indexState.page >= pageCount - 1 ? ' disabled' : ''}>Next <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="vertical-align:middle"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>` : '';
 
     el.innerHTML = `
@@ -4909,8 +4960,8 @@
       <div class="cal-header">
         <div class="cal-title">${monthName}</div>
         <div class="cal-nav">
-          <button id="cal-prev" title="Previous month">&larr;</button>
-          <button id="cal-next" title="Next month">&rarr;</button>
+          <button id="cal-prev" title="Previous month" aria-label="Previous month"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button id="cal-next" title="Next month" aria-label="Next month"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </div>
         <button class="cal-today-btn" id="cal-today">Today</button>
         ${metricSwitchHTML()}
@@ -5061,8 +5112,8 @@
       <div class="day-header">
         <a class="back-link" href="#/month/${year}-${month}" style="margin: 0;">← ${date.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</a>
         <div class="cal-nav">
-          <button id="day-prev" title="Previous day with data">&larr;</button>
-          <button id="day-next" title="Next day with data">&rarr;</button>
+          <button id="day-prev" title="Previous day with data" aria-label="Previous day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button id="day-next" title="Next day with data" aria-label="Next day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </div>
         <div class="day-title">${title}</div>
         ${metricSwitchHTML()}
@@ -5083,7 +5134,7 @@
 
       <div class="day-sessions-head">
         <div class="section-head" style="margin: 0;">Sessions</div>
-        ${files.length ? `<button class="day-timeline-btn" id="day-view-timeline" title="Open every session on this day as one continuous chart with zoom, markers, and autonomic interpretation">View as full-day timeline →</button>` : ''}
+        ${files.length ? `<button class="day-timeline-btn" id="day-view-timeline" title="Open every session on this day as one continuous chart with zoom, markers, and autonomic interpretation">View as full-day timeline <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="vertical-align:middle"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : ''}
       </div>
       <div class="sessions-grid">${sessionCardsHtml}</div>
     `;
@@ -5198,8 +5249,8 @@
       <div class="cal-header">
         <div class="cal-title">${weekTitle}</div>
         <div class="cal-nav">
-          <button id="week-prev" title="Previous week">&larr;</button>
-          <button id="week-next" title="Next week">&rarr;</button>
+          <button id="week-prev" title="Previous week" aria-label="Previous week"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button id="week-next" title="Next week" aria-label="Next week"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </div>
         <button class="cal-today-btn" id="week-today">This week</button>
         ${metricSwitchHTML()}
@@ -5853,8 +5904,8 @@
     }
     const dayNavHtml = isVirtualDay
       ? `<div class="cal-nav" style="margin-left: 12px;">
-           <button id="session-day-prev" ${dayNavPrev ? '' : 'disabled'} title="Previous day with data">&larr;</button>
-           <button id="session-day-next" ${dayNavNext ? '' : 'disabled'} title="Next day with data">&rarr;</button>
+           <button id="session-day-prev" ${dayNavPrev ? '' : 'disabled'} title="Previous day with data" aria-label="Previous day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+           <button id="session-day-next" ${dayNavNext ? '' : 'disabled'} title="Next day with data" aria-label="Next day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
          </div>`
       : '';
     // Short date format ("18 Apr") fits the big-number KPI style; the year +
@@ -5879,7 +5930,8 @@
           <input class="tag-input" id="tag-input" placeholder="+ add (Enter)" />
         </div>
       </div>
-      <div class="summary-bar">
+      <div class="summary-bar" id="summary-bar">
+        <button class="summary-bar-toggle" id="summary-bar-toggle" type="button" aria-label="Collapse summary" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <div class="summary-stat">
           <span class="summary-stat-label">Date</span>
           <span class="summary-stat-value" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${dateBig}</span>
@@ -6009,6 +6061,17 @@
         </div>
       </div>
     `;
+
+    // Apply persisted summary-bar collapse state (mobile-only behaviour but
+    // the class is harmless on desktop where the toggle is hidden).
+    try {
+      if (localStorage.getItem('hrv_summary_collapsed') === '1') {
+        const bar = document.getElementById('summary-bar');
+        const tog = document.getElementById('summary-bar-toggle');
+        if (bar) bar.classList.add('collapsed');
+        if (tog) tog.setAttribute('aria-expanded', 'false');
+      }
+    } catch (e) {}
 
     renderInsight(s);
     renderMarkerList(s);
@@ -8014,6 +8077,10 @@
       if (currentChart) {
         currentChart.options.scales.x.min = brushMin;
         currentChart.options.scales.x.max = brushMax;
+        if (currentChart.scales && currentChart.scales.x) {
+          currentChart.scales.x.options.min = brushMin;
+          currentChart.scales.x.options.max = brushMax;
+        }
         currentChart.update('none');
       }
       updateResetZoomVisibility();
@@ -8118,8 +8185,17 @@
     if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
     if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
     if (currentChart) {
+      // Chart.js 4.x: write to BOTH the options object and the live scale's
+      // options. options.scales.x is what the chart was constructed with;
+      // scales.x.options is the parsed-and-active scale config the renderer
+      // actually reads. Updating only one was the previous bug — context
+      // strip moved (DOM math) but the main chart stayed at full range.
       currentChart.options.scales.x.min = brushMin;
       currentChart.options.scales.x.max = brushMax;
+      if (currentChart.scales && currentChart.scales.x) {
+        currentChart.scales.x.options.min = brushMin;
+        currentChart.scales.x.options.max = brushMax;
+      }
       currentChart.update('none');
     }
     updateResetZoomVisibility();
@@ -8130,7 +8206,7 @@
     const s = currentSummary;
     const halfSpan = (span || Math.max(0.5, s.duration * 0.04)) / 2;
     brushMin = Math.max(0, t - halfSpan);
-    brushMax = Math.min(s.duration, t + halfSpan * 2);
+    brushMax = Math.min(s.duration, t + halfSpan);
     paintBrush();
   }
 
@@ -8365,6 +8441,18 @@
       }
     });
     document.getElementById('export-report').addEventListener('click', exportReport);
+    // Summary-bar collapse toggle (mobile only). Same pattern as the
+    // section/insight carets in this file: tap anywhere on the bar to
+    // toggle. Delegated because the bar is re-rendered inside
+    // renderSession each navigation. Persist the choice across reloads.
+    document.addEventListener('click', (e) => {
+      const bar = e.target.closest && e.target.closest('#summary-bar');
+      if (!bar) return;
+      const collapsed = bar.classList.toggle('collapsed');
+      const tog = document.getElementById('summary-bar-toggle');
+      if (tog) tog.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      try { localStorage.setItem('hrv_summary_collapsed', collapsed ? '1' : '0'); } catch (err) {}
+    });
     setupKeyboardNav();
     window.addEventListener('afterprint', () => {
       document.body.classList.remove('printing');
