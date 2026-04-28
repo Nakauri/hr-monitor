@@ -151,6 +151,159 @@
     margin-left: 2px;
     opacity: 0.7;
   }
+  /* Web reliability tips pill — only mounted on desktop Chromium where
+     Web Bluetooth has known stability quirks. Hidden on Capacitor / mobile
+     where the native plugin handles BLE directly. */
+  .hrm-tips-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    margin-right: 8px;
+    background: transparent;
+    color: var(--text-dim);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .hrm-tips-pill:hover { color: var(--text); border-color: var(--border-strong); background: #141414; }
+  .hrm-tips-pill svg { width: 12px; height: 12px; }
+
+  #hrm-web-banner {
+    background: rgba(93,202,165,0.08);
+    border-bottom: 1px solid rgba(93,202,165,0.25);
+    color: var(--text);
+    padding: 10px 24px;
+    font-size: 13px;
+    line-height: 1.55;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  #hrm-web-banner .hrm-web-banner-msg { flex: 1 1 auto; }
+  #hrm-web-banner button {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  #hrm-web-banner button:hover { color: var(--text); border-color: var(--text-dim); }
+  #hrm-web-banner a {
+    color: var(--accent-rmssd);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  #hrm-tips-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 19000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  #hrm-tips-overlay .hrm-tips-modal {
+    background: #131313;
+    border: 1px solid #2a2a2a;
+    border-radius: 14px;
+    color: #d8d8d8;
+    width: 100%;
+    max-width: 560px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 22px 26px 22px;
+    position: relative;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #hrm-tips-overlay h2 {
+    margin: 0 0 6px;
+    font-size: 16px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  #hrm-tips-overlay .hrm-tips-sub {
+    color: #8a8a8a;
+    font-size: 12px;
+    margin-bottom: 16px;
+    line-height: 1.55;
+  }
+  #hrm-tips-overlay .hrm-tip-item {
+    padding: 12px 0;
+    border-top: 1px solid #2a2a2a;
+  }
+  #hrm-tips-overlay .hrm-tip-item:first-of-type { border-top: none; padding-top: 4px; }
+  #hrm-tips-overlay .hrm-tip-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #hrm-tips-overlay .hrm-tip-status {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  #hrm-tips-overlay .hrm-tip-status.on { background: rgba(93,202,165,0.18); color: var(--accent-rmssd); }
+  #hrm-tips-overlay .hrm-tip-status.manual { background: rgba(255,255,255,0.06); color: #8a8a8a; }
+  #hrm-tips-overlay .hrm-tip-body {
+    font-size: 12px;
+    color: #b0b0b0;
+    line-height: 1.55;
+    margin-bottom: 8px;
+  }
+  #hrm-tips-overlay .hrm-tip-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  #hrm-tips-overlay .hrm-tip-actions button {
+    background: transparent;
+    color: #d8d8d8;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  #hrm-tips-overlay .hrm-tip-actions button:hover { background: #1a1a1a; border-color: #3a3a3a; }
+  #hrm-tips-overlay .hrm-tip-actions button.copied { color: var(--accent-rmssd); border-color: rgba(93,202,165,0.4); }
+  #hrm-tips-overlay .hrm-tip-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  #hrm-tips-overlay .hrm-tips-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 40px;
+    height: 40px;
+    background: transparent;
+    border: none;
+    color: #8a8a8a;
+    cursor: pointer;
+    border-radius: 8px;
+  }
+  #hrm-tips-overlay .hrm-tips-close:hover { color: #d8d8d8; background: #1a1a1a; }
+  #hrm-tips-overlay .hrm-tips-close svg { width: 22px; height: 22px; }
+
   /* Shown when Web Bluetooth is unavailable (Firefox, Safari). Gives the
      user a clear path to the Viewer instead of the "Connect strap" button
      silently failing. */
@@ -1462,7 +1615,8 @@
   <a class="app-nav-link" id="nav-viewer-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
-  <span id="hrm-version-chip-slot" style="margin-left: auto;"></span>
+  <span id="hrm-tips-slot" style="margin-left: auto;"></span>
+  <span id="hrm-version-chip-slot"></span>
 </nav>
 <script src="./diagnostics.js"></script>
 <script src="./settings.js"></script>
@@ -3839,6 +3993,57 @@
   async function releaseWakeLock() {
     if (wakeLock) { try { await wakeLock.release(); } catch (e) {} wakeLock = null; }
   }
+
+  // Audio keep-alive. Holds a silent looping AudioContext so Chromium marks
+  // the tab "playing audio." That priority class sidesteps the background
+  // throttler and reduces the rate at which Windows reaps the BLE GATT
+  // session. Mitigates (does not fix) chromium crbug/1441206. No effect on
+  // Capacitor where the native plugin owns BLE.
+  let _kaCtx = null;
+  let _kaSource = null;
+  function isCapacitorNative() {
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  }
+  function audioKeepAliveEnabled() {
+    if (isCapacitorNative()) return false;
+    const v = localStorage.getItem('hrm_audio_keepalive');
+    if (v === '0') return false;
+    return true; // default ON for desktop / web
+  }
+  function setAudioKeepAliveEnabled(on) {
+    localStorage.setItem('hrm_audio_keepalive', on ? '1' : '0');
+    if (on) startAudioKeepAlive();
+    else stopAudioKeepAlive();
+  }
+  function startAudioKeepAlive() {
+    if (_kaCtx || isCapacitorNative()) return;
+    if (!audioKeepAliveEnabled()) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      _kaCtx = new Ctx();
+      const buf = _kaCtx.createBuffer(1, 1, _kaCtx.sampleRate);
+      _kaSource = _kaCtx.createBufferSource();
+      _kaSource.buffer = buf;
+      _kaSource.loop = true;
+      _kaSource.connect(_kaCtx.destination);
+      _kaSource.start();
+    } catch (e) {
+      console.warn('[keep-alive] audio context start failed:', e && e.message ? e.message : e);
+      _kaCtx = null; _kaSource = null;
+    }
+  }
+  function stopAudioKeepAlive() {
+    try { if (_kaSource) _kaSource.stop(); } catch (e) {}
+    try { if (_kaCtx) _kaCtx.close(); } catch (e) {}
+    _kaSource = null; _kaCtx = null;
+  }
+  function resumeAudioKeepAliveIfNeeded() {
+    if (_kaCtx && _kaCtx.state === 'suspended') {
+      _kaCtx.resume().catch(() => {});
+    }
+  }
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     // Mobile browsers pause timers and may drop BLE while the tab is
@@ -3851,6 +4056,7 @@
       setStatus('Tab returned — retrying strap...');
       if (typeof tryReconnect === 'function') tryReconnect();
     }
+    resumeAudioKeepAliveIfNeeded();
     // User may have flipped the battery-optimisation switch in system
     // settings while the tab was hidden. Re-read state so the row updates.
     if (typeof refreshBattOpt === 'function') refreshBattOpt();
@@ -3873,6 +4079,10 @@
     $('overlay-status').textContent = '• LIVE · ' + (device.name || 'strap').toUpperCase();
     setConnState('live');
     logConnectionEvent('connect');
+    // Start the audio keep-alive (no-op on Capacitor, no-op if user opted
+    // out). Inside the user-gesture chain that started the session, so the
+    // AudioContext is allowed to start.
+    startAudioKeepAlive();
     // Battery is best-effort: not every strap exposes it, and a failed read shouldn't
     // block the main HR stream from being usable.
     readBattery().catch(() => {});
@@ -4016,6 +4226,7 @@
     // Stop passive advertisement watcher so it doesn't try to auto-reconnect
     // after the user explicitly stopped the session.
     stopWatchingAdvertisements();
+    stopAudioKeepAlive();
     // Capture Drive-upload intent BEFORE we tear everything down so the
     // toast only fires when the session actually had a Drive target.
     const nativeWasPublishing = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing());
@@ -5462,6 +5673,148 @@
       });
     } catch(e) {}
   }
+
+  // ============================================================
+  // Web reliability: tips pill + modal + first-time banner.
+  // Mounted only on desktop Chromium where Web Bluetooth has the
+  // crbug/1441206 idle-reap problem. Capacitor (Android native)
+  // skips all of this — the native plugin owns BLE there.
+  // ============================================================
+  function isWebBluetoothDesktop() {
+    if (isCapacitorNative()) return false;
+    if (!navigator.bluetooth) return false;
+    const uaMobile = navigator.userAgentData && navigator.userAgentData.mobile;
+    if (uaMobile === true) return false;
+    return true;
+  }
+
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+    return Promise.resolve();
+  }
+
+  function buildTipsModal() {
+    if (document.getElementById('hrm-tips-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'hrm-tips-overlay';
+    overlay.innerHTML = `
+      <div class="hrm-tips-modal" role="dialog" aria-label="Web reliability tips">
+        <button class="hrm-tips-close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        <h2>Web reliability</h2>
+        <div class="hrm-tips-sub">A few settings that help Web Bluetooth stay connected on desktop. Some apply automatically. Others need a couple of clicks in your browser or system settings.</div>
+        <div class="hrm-tip-item">
+          <div class="hrm-tip-title">Audio keep-alive <span class="hrm-tip-status on" id="hrm-ka-status">on</span></div>
+          <div class="hrm-tip-body">Plays a silent loop so Chrome treats this tab as active. Reduces the chance the browser drops the strap when you're working in another tab.</div>
+          <label class="hrm-tip-toggle">
+            <input type="checkbox" id="hrm-ka-toggle"> Keep audio keep-alive enabled
+          </label>
+        </div>
+        <div class="hrm-tip-item">
+          <div class="hrm-tip-title">Persistent Bluetooth pairings <span class="hrm-tip-status manual">manual</span></div>
+          <div class="hrm-tip-body">Open this URL in Chrome or Edge, set the flag to Enabled, and relaunch the browser. Your strap stays paired across browser restarts and idle drops.</div>
+          <div class="hrm-tip-actions">
+            <button data-copy="chrome://flags/#enable-web-bluetooth-new-permissions-backend">Copy chrome flag URL</button>
+          </div>
+        </div>
+        <div class="hrm-tip-item">
+          <div class="hrm-tip-title">Disable Energy Saver in Chrome <span class="hrm-tip-status manual">manual</span></div>
+          <div class="hrm-tip-body">Energy Saver pauses background tabs and can break the connection. Open Chrome's performance settings and turn it off.</div>
+          <div class="hrm-tip-actions">
+            <button data-copy="chrome://settings/performance">Copy Chrome performance URL</button>
+          </div>
+        </div>
+        <div class="hrm-tip-item">
+          <div class="hrm-tip-title">Bluetooth radio power management <span class="hrm-tip-status manual">manual</span></div>
+          <div class="hrm-tip-body">In Windows: Device Manager, then Bluetooth, then your radio's Properties, then Power Management. Uncheck "Allow the computer to turn off this device to save power." This is the single biggest fix on most Windows machines.</div>
+        </div>
+        <div class="hrm-tip-item">
+          <div class="hrm-tip-title">USB Selective Suspend <span class="hrm-tip-status manual">manual</span></div>
+          <div class="hrm-tip-body">Only relevant if your Bluetooth is a USB dongle. Open Power Options, Edit plan settings, Advanced, USB settings, and disable Selective Suspend on the active power plan.</div>
+        </div>
+        <div class="hrm-tip-item">
+          <div class="hrm-tip-title">For long sessions: use the Android app</div>
+          <div class="hrm-tip-body">The Android build keeps a steadier connection because it manages Bluetooth at the system level. Honest recommendation for sleep tracking and multi-hour sessions.</div>
+          <div class="hrm-tip-actions">
+            <a href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener"><button>Download Android APK</button></a>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.hrm-tips-close').addEventListener('click', close);
+
+    const kaToggle = overlay.querySelector('#hrm-ka-toggle');
+    const kaStatus = overlay.querySelector('#hrm-ka-status');
+    kaToggle.checked = audioKeepAliveEnabled();
+    kaStatus.textContent = kaToggle.checked ? 'on' : 'off';
+    kaStatus.className = 'hrm-tip-status ' + (kaToggle.checked ? 'on' : 'manual');
+    kaToggle.addEventListener('change', () => {
+      setAudioKeepAliveEnabled(kaToggle.checked);
+      kaStatus.textContent = kaToggle.checked ? 'on' : 'off';
+      kaStatus.className = 'hrm-tip-status ' + (kaToggle.checked ? 'on' : 'manual');
+    });
+
+    overlay.querySelectorAll('button[data-copy]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        copyToClipboard(btn.dataset.copy);
+        const orig = btn.textContent;
+        btn.textContent = 'Copied. Paste into the address bar.';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 2200);
+      });
+    });
+  }
+
+  function mountTipsPill() {
+    const slot = document.getElementById('hrm-tips-slot');
+    if (!slot) return;
+    if (!isWebBluetoothDesktop()) return;
+    const pill = document.createElement('a');
+    pill.href = '#';
+    pill.className = 'hrm-tips-pill';
+    pill.title = 'Web reliability tips';
+    pill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>tips`;
+    pill.addEventListener('click', (e) => { e.preventDefault(); buildTipsModal(); });
+    slot.appendChild(pill);
+  }
+
+  function showFirstTimeBanner() {
+    if (!isWebBluetoothDesktop()) return;
+    if (localStorage.getItem('hrm_web_reliability_banner_seen') === '1') return;
+    const compatBanner = document.getElementById('browser-compat-banner');
+    if (compatBanner && !compatBanner.hidden) return;
+    const banner = document.createElement('div');
+    banner.id = 'hrm-web-banner';
+    banner.innerHTML = `
+      <div class="hrm-web-banner-msg">For longer sessions on desktop, the Android app keeps a steadier connection. To stay on desktop, open <a id="hrm-web-banner-link">Web reliability tips</a> for a few quick settings that help.</div>
+      <button id="hrm-web-banner-dismiss">Got it</button>
+    `;
+    const target = compatBanner || document.getElementById('app');
+    if (target && target.parentNode) target.parentNode.insertBefore(banner, target);
+    banner.querySelector('#hrm-web-banner-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      buildTipsModal();
+    });
+    banner.querySelector('#hrm-web-banner-dismiss').addEventListener('click', () => {
+      try { localStorage.setItem('hrm_web_reliability_banner_seen', '1'); } catch (e) {}
+      banner.remove();
+    });
+  }
+
+  mountTipsPill();
+  showFirstTimeBanner();
 })();
 </script>
 </body>
