@@ -2924,14 +2924,28 @@
     }
   }
 
+  // Sign-in / restore-session chain: ensure folder, sync from Drive (with
+  // progress banner), parse newly-pulled CSVs (with progress banner),
+  // re-render. Replaces three near-duplicate inline chains in initDriveUI.
+  async function ensureFolderSyncAndRender() {
+    try {
+      await driveEnsureFolder();
+      driveUpdateUI();
+      await driveSync({ onProgress: showSyncLoader });
+      await loadSessions({ onProgress: showLoader });
+      route();
+    } finally {
+      hideLoader();
+    }
+  }
+
   function initDriveUI() {
     if (!window.aortiAuth) { setTimeout(initDriveUI, 120); return; }
     window.aortiAuth.onAuthChange((record) => {
       syncAuthStateLocal();
       if (record) {
         if (!driveFolderId) {
-          driveEnsureFolder()
-            .then(() => { driveUpdateUI(); return driveSync(); })
+          ensureFolderSyncAndRender()
             .catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
         }
       } else {
@@ -2944,20 +2958,13 @@
     syncAuthStateLocal();
     driveUpdateUI();
     window.addEventListener('online', () => {
-      // Re-attempt a folder/sync when network returns, in case we hit
-      // an offline error banner earlier in this session.
       if (driveAccessToken && !driveFolderId) {
-        driveEnsureFolder()
-          .then(() => { driveUpdateUI(); return driveSync(); })
-          .catch(() => {});
+        ensureFolderSyncAndRender().catch(() => {});
       }
     });
     window.addEventListener('offline', () => setDriveError('offline — will retry'));
-    // If a token is already cached from another page, pull the folder + sync
-    // without waiting for another auth event.
     if (driveAccessToken && !driveFolderId) {
-      driveEnsureFolder()
-        .then(() => { driveUpdateUI(); return driveSync(); })
+      ensureFolderSyncAndRender()
         .catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
     }
   }
@@ -3110,7 +3117,8 @@
   //                         desktop stays authoritative after phone uploads
   // The folder-write step only runs if the user has granted readwrite
   // permission; on denial the first two phases still happen.
-  async function driveSync() {
+  async function driveSync(opts) {
+    const onProgress = opts && opts.onProgress;
     if (!driveAccessToken || !driveFolderId) {
       return { pulled: 0, uploaded: 0, written: 0, skipped: 0 };
     }
@@ -3152,6 +3160,7 @@
       }
       done++;
       if (driveFiles.size > 0) setDriveProgress(`pulling ${done}/${driveFiles.size}`);
+      if (onProgress) onProgress(done, driveFiles.size);
     }
     console.info('[driveSync] phase1 done: skipped=' + skipped + ' pulled=' + pulled +
       ' missingMeta=' + missingMeta + ' staleMeta=' + staleMeta + ' missingStore=' + missingStore);
@@ -8515,7 +8524,7 @@
     });
   }
 
-  function showLoader(current, total) {
+  function showLoader(current, total, label) {
     const banner = document.getElementById('viewer-loading');
     const fill = document.getElementById('viewer-loading-fill');
     const text = document.getElementById('viewer-loading-text');
@@ -8523,10 +8532,10 @@
     if (total <= 0) { banner.classList.remove('shown'); return; }
     banner.classList.add('shown');
     if (fill) fill.style.width = (total > 0 ? (current / total * 100) : 0) + '%';
-    if (text) text.textContent = current >= total
-      ? 'Done'
-      : `Parsing sessions… ${current} of ${total}`;
+    const lab = label || 'Parsing sessions';
+    if (text) text.textContent = current >= total ? 'Done' : `${lab}… ${current} of ${total}`;
   }
+  function showSyncLoader(current, total) { showLoader(current, total, 'Syncing with Drive'); }
   function hideLoader() {
     const banner = document.getElementById('viewer-loading');
     if (banner) banner.classList.remove('shown');
