@@ -1079,10 +1079,7 @@
     display: grid;
     grid-template-columns: 1fr 340px;
     gap: 22px;
-    /* No flex / max-height — chart panel has its own fixed height now, and the
-       surrounding <main> handles scrolling if total content exceeds viewport. */
     position: relative;
-    transition: grid-template-columns 0.22s ease, gap 0.22s ease;
   }
   .session-layout.sidebar-collapsed {
     grid-template-columns: 1fr 0px;
@@ -7066,15 +7063,22 @@
         <span class="marker-time">${formatDuration(i.t)}</span>
         <span class="marker-label">${escape(i.label)}</span>
       </div>`).join('');
+    // Cache a sorted [{t, el}] array so the per-hover lookup in
+    // highlightMarkerItemByT becomes O(log N) instead of O(N) DOM scan.
+    _markerListByT.length = 0;
     el.querySelectorAll('.marker-item').forEach(mi => {
       const t = parseFloat(mi.dataset.t);
       const labelText = mi.querySelector('.marker-label').textContent;
       const tLabel = mi.querySelector('.marker-time').textContent;
+      _markerListByT.push({ t, el: mi });
       mi.addEventListener('click', () => zoomTo(t));
       mi.addEventListener('mouseenter', (e) => highlightMarker(t, labelText, tLabel, e));
       mi.addEventListener('mouseleave', unhighlightMarker);
     });
   }
+  // Module scope: rebuilt by renderMarkerList. Sorted by t (the marker-list
+  // builder already sorts items before render).
+  const _markerListByT = [];
 
   // Hovering a sidebar marker: drop a bright vertical highlight on the chart at that
   // time and show a tooltip anchored to the chart position (fallback: cursor position
@@ -7105,30 +7109,29 @@
   }
 
   // Bidirectional-sync: find the marker-list row whose data-t is closest to t
-  // (within a small tolerance) and pulse it. Called when the user hovers an
-  // annotation on the chart, so the sidebar row lights up to match.
+  // (within a small tolerance) and pulse it. Binary search on the cached
+  // _markerListByT array (sorted) — O(log N) vs the previous O(N) DOM scan
+  // that was running on every annotation hover.
   function highlightMarkerItemByT(t) {
     clearMarkerItemHighlight();
-    const list = document.getElementById('marker-list');
-    if (!list || !isFinite(t)) return;
-    const items = list.querySelectorAll('.marker-item');
-    let best = null, bestDist = Infinity;
-    for (const mi of items) {
-      const mt = parseFloat(mi.dataset.t);
-      if (!isFinite(mt)) continue;
-      const d = Math.abs(mt - t);
-      if (d < bestDist) { best = mi; bestDist = d; }
+    if (!isFinite(t) || !_markerListByT.length) return;
+    let lo = 0, hi = _markerListByT.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (_markerListByT[mid].t < t) lo = mid + 1;
+      else hi = mid;
     }
-    // Cap: only highlight if within 0.05 min (3 sec). Prevents snapping to a
-    // totally unrelated marker when the chart point has no sidebar counterpart.
-    if (!best || bestDist > 0.05) return;
-    best.classList.add('chart-hover');
-    // Scroll into view only if the row is actually off-screen — avoids jumpy
-    // autoscroll every time the user grazes an annotation.
+    const cand = _markerListByT[lo];
+    const prev = lo > 0 ? _markerListByT[lo - 1] : null;
+    const best = (prev && Math.abs(prev.t - t) < Math.abs(cand.t - t)) ? prev : cand;
+    if (!best || Math.abs(best.t - t) > 0.05) return;
+    best.el.classList.add('chart-hover');
+    const list = document.getElementById('marker-list');
+    if (!list) return;
     const listRect = list.getBoundingClientRect();
-    const itemRect = best.getBoundingClientRect();
+    const itemRect = best.el.getBoundingClientRect();
     if (itemRect.top < listRect.top || itemRect.bottom > listRect.bottom) {
-      best.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      best.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }
   function clearMarkerItemHighlight() {
@@ -7620,11 +7623,22 @@
     const sessionStartEpochMs = (s && s.startEpoch)
       || (sessionMeta && sessionMeta.date ? sessionMeta.date.getTime() : null);
 
-    // Palpitation cluster dots (one dot per cluster, sized by count)
+    // Palpitation cluster dots (one dot per cluster, sized by count). Binary
+    // search per cluster instead of a full reduce — was O(clusters × samples)
+    // and dominated render time on day-stitched views (50 clusters × 21k
+    // samples = 1M comparisons). data.hr is sorted by x.
     const palpDots = activeFilters.palp ? s.palpClusters.map(c => {
       const midT = (c.start + c.end) / 2;
-      // Find HR value near this time
-      const near = data.hr.reduce((best, p) => Math.abs(p.x - midT) < Math.abs(best.x - midT) ? p : best, data.hr[0]);
+      const hr = data.hr;
+      let lo = 0, hi = hr.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (hr[mid].x < midT) lo = mid + 1;
+        else hi = mid;
+      }
+      const cand = hr[lo];
+      const prev = lo > 0 ? hr[lo - 1] : null;
+      const near = (prev && Math.abs(prev.x - midT) < Math.abs(cand.x - midT)) ? prev : cand;
       return { x: midT, y: near.y, _count: c.count, _start: c.start, _end: c.end };
     }) : [];
 
@@ -7878,6 +7892,10 @@
         animation: false,
         parsing: false,
         normalized: true,
+        // 200 ms debounce on the responsive observer. Without this, dragging
+        // the window edge or animating the sidebar fires resize at ~60 Hz,
+        // and on day-stitched sessions each fire re-lays-out 100+ annotations.
+        resizeDelay: 200,
         // Snap to the vertical column at the cursor (index mode) so a single
         // tooltip surfaces every series at that timestamp — HR, RMSSD, any
         // palp cluster or event nearby — instead of separate popups per line.
@@ -7978,6 +7996,7 @@
       },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
+        parsing: false, normalized: true, resizeDelay: 200,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
         scales: {
           x: { type: 'linear', min: 0, max: s.duration, display: false },
