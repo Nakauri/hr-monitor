@@ -2773,12 +2773,9 @@
   // from two places: the shared Drive config (driveSyncConfig writes it) or
   // localStorage carried over from a prior monitor session on this browser.
   // Opens overlay.html with &bg=dark so the page renders visibly instead of
-  // the transparent-for-OBS default.
-  // Visibility now depends on two things: (1) a broadcast key exists in
-  // localStorage, AND (2) we've actually seen a tick from the relay in
-  // the last 15 seconds. The key alone used to be enough, which meant
-  // the button said "Live" even when nobody was broadcasting — just
-  // because the persistent key was hanging around from a past session.
+  // the transparent-for-OBS default. Visible only when (1) a broadcast key
+  // is in localStorage AND (2) we've seen a tick from the relay in the
+  // last 15 s — guards against stale keys after old sessions.
   let watchLiveSocket = null;
   let watchLiveLastTick = 0;
   function updateWatchLiveUI() {
@@ -3744,28 +3741,11 @@
     return j >= 0 ? rmssd[j].v : null;
   }
 
-  // Chills detection catches TWO physiologically distinct events, both
-  // felt subjectively as "chills":
-  //
-  // 1. Sympathetic / thermogenic (shivering, cold exposure with
-  //    metabolic response). HR up, RMSSD down, sustained minutes.
-  //    Literature: shivering drives metabolic HR up; RR variance
-  //    accompanied by HR elevation and RMSSD suppression.
-  //
-  // 2. Vagal / frisson (aesthetic chills, emotional peaks, cold-onset
-  //    diving-reflex response, ectopic-driven vagal bursts). RMSSD
-  //    spikes sharply; HR may or may not move; duration seconds to
-  //    ~2 min. RMSSD is a vagal-tone marker, so sudden rise = vagal
-  //    burst. Vagal bursts in structurally normal hearts also trigger
-  //    ectopic beats which further inflate RMSSD — same event, two
-  //    lenses.
-  //
-  // Both emitted into the same windows list with a `kind` field.
-  //
-  // ratioThreshold is kept on the API for the sensitivity slider but only
-  // multiplies the stdDev criterion; the HR-elevation and RMSSD gates are
-  // physiological and not user-tunable (they're what distinguishes real
-  // events from noise in the first place).
+  // Chills detector. Two physiological kinds emitted into one list with a
+  // `kind` field: 'sympathetic' (HR up + RMSSD down, sustained minutes,
+  // shivering / cold exposure) and 'vagal' (RMSSD spikes sharply, seconds
+  // to ~2 min, frisson / vagal-burst / ectopic-driven). ratioThreshold is
+  // wired to the sensitivity slider; it only scales the stdDev gate.
   function detectChillsWindows(hr, ratioThreshold, rmssd) {
     const out = [];
     if (!hr || hr.length < 20) return out;
@@ -3836,19 +3816,9 @@
       out.push(cur);
     }
 
-    // ===== Vagal-burst pass =====
-    // RMSSD rising sharply above its own trailing baseline. Brief. Either
-    // a genuine vagal surge (frisson, aesthetic chills, cold-onset) or
-    // the RR-interval signature of ectopic beats, which vagally-mediated
-    // ectopic literature describes as functionally the same thing (vagal
-    // surge triggers the ectopic).
-    //
-    // Criteria:
-    //   - nearest RMSSD ≥ 2.5 × trailing-baseline RMSSD AND ≥ +20 ms absolute
-    //   - sustained for ≥5 seconds (single-sample spikes = artefact)
-    //   - max burst length 2 min (anything longer is a sustained vagal
-    //     state, not a "burst"; it belongs to autonomic interpretation)
-    //   - 2-min cooldown
+    // Vagal-burst pass — sharp RMSSD rise above trailing baseline.
+    // Gates: ratio ≥2.5× baseline AND ≥+20 ms absolute; ≥5 s sustained;
+    // ≤2 min length cap; 2-min cooldown.
     if (rmssd && rmssdBaseline) {
       const VAGAL_RATIO = 2.5;
       const VAGAL_ABS_DELTA = 20;
@@ -4080,27 +4050,14 @@
       }
       smHR.push({ t: hr[i].t, v: n > 0 ? sum / n : null });
     }
-    // === Sympathetic flush detection (v2) ===
-    //
-    // A flush is a sympathetic surge. In POTS, the diagnostic criterion for
-    // orthostatic tachycardia uses a HR rise of ≥30 bpm SUSTAINED over the
-    // first 10 minutes of provocation, measured at multiple timepoints —
-    // "sustained" is doing the work, not "spike." The detector mirrors
-    // that clinical grounding:
-    //
-    // Criteria (all required):
-    //   1. Smoothed peak HR reaches max(baseline + 25, 100 bpm) — not
-    //      relative-to-session-median; that breaks on day-length sessions
-    //      where median is pulled down by sleep.
-    //   2. Onset: over the 2 min preceding the peak, HR rose ≥20 bpm from
-    //      the 5-min trailing baseline (verified on SMOOTHED HR so a single
-    //      bad beat in the backward scan can't satisfy the rise).
-    //   3. Sustain: smoothed HR stays ≥(baseline + 20) for ≥60 sec AFTER
-    //      the peak. This is the hard gate. One-minute spike = rejected.
-    //   4. RMSSD: trailing-baseline RMSSD vs RMSSD during the event must
-    //      drop ≥30%. Uses rolling baseline, not per-event start-point, so
-    //      a single RMSSD artifact can't inflate the drop.
-    //   5. 15-min cooldown between events — a real flush lasts 5-10 min.
+    // Sympathetic flush detector. Sustained HR rise + RMSSD drop, mirrors
+    // the POTS tilt-test criterion (≥30 bpm sustained over 10 min).
+    // All five gates required:
+    //   1. Smoothed peak HR ≥ max(baseline + 25, 100 bpm).
+    //   2. Onset: HR rose ≥20 bpm from 5-min trailing baseline in 2 min before peak.
+    //   3. Sustain: smoothed HR stays ≥(baseline + 20) for ≥60 sec after peak.
+    //   4. RMSSD drops ≥30% vs trailing baseline during event.
+    //   5. 15-min cooldown between events.
     const flushes = [];
     const FLUSH_PEAK_FLOOR = 100;
     const FLUSH_DELTA_MIN = 20;          // rise from baseline
@@ -4436,21 +4393,10 @@
     }
     if (!isFinite(rmssdMin.v)) rmssdMin = { t: 0, v: 0 };
 
-    // Two different "duration" concepts that used to be one field:
-    //
-    //   duration       — chart x-axis max. Minutes from 00:00 to the last
-    //                    data point in the day. Drives scales.x.max in
-    //                    drawSessionChart so the full timeline is visible.
-    //                    Setting this to union-of-portions truncates the
-    //                    chart mid-afternoon when evening sessions exist.
-    //
-    //   activeDuration — summary-bar display. Union of each session's
-    //                    in-day portion across files, capped at 24h.
-    //                    Summing portions double-counts dual-save /
-    //                    rehydrate overlap (the ">24h in one day" bug).
-    //
-    // Both are needed. renderSession reads activeDuration for the stat
-    // card and falls back to duration for real single-session views.
+    // duration: chart x-axis max (last data point in the day, in minutes
+    //   from 00:00). activeDuration: union of session portions for the
+    //   summary stat. Both are needed; renderSession reads activeDuration
+    //   and falls back to duration for non-virtual sessions.
     const dayEndMs = startOfDay + 86400000;
     const portionIntervals = [];
     for (const fn of files) {
@@ -5342,12 +5288,8 @@
     }
   }
 
-  // Destroy any existing Chart.js instance bound to the canvas before
-  // creating a new one. Without this, every renderAll / drawDaySparkline
-  // re-render leaks the previous Chart in Chart.instances and its callbacks
-  // keep firing on resize. Use for any chart that gets re-created on the
-  // SAME canvas (the main session chart + context chart already do this
-  // explicitly via currentChart.destroy()).
+  // Destroy any existing Chart bound to this canvas before creating a new
+  // one. Re-render-on-same-canvas otherwise leaks the prior instance.
   function freshChart(canvas, config) {
     if (!canvas) return null;
     try { Chart.getChart(canvas)?.destroy(); } catch (e) {}
@@ -6456,9 +6398,8 @@
     if (!summaries.length) return '';
 
     // For day-scoped aggregates, clip each session's contribution to the
-    // portion that actually falls within that day. Without this, an
-    // overnight session counts its full duration on BOTH days (start +
-    // continuation), producing "33 hours in one day" nonsense.
+    // portion that falls within that day. Otherwise an overnight session
+    // counts its full duration on both start and continuation days.
     function effDuration(s) {
       if (!dayIso) return s.duration;
       const p = typeof sessionDayPortion === 'function' ? sessionDayPortion(s, dayIso) : null;
@@ -7219,12 +7160,9 @@
     hideAnnoTip();
   }
 
-  // Shared enter/leave for chart annotations. The annotation tooltip now lives
-  // as a banner at the top of the chart (via showAnnoTip), so Chart.js's own
-  // HR/RMSSD data tooltip can keep following the cursor at the same time
-  // without overlap. Previously we suppressed the data tooltip while annotations
-  // were hovered, which hid HR data while the cursor was anywhere inside a
-  // large annotation region like a chills window.
+  // Shared enter/leave for chart annotations. Annotation tooltip lives as a
+  // banner at the top (showAnnoTip) so Chart.js's data tooltip can keep
+  // following the cursor at the same time without overlap.
   function annoEnter(t, html, evt) {
     showAnnoTip(html, evt);
     highlightAtTime(t);
@@ -7249,20 +7187,9 @@
     return { 'warn-high': 'HR high', 'warn-low': 'HR low', 'warn-crash': 'HRV crash', 'warn-palp': 'Palpitations' }[type] || type;
   }
 
-  // HR×HRV quadrant thresholds. Four bounds (not two) so each quadrant card can
-  // own its defining edges, with a neutral middle zone between them. The zone
-  // between HR_LOW and HR_HIGH, and HRV_LOW and HRV_HIGH, is unclassified — a
-  // session that lands there doesn't match any quadrant, which is honest: it's
-  // "not clearly either way" rather than being forced into a bucket.
-  //
-  //   POTS / autonomic-on default: HR 80–100, HRV 20–35.
-  //     POTS-typical seated HR sits at 85–95, HRV 15–30. Low HR for a POTS
-  //     patient means clearly below their baseline (<80). High HR means well
-  //     above (>100). HRV cuts are similarly shifted down.
-  //   Typical / autonomic-off default: HR 65–85, HRV 30–50.
-  //     Average adult resting HR is 60–75. <65 is "truly at rest", >85 is
-  //     "clearly activated". HRV 30 = lower end of healthy at rest, 50 = clearly
-  //     relaxed.
+  // HR×HRV quadrant thresholds. Four bounds (not two) so each quadrant
+  // owns its defining edges with a neutral middle zone between them. Two
+  // presets: POTS (HR 80–100, HRV 20–35) and Typical (HR 65–85, HRV 30–50).
   const LS_QUADRANT_THRESH = 'hrv_viewer_quadrant_thresh_v2';
   const QUADRANT_DEFAULT_POTS    = { hrLow: 80, hrHigh: 100, hrvLow: 20, hrvHigh: 35 };
   const QUADRANT_DEFAULT_TYPICAL = { hrLow: 65, hrHigh: 85,  hrvLow: 30, hrvHigh: 50 };
@@ -7572,8 +7499,6 @@
     btn.addEventListener('click', () => {
       layout.classList.toggle('sidebar-collapsed');
       localStorage.setItem('hrv_viewer_sidebar_collapsed', layout.classList.contains('sidebar-collapsed'));
-      // Chart needs to resize when the container width changes
-      setTimeout(() => currentChart && currentChart.resize(), 260);
     });
   }
 
@@ -7951,6 +7876,8 @@
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
+        parsing: false,
+        normalized: true,
         // Snap to the vertical column at the cursor (index mode) so a single
         // tooltip surfaces every series at that timestamp — HR, RMSSD, any
         // palp cluster or event nearby — instead of separate popups per line.
@@ -8060,9 +7987,8 @@
     });
   }
 
-  // Module-scope handle so each wireBrush call disconnects the previous
-  // ResizeObserver before creating a new one. Without this, every session
-  // open leaks an observer (callback keeps firing on every resize forever).
+  // Module-scope handle so each wireBrush disconnects the previous observer
+  // before creating a new one. Otherwise every session open leaks one.
   let _brushResizeObserver = null;
   function wireBrush(s) {
     if (_brushResizeObserver) {
@@ -8072,7 +7998,13 @@
     const overlay = document.getElementById('context-overlay');
     const brush = document.getElementById('context-brush');
     const duration = s.duration;
-    let drag = null; // {mode: 'pan'|'left'|'right'|'create', startX, startMin, startMax}
+    let drag = null;
+    // Last bounds applied to the chart's scale. ResizeObserver fires on any
+    // width change (sidebar collapse, window resize) and shouldn't re-update
+    // the chart when zoom range hasn't moved — that's the third of three
+    // redundant redraws per layout change.
+    let lastAppliedMin = null;
+    let lastAppliedMax = null;
 
     function xToMin(x) {
       const w = overlay.clientWidth;
@@ -8081,7 +8013,6 @@
     const dimLeft = document.getElementById('context-dim-left');
     const dimRight = document.getElementById('context-dim-right');
     function renderBrush() {
-      // Hard safety clamp - prevents out-of-range drift from edge-case drag math.
       if (brushMin < 0 || !isFinite(brushMin)) brushMin = 0;
       if (brushMax > duration || !isFinite(brushMax)) brushMax = duration;
       if (brushMax - brushMin < 0.01) brushMax = Math.min(duration, brushMin + 0.01);
@@ -8092,7 +8023,7 @@
       brush.style.width = (hi - lo) + 'px';
       if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
       if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
-      if (currentChart) {
+      if (currentChart && (brushMin !== lastAppliedMin || brushMax !== lastAppliedMax)) {
         currentChart.options.scales.x.min = brushMin;
         currentChart.options.scales.x.max = brushMax;
         if (currentChart.scales && currentChart.scales.x) {
@@ -8100,6 +8031,8 @@
           currentChart.scales.x.options.max = brushMax;
         }
         currentChart.update('none');
+        lastAppliedMin = brushMin;
+        lastAppliedMax = brushMax;
       }
       updateResetZoomVisibility();
     }
