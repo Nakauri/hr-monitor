@@ -3596,7 +3596,7 @@
     function needsReparse(fn) {
       const c = sessionsIndex[fn];
       return !c || c.__incomplete
-        || c.__schemaV !== 9
+        || c.__schemaV !== 10
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
         || !('quadPct' in c) || !('restingHR' in c);
     }
@@ -4160,10 +4160,15 @@
     let lastFlagAt = -Infinity;
     for (let i = 1; i < smHR.length; i++) {
       const cur = smHR[i];
+      // Skip null gap-markers — without this, `null < rangeMin` coerces to
+      // `0 < rangeMin` and rangeMin gets pulled to 0, producing fake
+      // "82 → 0" / "0 → 89" deltas across BLE drops.
+      if (cur.v == null) continue;
       if (cur.t < lastFlagAt + COOLDOWN) continue;
       let rangeMin = cur.v, rangeMax = cur.v;
       let minT = cur.t, maxT = cur.t;
       for (let j = i - 1; j >= 0 && cur.t - smHR[j].t <= WIN_MIN; j--) {
+        if (smHR[j].v == null) continue;
         if (smHR[j].v < rangeMin) { rangeMin = smHR[j].v; minT = smHR[j].t; }
         if (smHR[j].v > rangeMax) { rangeMax = smHR[j].v; maxT = smHR[j].t; }
       }
@@ -4203,7 +4208,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 9,
+      __schemaV: 10,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
