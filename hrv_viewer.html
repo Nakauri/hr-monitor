@@ -379,6 +379,45 @@
   .view.hidden { display: none; }
   #view-session:not(.hidden) { display: flex; flex-direction: column; gap: 18px; }
 
+  /* Loading banner — sticky at top of <main> while loadSessions is parsing
+     cached sessions. Determinate progress: known total, ticks per parse.
+     Shown only when there's work to do (e.g. after a schemaV bump). */
+  .viewer-loading {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 12;
+    padding: 8px 16px;
+    background: rgba(20, 20, 20, 0.96);
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: #d8d8d8;
+  }
+  .viewer-loading.shown { display: flex; }
+  .viewer-loading-bar {
+    flex: 1 1 auto;
+    max-width: 240px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .viewer-loading-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent, #5DCAA5);
+    transition: width 0.18s ease;
+  }
+  .viewer-loading-text {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted, #9a9a9a);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .viewer-loading-bar-fill { transition: none; }
+  }
+
   /* Empty state */
   #empty-state {
     display: flex;
@@ -2476,6 +2515,10 @@
 </header>
 
 <main>
+  <div id="viewer-loading" class="viewer-loading" role="status" aria-live="polite" aria-busy="true">
+    <div class="viewer-loading-bar"><div class="viewer-loading-bar-fill" id="viewer-loading-fill"></div></div>
+    <div class="viewer-loading-text" id="viewer-loading-text">Loading sessions…</div>
+  </div>
   <div id="empty-state">
     <div class="empty-panel">
       <h2>No sessions yet</h2>
@@ -3465,7 +3508,8 @@
     };
   }
 
-  async function loadSessions() {
+  async function loadSessions(opts) {
+    const onProgress = opts && opts.onProgress;
     loadCachedIndex();
     const filenames = await collectAvailableSessionFilenames();
     if (filenames.length === 0 && !driveAccessToken) return;
@@ -3475,22 +3519,33 @@
       if (!filenames.includes(k)) delete sessionsIndex[k];
     }
 
-    // Parse new files OR re-parse stale entries missing fields that were added later.
+    // Pre-pass: how many actually need reparsing? Reported as the loader's
+    // denominator so the bar reflects real work, not "0 of 205" when the
+    // cache is fresh.
+    function needsReparse(fn) {
+      const c = sessionsIndex[fn];
+      return !c || c.__incomplete
+        || c.__schemaV !== 9
+        || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
+        || !('quadPct' in c) || !('restingHR' in c);
+    }
+    const todo = filenames.filter(needsReparse);
+    if (onProgress) onProgress(0, todo.length);
+
     let newParsed = 0;
-    for (const fn of filenames) {
-      const cached = sessionsIndex[fn];
-      const needsReparse = !cached || cached.__incomplete
-        || cached.__schemaV !== 9
-        || !('flushes' in cached) || !('chillsWindows' in cached) || !('hrDeltas' in cached)
-        || !('quadPct' in cached) || !('restingHR' in cached);
-      // (postureSpans absence is fine — older CSVs may not have a posture column)
-      if (needsReparse) {
-        const summary = await parseSessionFile(fn);
-        if (summary) {
-          sessionsIndex[fn] = summary;
-          newParsed++;
-        }
+    let processed = 0;
+    for (const fn of todo) {
+      const summary = await parseSessionFile(fn);
+      if (summary) {
+        sessionsIndex[fn] = summary;
+        newParsed++;
       }
+      processed++;
+      // Yield every 4 parses so the loader bar paints + event loop drains
+      // user taps. Without this, the main thread stays blocked through
+      // all 200+ parses on S8 and the bar never moves visibly.
+      if (onProgress) onProgress(processed, todo.length);
+      if (processed % 4 === 0) await new Promise(r => setTimeout(r, 0));
     }
     if (newParsed > 0) persistIndex();
 
@@ -8241,48 +8296,15 @@
   }
 
   // ===== Init =====
-  async function init() {
-    const demo = isDemoMode();
-    if (demo) {
-      // Hide the "pick a folder / sign in" empty-state IMMEDIATELY so it
-      // doesn't flash through while demo CSVs are still parsing. The
-      // showOnly() call later (after route()) does the same job, but only
-      // once data is loaded — which can take a second or two.
-      const es = document.getElementById('empty-state');
-      if (es) es.style.display = 'none';
-      showDemoBanner();
-      try { await loadDemoSessions(); } catch (e) { console.error('[demo] load failed', e); }
-    } else {
-      await restoreFolder();
-      driveLoadMeta();
-      driveUpdateUI();
-      updateWatchLiveUI();
-      initDriveUI();
-      if (dirHandle) {
-        // Try silent permission check first
-        const perm = await dirHandle.queryPermission({ mode: 'read' });
-        if (perm === 'granted') {
-          await loadSessions();
-        }
-        // If not granted, user will need to click pick / an interaction to re-grant
-      } else {
-        // No local folder — still try loading from Drive cache so the user sees
-        // any previously-synced sessions without needing to pick a folder.
-        await loadSessions();
-      }
-    }
-    // If nothing happens yet, route() will show empty-state
-    route();
-
+  // Bind every event handler BEFORE awaiting any data load. Otherwise a
+  // slow loadSessions (e.g. 200+ cached sessions reparsing after a schemaV
+  // bump) blocks the user from interacting with the menu, view switcher,
+  // sign-in, etc. — every tap dies because the listener doesn't exist yet.
+  function bindUiHandlers(demo) {
     window.addEventListener('hashchange', route);
     if (demo) {
-      // In demo mode, hide all Drive + folder UI so the header isn't cluttered
-      // with controls that would either no-op or break demo state.
       document.querySelectorAll('.fi-folder, .fi-drive, .drive-sep').forEach(el => el.style.display = 'none');
     } else {
-      // Hide local-folder UI entirely on browsers without File System Access
-      // (Firefox, Safari, mobile). These users sync via Drive exclusively — the
-      // viewer stays fully functional, the folder picker just isn't shown.
       if (!window.showDirectoryPicker) {
         document.querySelectorAll('.fsa-only').forEach(el => el.hidden = true);
         const emptyPick = document.getElementById('empty-pick');
@@ -8298,9 +8320,6 @@
         driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
       });
     }
-    // Mobile hamburger. Toggles body.menu-open which reveals the stacked nav
-    // beneath the logo. Any nav link click closes the menu so it doesn't stay
-    // open after the user picks a view.
     const menuBtn = document.getElementById('mobile-menu-btn');
     if (menuBtn) {
       menuBtn.addEventListener('click', () => {
@@ -8314,9 +8333,6 @@
         });
       });
     }
-    // View-switcher dropdown (Sessions / Month / Week / Day / All). Single
-    // button on the header replaces the 5-tab nav. Click toggles open, click
-    // on a link closes, click outside closes.
     const vsBtn = document.getElementById('view-switcher-btn');
     const vsWrap = vsBtn ? vsBtn.closest('.view-switcher') : null;
     if (vsBtn && vsWrap) {
@@ -8339,8 +8355,6 @@
       });
     }
     applyAutonomicClass();
-    // Autonomic toggle lives inside the viewer-settings popover now; change
-    // handler is bound there when the popover is first created.
     document.getElementById('viewer-settings-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       const pop = document.getElementById('viewer-settings-popover');
@@ -8352,14 +8366,62 @@
     });
     document.getElementById('export-report').addEventListener('click', exportReport);
     setupKeyboardNav();
-
-    // Restore chart sizing after the print dialog closes
     window.addEventListener('afterprint', () => {
       document.body.classList.remove('printing');
       resizeAllViewerCharts();
     });
-    // Default to the month calendar if no hash is set yet.
+  }
+
+  function showLoader(current, total) {
+    const banner = document.getElementById('viewer-loading');
+    const fill = document.getElementById('viewer-loading-fill');
+    const text = document.getElementById('viewer-loading-text');
+    if (!banner) return;
+    if (total <= 0) { banner.classList.remove('shown'); return; }
+    banner.classList.add('shown');
+    if (fill) fill.style.width = (total > 0 ? (current / total * 100) : 0) + '%';
+    if (text) text.textContent = current >= total
+      ? 'Done'
+      : `Parsing sessions… ${current} of ${total}`;
+  }
+  function hideLoader() {
+    const banner = document.getElementById('viewer-loading');
+    if (banner) banner.classList.remove('shown');
+  }
+
+  async function init() {
+    const demo = isDemoMode();
+    bindUiHandlers(demo);
+    if (demo) {
+      const es = document.getElementById('empty-state');
+      if (es) es.style.display = 'none';
+      showDemoBanner();
+    } else {
+      await restoreFolder();
+      driveLoadMeta();
+      driveUpdateUI();
+      updateWatchLiveUI();
+      initDriveUI();
+    }
     if (!location.hash) setHash('month');
+    // Initial paint — empty-state if nothing's loaded yet.
+    route();
+    try {
+      if (demo) {
+        await loadDemoSessions();
+      } else if (dirHandle) {
+        const perm = await dirHandle.queryPermission({ mode: 'read' });
+        if (perm === 'granted') await loadSessions({ onProgress: showLoader });
+      } else {
+        await loadSessions({ onProgress: showLoader });
+      }
+    } catch (e) {
+      console.error('[init] load failed', e);
+    } finally {
+      hideLoader();
+    }
+    // Re-render now that data is in.
+    route();
   }
   init();
 })();

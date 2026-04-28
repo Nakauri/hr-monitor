@@ -14,7 +14,7 @@ const mobileRoot = path.resolve(__dirname, '..');
 const wwwDir = path.join(mobileRoot, 'www');
 
 // Files copied as-is.
-const PASSTHROUGH = ['overlay.html', 'hrv_viewer.html', 'widget.css', 'widget.js', 'diagnostics.js', 'settings.js', 'auth.js'];
+const PASSTHROUGH = ['overlay.html', 'widget.css', 'widget.js', 'diagnostics.js', 'settings.js', 'auth.js'];
 // The Capacitor WebView loads index.html by default; we want it to show the
 // dedicated mobile-first landing (app-home.html), not the scrolling public
 // landing. Public https://aorti.ca/ keeps the scroll-heavy page because
@@ -24,6 +24,11 @@ const INDEX_OVERRIDE = { from: 'app-home.html', to: 'index.html' };
 // before the closing </head> so navigator.bluetooth is patched before any
 // page script touches it.
 const INJECT_TARGET = 'hr_monitor.html';
+// Viewer needs the Drive auth shim (and bootstrap) so it can refresh an
+// expired access token via NativeHrSession instead of throwing
+// `native_refresh_unavailable` and forcing the user to re-sign-in.
+// Doesn't need BLE / FGS / relay — those are session-control concerns.
+const VIEWER_INJECT_TARGET = 'hrv_viewer.html';
 
 const SHIM_TAGS = `
   <!-- Capacitor-only shims loaded before page scripts so they can patch
@@ -41,6 +46,14 @@ const SHIM_TAGS = `
   <script src="./battery-opt.js"></script>
   <script src="./wake-lock.js"></script>
   <script src="./oem-background.js"></script>
+`;
+
+const VIEWER_SHIM_TAGS = `
+  <!-- Auth-only shim subset for the viewer. Without drive-auth-native.js,
+       window.__hrMonitorNativeDriveRefresh is undefined and auth.js
+       throws native_refresh_unavailable on token expiry, breaking sign-in. -->
+  <script src="./capacitor-bootstrap.js"></script>
+  <script src="./drive-auth-native.js"></script>
 `;
 
 function ensureDir(dir) {
@@ -99,6 +112,23 @@ function copyWithInject(relative) {
   console.log(`[copy-web] ${relative} → www/${relative} (shim injected, analytics stripped)`);
 }
 
+function copyViewerWithInject(relative) {
+  const from = path.join(repoRoot, relative);
+  const to = path.join(wwwDir, relative);
+  ensureDir(path.dirname(to));
+  if (!fs.existsSync(from)) {
+    console.warn(`[copy-web] skipping ${relative} (not found at repo root)`);
+    return;
+  }
+  let html = fs.readFileSync(from, 'utf8');
+  html = stripForMobile(html);
+  if (!/drive-auth-native\.js/.test(html)) {
+    html = html.replace(/<\/head>/i, `${VIEWER_SHIM_TAGS}</head>`);
+  }
+  fs.writeFileSync(to, html);
+  console.log(`[copy-web] ${relative} → www/${relative} (auth shim injected, analytics stripped)`);
+}
+
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
 // web files so relative paths just work.
 function copyMobileAssets() {
@@ -139,6 +169,7 @@ function buildOnce() {
   ensureDir(wwwDir);
   for (const f of PASSTHROUGH) copyFile(f);
   copyWithInject(INJECT_TARGET);
+  copyViewerWithInject(VIEWER_INJECT_TARGET);
   copyIndexOverride();
   copyMobileAssets();
   console.log('[copy-web] done');
@@ -146,7 +177,7 @@ function buildOnce() {
 
 function watch() {
   buildOnce();
-  const files = [...PASSTHROUGH, INJECT_TARGET, INDEX_OVERRIDE.from].map(f => path.join(repoRoot, f));
+  const files = [...PASSTHROUGH, INJECT_TARGET, VIEWER_INJECT_TARGET, INDEX_OVERRIDE.from].map(f => path.join(repoRoot, f));
   const mobileAssets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'].map(f => path.join(mobileRoot, 'src', f));
   const watched = [...files, ...mobileAssets].filter(f => fs.existsSync(f));
   console.log(`[copy-web] watching ${watched.length} files…`);

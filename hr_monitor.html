@@ -848,6 +848,42 @@
     height: 180px;
   }
 
+  /* Restore overlay — shown while the WebView reattaches to a native
+     session and the CSV snapshot is parsed back into the chart. The chart
+     canvas underneath is empty during this window; the overlay tells the
+     user "we're working" instead of looking frozen. Scoped to the chart
+     wrap so the rest of the UI (header, controls) stays interactive. */
+  .restore-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(10, 10, 10, 0.6);
+    color: #d8d8d8;
+    font-size: 13px;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .restore-overlay.shown { display: flex; }
+  .restore-overlay .spinner {
+    width: 28px;
+    height: 28px;
+    border: 2.5px solid rgba(93, 202, 165, 0.18);
+    border-top-color: #5DCAA5;
+    border-radius: 50%;
+    animation: restore-spin 0.9s linear infinite;
+  }
+  @keyframes restore-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .restore-overlay .spinner {
+      animation: none;
+      border-top-color: rgba(93, 202, 165, 0.18);
+    }
+  }
+
   .thresh-grid {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -1762,7 +1798,13 @@
       </div>
       <div class="section-body">
         <div class="section-watch-empty">Only available on the broadcasting device.</div>
-        <div class="main-chart-wrap"><canvas id="main-chart"></canvas></div>
+        <div class="main-chart-wrap">
+          <canvas id="main-chart"></canvas>
+          <div class="restore-overlay" id="restore-overlay" role="status" aria-live="polite">
+            <div class="spinner" aria-hidden="true"></div>
+            <div>Restoring session…</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3648,9 +3690,15 @@
     if (!nativeRehydrated) {
       nativeRehydrated = true;
       if (window.HRMLog) window.HRMLog.event('rehydrate queued');
-      rehydrateFromNativeCsv().catch(e => {
-        if (window.HRMLog) window.HRMLog.event('rehydrate error', e && e.message ? e.message : String(e));
-      });
+      const overlay = $('restore-overlay');
+      if (overlay) overlay.classList.add('shown');
+      rehydrateFromNativeCsv()
+        .catch(e => {
+          if (window.HRMLog) window.HRMLog.event('rehydrate error', e && e.message ? e.message : String(e));
+        })
+        .finally(() => {
+          if (overlay) overlay.classList.remove('shown');
+        });
     }
     return true;
   }
