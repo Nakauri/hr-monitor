@@ -8213,7 +8213,6 @@
       // new bounds. 'none' was sometimes leaving the rendered axis range
       // stale on the day-timeline view.
       currentChart.update();
-      console.log('[paintBrush] applied', { brushMin, brushMax, scaleMin: currentChart.scales.x.min, scaleMax: currentChart.scales.x.max });
     }
     updateResetZoomVisibility();
   }
@@ -8221,10 +8220,14 @@
   function zoomTo(t, span) {
     if (!currentSummary) return;
     const s = currentSummary;
-    const halfSpan = (span || Math.max(0.5, s.duration * 0.04)) / 2;
+    // Default to a tight 4-minute window so a marker is actually visible at
+    // the centre of the zoom. The earlier 4%-of-duration default produced
+    // ~1-hour-wide windows on overnight sessions, which read as "didn't
+    // zoom" because the marker was lost in the surrounding noise.
+    const desired = span || Math.min(s.duration, 4);
+    const halfSpan = desired / 2;
     brushMin = Math.max(0, t - halfSpan);
     brushMax = Math.min(s.duration, t + halfSpan);
-    console.log('[zoomTo]', { t, span, halfSpan, brushMin, brushMax, duration: s.duration });
     paintBrush();
   }
 
@@ -8416,7 +8419,8 @@
     }
     const menuBtn = document.getElementById('mobile-menu-btn');
     if (menuBtn) {
-      menuBtn.addEventListener('click', () => {
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const open = document.body.classList.toggle('menu-open');
         menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       });
@@ -8425,6 +8429,16 @@
           document.body.classList.remove('menu-open');
           menuBtn.setAttribute('aria-expanded', 'false');
         });
+      });
+      // Tap anywhere outside the open menu (= outside the .app-bar header)
+      // closes it. Same pattern as the view-switcher dropdown — gives the
+      // user an obvious dismissal gesture beyond re-tapping the hamburger.
+      document.addEventListener('click', (e) => {
+        if (!document.body.classList.contains('menu-open')) return;
+        const bar = document.querySelector('.app-bar');
+        if (bar && bar.contains(e.target)) return;
+        document.body.classList.remove('menu-open');
+        menuBtn.setAttribute('aria-expanded', 'false');
       });
     }
     const vsBtn = document.getElementById('view-switcher-btn');
