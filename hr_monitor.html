@@ -7,6 +7,17 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script>
+  // Set html.restoring before any paint when arriving via app-home's
+  // resume-session redirect (?mode=online). The full-page restore overlay
+  // becomes visible on the first frame so the user doesn't stare at a
+  // blank page during JS load + CSV rehydrate. Cleared by JS once
+  // rehydrateFromNativeCsv finishes, or by the waitForNativeSession
+  // timeout if no session was actually active.
+  if (location.search.indexOf('mode=online') >= 0) {
+    document.documentElement.classList.add('restoring');
+  }
+</script>
 <title>aorti.ca · live monitor</title>
 <meta name="robots" content="noindex">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -1010,19 +1021,24 @@
      user "we're working" instead of looking frozen. Scoped to the chart
      wrap so the rest of the UI (header, controls) stays interactive. */
   .restore-overlay {
-    position: absolute;
+    position: fixed;
     inset: 0;
     display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    background: rgba(10, 10, 10, 0.6);
+    gap: 14px;
+    background: rgba(10, 10, 10, 0.92);
     color: #d8d8d8;
-    font-size: 13px;
-    z-index: 5;
+    font-size: 14px;
+    z-index: 9000;
     pointer-events: none;
   }
+  /* Two ways to surface it: html.restoring is set by the early <head> script
+     when ?mode=online is in the URL, so the overlay paints on the first
+     frame before any JS runs. .shown is added later by JS once the native
+     plugin confirms an active session. Either path keeps it visible. */
+  html.restoring .restore-overlay,
   .restore-overlay.shown { display: flex; }
   .restore-overlay .spinner {
     width: 28px;
@@ -1584,6 +1600,10 @@
 </style>
 </head>
 <body>
+<div class="restore-overlay" id="restore-overlay" role="status" aria-live="polite">
+  <div class="spinner" aria-hidden="true"></div>
+  <div>Restoring session…</div>
+</div>
 <script>
   // Mode: "online" (Drive sync + relay broadcast + multi-device) or "offline"
   // (local recording only, no sign-in, no broadcast). Chosen at the index
@@ -1957,10 +1977,6 @@
         <div class="section-watch-empty">Only available on the broadcasting device.</div>
         <div class="main-chart-wrap">
           <canvas id="main-chart"></canvas>
-          <div class="restore-overlay" id="restore-overlay" role="status" aria-live="polite">
-            <div class="spinner" aria-hidden="true"></div>
-            <div>Restoring session…</div>
-          </div>
         </div>
       </div>
     </div>
@@ -3855,6 +3871,7 @@
         })
         .finally(() => {
           if (overlay) overlay.classList.remove('shown');
+          document.documentElement.classList.remove('restoring');
         });
     }
     return true;
@@ -3968,8 +3985,9 @@
       if (restoreNativeSessionUI()) { clearInterval(timer); return; }
       if (++tries > 40) {
         clearInterval(timer);
-        // Diagnostic: explain why we gave up. Helps distinguish "FGS died,
-        // session truly gone" from "session alive but JS can't see it".
+        // No session was actually active — release the restore overlay so
+        // the user sees the normal monitor UI instead of an indefinite spinner.
+        document.documentElement.classList.remove('restoring');
         if (window.HRMLog) {
           let reason = 'shim_missing';
           if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) {
@@ -3981,6 +3999,14 @@
       }
     }, 100);
   })();
+  // Safety net: if neither rehydrate completion nor the 4s timeout fires
+  // (e.g. the rehydrate hangs on an IPC call), don't leave the user
+  // staring at a spinner forever.
+  setTimeout(() => {
+    document.documentElement.classList.remove('restoring');
+    const overlay = $('restore-overlay');
+    if (overlay) overlay.classList.remove('shown');
+  }, 30000);
 
   // Screen Wake Lock: keep the phone/laptop awake during an active session so BLE
   // doesn't drop when the display times out. Auto-released on tab hide; re-request
