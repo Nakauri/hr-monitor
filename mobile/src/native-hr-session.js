@@ -83,6 +83,10 @@
       setPrefs: function (prefs) {
         return plugin.setPrefs({ prefs: prefs || {} });
       },
+      forceSyncNow: function () {
+        if (typeof plugin.forceSyncNow !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
+        return plugin.forceSyncNow().catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
+      },
       setBroadcast: function (enabled) {
         if (typeof plugin.setBroadcast !== 'function') return Promise.resolve();
         return plugin.setBroadcast({ enabled: !!enabled });

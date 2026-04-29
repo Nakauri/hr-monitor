@@ -142,6 +142,17 @@ public class NativeHrSessionPlugin extends Plugin {
     private NativeDriveUploader uploader;
     private NativeDriveResumableUploader resumable;
     private final AtomicLong lastUploadMs = new AtomicLong(0);
+    // Periodic finalize+restart cadence: every 30 min the resumable session
+    // is committed (file becomes visible in Drive) and a new PATCH session
+    // is opened against the same fileId. Without this the file only appears
+    // when the user stops the session — a 10-hour sleep recording shows
+    // nothing in Drive until morning.
+    private static final long DRIVE_FINALIZE_INTERVAL_MS = 30L * 60L * 1000L;
+    private final AtomicLong lastFinalizeMs = new AtomicLong(0);
+    // Gate: blocks chunk-append + a second concurrent finalize while a
+    // commit is in flight. Without it a tick during finalize would PUT
+    // to a closed session URL.
+    private final AtomicBoolean committing = new AtomicBoolean(false);
 
     private OkHttpClient httpClient;
     private volatile WebSocket relaySocket;
@@ -432,6 +443,11 @@ public class NativeHrSessionPlugin extends Plugin {
         synchronized (trendHrBuffer) { trendHrBuffer.clear(); }
         synchronized (trendRmssdBuffer) { trendRmssdBuffer.clear(); }
         lastUploadMs.set(0);
+        // First periodic finalize fires DRIVE_FINALIZE_INTERVAL_MS after start
+        // (not immediately — the resumable session needs a chunk's worth of
+        // bytes to commit anything meaningful). Setting to `now` defers.
+        lastFinalizeMs.set(System.currentTimeMillis());
+        committing.set(false);
 
         // CSV
         try {
@@ -466,6 +482,18 @@ public class NativeHrSessionPlugin extends Plugin {
                 java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
                 long sevenDaysMs = 7L * 24L * 60L * 60L * 1000L;
                 uploader.cleanupLocalCachedAsync(sessionsDir, sevenDaysMs);
+                // Crash recovery: if the immediately-previous session ended
+                // uncleanly (process killed mid-trickle, no finalize), its
+                // resumable session was orphaned by Drive and the file never
+                // appeared in the user's folder. Re-upload from the local
+                // CSV so they can see it on the viewer.
+                try {
+                    String prev = getContext().getSharedPreferences("hr_monitor_session", 0)
+                        .getString("lastSessionFilename", null);
+                    if (prev != null && !prev.isEmpty() && (csv == null || !prev.equals(csv.getFile().getName()))) {
+                        uploader.uploadOrphanIfNeededAsync(sessionsDir, prev);
+                    }
+                } catch (Throwable ignored) {}
             }
         } catch (Throwable t) { /* never block session start */ }
 
@@ -508,6 +536,7 @@ public class NativeHrSessionPlugin extends Plugin {
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.removeCallbacks(gattReconnectRunnable);
         if (csv != null) {
+            String stoppedFilename = csv.getFile().getName();
             csv.close();
             // Prefer the resumable finalize path. Sends only the bytes since
             // the last 256 KB-aligned chunk + commits with the actual total.
@@ -522,6 +551,12 @@ public class NativeHrSessionPlugin extends Plugin {
                 uploader.uploadAsync(csv.getFile());
             }
             csv = null;
+            // Stamp this filename as the "last session" hint so the next
+            // startSession can detect an orphaned upload and re-send it.
+            try {
+                getContext().getSharedPreferences("hr_monitor_session", 0)
+                    .edit().putString("lastSessionFilename", stoppedFilename).apply();
+            } catch (Throwable ignored) {}
         }
         closeRelaySocket();
         closeGattQuietly();
@@ -544,6 +579,92 @@ public class NativeHrSessionPlugin extends Plugin {
     public void disconnect(PluginCall call) {
         closeGattQuietly();
         call.resolve(new JSObject().put("disconnected", true));
+    }
+
+    /**
+     * Manual sync: commit the current resumable session so the partial CSV
+     * becomes visible in Drive, then re-open a PATCH session for the next
+     * batch of trickled chunks. Also re-uploads any orphans from prior
+     * sessions whose stop never ran. Wired to the monitor's drive-sync
+     * icon button on Capacitor.
+     */
+    @PluginMethod
+    public void forceSyncNow(PluginCall call) {
+        if (csv == null || !sessionActive.get()) {
+            call.resolve(new JSObject().put("ok", false).put("reason", "no_active_session"));
+            return;
+        }
+        if (!committing.compareAndSet(false, true)) {
+            call.resolve(new JSObject().put("ok", false).put("reason", "already_committing"));
+            return;
+        }
+        lastFinalizeMs.set(System.currentTimeMillis());
+        new Thread(() -> {
+            String reason = null;
+            boolean ok = false;
+            try {
+                java.io.File file = csv != null ? csv.getFile() : null;
+                if (file == null) { reason = "csv_gone"; return; }
+                String name = file.getName();
+                if (resumable != null && resumable.isReady()) {
+                    ok = resumable.finalizeSync(file);
+                    if (ok) {
+                        Log.i(TAG, "forceSyncNow finalize OK: " + name);
+                        resumable.restartSessionAsync();
+                        reason = "trickle_committed";
+                    } else {
+                        Log.w(TAG, "forceSyncNow finalize failed: " + name);
+                    }
+                }
+                if (!ok && uploader != null) {
+                    uploader.uploadAsync(file);
+                    ok = true;
+                    if (reason == null) reason = "full_upload_fallback";
+                }
+                if (uploader != null) {
+                    java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
+                    uploader.uploadOrphansAsync(sessionsDir);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "forceSyncNow threw: " + t.getMessage());
+                reason = t.getMessage();
+            } finally {
+                committing.set(false);
+                JSObject ret = new JSObject().put("ok", ok);
+                if (reason != null) ret.put("reason", reason);
+                call.resolve(ret);
+            }
+        }, "drive-force-sync").start();
+    }
+
+    /** Periodic finalize+restart timer body. Runs on its own thread because
+     *  finalizeSync is synchronous and would block the BLE binder thread
+     *  if invoked from the tick handler. */
+    private void finalizeAndRestartAsync() {
+        new Thread(() -> {
+            try {
+                java.io.File file = csv != null ? csv.getFile() : null;
+                if (file == null) return;
+                String name = file.getName();
+                if (resumable != null && resumable.isReady()) {
+                    boolean ok = resumable.finalizeSync(file);
+                    if (ok) {
+                        Log.i(TAG, "periodic finalize OK: " + name);
+                        resumable.restartSessionAsync();
+                    } else {
+                        Log.w(TAG, "periodic finalize failed; falling back to full upload: " + name);
+                        if (uploader != null) uploader.uploadAsync(file);
+                    }
+                } else if (uploader != null) {
+                    Log.i(TAG, "periodic finalize: resumable not ready, full-upload fallback");
+                    uploader.uploadAsync(file);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "finalizeAndRestart threw: " + t.getMessage());
+            } finally {
+                committing.set(false);
+            }
+        }, "drive-periodic-finalize").start();
     }
 
     @PluginMethod
@@ -1010,7 +1131,7 @@ public class NativeHrSessionPlugin extends Plugin {
         // resumable session is still INITIALIZING (in-flight, not yet
         // ready and not yet broken), skip this interval — we'd otherwise
         // create a duplicate Drive file with the same filename.
-        if (csv != null) {
+        if (csv != null && !committing.get()) {
             long since = now - lastUploadMs.get();
             if (since >= DRIVE_UPLOAD_INTERVAL_MS) {
                 if (resumable != null && resumable.isReady()) {
@@ -1024,6 +1145,16 @@ public class NativeHrSessionPlugin extends Plugin {
                     uploader.uploadAsync(csv.getFile());
                 }
                 // else: resumable is initializing — skip this tick, retry next interval.
+            }
+        }
+        // Periodic finalize: makes the trickled bytes visible in Drive at
+        // the current state. Falls back to a full upload if the resumable
+        // session isn't ready.
+        if (csv != null && !committing.get()
+                && now - lastFinalizeMs.get() >= DRIVE_FINALIZE_INTERVAL_MS) {
+            if (committing.compareAndSet(false, true)) {
+                lastFinalizeMs.set(now);
+                finalizeAndRestartAsync();
             }
         }
 

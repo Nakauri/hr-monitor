@@ -5568,9 +5568,28 @@
     // the toggle is informational (email shown below); a separate Sign-out
     // link handles the sign-out action without a confirm dialog.
     initDriveUI();
-    $('drive-signin').addEventListener('click', () => {
-      if (window.aortiAuth && window.aortiAuth.isSignedIn()) return;
-      driveSignIn();
+    $('drive-signin').addEventListener('click', async () => {
+      if (!window.aortiAuth || !window.aortiAuth.isSignedIn()) {
+        driveSignIn();
+        return;
+      }
+      // Signed in already. On Capacitor with an active native session,
+      // tapping the same button triggers a manual Drive sync — commits
+      // the trickled CSV so it becomes visible in the user's Drive
+      // folder mid-session, and re-uploads any orphaned prior sessions.
+      const native = window.HRMNativeHrSession;
+      if (!native || !native.isPublishing || !native.isPublishing()) return;
+      const sub = $('drive-status');
+      const orig = sub ? sub.textContent : '';
+      try {
+        if (sub) sub.textContent = 'Syncing…';
+        const res = await native.forceSyncNow();
+        if (sub) sub.textContent = res && res.ok ? 'Synced' : 'Sync failed';
+      } catch (e) {
+        if (sub) sub.textContent = 'Sync failed';
+      } finally {
+        setTimeout(() => { if (sub && (sub.textContent === 'Synced' || sub.textContent === 'Sync failed')) sub.textContent = orig; }, 2500);
+      }
     });
     $('drive-signout').addEventListener('click', driveSignOut);
     $('add-marker').addEventListener('click', addMarker);

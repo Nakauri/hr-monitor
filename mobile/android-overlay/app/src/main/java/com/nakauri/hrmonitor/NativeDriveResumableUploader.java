@@ -137,6 +137,49 @@ public class NativeDriveResumableUploader {
     }
 
     /**
+     * Restart a session against the same Drive file as the previous one.
+     * Uses PATCH against the existing fileId so the file is updated in
+     * place rather than duplicated. Called after a periodic finalize
+     * commits the current file — this re-opens the session for the next
+     * batch of trickled chunks.
+     */
+    public void restartSessionAsync() {
+        if (fileId == null) {
+            Log.w(TAG, "restartSessionAsync called with no fileId; can't PATCH");
+            broken = true;
+            return;
+        }
+        final String existingId = fileId;
+        final String name = filename;
+        executor.submit(() -> {
+            try {
+                this.lastChunkEnd = 0;
+                this.sessionUrl = null;
+                this.broken = false;
+                // fileId stays — we're reusing it for PATCH
+
+                String token = AuthStorage.getValidAccessToken(context);
+                if (token == null) {
+                    Log.i(TAG, "No valid Drive token; PATCH session disabled");
+                    broken = true;
+                    return;
+                }
+                String url = openPatchSession(token, existingId);
+                if (url == null) {
+                    Log.w(TAG, "openPatchSession failed; PATCH session disabled");
+                    broken = true;
+                    return;
+                }
+                sessionUrl = url;
+                Log.i(TAG, "Resumable PATCH session opened for " + name + " fileId=" + existingId);
+            } catch (Throwable t) {
+                Log.w(TAG, "restartSessionAsync threw: " + t.getMessage());
+                broken = true;
+            }
+        });
+    }
+
+    /**
      * Send any new 256 KB-aligned bytes since the last chunk. No-op if
      * less than CHUNK_BLOCK has accumulated. Async.
      */
@@ -221,6 +264,30 @@ public class NativeDriveResumableUploader {
     }
 
     // ---- HTTP helpers ----
+
+    /** PATCH session against an existing fileId. Used by restartSessionAsync
+     *  after a periodic finalize commit — keeps a single file on Drive
+     *  instead of creating a new one for every commit cycle. */
+    private String openPatchSession(String token, String existingFileId) throws IOException {
+        Request req = new Request.Builder()
+            .url("https://www.googleapis.com/upload/drive/v3/files/" + existingFileId + "?uploadType=resumable")
+            .header("Authorization", "Bearer " + token)
+            .header("X-Upload-Content-Type", "text/csv")
+            .patch(RequestBody.create(MediaType.parse("application/json; charset=UTF-8"), "{}"))
+            .build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (!resp.isSuccessful()) {
+                Log.w(TAG, "openPatchSession HTTP " + resp.code());
+                return null;
+            }
+            String loc = resp.header("Location");
+            if (loc == null || loc.isEmpty()) {
+                Log.w(TAG, "openPatchSession returned no Location header");
+                return null;
+            }
+            return loc;
+        }
+    }
 
     /** POST to /upload?uploadType=resumable. Returns session URL or null. */
     private String openSession(String token, String folderId, String name) throws IOException {
