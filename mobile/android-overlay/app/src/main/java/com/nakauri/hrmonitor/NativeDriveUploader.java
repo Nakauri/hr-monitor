@@ -252,6 +252,79 @@ public class NativeDriveUploader {
         return out;
     }
 
+    /**
+     * Crash-recovery: scan the sessions dir, find any CSV that doesn't have
+     * a Drive counterpart, and upload it. Skips the active session. Used
+     * by forceSyncNow (manual sync button) so a tap also salvages any
+     * prior session whose resumable upload was orphaned by a crash.
+     */
+    public void uploadOrphansAsync(File sessionsDir) {
+        if (sessionsDir == null || !sessionsDir.isDirectory()) return;
+        executor.submit(() -> {
+            try {
+                File[] files = sessionsDir.listFiles();
+                if (files == null) return;
+                String token = AuthStorage.getValidAccessToken(context);
+                if (token == null) return;
+                String folderId = folderIdRef.get();
+                if (folderId == null) {
+                    folderId = ensureFolder(token);
+                    if (folderId != null) folderIdRef.set(folderId);
+                }
+                if (folderId == null) return;
+                java.util.Set<String> driveNames = listDriveFilenames(token, folderId);
+                if (driveNames == null) return;
+                String activeName = sessionFilenameRef.get();
+                int uploaded = 0;
+                for (File f : files) {
+                    if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
+                    if (activeName != null && f.getName().equals(activeName)) continue;
+                    if (f.length() == 0) continue;
+                    if (driveNames.contains(f.getName())) continue;
+                    Log.i(TAG, "uploadOrphans: re-uploading " + f.getName() + " (" + f.length() + " bytes)");
+                    // Synchronous upload in this background thread — sequential
+                    // is fine for cleanup work.
+                    try { doUpload(f); uploaded++; }
+                    catch (IOException io) { Log.w(TAG, "orphan upload failed: " + io.getMessage()); }
+                }
+                if (uploaded > 0) Log.i(TAG, "uploadOrphans: re-uploaded " + uploaded + " files");
+            } catch (Throwable t) {
+                Log.w(TAG, "uploadOrphans threw: " + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Targeted variant: re-upload one specific filename if it's missing
+     * from Drive. Used at session start to catch the most common case —
+     * the IMMEDIATELY previous session ended uncleanly.
+     */
+    public void uploadOrphanIfNeededAsync(File sessionsDir, String filename) {
+        if (sessionsDir == null || filename == null || filename.isEmpty()) return;
+        executor.submit(() -> {
+            try {
+                File f = new File(sessionsDir, filename);
+                if (!f.exists() || f.length() == 0) return;
+                String token = AuthStorage.getValidAccessToken(context);
+                if (token == null) return;
+                String folderId = folderIdRef.get();
+                if (folderId == null) {
+                    folderId = ensureFolder(token);
+                    if (folderId != null) folderIdRef.set(folderId);
+                }
+                if (folderId == null) return;
+                java.util.Set<String> driveNames = listDriveFilenames(token, folderId);
+                if (driveNames == null || driveNames.contains(filename)) return;
+                Log.i(TAG, "uploadOrphan: re-uploading " + filename + " (" + f.length() + " bytes)");
+                doUpload(f);
+            } catch (IOException io) {
+                Log.w(TAG, "uploadOrphanIfNeeded: " + io.getMessage());
+            } catch (Throwable t) {
+                Log.w(TAG, "uploadOrphanIfNeeded threw: " + t.getMessage());
+            }
+        });
+    }
+
     /** Attempt an upload of the given CSV file. No-op if signed-out, mid-flight, or file empty. */
     public void uploadAsync(File csv) {
         if (csv == null || !csv.exists() || csv.length() == 0) return;
