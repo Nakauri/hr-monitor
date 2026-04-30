@@ -2991,7 +2991,7 @@
       await driveEnsureFolder();
       driveUpdateUI();
       await driveSync({ onProgress: showSyncLoader });
-      await loadSessions({ onProgress: showLoader });
+      await loadSessions({ onProgress: showSyncLoader });
       route();
     } finally {
       _ensureRunning = false;
@@ -8790,7 +8790,14 @@
         const perm = await dirHandle.queryPermission({ mode: 'read' });
         if (perm === 'granted') await loadSessions({ onProgress: showLoader });
       } else {
-        await loadSessions({ onProgress: showLoader });
+        // Drive-only context. If the user is signed in, the auth-change
+        // callback fires ensureFolderSyncAndRender shortly, which does its
+        // own load. Skip the parse-labelled load here so the two paths
+        // don't race for the same banner during refresh.
+        const isAuthed = !!(window.aortiAuth && typeof window.aortiAuth.isSignedIn === 'function' && window.aortiAuth.isSignedIn());
+        if (!isAuthed) {
+          await loadSessions({ onProgress: showSyncLoader });
+        }
       }
     } catch (e) {
       console.error('[init] load failed', e);
