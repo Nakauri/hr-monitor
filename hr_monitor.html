@@ -9,14 +9,17 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script>
   // Set html.restoring before any paint when arriving via app-home's
-  // resume-session redirect (?mode=online). The full-page restore overlay
-  // becomes visible on the first frame so the user doesn't stare at a
-  // blank page during JS load + CSV rehydrate. Cleared by JS once
-  // rehydrateFromNativeCsv finishes, or by the waitForNativeSession
-  // timeout if no session was actually active.
-  if (location.search.indexOf('mode=online') >= 0) {
-    document.documentElement.classList.add('restoring');
-  }
+  // resume-session redirect (sessionStorage flag set by app-home). The
+  // full-page restore overlay becomes visible on the first frame so the
+  // user doesn't stare at a blank page during JS load + CSV rehydrate.
+  // Start Session clicks also use ?mode=online but don't set the flag —
+  // those are fresh begins, no spinner. Cleared by JS once
+  // rehydrateFromNativeCsv finishes or waitForNativeSession times out.
+  try {
+    if (sessionStorage.getItem('hrm_resuming') === '1') {
+      document.documentElement.classList.add('restoring');
+    }
+  } catch (e) {}
 </script>
 <title>aorti.ca · live monitor</title>
 <meta name="robots" content="noindex">
@@ -3872,6 +3875,7 @@
         .finally(() => {
           if (overlay) overlay.classList.remove('shown');
           document.documentElement.classList.remove('restoring');
+          try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
           // Native restore overlay dismissed at the same moment as the
           // web-level overlay so the user sees a clean handoff to the
           // populated chart.
@@ -3992,6 +3996,7 @@
         // No session was actually active — release the restore overlay so
         // the user sees the normal monitor UI instead of an indefinite spinner.
         document.documentElement.classList.remove('restoring');
+        try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
         if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
         if (window.HRMLog) {
           let reason = 'shim_missing';
@@ -4009,6 +4014,7 @@
   // staring at a spinner forever.
   setTimeout(() => {
     document.documentElement.classList.remove('restoring');
+    try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
     const overlay = $('restore-overlay');
     if (overlay) overlay.classList.remove('shown');
     if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
