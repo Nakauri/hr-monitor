@@ -3656,7 +3656,7 @@
     function needsReparse(fn) {
       const c = sessionsIndex[fn];
       return !c || c.__incomplete
-        || c.__schemaV !== 10
+        || c.__schemaV !== 11
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
         || !('quadPct' in c) || !('restingHR' in c);
     }
@@ -3944,6 +3944,9 @@
 
     const hr = [];          // {t, v}
     const rmssd = [];       // {t, v}
+    const sdnnMatch = [];   // {t, v}
+    const sdnn5min = [];    // {t, v}
+    const sdnnFullSeries = []; // {t, v} — running session SDNN per row
     const palpTimes = [];   // [t, t, ...]
     const events = [];      // {t, label}
     const warnings = [];    // {t, type}
@@ -3981,6 +3984,18 @@
       if (h != null && !isNaN(h)) hr.push({ t, v: h, ep });
       const rm = r[idx.rmssd_ms] !== '' ? parseFloat(r[idx.rmssd_ms]) : null;
       if (rm != null && !isNaN(rm)) rmssd.push({ t, v: rm, ep });
+      if (idx.sdnn_match_ms != null) {
+        const v = r[idx.sdnn_match_ms] !== '' ? parseFloat(r[idx.sdnn_match_ms]) : null;
+        if (v != null && !isNaN(v) && v > 0) sdnnMatch.push({ t, v, ep });
+      }
+      if (idx.sdnn_5min_ms != null) {
+        const v = r[idx.sdnn_5min_ms] !== '' ? parseFloat(r[idx.sdnn_5min_ms]) : null;
+        if (v != null && !isNaN(v) && v > 0) sdnn5min.push({ t, v, ep });
+      }
+      if (idx.sdnn_full_ms != null) {
+        const v = r[idx.sdnn_full_ms] !== '' ? parseFloat(r[idx.sdnn_full_ms]) : null;
+        if (v != null && !isNaN(v) && v > 0) sdnnFullSeries.push({ t, v, ep });
+      }
       if (r[idx.palpitation] === '1') palpTimes.push(t);
       if (r[idx.event] && r[idx.event] !== '') events.push({ t, label: r[idx.event] });
       if (r[idx.warning] && r[idx.warning] !== '') warnings.push({ t, type: r[idx.warning] });
@@ -4013,6 +4028,8 @@
     // every row is a gap marker).
     const hrVals = hr.map(p => p.v).filter(v => v != null);
     const rmssdVals = rmssd.map(p => p.v).filter(v => v != null);
+    const sdnnMatchVals = sdnnMatch.map(p => p.v);
+    const sdnn5minVals = sdnn5min.map(p => p.v);
 
     // Max/min with timestamps. Skip null gap-marker entries — without this,
     // null < anyNumber returns true (null coerces to 0) so hrMin gets set to
@@ -4250,6 +4267,9 @@
       hrMax: maxHR,
       hrMin: minHR,
       rmssdAvg: rmssdVals.length ? Math.round(rmssdVals.reduce((s, v) => s + v, 0) / rmssdVals.length) : null,
+      sdnnMatchAvg: sdnnMatchVals.length ? Math.round(sdnnMatchVals.reduce((s, v) => s + v, 0) / sdnnMatchVals.length) : null,
+      sdnn5minAvg: sdnn5minVals.length ? Math.round(sdnn5minVals.reduce((s, v) => s + v, 0) / sdnn5minVals.length) : null,
+      sdnnFull: sdnnFullSeries.length ? Math.round(sdnnFullSeries[sdnnFullSeries.length - 1].v) : null,
       rmssdMax: maxRM,
       rmssdMin: minRM,
       restingHR,
@@ -4268,7 +4288,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 10,
+      __schemaV: 11,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -4338,7 +4358,7 @@
     header.forEach((h, i) => idx[h.trim()] = i);
     const fileStartEpoch = deriveFileStartEpoch(filename);
     const hasEpochCol = idx.epoch_ms != null;
-    const hr = [], rmssd = [];
+    const hr = [], rmssd = [], sdnnMatch = [], sdnn5min = [];
     for (const r of rows) {
       const t = parseFloat(r[idx.time_min]);
       if (isNaN(t)) continue;
@@ -4349,8 +4369,16 @@
       }
       if (r[idx.hr_bpm] !== '') hr.push({ x: t, y: parseFloat(r[idx.hr_bpm]), ep });
       if (r[idx.rmssd_ms] !== '') rmssd.push({ x: t, y: parseFloat(r[idx.rmssd_ms]), ep });
+      if (idx.sdnn_match_ms != null && r[idx.sdnn_match_ms] !== '') {
+        const v = parseFloat(r[idx.sdnn_match_ms]);
+        if (!isNaN(v) && v > 0) sdnnMatch.push({ x: t, y: v, ep });
+      }
+      if (idx.sdnn_5min_ms != null && r[idx.sdnn_5min_ms] !== '') {
+        const v = parseFloat(r[idx.sdnn_5min_ms]);
+        if (!isNaN(v) && v > 0) sdnn5min.push({ x: t, y: v, ep });
+      }
     }
-    return _sessionCacheTouch(filename, { hr, rmssd });
+    return _sessionCacheTouch(filename, { hr, rmssd, sdnnMatch, sdnn5min });
   }
 
   // Build a virtual "day session" that merges every session on a given date
@@ -4366,10 +4394,10 @@
     const loaded = await Promise.all(files.map(async fn => {
       try {
         const d = await loadFullSession(fn);
-        return { fn, hr: d.hr || [], rmssd: d.rmssd || [] };
+        return { fn, hr: d.hr || [], rmssd: d.rmssd || [], sdnnMatch: d.sdnnMatch || [], sdnn5min: d.sdnn5min || [] };
       } catch (e) {
         console.warn('[buildDaySession] load failed', fn, e);
-        return { fn, hr: [], rmssd: [] };
+        return { fn, hr: [], rmssd: [], sdnnMatch: [], sdnn5min: [] };
       }
     }));
 
@@ -4381,6 +4409,8 @@
     // chart. Dedupe by epoch so dual-saves don't double-plot the same beat.
     const hrByEp = new Map();
     const rmssdByEp = new Map();
+    const sdnnMatchByEp = new Map();
+    const sdnn5minByEp = new Map();
     for (const sd of loaded) {
       for (const p of sd.hr) {
         if (p.ep == null) continue;
@@ -4394,9 +4424,23 @@
         if (x < 0 || x > 1440) continue;
         if (!rmssdByEp.has(p.ep)) rmssdByEp.set(p.ep, { x, y: p.y, ep: p.ep });
       }
+      for (const p of sd.sdnnMatch) {
+        if (p.ep == null) continue;
+        const x = (p.ep - startOfDay) / 60000;
+        if (x < 0 || x > 1440) continue;
+        if (!sdnnMatchByEp.has(p.ep)) sdnnMatchByEp.set(p.ep, { x, y: p.y, ep: p.ep });
+      }
+      for (const p of sd.sdnn5min) {
+        if (p.ep == null) continue;
+        const x = (p.ep - startOfDay) / 60000;
+        if (x < 0 || x > 1440) continue;
+        if (!sdnn5minByEp.has(p.ep)) sdnn5minByEp.set(p.ep, { x, y: p.y, ep: p.ep });
+      }
     }
     const hr = Array.from(hrByEp.values()).sort((a, b) => a.x - b.x);
     const rmssd = Array.from(rmssdByEp.values()).sort((a, b) => a.x - b.x);
+    const sdnnMatch = Array.from(sdnnMatchByEp.values()).sort((a, b) => a.x - b.x);
+    const sdnn5min = Array.from(sdnn5minByEp.values()).sort((a, b) => a.x - b.x);
 
     // Walk each session's summary and shift its events into day-minute space.
     // Each event type has its own time-bearing fields: events use {t},
@@ -4492,6 +4536,10 @@
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
     const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
+    const sdnnMatchVals = sdnnMatch.map(p => p.y);
+    const sdnn5minVals = sdnn5min.map(p => p.y);
+    const sdnnMatchAvg = sdnnMatchVals.length ? Math.round(sdnnMatchVals.reduce((a, b) => a + b, 0) / sdnnMatchVals.length) : null;
+    const sdnn5minAvg = sdnn5minVals.length ? Math.round(sdnn5minVals.reduce((a, b) => a + b, 0) / sdnn5minVals.length) : null;
     const tachyPct = hrVals.length ? Math.round(hrVals.filter(v => v > 100).length / hrVals.length * 100) : 0;
     const warnCount = warnSegs.length;
 
@@ -4522,6 +4570,8 @@
       activeDuration,
       hrAvg, hrMax, hrMin,
       rmssdAvg, rmssdMax, rmssdMin,
+      sdnnMatchAvg, sdnn5minAvg,
+      sdnnFull: null,
       restingHR: null,
       palpCount, palpClusters,
       warnCount, warnSegs,
@@ -5971,6 +6021,9 @@
           <label><input type="checkbox" data-stat="hrMax" /> Max HR</label>
           <label><input type="checkbox" data-stat="hrMin" /> Min HR</label>
           <label><input type="checkbox" data-stat="rmssdAvg" /> Avg HRV</label>
+          <label><input type="checkbox" data-stat="sdnnMatchAvg" /> Avg SDNN ~RMSSD</label>
+          <label><input type="checkbox" data-stat="sdnn5minAvg" /> Avg SDNN (5 min)</label>
+          ${isVirtualDay ? '' : '<label><input type="checkbox" data-stat="sdnnFull" /> SDNN (session)</label>'}
           <label><input type="checkbox" data-stat="palpCount" /> Palps</label>
           <label><input type="checkbox" data-stat="warnCount" /> Warnings</label>
           <label><input type="checkbox" data-stat="uptime" /> Uptime</label>
@@ -6006,6 +6059,21 @@
           <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span>
           <span class="summary-stat-unit">ms rmssd</span>
         </div>
+        <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD. Comparable side-by-side with RMSSD on the same time scale.">
+          <span class="summary-stat-label">Avg SDNN</span>
+          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnnMatchAvg ?? '—'}</span>
+          <span class="summary-stat-unit">ms · 30 s</span>
+        </div>
+        <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5-minute rolling window. Clinical short-term HRV reference.">
+          <span class="summary-stat-label">Avg SDNN</span>
+          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnn5minAvg ?? '—'}</span>
+          <span class="summary-stat-unit">ms · 5 min</span>
+        </div>
+        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across all in-range RR intervals from the entire session. Most comparable to a clinical HRV report's SDNN.">
+          <span class="summary-stat-label">SDNN</span>
+          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnnFull ?? '—'}</span>
+          <span class="summary-stat-unit">ms · session</span>
+        </div>`}
         <div class="summary-stat" data-stat="palpCount">
           <span class="summary-stat-label">Palps</span>
           <span class="summary-stat-value ${s.palpCount ? 'palp' : ''}">${s.palpCount}</span>
@@ -7594,15 +7662,17 @@
   }
 
   // Summary-bar KPI customization. localStorage stores the set of HIDDEN
-  // stat keys (empty array = all visible, the default).
-  const SUMMARY_STAT_KEYS = ['date','duration','hrAvg','hrMax','hrMin','rmssdAvg','palpCount','warnCount','uptime','tachyPct'];
+  // stat keys. When nothing's saved we fall back to SUMMARY_DEFAULTS_HIDDEN
+  // so the bar isn't crowded by SDNN variants users haven't asked for.
+  const SUMMARY_STAT_KEYS = ['date','duration','hrAvg','hrMax','hrMin','rmssdAvg','sdnnMatchAvg','sdnn5minAvg','sdnnFull','palpCount','warnCount','uptime','tachyPct'];
+  const SUMMARY_DEFAULTS_HIDDEN = ['sdnn5minAvg','sdnnFull'];
   function getSummaryHiddenSet() {
     try {
       const raw = localStorage.getItem('hrv_summary_hidden');
-      if (!raw) return new Set();
+      if (!raw) return new Set(SUMMARY_DEFAULTS_HIDDEN);
       const arr = JSON.parse(raw);
-      return new Set(Array.isArray(arr) ? arr.filter(k => SUMMARY_STAT_KEYS.includes(k)) : []);
-    } catch (e) { return new Set(); }
+      return new Set(Array.isArray(arr) ? arr.filter(k => SUMMARY_STAT_KEYS.includes(k)) : SUMMARY_DEFAULTS_HIDDEN);
+    } catch (e) { return new Set(SUMMARY_DEFAULTS_HIDDEN); }
   }
   function saveSummaryHiddenSet(set) {
     try { localStorage.setItem('hrv_summary_hidden', JSON.stringify(Array.from(set))); } catch (e) {}
@@ -7647,8 +7717,11 @@
     if (reset) {
       reset.addEventListener('click', (e) => {
         e.stopPropagation();
-        saveSummaryHiddenSet(new Set());
-        menu.querySelectorAll('input[type="checkbox"][data-stat]').forEach(cb => { cb.checked = true; });
+        const defaults = new Set(SUMMARY_DEFAULTS_HIDDEN);
+        saveSummaryHiddenSet(defaults);
+        menu.querySelectorAll('input[type="checkbox"][data-stat]').forEach(cb => {
+          cb.checked = !defaults.has(cb.getAttribute('data-stat'));
+        });
         applySummaryStatVisibility();
       });
     }

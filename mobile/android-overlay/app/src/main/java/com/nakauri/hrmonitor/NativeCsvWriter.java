@@ -14,11 +14,11 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 // PARITY CRITICAL — schema must match hr_monitor.html buildSessionCSV().
-// Schema: time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture
+// Schema: time_min,epoch_ms,hr_bpm,rmssd_ms,sdnn_match_ms,sdnn_5min_ms,sdnn_full_ms,palpitation,event,warning,connection,posture
 public class NativeCsvWriter {
     private static final String TAG = "NativeCsvWriter";
     private static final String HEADER =
-        "time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture";
+        "time_min,epoch_ms,hr_bpm,rmssd_ms,sdnn_match_ms,sdnn_5min_ms,sdnn_full_ms,palpitation,event,warning,connection,posture";
 
     private final File file;
     private final long sessionStartMs;
@@ -53,13 +53,13 @@ public class NativeCsvWriter {
     private int rowsSinceFlush = 0;
     private long lastFlushAtMs = 0;
 
-    public synchronized void appendHrRow(int hr, double rmssd, long timestampMs) {
+    public synchronized void appendHrRow(int hr, double rmssd, double sdnnMatch, double sdnn5min, double sdnnFull, long timestampMs) {
         if (writer == null) return;
         double tMin = Math.max(0, (timestampMs - sessionStartMs)) / 60_000.0;
         try {
             writer.write(String.format(Locale.US,
-                "%.4f,%d,%d,%.2f,,,,,",
-                tMin, timestampMs, hr, rmssd));
+                "%.4f,%d,%d,%.2f,%.2f,%.2f,%.2f,,,,,",
+                tMin, timestampMs, hr, rmssd, sdnnMatch, sdnn5min, sdnnFull));
             writer.newLine();
             rowsSinceFlush++;
             long now = System.currentTimeMillis();
@@ -82,7 +82,7 @@ public class NativeCsvWriter {
         double tMin = Math.max(0, (timestampMs - sessionStartMs)) / 60_000.0;
         try {
             writer.write(String.format(Locale.US,
-                "%.4f,%d,,,,,,%s,",
+                "%.4f,%d,,,,,,,,,%s,",
                 tMin, timestampMs, connState));
             writer.newLine();
             // Connection events are rare + meaningful. Flush immediately so a

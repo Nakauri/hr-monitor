@@ -2015,7 +2015,14 @@
     startTime: null,
     hrSeries: [],
     rmssdSeries: [],
+    sdnnMatchSeries: [],
+    sdnn5minSeries: [],
+    sdnnFullSeries: [],
     rrBuffer: [],
+    rrBuffer5min: [],
+    sdnnFullCount: 0,
+    sdnnFullMean: 0,
+    sdnnFullM2: 0,
     breathBuffer: [],
     breathPhase: null,
     events: [],
@@ -2099,6 +2106,23 @@
     }
     if (count < 1) return null;
     return Math.sqrt(sumSq / count);
+  }
+
+  // PARITY CRITICAL — MUST MATCH NativeHrSessionPlugin.java:computeSdnn.
+  // Sample stddev (n-1) of in-range RR intervals. No successive-diff filter.
+  function computeSDNN(rrs) {
+    if (rrs.length < 2) return null;
+    const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
+    if (clean.length < 2) return null;
+    let sum = 0;
+    for (const rr of clean) sum += rr;
+    const mean = sum / clean.length;
+    let sumSq = 0;
+    for (const rr of clean) {
+      const d = rr - mean;
+      sumSq += d * d;
+    }
+    return Math.sqrt(sumSq / (clean.length - 1));
   }
 
   let mainChart = null, compactChart = null, rsaChart = null, hrInlineChart = null, rmssdInlineChart = null, hrLiveTraceChart = null;
@@ -2870,6 +2894,26 @@
       const cutoff = now - 0.5;
       state.rrBuffer = state.rrBuffer.filter(r => r.t >= cutoff);
       const rmssd = computeRMSSD(state.rrBuffer.map(r => r.rr));
+      const sdnnMatch = computeSDNN(state.rrBuffer.map(r => r.rr));
+      // 5 min rolling RR window for clinical-standard SDNN.
+      state.rrBuffer5min.push(...rrs.map(rr => ({ t: now, rr })));
+      const cutoff5 = now - 5;
+      state.rrBuffer5min = state.rrBuffer5min.filter(r => r.t >= cutoff5);
+      const sdnn5min = computeSDNN(state.rrBuffer5min.map(r => r.rr));
+      // Welford running stats — same range filter as computeSDNN. PARITY
+      // CRITICAL — must match NativeHrSessionPlugin.java sdnnFull*.
+      for (const rr of rrs) {
+        if (rr >= 300 && rr <= 2000) {
+          state.sdnnFullCount++;
+          const delta = rr - state.sdnnFullMean;
+          state.sdnnFullMean += delta / state.sdnnFullCount;
+          const delta2 = rr - state.sdnnFullMean;
+          state.sdnnFullM2 += delta * delta2;
+        }
+      }
+      const sdnnFull = state.sdnnFullCount >= 2
+        ? Math.sqrt(state.sdnnFullM2 / (state.sdnnFullCount - 1))
+        : null;
       if (rmssd != null) {
         state.currentRMSSD = rmssd;
         if (state.rmssdSeries.length) {
@@ -2881,6 +2925,12 @@
         state.rmssdSeries.push({ t: now, v: rmssd });
         if (state.rmssdSeries.length > 5000) state.rmssdSeries.shift();
       }
+      if (sdnnMatch != null) state.sdnnMatchSeries.push({ t: now, v: sdnnMatch });
+      if (sdnn5min != null) state.sdnn5minSeries.push({ t: now, v: sdnn5min });
+      if (sdnnFull != null) state.sdnnFullSeries.push({ t: now, v: sdnnFull });
+      if (state.sdnnMatchSeries.length > 5000) state.sdnnMatchSeries.shift();
+      if (state.sdnn5minSeries.length > 5000) state.sdnn5minSeries.shift();
+      if (state.sdnnFullSeries.length > 5000) state.sdnnFullSeries.shift();
       state.breathBuffer.push(...rrs.map(rr => ({ t: now, rr })));
       const breathCutoff = now - 0.75;
       state.breathBuffer = state.breathBuffer.filter(r => r.t >= breathCutoff);
@@ -4403,7 +4453,14 @@
   function resetSession() {
     state.hrSeries = [];
     state.rmssdSeries = [];
+    state.sdnnMatchSeries = [];
+    state.sdnn5minSeries = [];
+    state.sdnnFullSeries = [];
     state.rrBuffer = [];
+    state.rrBuffer5min = [];
+    state.sdnnFullCount = 0;
+    state.sdnnFullMean = 0;
+    state.sdnnFullM2 = 0;
     state.events = [];
     state.warnings = [];
     state.ectopicEvents = [];
@@ -4933,7 +4990,7 @@
     // epoch_ms: absolute Unix-ms timestamp per row. Makes the CSV self-describing
     // for cross-file analysis (e.g. sleep spanning midnight in daily-mode files)
     // without having to parse the filename.
-    const rows = [['time_min', 'epoch_ms', 'hr_bpm', 'rmssd_ms', 'palpitation', 'event', 'warning', 'connection', 'posture']];
+    const rows = [['time_min', 'epoch_ms', 'hr_bpm', 'rmssd_ms', 'sdnn_match_ms', 'sdnn_5min_ms', 'sdnn_full_ms', 'palpitation', 'event', 'warning', 'connection', 'posture']];
     const allTimes = new Set();
     state.hrSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
     state.rmssdSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
@@ -4945,6 +5002,9 @@
     const sorted = Array.from(allTimes).map(Number).sort((a,b) => a-b);
     const hrMap = new Map(state.hrSeries.map(p => [p.t.toFixed(4), p.v]));
     const rmssdMap = new Map(state.rmssdSeries.map(p => [p.t.toFixed(4), p.v]));
+    const sdnnMatchMap = new Map(state.sdnnMatchSeries.map(p => [p.t.toFixed(4), p.v]));
+    const sdnn5minMap = new Map(state.sdnn5minSeries.map(p => [p.t.toFixed(4), p.v]));
+    const sdnnFullMap = new Map(state.sdnnFullSeries.map(p => [p.t.toFixed(4), p.v]));
     const evMap = new Map(state.events.map(e => [e.t.toFixed(4), e.label]));
     const warnMap = new Map(state.warnings.map(w => [w.t.toFixed(4), w.type]));
     const palpSet = new Set(state.ectopicEvents.map(e => e.t.toFixed(4)));
@@ -4954,7 +5014,7 @@
     sorted.forEach(t => {
       const k = t.toFixed(4);
       const epochMs = Math.round(startEpoch + t * 60000);
-      rows.push([t.toFixed(4), epochMs, hrMap.get(k) ?? '', rmssdMap.get(k)?.toFixed(2) ?? '', palpSet.has(k) ? '1' : '', evMap.get(k) ?? '', warnMap.get(k) ?? '', connMap.get(k) ?? '', postureMap.get(k) ?? '']);
+      rows.push([t.toFixed(4), epochMs, hrMap.get(k) ?? '', rmssdMap.get(k)?.toFixed(2) ?? '', sdnnMatchMap.get(k)?.toFixed(2) ?? '', sdnn5minMap.get(k)?.toFixed(2) ?? '', sdnnFullMap.get(k)?.toFixed(2) ?? '', palpSet.has(k) ? '1' : '', evMap.get(k) ?? '', warnMap.get(k) ?? '', connMap.get(k) ?? '', postureMap.get(k) ?? '']);
     });
     const csv = rows.map(r => r.join(',')).join('\n');
     const filename = 'hrv_session_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.csv';
