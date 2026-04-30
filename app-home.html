@@ -331,6 +331,11 @@
       }
       plugin.status().then(function (s) {
         if (s && s.sessionActive) {
+          // Mark this navigation as a resume so the monitor's inline
+          // <head> script knows to keep the "Restoring session…" spinner
+          // up. Without the flag, monitor treats the load as a fresh
+          // start (e.g. user clicking Start Session), no spinner.
+          try { sessionStorage.setItem('hrm_resuming', '1'); } catch (e) {}
           // Don't hide the overlay — the monitor will dismiss it once
           // rehydrate finishes, giving the user a continuous spinner
           // through the whole reload.
