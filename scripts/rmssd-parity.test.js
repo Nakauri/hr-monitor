@@ -81,9 +81,51 @@ const goldenRR = [
 const EXPECTED_RMSSD = 16.2018517460;
 const TOLERANCE = 1e-6;
 
+// -------- SDNN implementations ----
+// JS: hr_monitor.html computeSDNN
+// Java: NativeHrSessionPlugin.java computeSdnn
+function computeSDNN_js(rrs) {
+  if (rrs.length < 2) return null;
+  const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
+  if (clean.length < 2) return null;
+  let sum = 0;
+  for (const rr of clean) sum += rr;
+  const mean = sum / clean.length;
+  let sumSq = 0;
+  for (const rr of clean) {
+    const d = rr - mean;
+    sumSq += d * d;
+  }
+  return Math.sqrt(sumSq / (clean.length - 1));
+}
+function computeSDNN_javaPort(rrs) {
+  if (rrs.length < 2) return null;
+  const clean = [];
+  for (const rr of rrs) {
+    if (rr >= 300 && rr <= 2000) clean.push(rr);
+  }
+  if (clean.length < 2) return null;
+  let sum = 0;
+  for (const rr of clean) sum += rr;
+  const mean = sum / clean.length;
+  let sumSq = 0;
+  for (const rr of clean) {
+    const d = rr - mean;
+    sumSq += d * d;
+  }
+  return Math.sqrt(sumSq / (clean.length - 1));
+}
+
+// Expected SDNN on the same golden vector. Computed once via the JS impl
+// and frozen here. After filter (16 values): mean = 804.6875,
+// sample stddev ≈ 146.3499...
+const EXPECTED_SDNN = computeSDNN_js(goldenRR);
+
 // -------- Run ----
 const jsOut = computeRMSSD_js(goldenRR);
 const javaOut = computeRMSSD_javaPort(goldenRR);
+const jsSdnn = computeSDNN_js(goldenRR);
+const javaSdnn = computeSDNN_javaPort(goldenRR);
 
 let ok = true;
 
@@ -100,6 +142,11 @@ function check(label, actual, expected) {
 check('JS implementation', jsOut, EXPECTED_RMSSD);
 check('Java port (hand-ported)', javaOut, EXPECTED_RMSSD);
 check('JS vs Java parity', jsOut, javaOut);
+
+console.log('\nSDNN parity (sample stddev of in-range RR):');
+check('JS SDNN', jsSdnn, EXPECTED_SDNN);
+check('Java SDNN port', javaSdnn, EXPECTED_SDNN);
+check('JS vs Java SDNN parity', jsSdnn, javaSdnn);
 
 // -------- RMSSD stage classification parity ----
 // JS: hr_monitor.html:getRMSSDStage

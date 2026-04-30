@@ -89,6 +89,8 @@ public class NativeHrSessionPlugin extends Plugin {
     // but hides the events this app is built to surface.
     // PARITY CRITICAL — see scripts/rmssd-parity.test.js.
     private static final long RR_WINDOW_MS = 30_000L;
+    // SDNN 5-min rolling window. Clinical short-term HRV reference.
+    private static final long RR_WINDOW_5MIN_MS = 300_000L;
     // Drive upload cadence — every 30 s. Same data pace as the JS auto-save.
     // 5 min during a session. Final upload happens at stopSessionInternal.
     // Crash loss = 5 min Drive lag; local CSV is always intact and re-uploads
@@ -133,9 +135,15 @@ public class NativeHrSessionPlugin extends Plugin {
 
     // RR + RMSSD
     private final Deque<RrEntry> rrWindow = new ArrayDeque<>();
+    private final Deque<RrEntry> rrWindow5min = new ArrayDeque<>();
     private final Deque<double[]> liveBuffer = new ArrayDeque<>();
     private final Deque<double[]> trendHrBuffer = new ArrayDeque<>();
     private final Deque<double[]> trendRmssdBuffer = new ArrayDeque<>();
+    // Welford running stats for session-wide SDNN. Reset per session.
+    // PARITY CRITICAL — must match hr_monitor.html state.sdnnFull*.
+    private long sdnnFullCount = 0;
+    private double sdnnFullMean = 0.0;
+    private double sdnnFullM2 = 0.0;
 
     // volatile: BLE binder thread reads while main thread can null on stop.
     private volatile NativeCsvWriter csv;
@@ -439,6 +447,12 @@ public class NativeHrSessionPlugin extends Plugin {
         boolean canBroadcast = broadcastEnabled && broadcastKey != null && !broadcastKey.isEmpty();
         sessionStartMs = System.currentTimeMillis();
         synchronized (rrWindow) { rrWindow.clear(); }
+        synchronized (rrWindow5min) { rrWindow5min.clear(); }
+        synchronized (rrWindow) {
+            sdnnFullCount = 0;
+            sdnnFullMean = 0.0;
+            sdnnFullM2 = 0.0;
+        }
         synchronized (liveBuffer) { liveBuffer.clear(); }
         synchronized (trendHrBuffer) { trendHrBuffer.clear(); }
         synchronized (trendRmssdBuffer) { trendRmssdBuffer.clear(); }
@@ -1055,6 +1069,7 @@ public class NativeHrSessionPlugin extends Plugin {
         gattReconnectAttempts = 0;
         // synchronized: BLE binder writes, main thread reads in publishTick.
         Double rmssd;
+        Double sdnnMatch;
         synchronized (rrWindow) {
             if (p.rrMs != null) {
                 for (int rr : p.rrMs) rrWindow.addLast(new RrEntry(rr, now));
@@ -1066,7 +1081,37 @@ public class NativeHrSessionPlugin extends Plugin {
                 else break;
             }
             rmssd = computeRmssd(rrWindow);
+            sdnnMatch = computeSdnn(rrWindow);
+            // Welford running stats — fed once per RR. Same range filter as
+            // computeRmssd / computeSdnn for parity.
+            if (p.rrMs != null) {
+                for (int rr : p.rrMs) {
+                    if (rr >= 300 && rr <= 2000) {
+                        sdnnFullCount++;
+                        double delta = rr - sdnnFullMean;
+                        sdnnFullMean += delta / sdnnFullCount;
+                        double delta2 = rr - sdnnFullMean;
+                        sdnnFullM2 += delta * delta2;
+                    }
+                }
+            }
         }
+        Double sdnn5min;
+        synchronized (rrWindow5min) {
+            if (p.rrMs != null) {
+                for (int rr : p.rrMs) rrWindow5min.addLast(new RrEntry(rr, now));
+            }
+            long cutoff5 = now - RR_WINDOW_5MIN_MS;
+            Iterator<RrEntry> it5 = rrWindow5min.iterator();
+            while (it5.hasNext()) {
+                if (it5.next().timestampMs < cutoff5) it5.remove();
+                else break;
+            }
+            sdnn5min = computeSdnn(rrWindow5min);
+        }
+        Double sdnnFull = (sdnnFullCount >= 2)
+            ? Math.sqrt(sdnnFullM2 / (sdnnFullCount - 1))
+            : null;
 
         synchronized (liveBuffer) {
             if (p.rrMs != null) {
@@ -1096,7 +1141,13 @@ public class NativeHrSessionPlugin extends Plugin {
 
         NativeCsvWriter writer = csv;
         if (writer != null) {
-            writer.appendHrRow(p.hr, rmssd != null ? rmssd : 0.0, now);
+            writer.appendHrRow(
+                p.hr,
+                rmssd != null ? rmssd : 0.0,
+                sdnnMatch != null ? sdnnMatch : 0.0,
+                sdnn5min != null ? sdnn5min : 0.0,
+                sdnnFull != null ? sdnnFull : 0.0,
+                now);
             int consec = writer.getConsecutiveFailures();
             if (consec == CSV_FAIL_ALERT_THRESHOLD) {
                 JSObject err = new JSObject();
@@ -1419,6 +1470,28 @@ public class NativeHrSessionPlugin extends Plugin {
         }
         if (count < 1) return null;
         return Math.sqrt(sumSq / count);
+    }
+
+    // PARITY CRITICAL — must match hr_monitor.html computeSDNN.
+    // Sample stddev (n-1) of in-range RR intervals. No diff filter so the
+    // formula stays simple and parity-testable; ectopics inflate SDNN, which
+    // is the standard clinical behaviour.
+    private static Double computeSdnn(Deque<RrEntry> window) {
+        if (window.size() < 2) return null;
+        java.util.ArrayList<Integer> clean = new java.util.ArrayList<>();
+        for (RrEntry e : window) {
+            if (e.rrMs >= 300 && e.rrMs <= 2000) clean.add(e.rrMs);
+        }
+        if (clean.size() < 2) return null;
+        double sum = 0.0;
+        for (int rr : clean) sum += rr;
+        double mean = sum / clean.size();
+        double sumSq = 0.0;
+        for (int rr : clean) {
+            double d = rr - mean;
+            sumSq += d * d;
+        }
+        return Math.sqrt(sumSq / (clean.size() - 1));
     }
 
     // ---- Relay WebSocket --------------------------------------------------
