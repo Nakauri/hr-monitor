@@ -2927,7 +2927,13 @@
   // Sign-in / restore-session chain: ensure folder, sync from Drive (with
   // progress banner), parse newly-pulled CSVs (with progress banner),
   // re-render. Replaces three near-duplicate inline chains in initDriveUI.
+  // Guarded so the auth-cached-token path and the onAuthChange callback
+  // can't fire concurrently — without the guard their progress callbacks
+  // race and the banner alternates labels rapid-fire.
+  let _ensureRunning = false;
   async function ensureFolderSyncAndRender() {
+    if (_ensureRunning) return;
+    _ensureRunning = true;
     try {
       await driveEnsureFolder();
       driveUpdateUI();
@@ -2935,6 +2941,7 @@
       await loadSessions({ onProgress: showLoader });
       route();
     } finally {
+      _ensureRunning = false;
       hideLoader();
     }
   }

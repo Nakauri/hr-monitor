@@ -46,14 +46,18 @@ const SHIM_TAGS = `
   <script src="./battery-opt.js"></script>
   <script src="./wake-lock.js"></script>
   <script src="./oem-background.js"></script>
+  <script src="./restore-overlay.js"></script>
 `;
 
 const VIEWER_SHIM_TAGS = `
   <!-- Auth-only shim subset for the viewer. Without drive-auth-native.js,
        window.__hrMonitorNativeDriveRefresh is undefined and auth.js
-       throws native_refresh_unavailable on token expiry, breaking sign-in. -->
+       throws native_refresh_unavailable on token expiry, breaking sign-in.
+       restore-overlay so the viewer can also dismiss the native splash if
+       a user lands here directly. -->
   <script src="./capacitor-bootstrap.js"></script>
   <script src="./drive-auth-native.js"></script>
+  <script src="./restore-overlay.js"></script>
 `;
 
 function ensureDir(dir) {
@@ -132,7 +136,7 @@ function copyViewerWithInject(relative) {
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
 // web files so relative paths just work.
 function copyMobileAssets() {
-  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js', 'native-hr-session.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'];
+  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js', 'native-hr-session.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js', 'restore-overlay.js'];
   for (const name of assets) {
     const from = path.join(mobileRoot, 'src', name);
     const to = path.join(wwwDir, name);

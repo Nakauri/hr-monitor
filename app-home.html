@@ -317,15 +317,33 @@
 <script>
   // If a native session is already running, skip the home and drop the
   // user straight into the monitor so they can see and control it.
+  // The native restore overlay (added by MainActivity.onCreate) stays up
+  // until the monitor's rehydrate finishes; here we just dismiss it
+  // when status() comes back saying no session is active, so users with
+  // no session don't see "Restoring session..." over the home buttons.
   (function () {
     try {
       if (!window.Capacitor || !window.Capacitor.isNativePlatform || !window.Capacitor.isNativePlatform()) return;
       const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.NativeHrSession;
-      if (!plugin || typeof plugin.status !== 'function') return;
+      if (!plugin || typeof plugin.status !== 'function') {
+        if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+        return;
+      }
       plugin.status().then(function (s) {
-        if (s && s.sessionActive) location.replace('./hr_monitor.html?mode=online');
-      }).catch(function () {});
-    } catch (e) {}
+        if (s && s.sessionActive) {
+          // Don't hide the overlay — the monitor will dismiss it once
+          // rehydrate finishes, giving the user a continuous spinner
+          // through the whole reload.
+          location.replace('./hr_monitor.html?mode=online');
+        } else {
+          if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+        }
+      }).catch(function () {
+        if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+      });
+    } catch (e) {
+      if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+    }
   })();
 
   // Start session → sign in via window.aortiAuth if not already signed in,
