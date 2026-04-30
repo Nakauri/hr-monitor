@@ -3872,6 +3872,10 @@
         .finally(() => {
           if (overlay) overlay.classList.remove('shown');
           document.documentElement.classList.remove('restoring');
+          // Native restore overlay dismissed at the same moment as the
+          // web-level overlay so the user sees a clean handoff to the
+          // populated chart.
+          if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
         });
     }
     return true;
@@ -3988,6 +3992,7 @@
         // No session was actually active — release the restore overlay so
         // the user sees the normal monitor UI instead of an indefinite spinner.
         document.documentElement.classList.remove('restoring');
+        if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
         if (window.HRMLog) {
           let reason = 'shim_missing';
           if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) {
@@ -4006,6 +4011,7 @@
     document.documentElement.classList.remove('restoring');
     const overlay = $('restore-overlay');
     if (overlay) overlay.classList.remove('shown');
+    if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
   }, 30000);
 
   // Screen Wake Lock: keep the phone/laptop awake during an active session so BLE
@@ -4669,7 +4675,7 @@
     const email = window.aortiAuth ? window.aortiAuth.getEmail() : null;
     if (driveAccessToken && !tokenExpired && !effectiveError) {
       if (driveFolderId) {
-        statusEl.textContent = driveRefreshing ? 'refreshing…' : 'syncing to Drive';
+        statusEl.textContent = driveRefreshing ? 'refreshing…' : 'Syncing to Drive (tap to sync now)';
         statusEl.classList.add('drive-syncing');
       } else {
         statusEl.textContent = 'signed in';
