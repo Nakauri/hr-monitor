@@ -182,6 +182,11 @@
           state,
           access_type: 'offline',
           prompt: 'consent',
+          // Combine prior grants with new scope requests in the response.
+          // Required for Google's "incremental authorization" warning to
+          // clear; behaviour-neutral for us since we always ask for the
+          // same minimal scope set (openid email drive.file).
+          include_granted_scopes: true,
           callback: (resp) => {
             if (resp.error) return reject(new Error('gsi_' + resp.error));
             if (resp.state !== state) return reject(new Error('state_mismatch'));
