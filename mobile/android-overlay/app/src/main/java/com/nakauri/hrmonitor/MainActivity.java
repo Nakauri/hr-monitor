@@ -1,5 +1,6 @@
 package com.nakauri.hrmonitor;
 
+import android.content.ComponentCallbacks2;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.os.Build;
@@ -57,8 +58,10 @@ public class MainActivity extends BridgeActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
             // Safety net: if JS never calls RestoreOverlay.hide() (auth fail,
             // page parse error, plugin missing), the overlay self-destructs
-            // after 30 s so the user is never stuck staring at a spinner.
-            new Handler(Looper.getMainLooper()).postDelayed(this::hideRestoreOverlay, 30000);
+            // after 60 s so the user is never stuck staring at a spinner.
+            // 60 s covers cold-from-multi-hour-background scenarios where
+            // WebView surface rebuild + JS cold-parse can exceed 30 s.
+            new Handler(Looper.getMainLooper()).postDelayed(this::hideRestoreOverlayBySafetyTimer, 60000);
         } catch (Throwable t) {
             Log.w(TAG, "Could not install restore overlay: " + t.getMessage());
         }
@@ -139,6 +142,23 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    /** Proactive memory release before LMK fires. At RUNNING_CRITICAL the
+     *  system is about to start killing background processes; freeing the
+     *  WebView's GPU buffers (Chart.js canvases ~320 MB) drops our PSS
+     *  enough to stay below the cutoff. JS handles the actual destroy. */
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            try {
+                NativeHrSessionPlugin p = NativeHrSessionPlugin.instance;
+                if (p != null) p.notifyTrimMemory(level);
+            } catch (Throwable t) {
+                Log.w(TAG, "onTrimMemory dispatch failed: " + t.getMessage());
+            }
+        }
+    }
+
     /** Build the restore-session overlay programmatically. Hardcoded colours
      *  (no theme references) so One UI / Material You skin differences don't
      *  change anything across S8 / S24 / etc. */
@@ -188,7 +208,7 @@ public class MainActivity extends BridgeActivity {
         return (int) (value * density + 0.5f);
     }
 
-    /** Idempotent. Called by RestoreOverlayPlugin.hide() from JS, by the 30 s
+    /** Idempotent. Called by RestoreOverlayPlugin.hide() from JS, by the
      *  safety timer in onCreate, or by future native paths if needed. */
     public void hideRestoreOverlay() {
         runOnUiThread(() -> {
@@ -199,6 +219,15 @@ public class MainActivity extends BridgeActivity {
             } catch (Throwable ignored) {}
             restoreOverlay = null;
         });
+    }
+
+    /** Safety-timer dismissal. Logs a diagnostic so logcat can distinguish
+     *  "JS hide() never came" from a normal dismissal. */
+    private void hideRestoreOverlayBySafetyTimer() {
+        if (restoreOverlay != null) {
+            Log.w(TAG, "Restore overlay auto-hidden by 60 s safety timer (JS hide() not received)");
+        }
+        hideRestoreOverlay();
     }
 
 }

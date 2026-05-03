@@ -2253,6 +2253,24 @@
     });
   }
 
+  // Free Chart.js GPU buffers. stop() before destroy() per Chart.js issue
+  // #2613/#7706 to avoid the destroy-during-animation race. Nulling the refs
+  // lets updateCharts() detect the trimmed state and call initCharts() lazily
+  // on the next tick / visibility change.
+  function destroyCharts() {
+    const all = [mainChart, compactChart, hrInlineChart, rmssdInlineChart, hrLiveTraceChart, rsaChart];
+    all.forEach(c => {
+      try { if (c && c.stop) c.stop(); } catch (e) {}
+      try { if (c && c.destroy) c.destroy(); } catch (e) {}
+    });
+    mainChart = null;
+    compactChart = null;
+    hrInlineChart = null;
+    rmssdInlineChart = null;
+    hrLiveTraceChart = null;
+    rsaChart = null;
+  }
+
   // Trailing moving-average smoother for time series. Elite HRV-style session trends
   // use heavy smoothing over the per-beat RMSSD so the line reads as an envelope.
   function smoothSeries(series, window) {
@@ -2301,18 +2319,22 @@
       try { updateStats(); } catch (e) {}
     } else {
       lastHiddenAt = Date.now();
-      // Halt any in-flight chart animations + drop the renderer's hold on
-      // off-screen GPU resources. Chart.js retains canvas-level state
-      // between updates; .stop() flushes pending RAFs so chromium can GC.
-      [mainChart, compactChart, hrInlineChart, rmssdInlineChart, hrLiveTraceChart, rsaChart].forEach(c => {
-        try { if (c && c.stop) c.stop(); } catch (e) {}
-      });
+      // Free GPU memory while backgrounded. Chart.js canvases hold ~320 MB
+      // of GL buffers in long sessions; releasing them keeps the WebView
+      // small enough to survive Android's low-memory killer.
+      destroyCharts();
     }
   });
 
   function updateCharts() {
     if (!state.startTime) return;
     if (!pageVisible) return; // skip render when backgrounded
+    // Recreate charts if they were destroyed by visibilitychange or
+    // onTrimMemory. Cheaper to rebuild on first tick after pressure
+    // clears than to keep them allocated continuously.
+    if (mainChart === null) {
+      try { initCharts(); } catch (e) {}
+    }
     const now = (Date.now() - state.startTime) / 60000;
     // 3-min window that anchors at x=0 early, then scrolls so newest is on the right edge.
     const WINDOW_MIN = 3;
@@ -3871,6 +3893,15 @@
             _nativeRelayLive = s.relay;
             try { refreshRelayStatus(); } catch (e) {}
           }
+        });
+      }
+      // Proactive GPU release before LMK fires. Activity.onTrimMemory at
+      // RUNNING_CRITICAL forwards here; destroyCharts frees ~320 MB of
+      // canvas buffers. updateCharts re-creates them on the next tick.
+      if (typeof window.HRMNativeHrSession.onTrimMemory === 'function') {
+        window.HRMNativeHrSession.onTrimMemory(function (d) {
+          if (window.HRMLog) window.HRMLog.event('trimMemory', d);
+          try { destroyCharts(); } catch (e) {}
         });
       }
       if (window.HRMLog) window.HRMLog.event('native-hr handler attached');

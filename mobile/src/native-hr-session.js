@@ -22,6 +22,7 @@
     const hrListeners = [];
     const stateListeners = [];
     const errorListeners = [];
+    const trimMemoryListeners = [];
 
     // Seed publishing flag from native state so WebView reload doesn't lose it.
     try {
@@ -51,6 +52,11 @@
     plugin.addListener('bleError', function (data) {
       console.warn('[native-hr-session] bleError', data);
       for (const cb of errorListeners) {
+        try { cb(data); } catch (e) {}
+      }
+    });
+    plugin.addListener('trimMemory', function (data) {
+      for (const cb of trimMemoryListeners) {
         try { cb(data); } catch (e) {}
       }
     });
@@ -133,6 +139,13 @@
         return function remove() {
           const i = errorListeners.indexOf(cb);
           if (i >= 0) errorListeners.splice(i, 1);
+        };
+      },
+      onTrimMemory: function (cb) {
+        trimMemoryListeners.push(cb);
+        return function remove() {
+          const i = trimMemoryListeners.indexOf(cb);
+          if (i >= 0) trimMemoryListeners.splice(i, 1);
         };
       },
       // Picker modal. Returns Promise<{mac, name}> with a .cancel() method.

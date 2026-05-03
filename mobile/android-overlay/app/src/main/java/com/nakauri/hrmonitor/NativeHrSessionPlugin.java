@@ -174,6 +174,19 @@ public class NativeHrSessionPlugin extends Plugin {
     // Static ref for NativeHrService Stop button. volatile for cross-thread reads.
     public static volatile NativeHrSessionPlugin instance;
 
+    /** Forward Activity.onTrimMemory to JS so the page can free GPU buffers
+     *  before LMK fires. Called from MainActivity. Safe to call before bridge
+     *  is ready — notifyListeners no-ops in that case. */
+    public void notifyTrimMemory(int level) {
+        try {
+            JSObject ev = new JSObject();
+            ev.put("level", level);
+            notifyListeners("trimMemory", ev);
+        } catch (Throwable t) {
+            Log.w(TAG, "notifyTrimMemory failed: " + t.getMessage());
+        }
+    }
+
     @Override
     public void load() {
         instance = this;
