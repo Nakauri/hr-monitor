@@ -18,3 +18,8 @@ android {
         release { signingConfig signingConfigs.release }
     }
 }
+
+dependencies {
+    // WorkManager for periodic orphan-recovery scans that survive process death.
+    implementation 'androidx.work:work-runtime:2.9.1'
+}

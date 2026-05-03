@@ -54,6 +54,23 @@
         <receiver
             android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver"
             android:exported="false" />
+
+        <!-- Periodic FGS-resurrection check. Fires every 15 min via
+             setExactAndAllowWhileIdle and restarts the service if it died. -->
+        <receiver
+            android:name="com.nakauri.hrmonitor.HrServiceHeartbeatReceiver"
+            android:exported="false" />
+
+        <!-- Survives reboot + app upgrade. Restarts the FGS if a session
+             was active and not cleanly stopped. -->
+        <receiver
+            android:name="com.nakauri.hrmonitor.HrBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
@@ -66,4 +83,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 </manifest>

@@ -76,6 +76,15 @@ public class MainActivity extends BridgeActivity {
             Log.w(TAG, "Could not install renderer-recovery WebViewClient: " + t.getMessage());
         }
 
+        // Periodic orphan-recovery worker. Catches CSVs that never got
+        // uploaded because the previous session ended uncleanly. KEEP
+        // policy ensures we don't reset the schedule on every Activity start.
+        try {
+            OrphanRecoveryWorker.schedule(this);
+        } catch (Throwable t) {
+            Log.w(TAG, "OrphanRecoveryWorker.schedule failed: " + t.getMessage());
+        }
+
         // Back navigation. Use OnBackPressedDispatcher so Android 14+
         // predictive-back gestures route through us; the legacy onBackPressed()
         // override is bypassed by the new gesture API.

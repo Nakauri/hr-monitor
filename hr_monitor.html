@@ -3833,6 +3833,20 @@
       // Virtual device stand-in so downstream code (device.name, etc.) works.
       device = { name: picked.name || 'HR Strap', id: picked.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
       await window.HRMNativeHrSession.connect(picked.mac);
+      // First-run battery optimization prompt. Without an exemption,
+      // stock Android Doze and Samsung One UI both kill the FGS during
+      // long screen-off periods. Asked once per device; user can re-prompt
+      // from Settings if they say no the first time.
+      try {
+        const askedKey = 'hrm_asked_battery_opt';
+        if (window.HRMOem && window.HRMOem.isAvailable && !localStorage.getItem(askedKey)) {
+          const ignoring = await window.HRMOem.isIgnoringBatteryOptimizations();
+          if (!ignoring) {
+            localStorage.setItem(askedKey, '1');
+            await window.HRMOem.requestIgnoreBatteryOptimizations();
+          }
+        }
+      } catch (e) {}
       const ident = getDeviceIdentity();
       await window.HRMNativeHrSession.startSession({
         broadcastKey: getOrCreateBroadcastKey(),
@@ -3903,6 +3917,39 @@
         window.HRMNativeHrSession.onTrimMemory(function (d) {
           if (window.HRMLog) window.HRMLog.event('trimMemory', d);
           try { destroyCharts(); } catch (e) {}
+        });
+      }
+      // Auto-resume after a process kill mid-session. Heartbeat / boot
+      // receivers restart the FGS; this picks up cached MAC + broadcast
+      // settings and silently reconnects so the user's recording resumes
+      // without manual intervention.
+      if (typeof window.HRMNativeHrSession.onSessionInterrupted === 'function') {
+        window.HRMNativeHrSession.onSessionInterrupted(async function (d) {
+          if (window.HRMLog) window.HRMLog.event('sessionInterrupted', d);
+          try {
+            if (!d || !d.mac) return;
+            // Set device stand-in so downstream UI works.
+            device = { name: 'HR Strap', id: d.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
+            await window.HRMNativeHrSession.connect(d.mac);
+            await window.HRMNativeHrSession.startSession({
+              broadcastKey: d.broadcastKey || getOrCreateBroadcastKey(),
+              senderId: d.senderId || getDeviceIdentity().id,
+              senderLabel: d.senderLabel || getDeviceIdentity().label,
+              broadcast: d.broadcastEnabled !== false,
+            });
+            device.gatt.connected = true;
+            if (state.startTime === null) state.startTime = d.sessionStartMs || Date.now();
+            state.lastDataTime = Date.now();
+            state.autoReconnect = true;
+            startSessionAutoSave();
+            acquireWakeLock();
+            setStatus('Resumed session after restart.', 'connected');
+            $('overlay-status').textContent = '• LIVE';
+            setConnState('live');
+            updateSessionToggle();
+          } catch (e) {
+            if (window.HRMLog) window.HRMLog.event('sessionInterrupted resume failed', e && e.message ? e.message : String(e));
+          }
         });
       }
       if (window.HRMLog) window.HRMLog.event('native-hr handler attached');

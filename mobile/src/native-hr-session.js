@@ -23,6 +23,7 @@
     const stateListeners = [];
     const errorListeners = [];
     const trimMemoryListeners = [];
+    const sessionInterruptedListeners = [];
 
     // Seed publishing flag from native state so WebView reload doesn't lose it.
     try {
@@ -57,6 +58,11 @@
     });
     plugin.addListener('trimMemory', function (data) {
       for (const cb of trimMemoryListeners) {
+        try { cb(data); } catch (e) {}
+      }
+    });
+    plugin.addListener('sessionInterrupted', function (data) {
+      for (const cb of sessionInterruptedListeners) {
         try { cb(data); } catch (e) {}
       }
     });
@@ -146,6 +152,13 @@
         return function remove() {
           const i = trimMemoryListeners.indexOf(cb);
           if (i >= 0) trimMemoryListeners.splice(i, 1);
+        };
+      },
+      onSessionInterrupted: function (cb) {
+        sessionInterruptedListeners.push(cb);
+        return function remove() {
+          const i = sessionInterruptedListeners.indexOf(cb);
+          if (i >= 0) sessionInterruptedListeners.splice(i, 1);
         };
       },
       // Picker modal. Returns Promise<{mac, name}> with a .cancel() method.

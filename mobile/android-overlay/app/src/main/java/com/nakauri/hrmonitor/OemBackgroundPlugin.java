@@ -1,9 +1,11 @@
 package com.nakauri.hrmonitor;
 
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 
 import com.getcapacitor.JSObject;
@@ -28,6 +30,55 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  */
 @CapacitorPlugin(name = "OemBackground")
 public class OemBackgroundPlugin extends Plugin {
+
+    @PluginMethod
+    public void isIgnoringBatteryOptimizations(PluginCall call) {
+        JSObject ret = new JSObject();
+        try {
+            PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+            boolean ignoring = pm != null
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
+            ret.put("ignoring", ignoring);
+            ret.put("supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M);
+        } catch (Throwable t) {
+            ret.put("ignoring", false);
+            ret.put("supported", false);
+            ret.put("error", t.getMessage());
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestIgnoreBatteryOptimizations(PluginCall call) {
+        JSObject ret = new JSObject();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            ret.put("opened", false);
+            ret.put("reason", "unsupported_api");
+            call.resolve(ret);
+            return;
+        }
+        try {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            boolean opened = tryStart(intent);
+            ret.put("opened", opened);
+            if (!opened) {
+                Intent fallback = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                opened = tryStart(fallback);
+                ret.put("opened", opened);
+                ret.put("path", opened ? "list_fallback" : "failed");
+            } else {
+                ret.put("path", "direct_request");
+            }
+        } catch (Throwable t) {
+            ret.put("opened", false);
+            ret.put("error", t.getMessage());
+        }
+        call.resolve(ret);
+    }
 
     @PluginMethod
     public void getManufacturer(PluginCall call) {

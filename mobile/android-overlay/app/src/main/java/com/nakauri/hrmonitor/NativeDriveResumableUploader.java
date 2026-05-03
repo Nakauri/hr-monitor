@@ -82,6 +82,18 @@ public class NativeDriveResumableUploader {
 
     public String getFileId() { return fileId; }
 
+    // Persist Drive resume keys so a process kill mid-upload doesn't lose
+    // the in-flight session URI / fileId. .apply (best-effort) is fine —
+    // worst case is a fresh session on resume, which still works.
+    private void persistResumeKeys() {
+        try {
+            context.getSharedPreferences("hr_monitor_session", 0).edit()
+                .putString("currentResumableUri", sessionUrl == null ? "" : sessionUrl)
+                .putString("currentDriveFileId", fileId == null ? "" : fileId)
+                .apply();
+        } catch (Throwable ignored) {}
+    }
+
     /** Reset session-scoped state. Call at the start of every new session. */
     public void resetSession() {
         executor.submit(() -> {
@@ -90,6 +102,7 @@ public class NativeDriveResumableUploader {
             filename = null;
             lastChunkEnd = 0;
             broken = false;
+            persistResumeKeys();
         });
     }
 
@@ -128,6 +141,7 @@ public class NativeDriveResumableUploader {
                     return;
                 }
                 sessionUrl = url;
+                persistResumeKeys();
                 Log.i(TAG, "Resumable session opened for " + filenameArg);
             } catch (Throwable t) {
                 Log.w(TAG, "startSessionAsync threw: " + t.getMessage());
@@ -171,6 +185,7 @@ public class NativeDriveResumableUploader {
                     return;
                 }
                 sessionUrl = url;
+                persistResumeKeys();
                 Log.i(TAG, "Resumable PATCH session opened for " + name + " fileId=" + existingId);
             } catch (Throwable t) {
                 Log.w(TAG, "restartSessionAsync threw: " + t.getMessage());
@@ -406,7 +421,7 @@ public class NativeDriveResumableUploader {
                         if (!b.isEmpty()) {
                             JSONObject jr = new JSONObject(b);
                             String id = jr.optString("id", null);
-                            if (id != null && !id.isEmpty()) fileId = id;
+                            if (id != null && !id.isEmpty()) { fileId = id; persistResumeKeys(); }
                         }
                     } catch (Exception ignored) {}
                     return true;

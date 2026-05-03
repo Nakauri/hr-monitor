@@ -25,19 +25,44 @@ public class NativeCsvWriter {
     private BufferedWriter writer;
 
     public NativeCsvWriter(Context context, long sessionStartMs) throws IOException {
+        this(context, sessionStartMs, null);
+    }
+
+    /**
+     * Open or reopen a CSV. When {@code resumeFilename} is non-null AND the
+     * file exists in the sessions dir, opens it in append mode and skips
+     * the header write. Otherwise creates a new file with the header.
+     * Used by auto-resume after process kill to continue writing into the
+     * same CSV instead of fragmenting the recording across files.
+     */
+    public NativeCsvWriter(Context context, long sessionStartMs, String resumeFilename) throws IOException {
         this.sessionStartMs = sessionStartMs;
         File dir = new File(context.getFilesDir(), "sessions");
         if (!dir.exists()) dir.mkdirs();
-        // .SSS prevents same-second collision; viewer regex tolerates it.
-        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss.SSS", Locale.US);
-        fmt.setTimeZone(TimeZone.getDefault());
-        String filename = "hrv_session_" + fmt.format(new Date(sessionStartMs)) + ".csv";
-        this.file = new File(dir, filename);
-        this.writer = new BufferedWriter(new FileWriter(file, false));
-        writer.write(HEADER);
-        writer.newLine();
-        writer.flush();
-        Log.i(TAG, "Opened: " + file.getAbsolutePath());
+        File target = null;
+        boolean appending = false;
+        if (resumeFilename != null && !resumeFilename.isEmpty()) {
+            File candidate = new File(dir, resumeFilename);
+            if (candidate.exists() && candidate.isFile()) {
+                target = candidate;
+                appending = true;
+            }
+        }
+        if (target == null) {
+            // .SSS prevents same-second collision; viewer regex tolerates it.
+            SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss.SSS", Locale.US);
+            fmt.setTimeZone(TimeZone.getDefault());
+            String filename = "hrv_session_" + fmt.format(new Date(sessionStartMs)) + ".csv";
+            target = new File(dir, filename);
+        }
+        this.file = target;
+        this.writer = new BufferedWriter(new FileWriter(file, appending));
+        if (!appending) {
+            writer.write(HEADER);
+            writer.newLine();
+            writer.flush();
+        }
+        Log.i(TAG, (appending ? "Reopened (append): " : "Opened: ") + file.getAbsolutePath());
     }
 
     private int consecutiveFailures = 0;

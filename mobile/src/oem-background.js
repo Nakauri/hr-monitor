@@ -64,11 +64,32 @@ try { window.__hrMonitorOemLoaded = true; } catch (e) {}
         }
       }
 
+      async function isIgnoringBatteryOptimizations() {
+        try {
+          const r = await Oem.isIgnoringBatteryOptimizations();
+          return !!(r && r.ignoring);
+        } catch (e) { return false; }
+      }
+
+      async function requestIgnoreBatteryOptimizations() {
+        try {
+          const r = await Oem.requestIgnoreBatteryOptimizations();
+          LOG('oem.requestIgnoreBatteryOptimizations', r);
+          return !!(r && r.opened);
+        } catch (e) {
+          const emsg = e && e.message ? e.message : String(e);
+          LOG_ERR('oem.requestIgnoreBatteryOptimizations threw', emsg);
+          return false;
+        }
+      }
+
       window.HRMOem = {
         vendor: info.vendor || 'other',
         manufacturer: info.manufacturer || '',
         hasKnownBackgroundKiller: !!info.hasKnownBackgroundKiller,
         openBackgroundSettings,
+        isIgnoringBatteryOptimizations,
+        requestIgnoreBatteryOptimizations,
         isAvailable: true,
       };
       oMark('__hrMonitorOemRegistered', true);

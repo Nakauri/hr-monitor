@@ -199,6 +199,29 @@ public class NativeHrSessionPlugin extends Plugin {
         uploader = new NativeDriveUploader(getContext());
         resumable = new NativeDriveResumableUploader(getContext(), uploader);
         registerNetworkCallback();
+        // Detect interrupted session from previous process. Heartbeat /
+        // boot receivers will have already restarted the FGS by now.
+        // Emit an event so JS can offer to auto-resume from cached state.
+        try {
+            android.content.SharedPreferences prefs = getContext().getSharedPreferences("hr_monitor_session", 0);
+            boolean wasActive = prefs.getBoolean("sessionActive", false);
+            boolean cleanlyStopped = prefs.getBoolean("cleanlyStopped", true);
+            if (wasActive && !cleanlyStopped) {
+                JSObject ev = new JSObject();
+                ev.put("mac", prefs.getString("lastConnectedMac", ""));
+                ev.put("broadcastKey", prefs.getString("broadcastKey", ""));
+                ev.put("senderId", prefs.getString("senderId", ""));
+                ev.put("senderLabel", prefs.getString("senderLabel", ""));
+                ev.put("broadcastEnabled", prefs.getBoolean("broadcastEnabled", true));
+                ev.put("sessionStartMs", prefs.getLong("sessionStartMs", 0));
+                ev.put("activeCsvFilename", prefs.getString("activeCsvFilename", ""));
+                // Defer slightly so JS listener attachment beats the event.
+                mainHandler.postDelayed(() -> notifyListeners("sessionInterrupted", ev), 1500);
+                Log.i(TAG, "Detected interrupted session — will signal JS for auto-resume.");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Interrupted-session detection failed: " + t.getMessage());
+        }
     }
 
     @Override
@@ -367,6 +390,12 @@ public class NativeHrSessionPlugin extends Plugin {
             try {
                 // autoConnect=false joins existing ACL links; =true waits on advertisements.
                 currentGatt = device.connectGatt(getContext(), false, gattCallback);
+                // Cache MAC for auto-resume after process kill. .apply is fine —
+                // stale-by-30s acceptable, the same MAC carries across kills.
+                try {
+                    getContext().getSharedPreferences("hr_monitor_session", 0).edit()
+                        .putString("lastConnectedMac", mac).apply();
+                } catch (Throwable ignored) {}
                 JSObject ret = new JSObject();
                 ret.put("connecting", true);
                 ret.put("bonded", usingBondedHandle);
@@ -533,6 +562,25 @@ public class NativeHrSessionPlugin extends Plugin {
         startNativeForegroundService("HR Monitor", "Recording");
 
         sessionActive.set(true);
+        // Persist crash-safety flags + resume context. .commit() on the
+        // booleans because SIGKILL between here and the heartbeat alarm
+        // would lose the "we're recording" signal. Other keys are .apply
+        // (best-effort) since they're rewritten at next session start
+        // regardless.
+        try {
+            getContext().getSharedPreferences("hr_monitor_session", 0).edit()
+                .putBoolean("sessionActive", true)
+                .putBoolean("cleanlyStopped", false)
+                .commit();
+            getContext().getSharedPreferences("hr_monitor_session", 0).edit()
+                .putLong("sessionStartMs", sessionStartMs)
+                .putString("broadcastKey", broadcastKey == null ? "" : broadcastKey)
+                .putString("senderId", senderId == null ? "" : senderId)
+                .putString("senderLabel", senderLabel == null ? "" : senderLabel)
+                .putBoolean("broadcastEnabled", broadcastEnabled)
+                .putString("activeCsvFilename", csv != null ? csv.getFile().getName() : "")
+                .apply();
+        } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
         lastHrAtMs = 0;
         gattReconnectAttempts = 0;
         mainHandler.removeCallbacks(heartbeatRunnable);
@@ -560,6 +608,15 @@ public class NativeHrSessionPlugin extends Plugin {
 
     public void stopSessionInternal() {
         sessionActive.set(false);
+        // Set cleanlyStopped FIRST so heartbeat/boot receivers don't try to
+        // resurrect this session if we're killed during the rest of teardown.
+        try {
+            getContext().getSharedPreferences("hr_monitor_session", 0).edit()
+                .putBoolean("sessionActive", false)
+                .putBoolean("cleanlyStopped", true)
+                .commit();
+        } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
+        HrServiceHeartbeatReceiver.cancel(getContext());
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.removeCallbacks(gattReconnectRunnable);
         if (csv != null) {

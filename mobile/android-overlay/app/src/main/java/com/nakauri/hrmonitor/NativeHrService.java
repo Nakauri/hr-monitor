@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
@@ -25,10 +26,36 @@ public class NativeHrService extends Service {
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_BODY = "body";
 
+    // Service-owned PARTIAL_WAKE_LOCK. Held for the full session lifetime.
+    // FGS keeps the process alive; this keeps the CPU on between BLE
+    // notifications during Doze. Without it, BLE callbacks queue up or
+    // drop. Must be inside the service so it dies with the service.
+    private PowerManager.WakeLock wakeLock;
+
     @Override
     public void onCreate() {
         super.onCreate();
         ensureChannel();
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) return;
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return;
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HRMonitor:Service");
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire();
+        } catch (Throwable t) {
+            Log.w(TAG, "acquireWakeLock failed: " + t.getMessage());
+        }
+    }
+
+    private void releaseWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Throwable ignored) {}
+        wakeLock = null;
     }
 
     @Override
@@ -60,16 +87,24 @@ public class NativeHrService extends Service {
             } else {
                 Log.i(TAG, "ACTION_STOP ignored — no active session (stale intent).");
             }
+            HrServiceHeartbeatReceiver.cancel(this);
+            releaseWakeLock();
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
         }
+        // ACTION_START path: acquire CPU keepalive + arm the periodic FGS
+        // resurrection alarm. Both are no-ops if already done — the heartbeat
+        // receiver re-fires this same path so we get re-armed across kills.
+        acquireWakeLock();
+        HrServiceHeartbeatReceiver.schedule(this);
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
         try { stopForeground(true); } catch (Throwable ignored) {}
+        releaseWakeLock();
         super.onDestroy();
     }
 
