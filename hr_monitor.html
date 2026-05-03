@@ -3847,6 +3847,7 @@
       saveLastStrap(device);
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
       startSessionAutoSave();
+      acquireWakeLock();
       setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
       $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
       setConnState('live');
@@ -4106,6 +4107,15 @@
   // on visibility change if we're still recording.
   let wakeLock = null;
   async function acquireWakeLock() {
+    // Native PARTIAL_WAKE_LOCK first — the only thing that keeps CPU alive
+    // through Doze. Web Wake Lock ('screen') is page-visibility-bound and
+    // useless when the screen turns off, so it's the fallback for browsers.
+    try {
+      if (window.HRMWakeLock && window.HRMWakeLock.isAvailable) {
+        await window.HRMWakeLock.acquire();
+        return;
+      }
+    } catch (e) {}
     if (!('wakeLock' in navigator)) return;
     try {
       wakeLock = await navigator.wakeLock.request('screen');
@@ -4113,6 +4123,11 @@
     } catch (e) { console.warn('Wake lock request failed:', e); }
   }
   async function releaseWakeLock() {
+    try {
+      if (window.HRMWakeLock && window.HRMWakeLock.isAvailable) {
+        await window.HRMWakeLock.release();
+      }
+    } catch (e) {}
     if (wakeLock) { try { await wakeLock.release(); } catch (e) {} wakeLock = null; }
   }
 

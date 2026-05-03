@@ -1222,15 +1222,14 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         }
 
-        // Notification update cadence is screen-aware. Live 1 Hz when the
-        // user is actually looking (screen on) so the duration counter
-        // doesn't feel laggy. Drop to every 5 s when the screen is off —
-        // nobody can see it tick anyway, and we save a few thousand
-        // notify() calls per overnight session.
-        long notifInterval = 5000L;
+        // Notification update cadence: 5 s screen-on, 10 s screen-off.
+        // Higher rates trigger Samsung's "abusive notification" heuristic
+        // and provoke FGS kills during overnight Doze. Suspected regression
+        // for sessions ending mid-sleep (May 2026).
+        long notifInterval = 10000L;
         try {
             android.os.PowerManager pm = (android.os.PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
-            if (pm != null && pm.isInteractive()) notifInterval = 1000L;
+            if (pm != null && pm.isInteractive()) notifInterval = 5000L;
         } catch (Throwable ignored) {}
         if (now - lastNotifUpdateMs >= notifInterval && sessionActive.get()) {
             lastNotifUpdateMs = now;
