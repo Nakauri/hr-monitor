@@ -15,6 +15,7 @@ import android.view.ViewGroup;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -183,6 +184,19 @@ public class MainActivity extends BridgeActivity {
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER);
 
+        // Aorti glyph above the spinner — gives the launch frame a Discord-style
+        // branded loading state on every Android version, not just API 31+ where
+        // the SplashScreen API renders the icon.
+        ImageView logo = new ImageView(this);
+        try {
+            int logoRes = getResources().getIdentifier("aorti_foreground", "drawable", getPackageName());
+            if (logoRes != 0) logo.setImageResource(logoRes);
+        } catch (Throwable ignored) {}
+        int logoSize = dp(160);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(logoSize, logoSize);
+        logoLp.bottomMargin = dp(12);
+        logo.setLayoutParams(logoLp);
+
         ProgressBar spinner = new ProgressBar(this);
         spinner.setIndeterminate(true);
         // Tint the spinner to the app's accent green. setIndeterminateTintList
@@ -201,6 +215,7 @@ public class MainActivity extends BridgeActivity {
         label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         label.setGravity(Gravity.CENTER);
 
+        column.addView(logo);
         column.addView(spinner);
         column.addView(label);
 

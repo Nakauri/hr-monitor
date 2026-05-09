@@ -3041,13 +3041,15 @@
       });
       ws.addEventListener('close', () => {
         relaySocket = null;
-        setStreamingStatus('offline');
+        // Native plugin owns its own WebSocket on Capacitor; refreshRelayStatus
+        // checks isPublishing() first and shows 'live' when native is healthy.
+        refreshRelayStatus();
         relayReconnectTimer = setTimeout(connectRelay, 5000);
       });
-      ws.addEventListener('error', () => setStreamingStatus('error'));
+      ws.addEventListener('error', () => refreshRelayStatus());
     } catch (e) {
       console.error('Relay connect failed:', e);
-      setStreamingStatus('error');
+      refreshRelayStatus();
       relayReconnectTimer = setTimeout(connectRelay, 5000);
     }
   }
@@ -3087,12 +3089,14 @@
     const nativePub = !!(window.HRMNativeHrSession
         && window.HRMNativeHrSession.isPublishing
         && window.HRMNativeHrSession.isPublishing());
-    if (nativePub && _nativeRelayLive !== null) {
-      if (_nativeRelayLive) {
-        setStreamingStatus(state.connState === 'live' ? 'live' : 'ready');
-      } else {
-        setStreamingStatus('connecting');
-      }
+    if (nativePub) {
+      // Native plugin owns the relay socket. Trust its publishing flag even
+      // before the first state event arrives — without this fallback, a
+      // healthy native broadcast that hasn't yet emitted state shows
+      // 'offline' or 'error' because the JS-side WS check below assumes
+      // JS owns the socket.
+      if (_nativeRelayLive === false) { setStreamingStatus('connecting'); return; }
+      setStreamingStatus(state.connState === 'live' ? 'live' : 'ready');
       return;
     }
     if (!relaySocket) { setStreamingStatus('offline'); return; }

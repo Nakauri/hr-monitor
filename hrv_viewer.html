@@ -3657,7 +3657,7 @@
     function needsReparse(fn) {
       const c = sessionsIndex[fn];
       return !c || c.__incomplete
-        || c.__schemaV !== 11
+        || c.__schemaV !== 12
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
         || !('quadPct' in c) || !('restingHR' in c);
     }
@@ -4259,6 +4259,55 @@
       }
     }
 
+    // Per-calendar-day breakdown for sessions that span midnight. Each
+    // local date the session touches gets its own slice (avg HR, max/min,
+    // tachy %, count + min epoch / max epoch). Month + week views read
+    // s.byDay[iso] so a 39-hour session reports its Saturday slice
+    // (e.g. 1.5 h, 12% tachy) on the Saturday cell instead of the
+    // file-wide 14% tachy.
+    const byDay = {};
+    {
+      const buckets = new Map();
+      const ymdLocal = (ms) => {
+        const dd = new Date(ms);
+        return dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0') + '-' + String(dd.getDate()).padStart(2, '0');
+      };
+      for (const p of hr) {
+        if (p.v == null || p.ep == null) continue;
+        const k = ymdLocal(p.ep);
+        let b = buckets.get(k);
+        if (!b) {
+          b = { hrSum: 0, hrCount: 0, tachyCount: 0, hrMax: -Infinity, hrMin: Infinity, startMs: p.ep, endMs: p.ep, palpCount: 0 };
+          buckets.set(k, b);
+        }
+        b.hrSum += p.v;
+        b.hrCount++;
+        if (p.v > 100) b.tachyCount++;
+        if (p.v > b.hrMax) b.hrMax = p.v;
+        if (p.v < b.hrMin) b.hrMin = p.v;
+        if (p.ep < b.startMs) b.startMs = p.ep;
+        if (p.ep > b.endMs) b.endMs = p.ep;
+      }
+      // Per-day palp count from absolute palp times.
+      for (const t of palpTimes) {
+        const ep = (hr[0] && hr[0].ep) ? hr[0].ep + (t - hr[0].t) * 60000 : startEpoch + t * 60000;
+        const k = ymdLocal(ep);
+        const b = buckets.get(k);
+        if (b) b.palpCount++;
+      }
+      for (const [k, b] of buckets) {
+        if (!b.hrCount) continue;
+        byDay[k] = {
+          hrAvg: Math.round(b.hrSum / b.hrCount),
+          hrMax: b.hrMax,
+          hrMin: b.hrMin,
+          tachyPct: Math.round((b.tachyCount / b.hrCount) * 100),
+          durationMin: Math.max(0.0001, (b.endMs - b.startMs) / 60000),
+          hrCount: b.hrCount,
+          palpCount: b.palpCount,
+        };
+      }
+    }
     const summary = {
       filename,
       startEpoch,
@@ -4285,11 +4334,12 @@
       hrDeltas,
       flushes,
       chillsWindows,
+      byDay,
       // Bump whenever summarizeCSV's output shape or logic changes. Forces a
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 11,
+      __schemaV: 12,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -4882,19 +4932,34 @@
   // burden (% time HR > 100), HR range (max-min reactivity), and plain average.
   let headlineMetric = localStorage.getItem('hrv_viewer_headline_metric') || 'rest';
 
-  // Aggregate a metric across a day's sessions. Returns { value, label, unit, stage, color }
-  function computeHeadline(metric, files) {
+  // Aggregate a metric across a day's sessions. Returns { value, label, unit, stage, color }.
+  // `iso` (YYYY-MM-DD) is the calendar day being rendered: when a session spans
+  // midnight, prefer s.byDay[iso] over file-wide stats so each day reports its
+  // own slice (a 39-hour session shows its 1.5-hr Saturday slice on Saturday's
+  // cell, not the full-file 14% tachy).
+  function computeHeadline(metric, files, iso) {
     if (!files || !files.length) return { value: null, label: '', unit: '', stage: 'stage-normal', color: STAGE_COLORS['stage-normal'] };
     let totalDur = 0, weightedHR = 0, weightedTachy = 0, minRest = null, maxHR = null, minHR = null;
     for (const fn of files) {
       const s = sessionsIndex[fn];
       if (!s) continue;
-      totalDur += s.duration;
-      weightedHR += s.hrAvg * s.duration;
-      weightedTachy += (s.tachyPct || 0) * s.duration;
+      const slice = (iso && s.byDay && s.byDay[iso]) ? s.byDay[iso] : null;
+      const dur = slice ? slice.durationMin : s.duration;
+      const hrAvg = slice ? slice.hrAvg : s.hrAvg;
+      const tachyPct = slice ? slice.tachyPct : (s.tachyPct || 0);
+      const sliceMax = slice ? slice.hrMax : (s.hrMax && s.hrMax.v);
+      const sliceMin = slice ? slice.hrMin : (s.hrMin && s.hrMin.v);
+      if (!dur) continue;
+      totalDur += dur;
+      weightedHR += hrAvg * dur;
+      weightedTachy += tachyPct * dur;
+      // restingHR isn't easily sliced per-day yet; fall back to file-wide
+      // value. For multi-day sessions this slightly over-reports rest on
+      // continuation days, but it's the same number on every day so the
+      // user can tell it's the session's calmest window.
       if (s.restingHR != null && (minRest == null || s.restingHR < minRest)) minRest = s.restingHR;
-      if (s.hrMax && (maxHR == null || s.hrMax.v > maxHR)) maxHR = s.hrMax.v;
-      if (s.hrMin && (minHR == null || s.hrMin.v < minHR)) minHR = s.hrMin.v;
+      if (sliceMax != null && (maxHR == null || sliceMax > maxHR)) maxHR = sliceMax;
+      if (sliceMin != null && (minHR == null || sliceMin < minHR)) minHR = sliceMin;
     }
     if (totalDur === 0) return { value: null, label: '', unit: '', stage: 'stage-normal', color: STAGE_COLORS['stage-normal'] };
     if (metric === 'avg') {
@@ -4975,19 +5040,40 @@
     // Compute bounds for color scaling: use each day's morning HR across ALL sessions.
     // We color with the stage colors (same vocabulary as live app).
     const dayStats = {}; // 'YYYY-MM-DD' -> { avgHR, restingHR, ... }
+    // Per-day events filtered by absolute timestamp: a multi-day session's
+    // palpitations / flushes / chills land on the day they happened, not on
+    // every day the session spans.
+    function eventsInDayRange(s, dateStr, eventArr, tField) {
+      if (!eventArr || !eventArr.length || !s.startEpoch) return 0;
+      const dayStart = new Date(dateStr + 'T00:00:00').getTime();
+      const dayEnd = dayStart + 86400000;
+      let n = 0;
+      for (const e of eventArr) {
+        const t = e[tField || 't'];
+        if (t == null) continue;
+        const ep = s.startEpoch + t * 60000;
+        if (ep >= dayStart && ep < dayEnd) n++;
+      }
+      return n;
+    }
     for (const [dateStr, files] of Object.entries(sessionsByDate)) {
       let weightedHR = 0, totalDur = 0, lowestRest = null;
       let palp = 0, warn = 0, flush = 0, chills = 0;
       for (const fn of files) {
         const ss = sessionsIndex[fn];
         if (!ss) continue;
-        weightedHR += ss.hrAvg * ss.duration;
-        totalDur += ss.duration;
+        const slice = ss.byDay && ss.byDay[dateStr];
+        const dur = slice ? slice.durationMin : ss.duration;
+        const hrAvg = slice ? slice.hrAvg : ss.hrAvg;
+        if (dur > 0) {
+          weightedHR += hrAvg * dur;
+          totalDur += dur;
+        }
         if (ss.restingHR != null && (lowestRest == null || ss.restingHR < lowestRest)) lowestRest = ss.restingHR;
-        palp += ss.palpCount;
-        warn += ss.warnCount;
-        flush += (ss.flushes || []).length;
-        chills += (ss.chillsWindows || []).length;
+        palp += slice ? (slice.palpCount || 0) : ss.palpCount;
+        warn += eventsInDayRange(ss, dateStr, ss.warnSegs, 'start');
+        flush += eventsInDayRange(ss, dateStr, ss.flushes, 'start');
+        chills += eventsInDayRange(ss, dateStr, ss.chillsWindows, 'start');
       }
       const avgHR = totalDur > 0 ? Math.round(weightedHR / totalDur) : null;
       dayStats[dateStr] = { avgHR, restingHR: lowestRest, sessionCount: files.length, palpCount: palp, warnCount: warn, flushCount: flush, chillsCount: chills, firstFile: files[0] };
@@ -5006,7 +5092,7 @@
         cells += `<div class="cal-cell ${isToday ? 'today' : ''}"><div class="cal-day-num">${d}</div></div>`;
         continue;
       }
-      const headline = computeHeadline(headlineMetric, sessionsByDate[iso]);
+      const headline = computeHeadline(headlineMetric, sessionsByDate[iso], iso);
       const palpBadge = stats.palpCount > 0 ? `<span class="cal-badge palp" title="${stats.palpCount} palpitation beats"><span class="cal-badge-dot"></span>${stats.palpCount}</span>` : '';
       const warnBadge = stats.warnCount > 0 ? `<span class="cal-badge warn" title="${stats.warnCount} threshold warnings"><span class="cal-badge-dot"></span>${stats.warnCount}</span>` : '';
       const flushBadge = stats.flushCount > 0 ? `<span class="cal-badge flush" title="${stats.flushCount} sympathetic flush events"><span class="cal-badge-dot"></span>${stats.flushCount}</span>` : '';
@@ -5314,16 +5400,34 @@
       // Duration-weighted avg HR across the day's sessions — more representative than
       // picking one session's average or using morning-only resting HR.
       let weightedHR = 0, totalDur = 0, totalPalp = 0, totalWarn = 0, totalShifts = 0, totalFlush = 0, totalChills = 0;
+      const dayStartMs = new Date(iso + 'T00:00:00').getTime();
+      const dayEndMs = dayStartMs + 86400000;
+      const inDay = (s, arr, k) => {
+        if (!arr || !s.startEpoch) return 0;
+        let n = 0;
+        for (const e of arr) {
+          const t = e[k || 't'];
+          if (t == null) continue;
+          const ep = s.startEpoch + t * 60000;
+          if (ep >= dayStartMs && ep < dayEndMs) n++;
+        }
+        return n;
+      };
       for (const fn of files) {
         const s = sessionsIndex[fn];
         if (!s) continue;
-        weightedHR += s.hrAvg * s.duration;
-        totalDur += s.duration;
-        totalPalp += s.palpCount;
-        totalWarn += s.warnCount;
-        totalShifts += (s.hrDeltas || []).length;
-        totalFlush += (s.flushes || []).length;
-        totalChills += (s.chillsWindows || []).length;
+        const slice = s.byDay && s.byDay[iso];
+        const dur = slice ? slice.durationMin : s.duration;
+        const hrAvg = slice ? slice.hrAvg : s.hrAvg;
+        if (dur > 0) {
+          weightedHR += hrAvg * dur;
+          totalDur += dur;
+        }
+        totalPalp += slice ? (slice.palpCount || 0) : s.palpCount;
+        totalWarn += inDay(s, s.warnSegs, 'start');
+        totalShifts += inDay(s, s.hrDeltas, 'start');
+        totalFlush += inDay(s, s.flushes, 'start');
+        totalChills += inDay(s, s.chillsWindows, 'start');
       }
       const avgHR = totalDur > 0 ? Math.round(weightedHR / totalDur) : null;
       cols.push({ iso, date: d, dow: dowNames[i], files, avgHR, totalPalp, totalWarn, totalShifts, totalFlush, totalChills, totalDur });
@@ -5353,7 +5457,7 @@
       <div class="week-grid">
         ${cols.map(c => {
           const hasData = c.files.length > 0;
-          const headline = computeHeadline(headlineMetric, c.files);
+          const headline = computeHeadline(headlineMetric, c.files, c.iso);
           const isToday = c.iso === todayStr;
           return `
             <div class="week-col ${hasData ? 'has-sessions' : 'empty'} ${isToday ? 'today' : ''}" data-date="${c.iso}" style="${hasData ? `border-left: 4px solid ${headline.color};` : ''}">
