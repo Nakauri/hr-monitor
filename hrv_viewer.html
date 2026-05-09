@@ -4583,7 +4583,11 @@
       activeDuration += ce - cs;
       activeDuration = activeDuration / 60000;
     }
-    const duration = hr.length ? hr[hr.length - 1].x : activeDuration;
+    // Always 24h for a virtual day — the chart x-axis spans 00:00 → 24:00
+    // regardless of where the session's data starts/ends within the day.
+    // activeDuration is the union of actual recorded minutes and is what
+    // gets shown to the user as "X h Y m of recording" in the summary.
+    const duration = 1440;
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
     const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
@@ -5161,17 +5165,14 @@
       setHash(`month/${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`);
     });
 
-    // Cell click → day view (stub for now) or jump to first session of that day
+    // Cell click → day view always. Even a single-file day routes through
+    // buildDaySession so multi-day sessions get clipped to that day's
+    // 24-hour window (00:00 → 23:59) instead of opening the raw 39-hour
+    // file. User can still drill into the underlying session from the
+    // day view's session list.
     el.querySelectorAll('.cal-cell.has-sessions').forEach(cell => {
       cell.addEventListener('click', () => {
-        const date = cell.dataset.date;
-        const files = sessionsByDate[date] || [];
-        // If only one session, open it directly; else go to day view
-        if (files.length === 1) {
-          setHash('session/' + encodeURIComponent(files[0]));
-        } else {
-          setHash('day/' + date);
-        }
+        setHash('day/' + cell.dataset.date);
       });
     });
   }
@@ -5501,9 +5502,7 @@
     });
     el.querySelectorAll('.week-col.has-sessions').forEach(col => {
       col.addEventListener('click', () => {
-        const files = sessionsByDate[col.dataset.date] || [];
-        if (files.length === 1) setHash('session/' + encodeURIComponent(files[0]));
-        else setHash('day/' + col.dataset.date);
+        setHash('day/' + col.dataset.date);
       });
     });
 
@@ -8364,6 +8363,11 @@
           },
           annotation: { annotations },
           hrOverlays: { overlays: hrOverlays },
+          // Chart.js built-in decimation. Day-stitched sessions can hold
+          // 47k+ points (1 Hz × 13h+); rendering all of them on a Galaxy
+          // S8 chokes pan/zoom. min-max keeps the visual envelope intact
+          // (peaks/troughs preserved) while capping render at ~2k points.
+          decimation: { enabled: true, algorithm: 'min-max', threshold: 2000, samples: 2000 },
         },
         scales: {
           x: {
@@ -8555,7 +8559,20 @@
   }
 
   // Shared: sync the brush visual + dim masks + main chart to the current brushMin/Max.
+  // CSS updates and chart-update fire on rAF — without throttling, a fast
+  // pointer drag fires this 60×/sec and a 13-hour day-stitched chart can't
+  // keep up (each chart.update() walks all overlays + downsamples). The
+  // visual brush still feels live because CSS layout is cheap; only the
+  // chart redraw is rate-limited.
+  let _paintBrushRafId = 0;
   function paintBrush() {
+    if (_paintBrushRafId) return;
+    _paintBrushRafId = requestAnimationFrame(() => {
+      _paintBrushRafId = 0;
+      _paintBrushNow();
+    });
+  }
+  function _paintBrushNow() {
     if (!currentSummary) return;
     const d = currentSummary.duration;
     const overlay = document.getElementById('context-overlay');
