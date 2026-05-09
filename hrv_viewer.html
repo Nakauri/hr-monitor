@@ -3720,20 +3720,20 @@
       }
       if (!sessionsByDate[startDate]) sessionsByDate[startDate] = [];
       sessionsByDate[startDate].push(fn);
-      // Midnight-crossing session ALSO buckets under the end-date so the
-      // morning of the next day shows the sleep portion. Day-view
-      // rendering computes the per-day portion via sessionDayPortion()
-      // and displays only the clock range that actually falls on that
-      // date, so no "11:29 PM on Thursday" nonsense on the continuation
-      // day. The session is ONE session with data on two days, not two
-      // sessions.
+      // Multi-day session: bucket onto EVERY local calendar day the session
+      // spans, not just start + end. Day-view's sessionDayPortion() clips
+      // each day's display to its 0–24h slice so a 39-hour Thu→Fri→Sat
+      // session shows as three separate per-day cards / charts.
       if (s && s.startEpoch && s.duration) {
         const endMs = s.startEpoch + s.duration * 60000;
-        const ed = new Date(endMs);
-        const endDate = ed.getFullYear() + '-' + String(ed.getMonth() + 1).padStart(2, '0') + '-' + String(ed.getDate()).padStart(2, '0');
-        if (endDate !== startDate) {
-          if (!sessionsByDate[endDate]) sessionsByDate[endDate] = [];
-          sessionsByDate[endDate].push(fn);
+        const dayCursor = new Date(s.startEpoch);
+        dayCursor.setHours(0, 0, 0, 0);
+        dayCursor.setDate(dayCursor.getDate() + 1);
+        while (dayCursor.getTime() < endMs) {
+          const dateKey = localDateKeyFromEpoch(dayCursor.getTime());
+          if (!sessionsByDate[dateKey]) sessionsByDate[dateKey] = [];
+          sessionsByDate[dateKey].push(fn);
+          dayCursor.setDate(dayCursor.getDate() + 1);
         }
       }
     }
@@ -8663,14 +8663,17 @@
       }
       if (!sessionsByDate[startKey]) sessionsByDate[startKey] = [];
       sessionsByDate[startKey].push(fn);
-      // Midnight-crossing session — also bucket onto the end date.
+      // Multi-day session: roll over onto every calendar day the session spans.
       if (s.startEpoch && s.duration) {
         const endMs = s.startEpoch + s.duration * 60000;
-        const ed = new Date(endMs);
-        const endKey = ed.getFullYear() + '-' + String(ed.getMonth() + 1).padStart(2, '0') + '-' + String(ed.getDate()).padStart(2, '0');
-        if (endKey !== startKey) {
-          if (!sessionsByDate[endKey]) sessionsByDate[endKey] = [];
-          sessionsByDate[endKey].push(fn);
+        const dayCursor = new Date(s.startEpoch);
+        dayCursor.setHours(0, 0, 0, 0);
+        dayCursor.setDate(dayCursor.getDate() + 1);
+        while (dayCursor.getTime() < endMs) {
+          const dateKey = localDateKeyFromEpoch(dayCursor.getTime());
+          if (!sessionsByDate[dateKey]) sessionsByDate[dateKey] = [];
+          sessionsByDate[dateKey].push(fn);
+          dayCursor.setDate(dayCursor.getDate() + 1);
         }
       }
     }
