@@ -17,16 +17,17 @@
         <item name="android:background">@null</item>
     </style>
 
-    <!-- Launch theme. Uses Android 12+'s SplashScreen API with a solid
-         dark background + the aorti glyph as the splash icon. Falls back
-         to the classic android:background on older devices. The
-         postSplashScreenTheme hands off to AppTheme.NoActionBar which
-         ALSO has a dark windowBackground so we never flash white. -->
+    <!-- Launch theme. API 31+ uses the SplashScreen API (animated icon
+         on dark background). Pre-API-31 (e.g. Galaxy S8 / Android 9)
+         falls back to android:windowBackground, which now points at a
+         layer-list drawable that paints the dark colour AND centres the
+         aorti glyph — so older devices get branded launch frame instead
+         of a black flash. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">#0A0A0A</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/aorti_foreground</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
         <item name="android:background">#0A0A0A</item>
-        <item name="android:windowBackground">#0A0A0A</item>
+        <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
 </resources>

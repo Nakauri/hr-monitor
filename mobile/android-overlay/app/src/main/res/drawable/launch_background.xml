@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-API-31 launch frame. The OS draws this as windowBackground from
+     the moment the Activity starts until our WebView paints. On API 31+
+     the SplashScreen API takes over via windowSplashScreenAnimatedIcon
+     and this only shows briefly behind the splash transition.
+     Without it, devices like the Galaxy S8 (API 28) flash a solid black
+     screen with no branding. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/aorti_icon_bg" />
+    <item android:gravity="center"
+          android:width="160dp"
+          android:height="160dp"
+          android:drawable="@drawable/aorti_foreground" />
+</layer-list>

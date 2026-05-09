@@ -3411,7 +3411,8 @@
       if (!meta) return fn;
       const s = sessionsIndex[fn];
       const dur = s ? formatDuration(s.duration) : '';
-      return meta.isoDate + ' · ' + meta.isoTime + (dur ? ' · ' + dur : '');
+      const dateKey = sessionLocalDateKey(s, meta) || meta.isoDate;
+      return dateKey + ' · ' + meta.isoTime + (dur ? ' · ' + dur : '');
     } catch (e) { return fn; }
   }
 
@@ -4459,7 +4460,7 @@
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
       if (!s || !meta) continue;
-      const offset = (meta.date.getTime() - startOfDay) / 60000;
+      const offset = (sessionStartEpoch(s, meta) - startOfDay) / 60000;
       for (const e of (s.events || [])) events.push(shiftBy(e, offset, ['t']));
       for (const w of (s.warnSegs || [])) warnSegs.push(shiftBy(w, offset, ['start', 'end']));
       for (const p of (s.palpClusters || [])) palpClusters.push(shiftBy(p, offset, ['start', 'end']));
@@ -4705,21 +4706,23 @@
     const now = new Date();
     if (range === 'month') {
       const d = new Date(now.getFullYear(), now.getMonth(), 1);
-      return d.toISOString().slice(0, 10);
+      return localDateKeyFromEpoch(d.getTime());
     }
     const days = parseInt(range, 10);
     if (!isFinite(days)) return null;
     const d = new Date(now);
     d.setDate(d.getDate() - days);
-    return d.toISOString().slice(0, 10);
+    return localDateKeyFromEpoch(d.getTime());
   }
   function applyIndexFilterSort(allFilenames) {
     let list = allFilenames.slice();
     const cutoff = rangeCutoffISO(indexState.range);
     if (cutoff) {
       list = list.filter(fn => {
+        const s = sessionsIndex[fn];
         const m = parseSessionFilename(fn);
-        return m && m.isoDate >= cutoff;
+        const key = sessionLocalDateKey(s, m);
+        return key >= cutoff;
       });
     }
     list.sort(SORT_COMPARATORS[indexState.sort] || SORT_COMPARATORS.newest);
@@ -4757,7 +4760,7 @@
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
-          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${meta ? meta.isoDate : fn}</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${sessionLocalDateKey(s, meta) || fn}</div>
           <div class="session-card-date">${meta && meta.date ? `${formatClockRange(sessionStartEpoch(s, meta), s.duration)} <span class="session-card-dur">(${dur})</span>` : `${dur} session`}</div>
           <div class="session-card-stats">
             <div class="session-card-stat">
@@ -4967,7 +4970,7 @@
     const monthName = first.toLocaleString(undefined, { month: 'long', year: 'numeric' });
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const dowStart = first.getDay(); // 0=Sun
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localDateKeyToday();
 
     // Compute bounds for color scaling: use each day's morning HR across ALL sessions.
     // We color with the stage colors (same vocabulary as live app).
@@ -5294,9 +5297,9 @@
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekStart.getDate() + 6);
 
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const weekStartStr = weekStart.toISOString().slice(0, 10);
-    const weekEndStr = weekEnd.toISOString().slice(0, 10);
+    const todayStr = localDateKeyToday();
+    const weekStartStr = localDateKeyFromEpoch(weekStart.getTime());
+    const weekEndStr = localDateKeyFromEpoch(weekEnd.getTime());
     const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     const cols = [];
@@ -5456,18 +5459,22 @@
   // ===== All-time trends =====
   let allGranularity = 'day'; // 'session' | 'day' | 'week' | 'month'
 
-  // Return a bucket key ('YYYY-MM-DD' etc.) for a session given the current granularity
-  function bucketKey(meta, gran) {
-    if (gran === 'session') return meta.isoDate + ' ' + meta.isoTime;
-    if (gran === 'day') return meta.isoDate;
+  // Return a bucket key ('YYYY-MM-DD' etc.) for a session given the current granularity.
+  // Prefer the CSV epoch_ms-derived local date over meta.isoDate (filename Z-parser
+  // shifts early-AM Android sessions to the previous local day).
+  function bucketKey(s, meta, gran) {
+    const dateKey = sessionLocalDateKey(s, meta) || meta.isoDate;
+    if (gran === 'session') return dateKey + ' ' + meta.isoTime;
+    if (gran === 'day') return dateKey;
     if (gran === 'week') {
-      const d = new Date(meta.date);
+      const epoch = sessionStartEpoch(s, meta) || (meta.date && meta.date.getTime()) || 0;
+      const d = new Date(epoch);
       d.setHours(0, 0, 0, 0);
       d.setDate(d.getDate() - d.getDay()); // Sunday
-      return d.toISOString().slice(0, 10);
+      return localDateKeyFromEpoch(d.getTime());
     }
-    if (gran === 'month') return meta.isoDate.slice(0, 7);
-    return meta.isoDate;
+    if (gran === 'month') return dateKey.slice(0, 7);
+    return dateKey;
   }
 
   // Aggregate per-session values into buckets by granularity, choosing reducer per metric.
@@ -5478,7 +5485,7 @@
       if (!s || !meta) continue;
       const v = valueFn(s, meta);
       if (v == null) continue;
-      const k = bucketKey(meta, gran);
+      const k = bucketKey(s, meta, gran);
       if (!buckets.has(k)) buckets.set(k, []);
       buckets.get(k).push(v);
     }
@@ -8556,6 +8563,27 @@
     if (s && s.startEpoch) return s.startEpoch;
     if (meta && meta.date) return meta.date.getTime();
     return 0;
+  }
+  // Local-tz YYYY-MM-DD from a UTC epoch. Used for every place that buckets
+  // or labels sessions by calendar day. Never use toISOString().slice(0,10)
+  // for date keys — for users west of UTC that returns the previous day.
+  function localDateKeyFromEpoch(epochMs) {
+    if (!epochMs) return '';
+    const d = new Date(epochMs);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  // Same for "now". Replaces new Date().toISOString().slice(0,10) which is
+  // UTC and shifts the "today" highlight by one day for users west of UTC.
+  function localDateKeyToday() {
+    return localDateKeyFromEpoch(Date.now());
+  }
+  // Local YYYY-MM-DD that a session card should display. Derived from the
+  // CSV's epoch_ms, NOT the filename — Android filenames are local time
+  // but the parser appends 'Z' and reads them as UTC, shifting early-AM
+  // sessions to the previous day.
+  function sessionLocalDateKey(s, meta) {
+    const ep = sessionStartEpoch(s, meta);
+    return ep ? localDateKeyFromEpoch(ep) : (meta && meta.isoDate) || '';
   }
   // Chart timeline labels switch between duration and wall clock via this
   // toggle. Persisted so the user's preference sticks across sessions.
