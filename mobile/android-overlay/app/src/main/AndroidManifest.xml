@@ -61,16 +61,6 @@
             android:name="com.nakauri.hrmonitor.HrServiceHeartbeatReceiver"
             android:exported="false" />
 
-        <!-- Resumes the FGS after a Play Store mid-session app upgrade.
-             BOOT_COMPLETED intentionally not subscribed: opening the app
-             after a phone reboot is the expected re-engagement path. -->
-        <receiver
-            android:name="com.nakauri.hrmonitor.HrBootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
     </application>
 
     <!-- Permissions -->

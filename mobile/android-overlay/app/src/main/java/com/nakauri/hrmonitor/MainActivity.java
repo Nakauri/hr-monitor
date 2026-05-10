@@ -36,12 +36,14 @@ import com.getcapacitor.BridgeWebViewClient;
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "MainActivity";
 
-    // Native restore-session overlay. Painted instantly when the Activity
-    // surface is created (via addContentView), covering the WebView while
-    // it rebuilds after recents-tap or renderer crash. Hidden by JS via
-    // RestoreOverlayPlugin once the chart has data, or auto-removed by
-    // the safety timer below if JS never fires.
+    // Native loading overlay. Branded splash + spinner painted ON TOP of
+    // the WebView whenever the Activity comes to the foreground while a
+    // session is active. JS calls RestoreOverlayPlugin.hide() once the
+    // page has rehydrated. 60-second safety timer dismisses if JS never
+    // fires.
     private View restoreOverlay;
+    private Runnable restoreSafetyTimer;
+    private static final long OVERLAY_SAFETY_MS = 60000L;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -52,20 +54,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(RestoreOverlayPlugin.class);
         super.onCreate(savedInstanceState);
 
-        try {
-            restoreOverlay = createRestoreOverlay();
-            addContentView(restoreOverlay, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-            // Safety net: if JS never calls RestoreOverlay.hide() (auth fail,
-            // page parse error, plugin missing), the overlay self-destructs
-            // after 60 s so the user is never stuck staring at a spinner.
-            // 60 s covers cold-from-multi-hour-background scenarios where
-            // WebView surface rebuild + JS cold-parse can exceed 30 s.
-            new Handler(Looper.getMainLooper()).postDelayed(this::hideRestoreOverlayBySafetyTimer, 60000);
-        } catch (Throwable t) {
-            Log.w(TAG, "Could not install restore overlay: " + t.getMessage());
-        }
+        showRestoreOverlay();
 
         // Renderer-recovery WebViewClient. Long sessions can OOM Chromium's
         // renderer; reloading the page in place beats Activity teardown.
@@ -151,6 +140,25 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // Re-show the loading overlay every time the Activity comes back to
+    // foreground while a session is active. WebView rehydrate of a 12-hour
+    // CSV on the S8 takes ~20-30 sec; without this the user stares at a
+    // frozen WebView during that window. JS calls hide() once rehydrate
+    // completes (or immediately on visibilitychange-visible if hidden was
+    // brief enough to skip rehydrate).
+    @Override
+    public void onResume() {
+        super.onResume();
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences("hr_monitor_session", 0);
+            boolean active = prefs.getBoolean("sessionActive", false);
+            boolean cleanly = prefs.getBoolean("cleanlyStopped", true);
+            if (active && !cleanly) showRestoreOverlay();
+        } catch (Throwable t) {
+            Log.w(TAG, "onResume overlay check failed: " + t.getMessage());
+        }
+    }
+
     /** Proactive memory release before LMK fires. At RUNNING_CRITICAL the
      *  system is about to start killing background processes; freeing the
      *  WebView's GPU buffers (Chart.js canvases ~320 MB) drops our PSS
@@ -231,8 +239,35 @@ public class MainActivity extends BridgeActivity {
         return (int) (value * density + 0.5f);
     }
 
+    // Idempotent. No-ops when the overlay is already attached. Always
+    // re-arms the safety timer so a stale onResume can't strand the user.
+    public void showRestoreOverlay() {
+        runOnUiThread(() -> {
+            try {
+                if (restoreOverlay != null && restoreOverlay.getParent() != null) {
+                    armRestoreSafetyTimer();
+                    return;
+                }
+                restoreOverlay = createRestoreOverlay();
+                addContentView(restoreOverlay, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+                armRestoreSafetyTimer();
+            } catch (Throwable t) {
+                Log.w(TAG, "showRestoreOverlay failed: " + t.getMessage());
+            }
+        });
+    }
+
+    private void armRestoreSafetyTimer() {
+        Handler h = new Handler(Looper.getMainLooper());
+        if (restoreSafetyTimer != null) h.removeCallbacks(restoreSafetyTimer);
+        restoreSafetyTimer = this::hideRestoreOverlayBySafetyTimer;
+        h.postDelayed(restoreSafetyTimer, OVERLAY_SAFETY_MS);
+    }
+
     /** Idempotent. Called by RestoreOverlayPlugin.hide() from JS, by the
-     *  safety timer in onCreate, or by future native paths if needed. */
+     *  safety timer, or by future native paths if needed. */
     public void hideRestoreOverlay() {
         runOnUiThread(() -> {
             try {
@@ -241,6 +276,10 @@ public class MainActivity extends BridgeActivity {
                 }
             } catch (Throwable ignored) {}
             restoreOverlay = null;
+            if (restoreSafetyTimer != null) {
+                new Handler(Looper.getMainLooper()).removeCallbacks(restoreSafetyTimer);
+                restoreSafetyTimer = null;
+            }
         });
     }
 

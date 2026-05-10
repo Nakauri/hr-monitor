@@ -2329,17 +2329,27 @@
       if (typeof refreshBattOpt === 'function') refreshBattOpt();
     } catch (e) {}
     const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    let rehydratePromise = null;
     if (wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
         && window.HRMNativeHrSession
         && window.HRMNativeHrSession.isPublishing
         && window.HRMNativeHrSession.isPublishing()) {
       if (window.HRMLog) window.HRMLog.event('resume rehydrate', { hiddenSec: Math.round(hiddenMs / 1000) });
-      rehydrateFromNativeCsv().catch(e => {
+      rehydratePromise = rehydrateFromNativeCsv().catch(e => {
         if (window.HRMLog) window.HRMLog.event('resume rehydrate error', e && e.message ? e.message : String(e));
       });
     }
     try { updateCharts(); } catch (e) {}
     try { updateStats(); } catch (e) {}
+    // Native loading overlay: MainActivity.onResume re-shows it on every
+    // foreground. Dismiss after rehydrate (or immediately if none needed)
+    // so the user always sees the spinner during the WebView's catch-up
+    // window, never a frozen blank page.
+    const dismissOverlay = () => {
+      try { if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide(); } catch (e) {}
+    };
+    if (rehydratePromise) rehydratePromise.then(dismissOverlay, dismissOverlay);
+    else dismissOverlay();
   });
 
   function updateCharts() {
