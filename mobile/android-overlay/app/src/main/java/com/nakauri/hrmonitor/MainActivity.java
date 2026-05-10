@@ -43,7 +43,12 @@ public class MainActivity extends BridgeActivity {
     // fires.
     private View restoreOverlay;
     private Runnable restoreSafetyTimer;
-    private static final long OVERLAY_SAFETY_MS = 60000L;
+    // Short safety timer: the overlay is purely a visual transition, not a
+    // ready-state gate. JS dismisses on visibilitychange-visible and on
+    // page init; this is just the fallback so a missed signal can't strand
+    // the user staring at a spinner. 5 s is long enough for the WebView's
+    // first paint after resume on the S8.
+    private static final long OVERLAY_SAFETY_MS = 5000L;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

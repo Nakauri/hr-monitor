@@ -2328,28 +2328,25 @@
       resumeAudioKeepAliveIfNeeded();
       if (typeof refreshBattOpt === 'function') refreshBattOpt();
     } catch (e) {}
+    // Dismiss the native loading overlay IMMEDIATELY on resume — its only
+    // job is to cover the WebView during the OS-level activity-resume
+    // transition, not to wait for the rehydrate to finish. Rehydrate can
+    // be slow (10–30 s on S8 with a long CSV) and could hang if the user
+    // backgrounds again mid-fetch; gating dismiss on it leaves a stuck
+    // spinner.
+    try { if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide(); } catch (e) {}
     const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
-    let rehydratePromise = null;
     if (wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
         && window.HRMNativeHrSession
         && window.HRMNativeHrSession.isPublishing
         && window.HRMNativeHrSession.isPublishing()) {
       if (window.HRMLog) window.HRMLog.event('resume rehydrate', { hiddenSec: Math.round(hiddenMs / 1000) });
-      rehydratePromise = rehydrateFromNativeCsv().catch(e => {
+      rehydrateFromNativeCsv().catch(e => {
         if (window.HRMLog) window.HRMLog.event('resume rehydrate error', e && e.message ? e.message : String(e));
       });
     }
     try { updateCharts(); } catch (e) {}
     try { updateStats(); } catch (e) {}
-    // Native loading overlay: MainActivity.onResume re-shows it on every
-    // foreground. Dismiss after rehydrate (or immediately if none needed)
-    // so the user always sees the spinner during the WebView's catch-up
-    // window, never a frozen blank page.
-    const dismissOverlay = () => {
-      try { if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide(); } catch (e) {}
-    };
-    if (rehydratePromise) rehydratePromise.then(dismissOverlay, dismissOverlay);
-    else dismissOverlay();
   });
 
   function updateCharts() {
