@@ -150,16 +150,12 @@ public class NativeHrSessionPlugin extends Plugin {
     private NativeDriveUploader uploader;
     private NativeDriveResumableUploader resumable;
     private final AtomicLong lastUploadMs = new AtomicLong(0);
-    // Periodic finalize+restart cadence: every 30 min the resumable session
-    // is committed (file becomes visible in Drive) and a new PATCH session
-    // is opened against the same fileId. Without this the file only appears
-    // when the user stops the session — a 10-hour sleep recording shows
-    // nothing in Drive until morning.
+    // Periodic finalize+restart cadence. Every 30 min the resumable session
+    // commits (file appears in Drive) and a fresh PATCH session opens against
+    // the same fileId.
     private static final long DRIVE_FINALIZE_INTERVAL_MS = 30L * 60L * 1000L;
     private final AtomicLong lastFinalizeMs = new AtomicLong(0);
-    // Gate: blocks chunk-append + a second concurrent finalize while a
-    // commit is in flight. Without it a tick during finalize would PUT
-    // to a closed session URL.
+    // Blocks chunk-append + concurrent finalize while a commit is in flight.
     private final AtomicBoolean committing = new AtomicBoolean(false);
 
     private OkHttpClient httpClient;
@@ -487,7 +483,15 @@ public class NativeHrSessionPlugin extends Plugin {
         broadcastEnabled = (broadcastOpt == null) ? true : broadcastOpt;
         // Relay needs a broadcastKey; offline mode runs without one.
         boolean canBroadcast = broadcastEnabled && broadcastKey != null && !broadcastKey.isEmpty();
-        sessionStartMs = System.currentTimeMillis();
+        // Resume context: when JS replays a sessionInterrupted event back into
+        // startSession, the prior session's filename + start ms come along so
+        // we can append to the existing CSV instead of fragmenting one logical
+        // recording across two files.
+        String resumeFilename = call.getString("resumeFilename");
+        Long resumeStartMs = call.getLong("resumeSessionStartMs", 0L);
+        boolean resuming = resumeFilename != null && !resumeFilename.isEmpty()
+            && resumeStartMs != null && resumeStartMs > 0L;
+        sessionStartMs = resuming ? resumeStartMs : System.currentTimeMillis();
         synchronized (rrWindow) { rrWindow.clear(); }
         synchronized (rrWindow5min) { rrWindow5min.clear(); }
         synchronized (rrWindow) {
@@ -499,18 +503,17 @@ public class NativeHrSessionPlugin extends Plugin {
         synchronized (trendHrBuffer) { trendHrBuffer.clear(); }
         synchronized (trendRmssdBuffer) { trendRmssdBuffer.clear(); }
         lastUploadMs.set(0);
-        // First periodic finalize fires DRIVE_FINALIZE_INTERVAL_MS after start
-        // (not immediately — the resumable session needs a chunk's worth of
-        // bytes to commit anything meaningful). Setting to `now` defers.
         lastFinalizeMs.set(System.currentTimeMillis());
         committing.set(false);
 
-        // CSV
-        try {
-            csv = new NativeCsvWriter(getContext(), sessionStartMs);
-        } catch (Exception e) {
-            Log.w(TAG, "Could not open CSV: " + e.getMessage());
-            csv = null;
+        // CSV — append to prior file when resuming, fresh file otherwise.
+        synchronized (this) {
+            try {
+                csv = new NativeCsvWriter(getContext(), sessionStartMs, resuming ? resumeFilename : null);
+            } catch (Exception e) {
+                Log.w(TAG, "Could not open CSV: " + e.getMessage());
+                csv = null;
+            }
         }
         if (uploader != null) uploader.resetSession();
         if (resumable != null) {
@@ -528,11 +531,8 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         }
 
-        // Pre-session cleanup pass. Catches orphan CSVs from previous
-        // sessions that ended unclean (process kill, OEM battery saver
-        // killed FGS before stopSessionInternal could run, force-stop
-        // from Settings). Without a start-time hook those files would
-        // sit forever for users whose stop path never runs cleanly.
+        // Pre-session cleanup pass. Catches orphan CSVs from prior sessions
+        // that ended unclean (process kill, OEM kill, force-stop).
         try {
             if (uploader != null) {
                 java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
@@ -619,22 +619,21 @@ public class NativeHrSessionPlugin extends Plugin {
         HrServiceHeartbeatReceiver.cancel(getContext());
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.removeCallbacks(gattReconnectRunnable);
-        if (csv != null) {
-            String stoppedFilename = csv.getFile().getName();
-            csv.close();
-            // Prefer the resumable finalize path. Sends only the bytes since
-            // the last 256 KB-aligned chunk + commits with the actual total.
-            // If resumable is broken or never opened (offline, auth fail),
-            // fall back to the existing full-PATCH upload so the session
-            // still ends up on Drive.
+        // Snapshot + null under lock so BLE binder reads can't observe a
+        // half-closed writer. Resumable finalize and full-PATCH fallback
+        // both run against the snapshot.
+        NativeCsvWriter snap;
+        synchronized (this) { snap = csv; csv = null; }
+        if (snap != null) {
+            String stoppedFilename = snap.getFile().getName();
+            snap.close();
             boolean finalized = false;
             if (resumable != null && resumable.isReady()) {
-                finalized = resumable.finalizeSync(csv.getFile());
+                finalized = resumable.finalizeSync(snap.getFile());
             }
             if (!finalized && uploader != null) {
-                uploader.uploadAsync(csv.getFile());
+                uploader.uploadAsync(snap.getFile());
             }
-            csv = null;
             // Stamp this filename as the "last session" hint so the next
             // startSession can detect an orphaned upload and re-send it.
             try {
@@ -687,7 +686,8 @@ public class NativeHrSessionPlugin extends Plugin {
             String reason = null;
             boolean ok = false;
             try {
-                java.io.File file = csv != null ? csv.getFile() : null;
+                NativeCsvWriter w = csv;
+                java.io.File file = w != null ? w.getFile() : null;
                 if (file == null) { reason = "csv_gone"; return; }
                 String name = file.getName();
                 if (resumable != null && resumable.isReady()) {
@@ -727,7 +727,8 @@ public class NativeHrSessionPlugin extends Plugin {
     private void finalizeAndRestartAsync() {
         new Thread(() -> {
             try {
-                java.io.File file = csv != null ? csv.getFile() : null;
+                NativeCsvWriter w = csv;
+                java.io.File file = w != null ? w.getFile() : null;
                 if (file == null) return;
                 String name = file.getName();
                 if (resumable != null && resumable.isReady()) {
@@ -1045,7 +1046,8 @@ public class NativeHrSessionPlugin extends Plugin {
             } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
                 Log.i(TAG, "GATT disconnected status=" + status);
                 hrChar = null;
-                if (csv != null) csv.appendConnectionRow("disconnected", System.currentTimeMillis());
+                NativeCsvWriter w = csv;
+                if (w != null) w.appendConnectionRow("disconnected", System.currentTimeMillis());
                 emitState();
                 if (sessionActive.get()) scheduleGattReconnect();
             }

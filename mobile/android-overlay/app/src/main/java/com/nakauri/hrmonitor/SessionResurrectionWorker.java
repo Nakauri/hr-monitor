@@ -56,8 +56,14 @@ public class SessionResurrectionWorker extends Worker {
 
     public static void schedule(Context context) {
         try {
+            // 15 min is WorkManager's hard minimum periodic interval. Paired
+            // with the 10-min AlarmManager heartbeat the LCM is 30 min and
+            // worst-case gap between any-fire is ~10 min. initialDelay 5 min
+            // offsets the first WM fire from the first AM fire so they don't
+            // coincide on schedule().
             PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
                     SessionResurrectionWorker.class, 15, TimeUnit.MINUTES)
+                .setInitialDelay(5, TimeUnit.MINUTES)
                 .build();
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 UNIQUE_NAME,

@@ -26,10 +26,8 @@ public class NativeHrService extends Service {
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_BODY = "body";
 
-    // Service-owned PARTIAL_WAKE_LOCK. Held for the full session lifetime.
-    // FGS keeps the process alive; this keeps the CPU on between BLE
-    // notifications during Doze. Without it, BLE callbacks queue up or
-    // drop. Must be inside the service so it dies with the service.
+    // Service-owned PARTIAL_WAKE_LOCK. Held for the session's lifetime so
+    // BLE callbacks keep firing through Doze.
     private PowerManager.WakeLock wakeLock;
 
     @Override

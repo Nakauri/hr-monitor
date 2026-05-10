@@ -2031,7 +2031,6 @@
     connectionEvents: [],
     currentPosture: 'sitting',
     postureLog: [], // [{ t, posture }]
-    lastPalpAlertTime: 0,
     currentHR: null,
     currentRMSSD: null,
     currentWarn: null,
@@ -2136,6 +2135,9 @@
   }
 
   function initCharts() {
+    // Idempotent — destroy any existing instances first so a double-call
+    // (e.g. visibilitychange race) doesn't leak Chart.js + GPU buffers.
+    destroyCharts();
     // Live HR trace - beat-to-beat iHR. Monotone cubic keeps peaks honest without the
     // overshoot tension produces. X-axis is a fixed 45-sec window that scrolls with now,
     // so early data doesn't stretch to fill the canvas.
@@ -2301,29 +2303,43 @@
   let pageVisible = typeof document.hidden === 'boolean' ? !document.hidden : true;
   let lastHiddenAt = 0;
   const REHYDRATE_ON_RESUME_MS = 5000;
+  // Single visibilitychange handler. Order on resume: BLE/wake-lock first
+  // (so the data path is alive), then audio + battery-opt UI, then a CSV
+  // rehydrate if the hide was long enough that the native plugin's queued
+  // events were dropped, then chart + stats redraw last.
   document.addEventListener('visibilitychange', () => {
     const wasHidden = !pageVisible;
     pageVisible = !document.hidden;
-    if (pageVisible) {
-      const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
-      if (wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
-          && window.HRMNativeHrSession
-          && window.HRMNativeHrSession.isPublishing
-          && window.HRMNativeHrSession.isPublishing()) {
-        if (window.HRMLog) window.HRMLog.event('resume rehydrate', { hiddenSec: Math.round(hiddenMs / 1000) });
-        rehydrateFromNativeCsv().catch(e => {
-          if (window.HRMLog) window.HRMLog.event('resume rehydrate error', e && e.message ? e.message : String(e));
-        });
-      }
-      try { updateCharts(); } catch (e) {}
-      try { updateStats(); } catch (e) {}
-    } else {
+    if (!pageVisible) {
       lastHiddenAt = Date.now();
       // Free GPU memory while backgrounded. Chart.js canvases hold ~320 MB
-      // of GL buffers in long sessions; releasing them keeps the WebView
-      // small enough to survive Android's low-memory killer.
+      // of GL buffers in long sessions.
       destroyCharts();
+      return;
     }
+    // Visible.
+    try {
+      if (device && device.gatt && device.gatt.connected && !wakeLock) {
+        acquireWakeLock();
+      } else if (state.autoReconnect && device && device.gatt && !device.gatt.connected) {
+        setStatus('Tab returned — retrying strap...');
+        if (typeof tryReconnect === 'function') tryReconnect();
+      }
+      resumeAudioKeepAliveIfNeeded();
+      if (typeof refreshBattOpt === 'function') refreshBattOpt();
+    } catch (e) {}
+    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    if (wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
+        && window.HRMNativeHrSession
+        && window.HRMNativeHrSession.isPublishing
+        && window.HRMNativeHrSession.isPublishing()) {
+      if (window.HRMLog) window.HRMLog.event('resume rehydrate', { hiddenSec: Math.round(hiddenMs / 1000) });
+      rehydrateFromNativeCsv().catch(e => {
+        if (window.HRMLog) window.HRMLog.event('resume rehydrate error', e && e.message ? e.message : String(e));
+      });
+    }
+    try { updateCharts(); } catch (e) {}
+    try { updateStats(); } catch (e) {}
   });
 
   function updateCharts() {
@@ -3158,8 +3174,11 @@
   // 5-s presence heartbeat while actively recording, so other devices can see
   // us in their Active broadcasts list even during BLE gaps when no ticks fire.
   let presenceTimer = null;
+  function stopPresenceHeartbeat() {
+    if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
+  }
   function startPresenceHeartbeat() {
-    if (presenceTimer) clearInterval(presenceTimer);
+    stopPresenceHeartbeat();
     presenceTimer = setInterval(() => {
       // Emit presence while a session is active AND we're either live or
       // actively trying to reconnect. Watchers hold the slot open during the
@@ -3940,6 +3959,10 @@
               senderId: d.senderId || getDeviceIdentity().id,
               senderLabel: d.senderLabel || getDeviceIdentity().label,
               broadcast: d.broadcastEnabled !== false,
+              // Append to the prior session's CSV instead of starting a new
+              // file — keeps a single recording continuous across resumes.
+              resumeFilename: d.activeCsvFilename || '',
+              resumeSessionStartMs: d.sessionStartMs || 0,
             });
             device.gatt.connected = true;
             if (state.startTime === null) state.startTime = d.sessionStartMs || Date.now();
@@ -4026,7 +4049,24 @@
   // the user's previous session. Full data lives in the CSV (and on Drive);
   // the viewer is the place to look at the whole session.
   const REHYDRATE_KEEP_MIN = 3;
+  // Re-entry guard: visibilitychange can fire back-to-back (screen flicker,
+  // multi-window split), and after 12+ hours of WebView pressure a second
+  // concurrent rehydrate doubles the CSV-parse allocation and was the
+  // suspected cause of the 03:14 AM May 10 process death.
+  let _rehydrateInFlight = false;
   async function rehydrateFromNativeCsv() {
+    if (_rehydrateInFlight) {
+      if (window.HRMLog) window.HRMLog.event('rehydrate skipped', 'already in flight');
+      return;
+    }
+    _rehydrateInFlight = true;
+    try {
+      return await _rehydrateFromNativeCsvImpl();
+    } finally {
+      _rehydrateInFlight = false;
+    }
+  }
+  async function _rehydrateFromNativeCsvImpl() {
     if (window.HRMLog) window.HRMLog.event('rehydrate starting', {
       hasShim: !!window.HRMNativeHrSession,
       hasMethod: !!(window.HRMNativeHrSession && typeof window.HRMNativeHrSession.getSessionSnapshot === 'function'),
@@ -4232,23 +4272,7 @@
     }
   }
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    // Mobile browsers pause timers and may drop BLE while the tab is
-    // backgrounded. On return: re-acquire the wake lock (it gets released
-    // automatically on hide) and kick the reconnect loop if the strap has
-    // dropped but auto-reconnect is still armed.
-    if (device && device.gatt && device.gatt.connected && !wakeLock) {
-      acquireWakeLock();
-    } else if (state.autoReconnect && device && device.gatt && !device.gatt.connected) {
-      setStatus('Tab returned — retrying strap...');
-      if (typeof tryReconnect === 'function') tryReconnect();
-    }
-    resumeAudioKeepAliveIfNeeded();
-    // User may have flipped the battery-optimisation switch in system
-    // settings while the tab was hidden. Re-read state so the row updates.
-    if (typeof refreshBattOpt === 'function') refreshBattOpt();
-  });
+  // (Visibility handling consolidated above — single listener at line ~2304.)
 
   async function attachConnection() {
     setStatus('Connecting to ' + (device.name || 'device') + '...');
@@ -4415,6 +4439,7 @@
     // after the user explicitly stopped the session.
     stopWatchingAdvertisements();
     stopAudioKeepAlive();
+    stopPresenceHeartbeat();
     // Capture Drive-upload intent BEFORE we tear everything down so the
     // toast only fires when the session actually had a Drive target.
     const nativeWasPublishing = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing());

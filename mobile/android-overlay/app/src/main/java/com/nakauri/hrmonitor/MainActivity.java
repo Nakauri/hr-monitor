@@ -136,19 +136,9 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    /**
-     * Capacitor's BridgeActivity.onPause calls bridge.onPause() which
-     * suspends the WebView's JavaScript engine when the Activity goes to
-     * background. For our use case that kills the BLE → tick → relay
-     * pipeline because the JS callbacks stop firing — the FGS notification
-     * stays up and wake lock stays held, but no data flows.
-     *
-     * Re-call webView.onResume() right after super.onPause() so JS keeps
-     * running while backgrounded. The wake lock + FGS keep CPU + process
-     * alive; this keeps JS scheduled. Trade-off: the WebView consumes more
-     * battery while the screen is off, but for a 24/7 streaming app
-     * that's the point.
-     */
+    // Override Capacitor's bridge.onPause() suspension of the WebView JS
+    // engine so the BLE → tick → relay pipeline keeps flowing while
+    // backgrounded. Costs WebView battery; required for 24/7 streaming.
     @Override
     public void onPause() {
         super.onPause();
