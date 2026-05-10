@@ -9,15 +9,19 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.util.Log;
 
-// Periodic FGS-resurrection check. Fires every 15 min via
-// setExactAndAllowWhileIdle (Doze-pierces). If a session was active and
-// hasn't been cleanly stopped, ensures the FGS is running by issuing a
-// startForegroundService Intent. The Service's onStartCommand is
-// idempotent — already-running services just refresh the notification.
+// Periodic FGS-resurrection check. setAlarmClock is the ONLY alarm class
+// Samsung's One UI cannot suppress in deep sleep — setExactAndAllowWhileIdle
+// gets throttled hard on S8 / overnight. The cost is a visible alarm-clock
+// chip in the status bar while a session is active; the benefit is the
+// session actually surviving overnight without the user adding the app to
+// "Never sleeping apps".
 public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
     private static final String TAG = "HrHeartbeat";
     private static final int REQ_CODE = 0xA0;
-    private static final long INTERVAL_MS = 15L * 60L * 1000L;
+    // 10 min: short enough that a single missed beat still recovers within
+    // 20 min; long enough that battery cost is negligible compared to the
+    // wake lock the FGS already holds.
+    private static final long INTERVAL_MS = 10L * 60L * 1000L;
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -50,7 +54,16 @@ public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
             if (am == null) return;
             PendingIntent pi = pendingIntent(context, false);
             long triggerAt = System.currentTimeMillis() + INTERVAL_MS;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                // Tap-target for the alarm chip — opens MainActivity. Required
+                // by setAlarmClock (the chip wants somewhere to take the user).
+                Intent showIntent = new Intent(context, MainActivity.class);
+                showIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                int piFlags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+                PendingIntent showPi = PendingIntent.getActivity(context, REQ_CODE + 1, showIntent, piFlags | PendingIntent.FLAG_UPDATE_CURRENT);
+                AlarmManager.AlarmClockInfo info = new AlarmManager.AlarmClockInfo(triggerAt, showPi);
+                am.setAlarmClock(info, pi);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
             } else {
                 am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);

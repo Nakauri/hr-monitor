@@ -6174,12 +6174,12 @@
           <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnnMatchAvg ?? '—'}</span>
           <span class="summary-stat-unit">ms · 30 s</span>
         </div>
-        <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5-minute rolling window. Clinical short-term HRV reference.">
+        <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5-minute rolling window. Standard short-term HRV window.">
           <span class="summary-stat-label">Avg SDNN</span>
           <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnn5minAvg ?? '—'}</span>
           <span class="summary-stat-unit">ms · 5 min</span>
         </div>
-        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across all in-range RR intervals from the entire session. Most comparable to a clinical HRV report's SDNN.">
+        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across all in-range RR intervals from the entire session.">
           <span class="summary-stat-label">SDNN</span>
           <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnnFull ?? '—'}</span>
           <span class="summary-stat-unit">ms · session</span>

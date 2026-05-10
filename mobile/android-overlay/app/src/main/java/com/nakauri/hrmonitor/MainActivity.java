@@ -86,6 +86,15 @@ public class MainActivity extends BridgeActivity {
             Log.w(TAG, "OrphanRecoveryWorker.schedule failed: " + t.getMessage());
         }
 
+        // Redundant session-resurrection job. Independent of the AlarmManager
+        // heartbeat so a single OEM throttle path can't take down both
+        // resurrection routes at once.
+        try {
+            SessionResurrectionWorker.schedule(this);
+        } catch (Throwable t) {
+            Log.w(TAG, "SessionResurrectionWorker.schedule failed: " + t.getMessage());
+        }
+
         // Back navigation. Use OnBackPressedDispatcher so Android 14+
         // predictive-back gestures route through us; the legacy onBackPressed()
         // override is bypassed by the new gesture API.
