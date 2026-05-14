@@ -1026,10 +1026,33 @@ public class NativeHrSessionPlugin extends Plugin {
     @PluginMethod
     public void status(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("sessionActive", sessionActive.get());
+        boolean active = sessionActive.get();
+        ret.put("sessionActive", active);
         ret.put("bleConnected", currentGatt != null);
         ret.put("relayLive", relayLive.get());
-        if (csv != null) ret.put("csvFile", csv.getFilename());
+        if (csv != null) {
+            ret.put("csvFile", csv.getFilename());
+            ret.put("sessionStartMs", csv.getSessionStartMs());
+        }
+        // Recovery hint for the JS bootstrap. After a process kill the
+        // AtomicBoolean resets to false but SharedPrefs still says a session
+        // was running and the heartbeat path is about to resurrect it. JS
+        // reads this synchronously so the "Resuming session..." overlay can
+        // stay up instead of timing out before the deferred sessionInterrupted
+        // event drives the actual resume.
+        try {
+            android.content.SharedPreferences prefs = getContext().getSharedPreferences("hr_monitor_session", 0);
+            boolean prefsActive = prefs.getBoolean("sessionActive", false);
+            boolean cleanly = prefs.getBoolean("cleanlyStopped", true);
+            boolean recoveryPending = prefsActive && !cleanly && !active;
+            ret.put("interruptedRecovery", recoveryPending);
+            if (recoveryPending) {
+                ret.put("interruptedFilename", prefs.getString("activeCsvFilename", ""));
+                ret.put("interruptedSessionStartMs", prefs.getLong("sessionStartMs", 0));
+            }
+        } catch (Throwable ignored) {
+            ret.put("interruptedRecovery", false);
+        }
         call.resolve(ret);
     }
 

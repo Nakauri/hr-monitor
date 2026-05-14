@@ -19,11 +19,27 @@
 
     let publishing = false;
     let csvFilename = null;
+    let sessionStartMs = 0;
+    // Set true when status() reports the native AtomicBoolean reset to false
+    // but SharedPrefs say a session was running. Means a heartbeat-driven
+    // resurrection is incoming; the UI should keep its restore overlay up
+    // longer than the default 4-s window.
+    let interruptedRecovery = false;
+    let interruptedFilename = '';
+    let interruptedSessionStartMs = 0;
+    const statusReadyCallbacks = [];
+    let statusReady = false;
     const hrListeners = [];
     const stateListeners = [];
     const errorListeners = [];
     const trimMemoryListeners = [];
     const sessionInterruptedListeners = [];
+
+    function fireStatusReady() {
+      statusReady = true;
+      const cbs = statusReadyCallbacks.splice(0);
+      for (const cb of cbs) { try { cb(); } catch (e) {} }
+    }
 
     // Seed publishing flag from native state so WebView reload doesn't lose it.
     try {
@@ -32,13 +48,22 @@
           if (s && s.sessionActive) {
             publishing = true;
             csvFilename = s.csvFile || csvFilename;
+            sessionStartMs = s.sessionStartMs || 0;
             for (const cb of stateListeners) {
               try { cb({ ble: !!s.bleConnected, relay: !!s.relayLive, session: true }); } catch (e) {}
             }
           }
-        }).catch(function () { /* no-op */ });
+          if (s && s.interruptedRecovery) {
+            interruptedRecovery = true;
+            interruptedFilename = s.interruptedFilename || '';
+            interruptedSessionStartMs = s.interruptedSessionStartMs || 0;
+          }
+          fireStatusReady();
+        }).catch(function () { fireStatusReady(); });
+      } else {
+        fireStatusReady();
       }
-    } catch (e) {}
+    } catch (e) { fireStatusReady(); }
 
     plugin.addListener('hr', function (data) {
       for (const cb of hrListeners) {
@@ -71,6 +96,22 @@
       isAvailable: true,
       isPublishing: function () { return publishing; },
       getCsvFilename: function () { return csvFilename; },
+      getSessionStartMs: function () { return sessionStartMs || interruptedSessionStartMs || 0; },
+      isInterruptedRecoveryPending: function () { return interruptedRecovery && !publishing; },
+      getInterruptedInfo: function () {
+        return {
+          pending: interruptedRecovery && !publishing,
+          filename: interruptedFilename,
+          sessionStartMs: interruptedSessionStartMs,
+        };
+      },
+      // Resolves once the initial status() IPC has completed (success or
+      // failure). Lets the page-level bootstrap branch on the recovery state
+      // synchronously instead of polling.
+      whenStatusReady: function () {
+        if (statusReady) return Promise.resolve();
+        return new Promise(function (resolve) { statusReadyCallbacks.push(resolve); });
+      },
       scan: function (opts) {
         return plugin.scan(opts || {});
       },
@@ -80,13 +121,18 @@
       startSession: function (opts) {
         return plugin.startSession(opts).then(function (r) {
           publishing = true;
+          interruptedRecovery = false;
           csvFilename = r && r.csvFile || null;
+          if (r && r.sessionStartMs) sessionStartMs = r.sessionStartMs;
+          else if (opts && opts.resumeSessionStartMs) sessionStartMs = opts.resumeSessionStartMs;
           return r;
         });
       },
       stopSession: function () {
         return plugin.stopSession().then(function (r) {
           publishing = false;
+          interruptedRecovery = false;
+          sessionStartMs = 0;
           return r;
         });
       },

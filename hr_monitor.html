@@ -3475,6 +3475,92 @@
     });
   }
 
+  // Proactive "your phone killed Aorti overnight" prompt. Triggered from the
+  // recovery paths after a kill is detected. Throttled to once per 14 days
+  // so we don't nag a user who has already declined; cleared on Allow so we
+  // never re-ask once they've added Aorti to the OEM allowlist.
+  const OEM_PROMPT_LS_KEY = 'hrm_oem_whitelist_prompt';
+  const OEM_PROMPT_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
+
+  function maybePromptOemWhitelist() {
+    try {
+      if (!(window.HRMOem && window.HRMOem.isAvailable && window.HRMOem.hasKnownBackgroundKiller)) return;
+      let prev = null;
+      try { prev = JSON.parse(localStorage.getItem(OEM_PROMPT_LS_KEY) || 'null'); } catch (e) {}
+      if (prev && prev.state === 'added') return;
+      if (prev && prev.state === 'dismissed' && (Date.now() - (prev.ts || 0)) < OEM_PROMPT_COOLDOWN_MS) return;
+      setTimeout(showOemWhitelistModal, 3500);
+    } catch (e) {}
+  }
+
+  function showOemWhitelistModal() {
+    if (document.getElementById('hrm-oem-prompt-overlay')) return;
+    const vendor = (window.HRMOem && window.HRMOem.vendor) || 'other';
+    const mfrName = (window.HRMOem && window.HRMOem.manufacturer) || 'Your phone';
+    let listLabel = 'background allow list';
+    let bodyText = mfrName + ' suspended Aorti while your screen was off. We restored the session, but to keep recording reliably you can add Aorti to ' + mfrName + '\'s background allow list.';
+    if (vendor === 'samsung') {
+      listLabel = 'Never sleeping apps';
+      bodyText = 'Samsung paused Aorti overnight. We restored your session, but to record reliably while the screen is off, add Aorti to "Never sleeping apps" in Samsung Device care.';
+    } else if (vendor === 'xiaomi') {
+      listLabel = 'Autostart';
+      bodyText = 'Xiaomi paused Aorti overnight. We restored your session, but to record reliably you should enable Aorti in Xiaomi\'s Autostart list.';
+    } else if (vendor === 'huawei' || vendor === 'honor') {
+      listLabel = 'Protected apps';
+      bodyText = mfrName + ' paused Aorti overnight. We restored your session, but to record reliably you should add Aorti to Protected / Startup apps.';
+    } else if (vendor === 'oppo' || vendor === 'realme') {
+      listLabel = 'Startup apps';
+      bodyText = mfrName + ' paused Aorti overnight. We restored your session, but to record reliably you should add Aorti to the Startup list.';
+    } else if (vendor === 'vivo') {
+      listLabel = 'Background app starts';
+      bodyText = 'Vivo paused Aorti overnight. We restored your session, but to record reliably you should allow Aorti in Background app starts.';
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'hrm-oem-prompt-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:19500;display:flex;align-items:center;justify-content:center;padding:24px;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#131313;border:1px solid #2a2a2a;border-radius:14px;color:#d8d8d8;width:100%;max-width:440px;padding:22px 24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+    const h = document.createElement('div');
+    h.textContent = 'Aorti was paused overnight';
+    h.style.cssText = 'font-size:15px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-bottom:10px;';
+    const body = document.createElement('div');
+    body.textContent = bodyText;
+    body.style.cssText = 'font-size:13px;color:#b0b0b0;line-height:1.55;margin-bottom:16px;';
+    const note = document.createElement('div');
+    note.textContent = 'Tap Allow, then toggle Aorti on. You only need to do this once.';
+    note.style.cssText = 'font-size:12px;color:#8a8a8a;line-height:1.5;margin-bottom:18px;';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;';
+    const allow = document.createElement('button');
+    allow.textContent = 'Add to ' + listLabel;
+    allow.style.cssText = 'flex:1;min-width:140px;background:#5DCAA5;color:#0a0a0a;border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;';
+    const later = document.createElement('button');
+    later.textContent = 'Not now';
+    later.style.cssText = 'background:transparent;color:#8a8a8a;border:1px solid #2a2a2a;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;';
+    actions.appendChild(allow);
+    actions.appendChild(later);
+    card.appendChild(h);
+    card.appendChild(body);
+    card.appendChild(note);
+    card.appendChild(actions);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    function persist(state) {
+      try { localStorage.setItem(OEM_PROMPT_LS_KEY, JSON.stringify({ state: state, ts: Date.now() })); } catch (e) {}
+    }
+    function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+
+    allow.addEventListener('click', () => {
+      persist('added');
+      try { window.HRMOem.openBackgroundSettings().catch(() => {}); } catch (e) {}
+      close();
+    });
+    later.addEventListener('click', () => { persist('dismissed'); close(); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) { persist('dismissed'); close(); } });
+  }
+
   // Per-tab device identity. Generated once on first broadcast and kept for
   // the tab's lifetime (sessionStorage, not localStorage — two tabs in the
   // same browser need distinct IDs so a double-broadcast shows up clearly on
@@ -3981,6 +4067,27 @@
             $('overlay-status').textContent = '• LIVE';
             setConnState('live');
             updateSessionToggle();
+            try {
+              const overlay = $('restore-overlay');
+              if (overlay) overlay.classList.remove('shown');
+              document.documentElement.classList.remove('restoring');
+              if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+            } catch (eOv) {}
+            try {
+              const startMs = d.sessionStartMs || 0;
+              const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
+              const totalMin = Math.floor(elapsedMs / 60000);
+              const h = Math.floor(totalMin / 60);
+              const m = totalMin % 60;
+              const dur = h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
+              showToast(elapsedMs > 0
+                ? ('Session resumed. ' + dur + ' recorded so far.')
+                : 'Session resumed.', 5000);
+            } catch (eT) {}
+            // The sessionInterrupted path only fires when the prior process
+            // was killed. That's the moment to surface the OEM allowlist
+            // prompt — kills are exactly what it prevents.
+            try { maybePromptOemWhitelist(); } catch (eP) {}
           } catch (e) {
             if (window.HRMLog) window.HRMLog.event('sessionInterrupted resume failed', e && e.message ? e.message : String(e));
           }
@@ -4016,7 +4123,9 @@
     }
     const last = getLastStrap();
     device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
-    if (state.startTime === null) state.startTime = Date.now();
+    const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
+      ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
+    if (state.startTime === null) state.startTime = nativeStartMs > 0 ? nativeStartMs : Date.now();
     state.lastDataTime = Date.now();
     state.autoReconnect = true;
     setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
@@ -4043,6 +4152,20 @@
           // web-level overlay so the user sees a clean handoff to the
           // populated chart.
           if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+          try {
+            const startMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
+              ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
+            const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
+            const totalMin = Math.floor(elapsedMs / 60000);
+            const h = Math.floor(totalMin / 60);
+            const m = totalMin % 60;
+            const dur = h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
+            if (typeof showToast === 'function') {
+              showToast(elapsedMs > 60000
+                ? ('Session resumed. ' + dur + ' recorded so far.')
+                : 'Session resumed.', 5000);
+            }
+          } catch (eT) {}
         });
     }
     return true;
@@ -4168,26 +4291,55 @@
 
   (function waitForNativeSession() {
     if (restoreNativeSessionUI()) return;
-    let tries = 0;
-    const timer = setInterval(() => {
-      if (restoreNativeSessionUI()) { clearInterval(timer); return; }
-      if (++tries > 40) {
-        clearInterval(timer);
-        // No session was actually active — release the restore overlay so
-        // the user sees the normal monitor UI instead of an indefinite spinner.
-        document.documentElement.classList.remove('restoring');
-        try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
-        if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
-        if (window.HRMLog) {
-          let reason = 'shim_missing';
-          if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) {
-            reason = (window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing())
-              ? 'publishing_true_but_skipped' : 'not_publishing_after_4s';
-          }
-          window.HRMLog.event('native session not detected (4s)', reason);
+    const overlay = $('restore-overlay');
+    function dismissAll(reason) {
+      document.documentElement.classList.remove('restoring');
+      try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
+      if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+      if (overlay) overlay.classList.remove('shown');
+      if (window.HRMLog) window.HRMLog.event('native session bootstrap done', reason);
+    }
+    // Once the initial status() IPC has resolved, branch:
+    //   - publishing true   → restoreNativeSessionUI handles rehydrate
+    //   - recovery pending  → keep splash up for up to 60 s while the
+    //                         sessionInterrupted-driven resume runs
+    //   - neither           → cold start with no session; dismiss the
+    //                         splash immediately so the UI is interactive
+    function start() {
+      let tries = 0;
+      let maxTries = 40;
+      let extended = false;
+      const timer = setInterval(() => {
+        if (restoreNativeSessionUI()) { clearInterval(timer); return; }
+        const recoveryPending = !!(window.HRMNativeHrSession
+          && window.HRMNativeHrSession.isInterruptedRecoveryPending
+          && window.HRMNativeHrSession.isInterruptedRecoveryPending());
+        if (!extended && recoveryPending) {
+          extended = true;
+          maxTries = 600;
+          if (overlay) overlay.classList.add('shown');
+          if (window.HRMLog) window.HRMLog.event('native recovery pending, extending wait to 60s');
         }
-      }
-    }, 100);
+        if (++tries > maxTries) {
+          clearInterval(timer);
+          dismissAll(extended ? 'not_publishing_after_60s' : 'not_publishing_after_4s');
+        }
+      }, 100);
+    }
+    const ns = window.HRMNativeHrSession;
+    if (ns && typeof ns.whenStatusReady === 'function') {
+      ns.whenStatusReady().then(() => {
+        const publishing = !!(ns.isPublishing && ns.isPublishing());
+        const recoveryPending = !!(ns.isInterruptedRecoveryPending && ns.isInterruptedRecoveryPending());
+        if (publishing) { start(); return; }
+        if (recoveryPending) { start(); return; }
+        // Genuinely a cold start. Dismiss the native splash now so the UI is
+        // visible immediately instead of waiting out the 4-s safety poll.
+        dismissAll('cold_start_no_session');
+      }).catch(() => start());
+    } else {
+      start();
+    }
   })();
   // Safety net: if neither rehydrate completion nor the 4s timeout fires
   // (e.g. the rehydrate hangs on an IPC call), don't leave the user

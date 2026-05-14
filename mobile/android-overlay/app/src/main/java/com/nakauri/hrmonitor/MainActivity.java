@@ -43,12 +43,13 @@ public class MainActivity extends BridgeActivity {
     // fires.
     private View restoreOverlay;
     private Runnable restoreSafetyTimer;
-    // Short safety timer: the overlay is purely a visual transition, not a
-    // ready-state gate. JS dismisses on visibilitychange-visible and on
-    // page init; this is just the fallback so a missed signal can't strand
-    // the user staring at a spinner. 5 s is long enough for the WebView's
-    // first paint after resume on the S8.
-    private static final long OVERLAY_SAFETY_MS = 5000L;
+    // Cold-launch safety timer. Cold WebView startup on the S8 (Android 9)
+    // can take 8-15 s before the page is interactive, between Chromium init,
+    // CDN-loaded Chart.js, Google Fonts, and the 278 KB HTML parse. Long
+    // window so the user sees the branded splash for the duration instead
+    // of a blank WebView; JS dismisses earlier via RestoreOverlayPlugin.hide
+    // once the bootstrap settles.
+    private static final long OVERLAY_SAFETY_MS = 25000L;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -65,7 +66,11 @@ public class MainActivity extends BridgeActivity {
         // renderer; reloading the page in place beats Activity teardown.
         try {
             if (bridge != null && bridge.getWebView() != null) {
-                bridge.getWebView().setWebViewClient(new HrMonitorWebViewClient(bridge));
+                WebView wv = bridge.getWebView();
+                wv.setWebViewClient(new HrMonitorWebViewClient(bridge));
+                // Dark default behind the page so the gap between the splash
+                // dismissing and the page's first paint isn't a white flash.
+                wv.setBackgroundColor(0xFF0A0A0A);
             }
         } catch (Throwable t) {
             Log.w(TAG, "Could not install renderer-recovery WebViewClient: " + t.getMessage());
