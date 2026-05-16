@@ -4065,12 +4065,44 @@
     updateSessionToggle();
   }
 
+  // Waits for the first HR notification with a beat count > 0. Resolves
+  // when BLE actually starts delivering data; rejects on timeout. Used by
+  // the recovery flow to confirm GATT is alive before declaring success
+  // (startSession resolves the moment native sets up its session struct;
+  // the BLE link establishes async via gattCallback.onConnectionStateChange).
+  function waitForFirstHr(timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      if (!(window.HRMNativeHrSession && window.HRMNativeHrSession.onHr)) {
+        reject(new Error('no_hr_listener'));
+        return;
+      }
+      let settled = false;
+      let timer = null;
+      const unsub = window.HRMNativeHrSession.onHr(function (d) {
+        if (settled) return;
+        if (!d || !d.hr || d.hr <= 0) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        try { unsub(); } catch (e) {}
+        resolve(d);
+      });
+      timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        try { unsub(); } catch (e) {}
+        reject(new Error('no_hr_within_timeout'));
+      }, timeoutMs);
+    });
+  }
+
   // Perform the actual reconnect + startSession after a process kill. The
-  // controller awaits this; the publishingStarted event from the plugin
-  // is what tells the controller the session is back up.
+  // controller awaits this. We only declare success once BLE is actually
+  // delivering HR data — startSession's resolution is "session is set up
+  // on native" not "GATT is live and notifying."
   async function performRecoveryFromContext(ctx) {
     if (!ctx || !ctx.mac) throw new Error('no_mac_in_recovery_context');
     device = { name: 'HR Strap', id: ctx.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
+    setStatus('Reconnecting strap...', 'pending');
     await window.HRMNativeHrSession.connect(ctx.mac);
     await window.HRMNativeHrSession.startSession({
       broadcastKey: ctx.broadcastKey || getOrCreateBroadcastKey(),
@@ -4080,6 +4112,10 @@
       resumeFilename: ctx.activeCsvFilename || '',
       resumeSessionStartMs: ctx.sessionStartMs || 0,
     });
+    // Gate on actual data flow. 12 s is enough for a bonded reconnect on
+    // the S8 with the strap already on the user; longer values just delay
+    // the user-facing failure UI.
+    await waitForFirstHr(12000);
     device.gatt.connected = true;
     if (state.startTime === null) state.startTime = ctx.sessionStartMs || Date.now();
     state.lastDataTime = Date.now();
@@ -4090,7 +4126,6 @@
     $('overlay-status').textContent = '• LIVE';
     setConnState('live');
     updateSessionToggle();
-    try { maybePromptOemWhitelist(); } catch (e) {}
     try {
       const startMs = ctx.sessionStartMs || 0;
       const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
@@ -4102,6 +4137,13 @@
         showToast(elapsedMs > 0 ? ('Session resumed. ' + dur + ' recorded so far.') : 'Session resumed.', 5000);
       }
     } catch (e) {}
+    // Defer the OEM allowlist prompt until well after BLE settles. Firing
+    // it inside the recovery window switches Activity focus and races the
+    // GATT handshake, which is exactly what we don't want when proving
+    // recovery works.
+    setTimeout(function () {
+      try { maybePromptOemWhitelist(); } catch (e) {}
+    }, 8000);
   }
 
   // Reads the native session's CSV and rebuilds in-memory chart state from
