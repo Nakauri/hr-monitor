@@ -216,22 +216,13 @@ public class NativeHrSessionPlugin extends Plugin {
                 + " fgLoss=" + lastFgLossReason + "@" + lastFgLossMs
                 + " trim=" + lastTrimLevel + "@" + lastTrimMs);
             if (wasActive && !cleanlyStopped) {
-                JSObject ev = new JSObject();
-                ev.put("mac", prefs.getString("lastConnectedMac", ""));
-                ev.put("broadcastKey", prefs.getString("broadcastKey", ""));
-                ev.put("senderId", prefs.getString("senderId", ""));
-                ev.put("senderLabel", prefs.getString("senderLabel", ""));
-                ev.put("broadcastEnabled", prefs.getBoolean("broadcastEnabled", true));
-                ev.put("sessionStartMs", prefs.getLong("sessionStartMs", 0));
-                ev.put("activeCsvFilename", prefs.getString("activeCsvFilename", ""));
-                ev.put("lastAliveMs", lastAliveMs);
-                ev.put("lastFgLossReason", lastFgLossReason);
-                ev.put("lastFgLossMs", lastFgLossMs);
-                ev.put("lastTrimMemoryLevel", lastTrimLevel);
-                ev.put("lastTrimMemoryMs", lastTrimMs);
-                // Defer slightly so JS listener attachment beats the event.
-                mainHandler.postDelayed(() -> notifyListeners("sessionInterrupted", ev), 1500);
-                Log.i(TAG, "Detected interrupted session — will signal JS for auto-resume.");
+                Log.i(TAG, "Detected interrupted session — JS will read context from status().");
+                // Transitional emit while external consumers migrate to reading
+                // the recovery context from status(). Remove after one stable
+                // overnight soak.
+                JSObject ev = buildRecoveryContext(prefs, lastAliveMs,
+                    lastFgLossReason, lastFgLossMs, lastTrimLevel, lastTrimMs);
+                notifyListeners("sessionInterrupted", ev);
             }
         } catch (Throwable t) {
             Log.w(TAG, "Interrupted-session detection failed: " + t.getMessage());
@@ -604,6 +595,10 @@ public class NativeHrSessionPlugin extends Plugin {
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
         emitState();
+        JSObject startedEv = new JSObject();
+        startedEv.put("sessionStartMs", sessionStartMs);
+        if (csv != null) startedEv.put("csvFile", csv.getFilename());
+        notifyListeners("publishingStarted", startedEv);
         JSObject ret = new JSObject();
         ret.put("started", true);
         if (csv != null) ret.put("csvFile", csv.getFilename());
@@ -635,6 +630,9 @@ public class NativeHrSessionPlugin extends Plugin {
                 .putBoolean("cleanlyStopped", true)
                 .commit();
         } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
+        JSObject stoppedEv = new JSObject();
+        stoppedEv.put("reason", "plugin_stop");
+        notifyListeners("publishingStopped", stoppedEv);
         HrServiceHeartbeatReceiver.cancel(getContext());
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.removeCallbacks(gattReconnectRunnable);
@@ -1053,26 +1051,49 @@ public class NativeHrSessionPlugin extends Plugin {
             ret.put("csvFile", csv.getFilename());
             ret.put("sessionStartMs", csv.getSessionStartMs());
         }
-        // Recovery hint for the JS bootstrap. After a process kill the
-        // AtomicBoolean resets to false but SharedPrefs still says a session
-        // was running and the heartbeat path is about to resurrect it. JS
-        // reads this synchronously so the "Resuming session..." overlay can
-        // stay up instead of timing out before the deferred sessionInterrupted
-        // event drives the actual resume.
+        // When the in-memory AtomicBoolean disagrees with persisted state, the
+        // process was killed mid-session. JS reads the recoveryContext block
+        // synchronously from this snapshot — no event timing race.
         try {
-            android.content.SharedPreferences prefs = getContext().getSharedPreferences("hr_monitor_session", 0);
+            android.content.SharedPreferences prefs = getContext()
+                .getSharedPreferences("hr_monitor_session", 0);
             boolean prefsActive = prefs.getBoolean("sessionActive", false);
             boolean cleanly = prefs.getBoolean("cleanlyStopped", true);
             boolean recoveryPending = prefsActive && !cleanly && !active;
             ret.put("interruptedRecovery", recoveryPending);
             if (recoveryPending) {
-                ret.put("interruptedFilename", prefs.getString("activeCsvFilename", ""));
-                ret.put("interruptedSessionStartMs", prefs.getLong("sessionStartMs", 0));
+                ret.put("recoveryContext", buildRecoveryContext(prefs,
+                    prefs.getLong("last_alive_ms", 0),
+                    prefs.getString("last_fg_loss_reason", null),
+                    prefs.getLong("last_fg_loss_ms", 0),
+                    prefs.getInt("last_trim_memory_level", 0),
+                    prefs.getLong("last_trim_memory_ms", 0)));
             }
         } catch (Throwable ignored) {
             ret.put("interruptedRecovery", false);
         }
         call.resolve(ret);
+    }
+
+    // Single source of truth for the interrupted-recovery payload. Consumed
+    // by both status() (snapshot) and the load()'s transitional event emit.
+    private JSObject buildRecoveryContext(android.content.SharedPreferences prefs,
+            long lastAliveMs, String lastFgLossReason, long lastFgLossMs,
+            int lastTrimLevel, long lastTrimMs) {
+        JSObject ctx = new JSObject();
+        ctx.put("mac", prefs.getString("lastConnectedMac", ""));
+        ctx.put("broadcastKey", prefs.getString("broadcastKey", ""));
+        ctx.put("senderId", prefs.getString("senderId", ""));
+        ctx.put("senderLabel", prefs.getString("senderLabel", ""));
+        ctx.put("broadcastEnabled", prefs.getBoolean("broadcastEnabled", true));
+        ctx.put("sessionStartMs", prefs.getLong("sessionStartMs", 0));
+        ctx.put("activeCsvFilename", prefs.getString("activeCsvFilename", ""));
+        ctx.put("lastAliveMs", lastAliveMs);
+        ctx.put("lastFgLossReason", lastFgLossReason);
+        ctx.put("lastFgLossMs", lastFgLossMs);
+        ctx.put("lastTrimMemoryLevel", lastTrimLevel);
+        ctx.put("lastTrimMemoryMs", lastTrimMs);
+        return ctx;
     }
 
     // ---- BLE plumbing ----------------------------------------------------

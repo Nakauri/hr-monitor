@@ -39,17 +39,15 @@ public class MainActivity extends BridgeActivity {
     // Native loading overlay. Branded splash + spinner painted ON TOP of
     // the WebView whenever the Activity comes to the foreground while a
     // session is active. JS calls RestoreOverlayPlugin.hide() once the
-    // page has rehydrated. 60-second safety timer dismisses if JS never
-    // fires.
+    // page has rehydrated. This native timer is the WebView-dead-on-arrival
+    // fence; JS owns its own shorter ceiling for recovery flows.
     private View restoreOverlay;
     private Runnable restoreSafetyTimer;
-    // Cold-launch safety timer. Cold WebView startup on the S8 (Android 9)
-    // can take 8-15 s before the page is interactive, between Chromium init,
-    // CDN-loaded Chart.js, Google Fonts, and the 278 KB HTML parse. Long
-    // window so the user sees the branded splash for the duration instead
-    // of a blank WebView; JS dismisses earlier via RestoreOverlayPlugin.hide
-    // once the bootstrap settles.
-    private static final long OVERLAY_SAFETY_MS = 25000L;
+    // Sits above the JS state controller's 30 s recovery ceiling so the
+    // controller has room to render a recovery_failed UI before this fence
+    // trips. Only relevant when JS never runs at all (renderer dead / WebView
+    // crashed mid-bootstrap).
+    private static final long OVERLAY_SAFETY_MS = 45000L;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -160,9 +158,21 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         try {
-            android.content.SharedPreferences prefs = getSharedPreferences("hr_monitor_session", 0);
-            boolean active = prefs.getBoolean("sessionActive", false);
-            boolean cleanly = prefs.getBoolean("cleanlyStopped", true);
+            // Source of truth: the AtomicBoolean inside the live plugin. The
+            // prefs are last-write-wins crash anchors, not the real state.
+            // Falling back to prefs only when the plugin hasn't initialised
+            // yet (race during process restart).
+            NativeHrSessionPlugin p = NativeHrSessionPlugin.instance;
+            boolean active;
+            boolean cleanly;
+            if (p != null) {
+                active = p.isSessionActive();
+                cleanly = !active;
+            } else {
+                android.content.SharedPreferences prefs = getSharedPreferences("hr_monitor_session", 0);
+                active = prefs.getBoolean("sessionActive", false);
+                cleanly = prefs.getBoolean("cleanlyStopped", true);
+            }
             if (active && !cleanly) showRestoreOverlay();
         } catch (Throwable t) {
             Log.w(TAG, "onResume overlay check failed: " + t.getMessage());
@@ -303,7 +313,7 @@ public class MainActivity extends BridgeActivity {
      *  "JS hide() never came" from a normal dismissal. */
     private void hideRestoreOverlayBySafetyTimer() {
         if (restoreOverlay != null) {
-            Log.w(TAG, "Restore overlay auto-hidden by 60 s safety timer (JS hide() not received)");
+            Log.w(TAG, "Restore overlay auto-hidden by " + (OVERLAY_SAFETY_MS / 1000) + " s safety timer (JS hide() not received)");
         }
         hideRestoreOverlay();
     }
