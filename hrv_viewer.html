@@ -4493,32 +4493,58 @@
     const sdnnMatch = Array.from(sdnnMatchByEp.values()).sort((a, b) => a.x - b.x);
     const sdnn5min = Array.from(sdnn5minByEp.values()).sort((a, b) => a.x - b.x);
 
-    // Walk each session's summary and shift its events into day-minute space.
-    // Each event type has its own time-bearing fields: events use {t},
-    // warnSegs/palpClusters/connGaps/hrDeltas/chillsWindows/postureSpans use
-    // {start, end}, flushes use both {start, end, t}. Missing any field leaves
-    // events clustered at session-relative time and mis-places them on the chart.
-    const shiftBy = (obj, off, keys) => {
+    // Walk each session's summary and shift its events into day-minute space,
+    // then clip to [0, 1440] so cross-day sessions don't bleed markers into
+    // adjacent days. Marker families fall into two shapes:
+    //   point  — anchored on {t}: events. Drop entirely if anchor falls outside the day.
+    //   range  — anchored on {start, end}: warnSegs/palpClusters/connGaps/hrDeltas/
+    //            chillsWindows/postureSpans. Clip to [0, 1440]; drop if no overlap.
+    //   flushes are range-primary with an additional peak {t}; clip the range, clamp t
+    //   to within the clipped range, never delete on t-alone.
+    const DAY_MAX = 1440;
+    const shiftPoint = (obj, off, anchor) => {
+      const v = obj[anchor];
+      if (typeof v !== 'number') return null;
+      const shifted = v + off;
+      if (shifted < 0 || shifted > DAY_MAX) return null;
       const r = { ...obj };
-      for (const k of keys) if (typeof r[k] === 'number') r[k] += off;
+      r[anchor] = shifted;
+      return r;
+    };
+    const shiftRange = (obj, off) => {
+      const s0 = obj.start, e0 = obj.end;
+      if (typeof s0 !== 'number' || typeof e0 !== 'number') return null;
+      const start = Math.max(0, s0 + off);
+      const end = Math.min(DAY_MAX, e0 + off);
+      if (end <= start) return null;
+      return { ...obj, start, end };
+    };
+    const shiftFlush = (obj, off) => {
+      const r = shiftRange(obj, off);
+      if (!r) return null;
+      if (typeof obj.t === 'number') {
+        const tShifted = obj.t + off;
+        r.t = Math.max(r.start, Math.min(r.end, tShifted));
+      }
       return r;
     };
     const events = [], warnSegs = [], palpClusters = [], connGaps = [];
     const hrDeltas = [], flushes = [], chillsWindows = [], postureSpans = [];
     let palpCount = 0;
+    const pushIf = (arr, v) => { if (v) arr.push(v); };
     for (const fn of files) {
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
       if (!s || !meta) continue;
       const offset = (sessionStartEpoch(s, meta) - startOfDay) / 60000;
-      for (const e of (s.events || [])) events.push(shiftBy(e, offset, ['t']));
-      for (const w of (s.warnSegs || [])) warnSegs.push(shiftBy(w, offset, ['start', 'end']));
-      for (const p of (s.palpClusters || [])) palpClusters.push(shiftBy(p, offset, ['start', 'end']));
-      for (const g of (s.connGaps || [])) connGaps.push(shiftBy(g, offset, ['start', 'end']));
-      for (const d of (s.hrDeltas || [])) hrDeltas.push(shiftBy(d, offset, ['start', 'end']));
-      for (const f of (s.flushes || [])) flushes.push(shiftBy(f, offset, ['start', 'end', 't']));
-      for (const c of (s.chillsWindows || [])) chillsWindows.push(shiftBy(c, offset, ['start', 'end']));
-      for (const ps of (s.postureSpans || [])) postureSpans.push(shiftBy(ps, offset, ['start', 'end']));
+      for (const e of (s.events || [])) pushIf(events, shiftPoint(e, offset, 't'));
+      for (const w of (s.warnSegs || [])) pushIf(warnSegs, shiftRange(w, offset));
+      for (const p of (s.palpClusters || [])) pushIf(palpClusters, shiftRange(p, offset));
+      for (const g of (s.connGaps || [])) pushIf(connGaps, shiftRange(g, offset));
+      for (const d of (s.hrDeltas || [])) pushIf(hrDeltas, shiftRange(d, offset));
+      for (const f of (s.flushes || [])) pushIf(flushes, shiftFlush(f, offset));
+      for (const c of (s.chillsWindows || [])) pushIf(chillsWindows, shiftRange(c, offset));
+      for (const ps of (s.postureSpans || [])) pushIf(postureSpans, shiftRange(ps, offset));
       palpCount += (s.palpCount || 0);
     }
 
@@ -8605,6 +8631,9 @@
   function zoomTo(t, span) {
     if (!currentSummary) return;
     const s = currentSummary;
+    // Clamp t to the chart's range so a marker that snuck through with a
+    // negative or out-of-range time can't collapse the brush to zero width.
+    t = Math.max(0, Math.min(s.duration, t));
     // Default to a tight 4-minute window so a marker is actually visible at
     // the centre of the zoom. The earlier 4%-of-duration default produced
     // ~1-hour-wide windows on overnight sessions, which read as "didn't
