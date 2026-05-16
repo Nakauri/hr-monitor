@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -79,6 +80,7 @@ public class NativeHrService extends Service {
             // stopSessionInternal (which would close the fresh GATT).
             NativeHrSessionPlugin plugin = NativeHrSessionPlugin.instance;
             boolean sessionLive = plugin != null && plugin.isSessionActive();
+            setFgLossReason(this, sessionLive ? "user_stop_button" : "stale_action_stop");
             if (sessionLive) {
                 try { plugin.stopSessionInternal(); }
                 catch (Throwable t) { Log.w(TAG, "stopSessionInternal threw: " + t.getMessage()); }
@@ -101,6 +103,7 @@ public class NativeHrService extends Service {
 
     @Override
     public void onDestroy() {
+        setFgLossReason(this, "service_on_destroy");
         try { stopForeground(true); } catch (Throwable ignored) {}
         releaseWakeLock();
         super.onDestroy();
@@ -109,22 +112,30 @@ public class NativeHrService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
-    // Swipe-to-stop: terminate the session. Posted to main thread because
-    // onTaskRemoved fires on a binder thread (would ANR + race BLE callback).
+    // Session survives swipe-from-recents. Only the notification Stop button
+    // (ACTION_STOP) and JS-initiated stopSession may terminate a session.
+    // Samsung One UI invokes onTaskRemoved on long-destroyed Activities even
+    // without a user gesture; terminating here loses overnight recordings.
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        Log.i(TAG, "onTaskRemoved — terminating session");
-        final NativeHrSessionPlugin plugin = NativeHrSessionPlugin.instance;
-        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
-            try {
-                if (plugin != null) plugin.stopSessionInternal();
-            } catch (Throwable t) {
-                Log.w(TAG, "stopSessionInternal threw: " + t.getMessage());
-            }
-            try { stopForeground(true); } catch (Throwable ignored) {}
-            stopSelf();
-        });
+        Log.i(TAG, "onTaskRemoved — ignoring (session-survives-swipe)");
+        setFgLossReason(this, "task_removed_ignored");
         super.onTaskRemoved(rootIntent);
+    }
+
+    // Synchronous probe write. Both keys committed together so a post-mortem
+    // adb shell run-as ... cat shared_prefs/hr_monitor_session.xml names the
+    // exit door + when. .commit() because we may be torn down within frames.
+    static void setFgLossReason(Context ctx, String reason) {
+        try {
+            SharedPreferences prefs = ctx.getSharedPreferences("hr_monitor_session", 0);
+            prefs.edit()
+                .putString("last_fg_loss_reason", reason)
+                .putLong("last_fg_loss_ms", System.currentTimeMillis())
+                .commit();
+        } catch (Throwable t) {
+            Log.w(TAG, "setFgLossReason failed: " + t.getMessage());
+        }
     }
 
     private void ensureChannel() { ensureChannelStatic(this); }

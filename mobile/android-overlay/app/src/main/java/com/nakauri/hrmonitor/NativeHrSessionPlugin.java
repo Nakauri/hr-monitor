@@ -132,6 +132,11 @@ public class NativeHrSessionPlugin extends Plugin {
     private String senderLabel;
     private long sessionStartMs;
     private final AtomicBoolean sessionActive = new AtomicBoolean(false);
+    // Throttle for the post-mortem alive-pulse pref write. shared_prefs.apply
+    // is cheap but at 1 Hz the file rewrites would still churn — 10 sec is
+    // fine resolution for "when did we last record" forensics.
+    private static final long ALIVE_WRITE_INTERVAL_MS = 10_000L;
+    private long lastAliveWriteMs = 0L;
 
     // RR + RMSSD
     private final Deque<RrEntry> rrWindow = new ArrayDeque<>();
@@ -202,6 +207,14 @@ public class NativeHrSessionPlugin extends Plugin {
             android.content.SharedPreferences prefs = getContext().getSharedPreferences("hr_monitor_session", 0);
             boolean wasActive = prefs.getBoolean("sessionActive", false);
             boolean cleanlyStopped = prefs.getBoolean("cleanlyStopped", true);
+            long lastAliveMs = prefs.getLong("last_alive_ms", 0);
+            String lastFgLossReason = prefs.getString("last_fg_loss_reason", null);
+            long lastFgLossMs = prefs.getLong("last_fg_loss_ms", 0);
+            int lastTrimLevel = prefs.getInt("last_trim_memory_level", 0);
+            long lastTrimMs = prefs.getLong("last_trim_memory_ms", 0);
+            Log.i(TAG, "Post-mortem: lastAlive=" + lastAliveMs
+                + " fgLoss=" + lastFgLossReason + "@" + lastFgLossMs
+                + " trim=" + lastTrimLevel + "@" + lastTrimMs);
             if (wasActive && !cleanlyStopped) {
                 JSObject ev = new JSObject();
                 ev.put("mac", prefs.getString("lastConnectedMac", ""));
@@ -211,6 +224,11 @@ public class NativeHrSessionPlugin extends Plugin {
                 ev.put("broadcastEnabled", prefs.getBoolean("broadcastEnabled", true));
                 ev.put("sessionStartMs", prefs.getLong("sessionStartMs", 0));
                 ev.put("activeCsvFilename", prefs.getString("activeCsvFilename", ""));
+                ev.put("lastAliveMs", lastAliveMs);
+                ev.put("lastFgLossReason", lastFgLossReason);
+                ev.put("lastFgLossMs", lastFgLossMs);
+                ev.put("lastTrimMemoryLevel", lastTrimLevel);
+                ev.put("lastTrimMemoryMs", lastTrimMs);
                 // Defer slightly so JS listener attachment beats the event.
                 mainHandler.postDelayed(() -> notifyListeners("sessionInterrupted", ev), 1500);
                 Log.i(TAG, "Detected interrupted session — will signal JS for auto-resume.");
@@ -607,6 +625,7 @@ public class NativeHrSessionPlugin extends Plugin {
     public boolean isSessionActive() { return sessionActive.get(); }
 
     public void stopSessionInternal() {
+        NativeHrService.setFgLossReason(getContext(), "plugin_stop_session_internal");
         sessionActive.set(false);
         // Set cleanlyStopped FIRST so heartbeat/boot receivers don't try to
         // resurrect this session if we're killed during the rest of teardown.
@@ -1162,6 +1181,13 @@ public class NativeHrSessionPlugin extends Plugin {
         long now = System.currentTimeMillis();
         lastHrAtMs = now;
         gattReconnectAttempts = 0;
+        if (now - lastAliveWriteMs >= ALIVE_WRITE_INTERVAL_MS) {
+            lastAliveWriteMs = now;
+            try {
+                getContext().getSharedPreferences("hr_monitor_session", 0)
+                    .edit().putLong("last_alive_ms", now).apply();
+            } catch (Throwable ignored) {}
+        }
         // synchronized: BLE binder writes, main thread reads in publishTick.
         Double rmssd;
         Double sdnnMatch;

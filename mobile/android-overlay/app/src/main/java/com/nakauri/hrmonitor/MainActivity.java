@@ -178,6 +178,12 @@ public class MainActivity extends BridgeActivity {
         super.onTrimMemory(level);
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
             try {
+                getSharedPreferences("hr_monitor_session", 0).edit()
+                    .putInt("last_trim_memory_level", level)
+                    .putLong("last_trim_memory_ms", System.currentTimeMillis())
+                    .apply();
+            } catch (Throwable ignored) {}
+            try {
                 NativeHrSessionPlugin p = NativeHrSessionPlugin.instance;
                 if (p != null) p.notifyTrimMemory(level);
             } catch (Throwable t) {
