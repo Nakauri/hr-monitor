@@ -13,8 +13,8 @@
   // full-page restore overlay becomes visible on the first frame so the
   // user doesn't stare at a blank page during JS load + CSV rehydrate.
   // Start Session clicks also use ?mode=online but don't set the flag —
-  // those are fresh begins, no spinner. Cleared by JS once
-  // rehydrateFromNativeCsv finishes or waitForNativeSession times out.
+  // those are fresh begins, no spinner. Cleared by the lifecycle
+  // controller's onHide hook once bootstrap or recovery completes.
   try {
     if (sessionStorage.getItem('hrm_resuming') === '1') {
       document.documentElement.classList.add('restoring');
@@ -32,6 +32,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
 <script src="./widget.js"></script>
+<script src="./lifecycle-state.js"></script>
 <link rel="stylesheet" href="./widget.css">
 <style>
   :root {
@@ -2328,22 +2329,18 @@
       resumeAudioKeepAliveIfNeeded();
       if (typeof refreshBattOpt === 'function') refreshBattOpt();
     } catch (e) {}
-    // Dismiss the native loading overlay IMMEDIATELY on resume — its only
-    // job is to cover the WebView during the OS-level activity-resume
-    // transition, not to wait for the rehydrate to finish. Rehydrate can
-    // be slow (10–30 s on S8 with a long CSV) and could hang if the user
-    // backgrounds again mid-fetch; gating dismiss on it leaves a stuck
-    // spinner.
-    try { if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide(); } catch (e) {}
     const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
-    if (wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
-        && window.HRMNativeHrSession
-        && window.HRMNativeHrSession.isPublishing
-        && window.HRMNativeHrSession.isPublishing()) {
+    const needsRehydrate = wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
+      && window.HRMNativeHrSession
+      && window.HRMNativeHrSession.isPublishing
+      && window.HRMNativeHrSession.isPublishing();
+    if (needsRehydrate && __hrLifecycle) {
+      // Controller shows the overlay, rehydrates, dismisses on completion.
       if (window.HRMLog) window.HRMLog.event('resume rehydrate', { hiddenSec: Math.round(hiddenMs / 1000) });
-      rehydrateFromNativeCsv().catch(e => {
-        if (window.HRMLog) window.HRMLog.event('resume rehydrate error', e && e.message ? e.message : String(e));
-      });
+      __hrLifecycle.onResume({ hiddenForMs: hiddenMs });
+    } else if (window.HRMRestoreOverlay) {
+      // Short hide: nothing to rehydrate, just dismiss any leftover overlay.
+      try { window.HRMRestoreOverlay.hide(); } catch (e) {}
     }
     try { updateCharts(); } catch (e) {}
     try { updateStats(); } catch (e) {}
@@ -4035,62 +4032,12 @@
           try { destroyCharts(); } catch (e) {}
         });
       }
-      // Auto-resume after a process kill mid-session. Heartbeat / boot
-      // receivers restart the FGS; this picks up cached MAC + broadcast
-      // settings and silently reconnects so the user's recording resumes
-      // without manual intervention.
+      // sessionInterrupted is now a delta notification only. Recovery context
+      // is read from status().recoveryContext (via the shim's getRecoveryContext)
+      // by the lifecycle controller's bootstrap path. This listener just logs.
       if (typeof window.HRMNativeHrSession.onSessionInterrupted === 'function') {
-        window.HRMNativeHrSession.onSessionInterrupted(async function (d) {
-          if (window.HRMLog) window.HRMLog.event('sessionInterrupted', d);
-          try {
-            if (!d || !d.mac) return;
-            // Set device stand-in so downstream UI works.
-            device = { name: 'HR Strap', id: d.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
-            await window.HRMNativeHrSession.connect(d.mac);
-            await window.HRMNativeHrSession.startSession({
-              broadcastKey: d.broadcastKey || getOrCreateBroadcastKey(),
-              senderId: d.senderId || getDeviceIdentity().id,
-              senderLabel: d.senderLabel || getDeviceIdentity().label,
-              broadcast: d.broadcastEnabled !== false,
-              // Append to the prior session's CSV instead of starting a new
-              // file — keeps a single recording continuous across resumes.
-              resumeFilename: d.activeCsvFilename || '',
-              resumeSessionStartMs: d.sessionStartMs || 0,
-            });
-            device.gatt.connected = true;
-            if (state.startTime === null) state.startTime = d.sessionStartMs || Date.now();
-            state.lastDataTime = Date.now();
-            state.autoReconnect = true;
-            startSessionAutoSave();
-            acquireWakeLock();
-            setStatus('Resumed session after restart.', 'connected');
-            $('overlay-status').textContent = '• LIVE';
-            setConnState('live');
-            updateSessionToggle();
-            try {
-              const overlay = $('restore-overlay');
-              if (overlay) overlay.classList.remove('shown');
-              document.documentElement.classList.remove('restoring');
-              if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
-            } catch (eOv) {}
-            try {
-              const startMs = d.sessionStartMs || 0;
-              const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
-              const totalMin = Math.floor(elapsedMs / 60000);
-              const h = Math.floor(totalMin / 60);
-              const m = totalMin % 60;
-              const dur = h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
-              showToast(elapsedMs > 0
-                ? ('Session resumed. ' + dur + ' recorded so far.')
-                : 'Session resumed.', 5000);
-            } catch (eT) {}
-            // The sessionInterrupted path only fires when the prior process
-            // was killed. That's the moment to surface the OEM allowlist
-            // prompt — kills are exactly what it prevents.
-            try { maybePromptOemWhitelist(); } catch (eP) {}
-          } catch (e) {
-            if (window.HRMLog) window.HRMLog.event('sessionInterrupted resume failed', e && e.message ? e.message : String(e));
-          }
+        window.HRMNativeHrSession.onSessionInterrupted(function (d) {
+          if (window.HRMLog) window.HRMLog.event('sessionInterrupted (transitional)', d);
         });
       }
       if (window.HRMLog) window.HRMLog.event('native-hr handler attached');
@@ -4100,27 +4047,11 @@
       return false;
     }
   }
-  (function waitForNativeHr() {
-    if (wireNativeHr()) return;
-    let tries = 0;
-    const timer = setInterval(() => {
-      if (wireNativeHr() || ++tries > 40) clearInterval(timer);
-    }, 100);
-  })();
-
-  // On page load / WebView reload, if the native session is still alive
-  // behind the scenes (FGS kept the process running), auto-resync the UI
-  // to "live" so the user doesn't see a stale "Start session" button and
-  // accidentally kick off a new pair flow.
-  let nativeRehydrated = false;
-  let restoreLogged = false;
-  function restoreNativeSessionUI() {
-    if (!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable)) return false;
-    if (!(window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing())) return false;
-    if (!restoreLogged) {
-      restoreLogged = true;
-      if (window.HRMLog) window.HRMLog.event('native session detected on load');
-    }
+  // Set up the live UI from a still-publishing native session (process kept
+  // running through a WebView reload). Pure UI prep — no rehydrate, no
+  // overlay management. The lifecycle controller calls this from its
+  // performRehydrate hook before pulling the CSV.
+  function prepareLiveUiFromNativeSession() {
     const last = getLastStrap();
     device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
     const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
@@ -4132,43 +4063,45 @@
     $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
     setConnState('live');
     updateSessionToggle();
-    // One-shot: pull the CSV off disk and repopulate state.hrSeries /
-    // state.rmssdSeries so the chart isn't empty after a mid-session
-    // reclaim. Fires async; the live HR listener keeps appending meanwhile.
-    if (!nativeRehydrated) {
-      nativeRehydrated = true;
-      if (window.HRMLog) window.HRMLog.event('rehydrate queued');
-      const overlay = $('restore-overlay');
-      if (overlay) overlay.classList.add('shown');
-      rehydrateFromNativeCsv()
-        .catch(e => {
-          if (window.HRMLog) window.HRMLog.event('rehydrate error', e && e.message ? e.message : String(e));
-        })
-        .finally(() => {
-          if (overlay) overlay.classList.remove('shown');
-          document.documentElement.classList.remove('restoring');
-          try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
-          // Native restore overlay dismissed at the same moment as the
-          // web-level overlay so the user sees a clean handoff to the
-          // populated chart.
-          if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
-          try {
-            const startMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
-              ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
-            const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
-            const totalMin = Math.floor(elapsedMs / 60000);
-            const h = Math.floor(totalMin / 60);
-            const m = totalMin % 60;
-            const dur = h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
-            if (typeof showToast === 'function') {
-              showToast(elapsedMs > 60000
-                ? ('Session resumed. ' + dur + ' recorded so far.')
-                : 'Session resumed.', 5000);
-            }
-          } catch (eT) {}
-        });
-    }
-    return true;
+  }
+
+  // Perform the actual reconnect + startSession after a process kill. The
+  // controller awaits this; the publishingStarted event from the plugin
+  // is what tells the controller the session is back up.
+  async function performRecoveryFromContext(ctx) {
+    if (!ctx || !ctx.mac) throw new Error('no_mac_in_recovery_context');
+    device = { name: 'HR Strap', id: ctx.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
+    await window.HRMNativeHrSession.connect(ctx.mac);
+    await window.HRMNativeHrSession.startSession({
+      broadcastKey: ctx.broadcastKey || getOrCreateBroadcastKey(),
+      senderId: ctx.senderId || getDeviceIdentity().id,
+      senderLabel: ctx.senderLabel || getDeviceIdentity().label,
+      broadcast: ctx.broadcastEnabled !== false,
+      resumeFilename: ctx.activeCsvFilename || '',
+      resumeSessionStartMs: ctx.sessionStartMs || 0,
+    });
+    device.gatt.connected = true;
+    if (state.startTime === null) state.startTime = ctx.sessionStartMs || Date.now();
+    state.lastDataTime = Date.now();
+    state.autoReconnect = true;
+    startSessionAutoSave();
+    acquireWakeLock();
+    setStatus('Resumed session after restart.', 'connected');
+    $('overlay-status').textContent = '• LIVE';
+    setConnState('live');
+    updateSessionToggle();
+    try { maybePromptOemWhitelist(); } catch (e) {}
+    try {
+      const startMs = ctx.sessionStartMs || 0;
+      const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
+      const totalMin = Math.floor(elapsedMs / 60000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      const dur = h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
+      if (typeof showToast === 'function') {
+        showToast(elapsedMs > 0 ? ('Session resumed. ' + dur + ' recorded so far.') : 'Session resumed.', 5000);
+      }
+    } catch (e) {}
   }
 
   // Reads the native session's CSV and rebuilds in-memory chart state from
@@ -4289,68 +4222,62 @@
     } catch (e) {}
   })();
 
-  (function waitForNativeSession() {
-    if (restoreNativeSessionUI()) return;
-    const overlay = $('restore-overlay');
-    function dismissAll(reason) {
+  // Lifecycle bootstrap. Run once after the native shim has had a chance
+  // to populate window.HRMNativeHrSession (DOMContentLoaded). The controller
+  // is the single owner of overlay visibility — no setIntervals, no fallback
+  // safety nets at this layer (the native 45 s fence covers WebView-dead).
+  let __hrLifecycle = null;
+  function bootstrapHrLifecycle() {
+    if (!wireNativeHr()) {
+      // Web mode (no native shim). Nothing to bootstrap. Make sure any
+      // pre-painted overlay state is cleared.
       document.documentElement.classList.remove('restoring');
-      try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
-      if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+      const overlay = $('restore-overlay');
       if (overlay) overlay.classList.remove('shown');
-      if (window.HRMLog) window.HRMLog.event('native session bootstrap done', reason);
-    }
-    // Once the initial status() IPC has resolved, branch:
-    //   - publishing true   → restoreNativeSessionUI handles rehydrate
-    //   - recovery pending  → keep splash up for up to 60 s while the
-    //                         sessionInterrupted-driven resume runs
-    //   - neither           → cold start with no session; dismiss the
-    //                         splash immediately so the UI is interactive
-    function start() {
-      let tries = 0;
-      let maxTries = 40;
-      let extended = false;
-      const timer = setInterval(() => {
-        if (restoreNativeSessionUI()) { clearInterval(timer); return; }
-        const recoveryPending = !!(window.HRMNativeHrSession
-          && window.HRMNativeHrSession.isInterruptedRecoveryPending
-          && window.HRMNativeHrSession.isInterruptedRecoveryPending());
-        if (!extended && recoveryPending) {
-          extended = true;
-          maxTries = 600;
-          if (overlay) overlay.classList.add('shown');
-          if (window.HRMLog) window.HRMLog.event('native recovery pending, extending wait to 60s');
-        }
-        if (++tries > maxTries) {
-          clearInterval(timer);
-          dismissAll(extended ? 'not_publishing_after_60s' : 'not_publishing_after_4s');
-        }
-      }, 100);
+      return;
     }
     const ns = window.HRMNativeHrSession;
-    if (ns && typeof ns.whenStatusReady === 'function') {
-      ns.whenStatusReady().then(() => {
-        const publishing = !!(ns.isPublishing && ns.isPublishing());
-        const recoveryPending = !!(ns.isInterruptedRecoveryPending && ns.isInterruptedRecoveryPending());
-        if (publishing) { start(); return; }
-        if (recoveryPending) { start(); return; }
-        // Genuinely a cold start. Dismiss the native splash now so the UI is
-        // visible immediately instead of waiting out the 4-s safety poll.
-        dismissAll('cold_start_no_session');
-      }).catch(() => start());
-    } else {
-      start();
-    }
-  })();
-  // Safety net: if neither rehydrate completion nor the 4s timeout fires
-  // (e.g. the rehydrate hangs on an IPC call), don't leave the user
-  // staring at a spinner forever.
-  setTimeout(() => {
-    document.documentElement.classList.remove('restoring');
-    try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
-    const overlay = $('restore-overlay');
-    if (overlay) overlay.classList.remove('shown');
-    if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
-  }, 30000);
+    if (!(ns && typeof ns.whenStatusReady === 'function' && window.HRMLifecycleController)) return;
+    __hrLifecycle = window.HRMLifecycleController.create({
+      hideOverlay: function () {
+        if (window.HRMRestoreOverlay) { try { window.HRMRestoreOverlay.hide(); } catch (e) {} }
+        return Promise.resolve();
+      },
+      onShow: function () {
+        const overlay = $('restore-overlay');
+        if (overlay) overlay.classList.add('shown');
+      },
+      onHide: function () {
+        const overlay = $('restore-overlay');
+        if (overlay) overlay.classList.remove('shown');
+        document.documentElement.classList.remove('restoring');
+        try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
+      },
+      performRehydrate: function () { return rehydrateFromNativeCsv(); },
+      performRecovery: function (ctx) { return performRecoveryFromContext(ctx); },
+      onPublishingChanged: function (cb) {
+        return typeof ns.onPublishingChanged === 'function' ? ns.onPublishingChanged(cb) : function () {};
+      },
+      onRecoveryFailed: function (reason) {
+        if (window.HRMLog) window.HRMLog.event('recovery failed', reason);
+        try { showToast("Couldn't resume the previous session. Pair the strap and start a new one.", 6000); } catch (e) {}
+      },
+      log: function (msg) { if (window.HRMLog) window.HRMLog.event(msg); },
+    });
+    ns.whenStatusReady().then(function () {
+      const publishing = !!(ns.isPublishing && ns.isPublishing());
+      const recoveryContext = typeof ns.getRecoveryContext === 'function' ? ns.getRecoveryContext() : null;
+      if (publishing) prepareLiveUiFromNativeSession();
+      __hrLifecycle.bootstrap({ publishing: publishing, recoveryContext: recoveryContext });
+    }).catch(function () {
+      __hrLifecycle.bootstrap({ publishing: false, recoveryContext: null });
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapHrLifecycle, { once: true });
+  } else {
+    bootstrapHrLifecycle();
+  }
 
   // Screen Wake Lock: keep the phone/laptop awake during an active session so BLE
   // doesn't drop when the display times out. Auto-released on tab hide; re-request
