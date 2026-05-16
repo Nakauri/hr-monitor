@@ -20,13 +20,9 @@
     let publishing = false;
     let csvFilename = null;
     let sessionStartMs = 0;
-    // Set true when status() reports the native AtomicBoolean reset to false
-    // but SharedPrefs say a session was running. Means a heartbeat-driven
-    // resurrection is incoming; the UI should keep its restore overlay up
-    // longer than the default 4-s window.
-    let interruptedRecovery = false;
-    let interruptedFilename = '';
-    let interruptedSessionStartMs = 0;
+    // Populated from status().recoveryContext when the native plugin detects
+    // a session that survived the previous process. Null otherwise.
+    let recoveryContext = null;
     const statusReadyCallbacks = [];
     let statusReady = false;
     const hrListeners = [];
@@ -34,6 +30,26 @@
     const errorListeners = [];
     const trimMemoryListeners = [];
     const sessionInterruptedListeners = [];
+    const publishingListeners = [];
+
+    function setPublishing(next, payload) {
+      const prev = publishing;
+      publishing = !!next;
+      if (publishing && payload) {
+        if (payload.csvFile) csvFilename = payload.csvFile;
+        if (payload.sessionStartMs) sessionStartMs = payload.sessionStartMs;
+      }
+      if (!publishing) {
+        sessionStartMs = 0;
+        csvFilename = null;
+      }
+      if (prev !== publishing) {
+        const evt = { publishing: publishing, payload: payload || null };
+        for (const cb of publishingListeners) {
+          try { cb(evt); } catch (e) {}
+        }
+      }
+    }
 
     function fireStatusReady() {
       statusReady = true;
@@ -41,7 +57,9 @@
       for (const cb of cbs) { try { cb(); } catch (e) {} }
     }
 
-    // Seed publishing flag from native state so WebView reload doesn't lose it.
+    // Seed from native state so a WebView reload doesn't lose what the
+    // process already knows. status() carries both the live snapshot and
+    // (when applicable) the recovery context for an interrupted session.
     try {
       if (typeof plugin.status === 'function') {
         plugin.status().then(function (s) {
@@ -53,10 +71,8 @@
               try { cb({ ble: !!s.bleConnected, relay: !!s.relayLive, session: true }); } catch (e) {}
             }
           }
-          if (s && s.interruptedRecovery) {
-            interruptedRecovery = true;
-            interruptedFilename = s.interruptedFilename || '';
-            interruptedSessionStartMs = s.interruptedSessionStartMs || 0;
+          if (s && s.interruptedRecovery && s.recoveryContext) {
+            recoveryContext = s.recoveryContext;
           }
           fireStatusReady();
         }).catch(function () { fireStatusReady(); });
@@ -87,27 +103,30 @@
       }
     });
     plugin.addListener('sessionInterrupted', function (data) {
+      // Transitional. status().recoveryContext is the authoritative source.
+      if (data && !recoveryContext) recoveryContext = data;
       for (const cb of sessionInterruptedListeners) {
         try { cb(data); } catch (e) {}
       }
+    });
+    plugin.addListener('publishingStarted', function (data) {
+      recoveryContext = null;
+      setPublishing(true, data);
+    });
+    plugin.addListener('publishingStopped', function (data) {
+      setPublishing(false, data);
     });
 
     window.HRMNativeHrSession = {
       isAvailable: true,
       isPublishing: function () { return publishing; },
       getCsvFilename: function () { return csvFilename; },
-      getSessionStartMs: function () { return sessionStartMs || interruptedSessionStartMs || 0; },
-      isInterruptedRecoveryPending: function () { return interruptedRecovery && !publishing; },
-      getInterruptedInfo: function () {
-        return {
-          pending: interruptedRecovery && !publishing,
-          filename: interruptedFilename,
-          sessionStartMs: interruptedSessionStartMs,
-        };
-      },
-      // Resolves once the initial status() IPC has completed (success or
-      // failure). Lets the page-level bootstrap branch on the recovery state
-      // synchronously instead of polling.
+      getSessionStartMs: function () { return sessionStartMs; },
+      getRecoveryContext: function () { return recoveryContext; },
+      // Transitional. New callers should read getRecoveryContext() directly.
+      isInterruptedRecoveryPending: function () { return !!recoveryContext && !publishing; },
+      // Resolves once the initial status() IPC has completed. Lets the page
+      // bootstrap branch on snapshot state synchronously, no polling.
       whenStatusReady: function () {
         if (statusReady) return Promise.resolve();
         return new Promise(function (resolve) { statusReadyCallbacks.push(resolve); });
@@ -119,22 +138,18 @@
         return plugin.connect({ mac: mac });
       },
       startSession: function (opts) {
+        // The publishingStarted event is authoritative for the publishing
+        // flag flip. We still update sessionStartMs here for callers that
+        // read it from the resolve value's path.
         return plugin.startSession(opts).then(function (r) {
-          publishing = true;
-          interruptedRecovery = false;
-          csvFilename = r && r.csvFile || null;
           if (r && r.sessionStartMs) sessionStartMs = r.sessionStartMs;
           else if (opts && opts.resumeSessionStartMs) sessionStartMs = opts.resumeSessionStartMs;
           return r;
         });
       },
       stopSession: function () {
-        return plugin.stopSession().then(function (r) {
-          publishing = false;
-          interruptedRecovery = false;
-          sessionStartMs = 0;
-          return r;
-        });
+        // publishingStopped event flips the flag; this just forwards the call.
+        return plugin.stopSession();
       },
       disconnect: function () { return plugin.disconnect(); },
       status: function () { return plugin.status(); },
@@ -205,6 +220,13 @@
         return function remove() {
           const i = sessionInterruptedListeners.indexOf(cb);
           if (i >= 0) sessionInterruptedListeners.splice(i, 1);
+        };
+      },
+      onPublishingChanged: function (cb) {
+        publishingListeners.push(cb);
+        return function remove() {
+          const i = publishingListeners.indexOf(cb);
+          if (i >= 0) publishingListeners.splice(i, 1);
         };
       },
       // Picker modal. Returns Promise<{mac, name}> with a .cancel() method.
