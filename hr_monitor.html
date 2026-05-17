@@ -4114,9 +4114,10 @@
       resumeFilename: ctx.activeCsvFilename || '',
       resumeSessionStartMs: ctx.sessionStartMs || 0,
     });
-    // Native session is up. Treat it as live; if BLE turns out to be flaky,
-    // the status pill drops to "reconnecting" and the chart stays empty
-    // until first HR.
+    // Native session is up. Mark the button as session-active immediately
+    // so the user has a working Stop control while we wait for first HR.
+    // setConnState now drives updateSessionToggle internally; no separate
+    // call needed.
     device.gatt.connected = true;
     if (state.startTime === null) state.startTime = ctx.sessionStartMs || Date.now();
     state.lastDataTime = Date.now();
@@ -4124,7 +4125,7 @@
     startSessionAutoSave();
     acquireWakeLock();
     $('overlay-status').textContent = '• LIVE';
-    updateSessionToggle();
+    setConnState('reconnecting');
     let firstHrArrived = false;
     try {
       await waitForFirstHr(12000);
@@ -4137,7 +4138,6 @@
       setConnState('live');
     } else {
       setStatus('Session resumed. Strap is reconnecting...', 'pending');
-      setConnState('reconnecting');
       // Background flip: when HR data eventually lands, switch status to
       // live. Lives alongside wireNativeHr's main listener; both fire.
       const unsubLive = window.HRMNativeHrSession.onHr(function (d) {
@@ -4707,6 +4707,9 @@
     document.body.classList.remove('conn-live', 'conn-reconnecting');
     if (connState === 'live') document.body.classList.add('conn-live');
     else if (connState === 'reconnecting') document.body.classList.add('conn-reconnecting');
+    // Single source of truth for "session UI matches the current state."
+    // Callers no longer need to remember updateSessionToggle() afterward.
+    try { updateSessionToggle(); } catch (e) {}
     // Refresh the banner so it reflects the new conn state immediately.
     showWarningBanner(state.currentWarn);
     // Relay status chip reflects "am I publishing HR right now?", which
