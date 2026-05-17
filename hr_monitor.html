@@ -3167,9 +3167,7 @@
       if (msg.senderId && msg.senderId === dev.id) return;
       if (msg.targetId === dev.id) {
         // Another device just took over. Disconnect and stop publishing.
-        widgetPrefs.broadcast = false;
-        saveWidgetPrefs();
-        if (typeof applyBroadcastPref === 'function') applyBroadcastPref();
+        setBroadcast(false);
         try { if (typeof disconnect === 'function') disconnect(); } catch (e) {}
         setStatus('Broadcast stopped: another device took over.', 'warn');
       }
@@ -3324,6 +3322,14 @@
       try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {}
     }
     refreshRelayStatus();
+  }
+  // Single writer for runtime broadcast toggles. Hydration from localStorage
+  // (loadWidgetPrefs) writes the field directly — calling this during boot
+  // would re-save what we just loaded and reconnect the relay prematurely.
+  function setBroadcast(enabled) {
+    widgetPrefs.broadcast = !!enabled;
+    saveWidgetPrefs();
+    applyBroadcastPref();
   }
   function setStreamingStatus(s) {
     const el = $('relay-status');
@@ -3823,10 +3829,7 @@
       setStatus('Web Bluetooth not supported. Use Chrome, Edge, or Opera.', 'error');
       return;
     }
-    thresholds.high = parseInt($('thresh-high').value) || 130;
-    thresholds.low = parseInt($('thresh-low').value) || 55;
-    thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15;
-    thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5;
+    loadThresholdsFromInputs();
     state.audioOn = $('audio-on').checked;
     // Request the folder write permission FIRST, while we still have user-gesture
     // context from the Connect click. If deferred until after BLE async work, Chrome
@@ -3873,9 +3876,8 @@
         }
       }
       device.addEventListener('gattserverdisconnected', onDisconnected);
-      if (state.startTime === null) state.startTime = Date.now();
+      setSessionStart(Date.now());
       state.lastDataTime = Date.now();
-      state.autoReconnect = true;
       await attachConnection();
       saveLastStrap(device);
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
@@ -3895,10 +3897,7 @@
     if (connectInFlight) return;
     connectInFlight = true;
     try {
-    thresholds.high = parseInt($('thresh-high').value) || 130;
-    thresholds.low = parseInt($('thresh-low').value) || 55;
-    thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15;
-    thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5;
+    loadThresholdsFromInputs();
     state.audioOn = $('audio-on').checked;
     // Authoritative check: ask native directly. The cached isPublishing()
     // flag is seeded async on shim init and races with a fast Start tap.
@@ -3909,14 +3908,12 @@
     } catch (e) {}
     if (sessionAlive) {
       const last = getLastStrap();
-      device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
-      if (state.startTime === null) state.startTime = Date.now();
+      device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: true });
+      setSessionStart(Date.now());
       state.lastDataTime = Date.now();
-      state.autoReconnect = true;
       setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
       $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
       setConnState('live');
-      updateSessionToggle();
       return;
     }
     let picked = null;
@@ -3944,7 +3941,7 @@
         setStatus('Connecting to ' + (picked.name || 'strap') + '...');
       }
       // Virtual device stand-in so downstream code (device.name, etc.) works.
-      device = { name: picked.name || 'HR Strap', id: picked.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
+      device = buildNativeDevice({ name: picked.name || 'HR Strap', id: picked.mac, connected: false });
       await window.HRMNativeHrSession.connect(picked.mac);
       // First-run battery optimization prompt. Without an exemption,
       // stock Android Doze and Samsung One UI both kill the FGS during
@@ -3968,9 +3965,8 @@
         broadcast: !!widgetPrefs.broadcast,
       });
       device.gatt.connected = true;
-      if (state.startTime === null) state.startTime = Date.now();
+      setSessionStart(Date.now());
       state.lastDataTime = Date.now();
-      state.autoReconnect = true;
       saveLastStrap(device);
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
       startSessionAutoSave();
@@ -4053,16 +4049,14 @@
   // performRehydrate hook before pulling the CSV.
   function prepareLiveUiFromNativeSession() {
     const last = getLastStrap();
-    device = { name: (last && last.name) || 'HR Strap', id: 'native', _native: true, gatt: { connected: true, disconnect: () => {} } };
+    device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: true });
     const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
       ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
-    if (state.startTime === null) state.startTime = nativeStartMs > 0 ? nativeStartMs : Date.now();
+    setSessionStart(nativeStartMs > 0 ? nativeStartMs : Date.now());
     state.lastDataTime = Date.now();
-    state.autoReconnect = true;
     setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
     $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
     setConnState('live');
-    updateSessionToggle();
   }
 
   // Waits for the first HR notification with a beat count > 0. Resolves
@@ -4103,7 +4097,7 @@
   // the regular onHr listener will pick up data whenever it lands.
   async function performRecoveryFromContext(ctx) {
     if (!ctx || !ctx.mac) throw new Error('no_mac_in_recovery_context');
-    device = { name: 'HR Strap', id: ctx.mac, _native: true, gatt: { connected: false, disconnect: () => {} } };
+    device = buildNativeDevice({ name: 'HR Strap', id: ctx.mac, connected: false });
     setStatus('Reconnecting strap...', 'pending');
     await window.HRMNativeHrSession.connect(ctx.mac);
     await window.HRMNativeHrSession.startSession({
@@ -4119,9 +4113,8 @@
     // setConnState now drives updateSessionToggle internally; no separate
     // call needed.
     device.gatt.connected = true;
-    if (state.startTime === null) state.startTime = ctx.sessionStartMs || Date.now();
+    setSessionStart(ctx.sessionStartMs || Date.now());
     state.lastDataTime = Date.now();
-    state.autoReconnect = true;
     startSessionAutoSave();
     acquireWakeLock();
     $('overlay-status').textContent = '• LIVE';
@@ -4702,6 +4695,29 @@
   // there's never two overlapping badges. Disconnected / reconnecting always
   // wins over warnings (no point showing "HRV crashed" if the strap just
   // dropped signal).
+  // Single writer for "this is the start of a session." startTime is set
+  // only if not already established (a mid-session reconnect must keep the
+  // original epoch). autoReconnect always flips on — it's the signal that
+  // the BLE pipeline should auto-recover from dropouts.
+  // Other state.startTime writes (defensive guard in processHRData, CSV
+  // import, resetSession's conditional clear) have different semantics
+  // and bypass this helper intentionally.
+  function setSessionStart(startMs) {
+    if (state.startTime === null) state.startTime = startMs || Date.now();
+    state.autoReconnect = true;
+  }
+  // Single shape for the device stand-in used during native sessions.
+  // `id` is either 'native' (resuming an in-process session) or a MAC
+  // (fresh connect or recovery); both are valid downstream.
+  function buildNativeDevice(opts) {
+    const o = opts || {};
+    return {
+      name: o.name || 'HR Strap',
+      id: o.id || 'native',
+      _native: true,
+      gatt: { connected: !!o.connected, disconnect: function () {} },
+    };
+  }
   function setConnState(connState) {
     state.connState = connState;
     document.body.classList.remove('conn-live', 'conn-reconnecting');
@@ -5573,6 +5589,7 @@
         if (w > 0 && h > 0 && (w !== widgetPrefs.customWidth || h !== widgetPrefs.customHeight)) {
           widgetPrefs.customWidth = w;
           widgetPrefs.customHeight = h;
+          saveWidgetPrefs();
           updateObsSizeDisplay();
           if (typeof pushPrefsToOverlay === 'function') pushPrefsToOverlay();
         }
@@ -5703,6 +5720,16 @@
   function saveAlertThresholds() {
     try { localStorage.setItem('hr_monitor_alert_thresholds', JSON.stringify(thresholds)); } catch(e) {}
     pushStageThresholdsToNative();
+  }
+  // Re-reads the inputs at session-start time so any in-flight edits the
+  // user typed before hitting Start are picked up. Per-input change handlers
+  // (~line 6000) already save on every keystroke, so this is a sync of
+  // in-memory state with current input values, not a persist.
+  function loadThresholdsFromInputs() {
+    thresholds.high = parseInt($('thresh-high').value) || 130;
+    thresholds.low = parseInt($('thresh-low').value) || 55;
+    thresholds.rmssd = parseInt($('thresh-rmssd').value) || 15;
+    thresholds.palpPerMin = parseInt($('thresh-palp').value) || 5;
   }
   function loadAlertThresholds() {
     try {
