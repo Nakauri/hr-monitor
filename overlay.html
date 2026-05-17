@@ -275,6 +275,13 @@
       document.body.classList.toggle('no-warning', prefs.showWarning === false);
       document.body.classList.toggle('no-conn-dot', prefs.showConnDot === false);
       document.body.classList.toggle('warning-above', prefs.warningPlacement === 'above');
+      // Mirror the sender's "all widgets visible" width as a min-width floor
+      // so the widget renders at the stable size from frame 1 instead of
+      // growing from Chart.js's 300px intrinsic. widget.css's selector
+      // already consumes this var when all four widget toggles are on.
+      if (typeof prefs.fullWidgetsWidth === 'number' && prefs.fullWidgetsWidth > 0) {
+        document.documentElement.style.setProperty('--full-widgets-width', prefs.fullWidgetsWidth + 'px');
+      }
     }
     if (size && z && Number.isFinite(size.w) && Number.isFinite(size.h)) {
       // In embed mode the iframe viewport — not the broadcasting device — decides

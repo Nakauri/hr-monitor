@@ -3686,6 +3686,10 @@
         showPalpChip: widgetPrefs.showPalpChip,
         showWarning: widgetPrefs.showWarning,
         warningPlacement: widgetPrefs.warningPlacement || 'inside',
+        // Sender's measured "all widgets visible" width so receivers can
+        // render the widget at its stable size from frame 1 instead of
+        // growing from Chart.js's 300px intrinsic over the first few seconds.
+        fullWidgetsWidth: widgetPrefs.fullWidgetsWidth || 0,
       },
       // widgetSize is only sent when the user has customised it. Otherwise the
       // overlay would forcibly clamp #overlay-zone to the broadcaster's
