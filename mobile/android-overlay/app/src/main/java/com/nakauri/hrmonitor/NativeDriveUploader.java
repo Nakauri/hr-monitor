@@ -438,6 +438,20 @@ public class NativeDriveUploader {
         sessionFilenameRef.set(filename);
 
         String fileId = sessionFileIdRef.get();
+        if (fileId == null) {
+            // Hydrate from prefs — the in-memory ref is null after every
+            // process restart but currentDriveFileId persists. Without this
+            // we'd POST a duplicate file instead of PATCHing the existing one,
+            // and the viewer would see two files with the same name.
+            try {
+                String prefId = context.getSharedPreferences("hr_monitor_session", 0)
+                    .getString("currentDriveFileId", null);
+                if (prefId != null && !prefId.isEmpty()) {
+                    fileId = prefId;
+                    sessionFileIdRef.set(prefId);
+                }
+            } catch (Throwable ignored) {}
+        }
         boolean success;
         if (fileId == null) {
             String newId = createFile(token, folderId, filename, csvBytes);

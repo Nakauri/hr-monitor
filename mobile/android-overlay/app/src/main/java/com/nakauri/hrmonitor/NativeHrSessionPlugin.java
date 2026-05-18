@@ -780,12 +780,14 @@ public class NativeHrSessionPlugin extends Plugin {
                         Log.w(TAG, "forceSyncNow finalize failed: " + name);
                     }
                 }
-                if (!ok && uploader != null) {
-                    uploader.uploadAsync(file);
-                    ok = true;
-                    if (reason == null) reason = "full_upload_fallback";
-                }
+                // Safety net: PATCH the full local file regardless of finalize
+                // outcome. Catches the case where the resumable session went
+                // silently stale (e.g. across process restarts) and finalize
+                // reports success but Drive's content is behind. doUpload now
+                // hydrates the file ID from prefs if the in-memory ref reset.
                 if (uploader != null) {
+                    uploader.uploadAsync(file);
+                    if (!ok) { ok = true; if (reason == null) reason = "full_upload_fallback"; }
                     java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
                     uploader.uploadOrphansAsync(sessionsDir);
                 }
