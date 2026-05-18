@@ -61,6 +61,14 @@
             android:name="com.nakauri.hrmonitor.HrServiceHeartbeatReceiver"
             android:exported="false" />
 
+        <!-- Floating HR overlay (Pulsoid-style). Hosts a WindowManager-attached
+             View that displays live BPM above other apps. Requires the
+             SYSTEM_ALERT_WINDOW permission; user-toggled via long-press on
+             the widget in the app. -->
+        <service
+            android:name="com.nakauri.hrmonitor.FloatingOverlayService"
+            android:exported="false" />
+
     </application>
 
     <!-- Permissions -->
@@ -75,4 +83,5 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 </manifest>

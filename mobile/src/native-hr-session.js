@@ -160,6 +160,22 @@
         if (typeof plugin.forceSyncNow !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
         return plugin.forceSyncNow().catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
       },
+      hasOverlayPermission: function () {
+        if (typeof plugin.hasOverlayPermission !== 'function') return Promise.resolve({ granted: false });
+        return plugin.hasOverlayPermission().catch(function () { return { granted: false }; });
+      },
+      requestOverlayPermission: function () {
+        if (typeof plugin.requestOverlayPermission !== 'function') return Promise.resolve({ opened: false });
+        return plugin.requestOverlayPermission().catch(function () { return { opened: false }; });
+      },
+      startFloatingOverlay: function () {
+        if (typeof plugin.startFloatingOverlay !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
+        return plugin.startFloatingOverlay().catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
+      },
+      stopFloatingOverlay: function () {
+        if (typeof plugin.stopFloatingOverlay !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
+        return plugin.stopFloatingOverlay().catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
+      },
       setBroadcast: function (enabled) {
         if (typeof plugin.setBroadcast !== 'function') return Promise.resolve();
         return plugin.setBroadcast({ enabled: !!enabled });

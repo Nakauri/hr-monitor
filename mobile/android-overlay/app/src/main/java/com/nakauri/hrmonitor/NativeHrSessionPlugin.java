@@ -175,6 +175,11 @@ public class NativeHrSessionPlugin extends Plugin {
     // Static ref for NativeHrService Stop button. volatile for cross-thread reads.
     public static volatile NativeHrSessionPlugin instance;
 
+    // Single listener slot for the floating-overlay Service. Plugin calls
+    // listener.onHrUpdate(bpm) on every HR tick when non-null. Service
+    // installs itself in onCreate, clears in onDestroy.
+    public static volatile FloatingOverlayService.HrUpdateListener floatingOverlayListener;
+
     /** Forward Activity.onTrimMemory to JS so the page can free GPU buffers
      *  before LMK fires. Called from MainActivity. Safe to call before bridge
      *  is ready — notifyListeners no-ops in that case. */
@@ -616,6 +621,57 @@ public class NativeHrSessionPlugin extends Plugin {
     public void stopSession(PluginCall call) {
         stopSessionInternal();
         call.resolve(new JSObject().put("stopped", true));
+    }
+
+    // ---- Floating overlay ------------------------------------------------
+
+    @PluginMethod
+    public void hasOverlayPermission(PluginCall call) {
+        boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+            || android.provider.Settings.canDrawOverlays(getContext());
+        call.resolve(new JSObject().put("granted", granted));
+    }
+
+    @PluginMethod
+    public void requestOverlayPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || android.provider.Settings.canDrawOverlays(getContext())) {
+            call.resolve(new JSObject().put("granted", true));
+            return;
+        }
+        try {
+            Intent i = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:" + getContext().getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve(new JSObject().put("opened", true));
+        } catch (Throwable t) {
+            call.reject("could not open overlay-permission settings: " + t.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void startFloatingOverlay(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && !android.provider.Settings.canDrawOverlays(getContext())) {
+            call.resolve(new JSObject().put("ok", false).put("reason", "permission_required"));
+            return;
+        }
+        try {
+            Intent i = new Intent(getContext(), FloatingOverlayService.class);
+            getContext().startService(i);
+            call.resolve(new JSObject().put("ok", true));
+        } catch (Throwable t) {
+            call.resolve(new JSObject().put("ok", false).put("reason", t.getMessage()));
+        }
+    }
+
+    @PluginMethod
+    public void stopFloatingOverlay(PluginCall call) {
+        try {
+            getContext().stopService(new Intent(getContext(), FloatingOverlayService.class));
+        } catch (Throwable ignored) {}
+        call.resolve(new JSObject().put("ok", true));
     }
 
     /**
@@ -1215,6 +1271,10 @@ public class NativeHrSessionPlugin extends Plugin {
                 getContext().getSharedPreferences("hr_monitor_session", 0)
                     .edit().putLong("last_alive_ms", now).apply();
             } catch (Throwable ignored) {}
+        }
+        FloatingOverlayService.HrUpdateListener overlay = floatingOverlayListener;
+        if (overlay != null) {
+            try { overlay.onHrUpdate(p.hr); } catch (Throwable ignored) {}
         }
         // synchronized: BLE binder writes, main thread reads in publishTick.
         Double rmssd;
