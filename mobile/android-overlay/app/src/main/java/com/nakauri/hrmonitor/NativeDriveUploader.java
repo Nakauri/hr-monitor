@@ -462,6 +462,24 @@ public class NativeDriveUploader {
             }
         } else {
             success = patchFile(token, fileId, csvBytes);
+            // 404 = file ID no longer exists (user deleted from Drive, or it
+            // got trashed). Without this fallback, every subsequent upload
+            // PATCHes a dead ID and silently fails. Clear the stale ID +
+            // persisted ref, then CREATE a fresh file so sync stays alive.
+            if (!success && lastHttpStatus == 404) {
+                Log.w(TAG, "Drive PATCH 404 for fileId=" + fileId + " — clearing stale ref and creating fresh file");
+                sessionFileIdRef.set(null);
+                try {
+                    context.getSharedPreferences("hr_monitor_session", 0).edit()
+                        .putString("currentDriveFileId", "").apply();
+                } catch (Throwable ignored) {}
+                String newId = createFile(token, folderId, filename, csvBytes);
+                success = (newId != null);
+                if (success) {
+                    sessionFileIdRef.set(newId);
+                    Log.i(TAG, "Created replacement Drive file: " + filename + " -> " + newId);
+                }
+            }
         }
 
         // 401 retry: token can expire between AuthStorage.getValidAccessToken

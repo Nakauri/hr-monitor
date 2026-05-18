@@ -107,6 +107,19 @@ public class NativeDriveResumableUploader {
     }
 
     /**
+     * Mark the resumable as broken without resetting any state. Called at
+     * plugin load() when we detect an interrupted session — the in-memory
+     * sessionUrl/lastChunkEnd from the previous process are gone, so the
+     * resumable can't trickle anymore. Marking broken makes the periodic
+     * upload tick fall through to uploader.uploadAsync (full PATCH via the
+     * persisted fileId) instead of silently skipping because isReady() and
+     * isBroken() are both false during init-limbo.
+     */
+    public void markBrokenForRestart() {
+        broken = true;
+    }
+
+    /**
      * Open a resumable upload session for the given filename. Async; uses
      * the executor to avoid blocking the caller. Returns nothing — check
      * isReady() to confirm session opened. If folder lookup or session POST

@@ -222,6 +222,12 @@ public class NativeHrSessionPlugin extends Plugin {
                 + " trim=" + lastTrimLevel + "@" + lastTrimMs);
             if (wasActive && !cleanlyStopped) {
                 Log.i(TAG, "Detected interrupted session — JS will read context from status().");
+                // Without this, the periodic Drive tick (line ~1399) sees
+                // resumable in init-limbo (sessionUrl=null && broken=false)
+                // and silently skips every interval. Marking broken makes
+                // the tick fall through to uploader.uploadAsync, which now
+                // hydrates the fileId from currentDriveFileId in prefs.
+                if (resumable != null) resumable.markBrokenForRestart();
                 // Transitional emit while external consumers migrate to reading
                 // the recovery context from status(). Remove after one stable
                 // overnight soak.
@@ -780,14 +786,17 @@ public class NativeHrSessionPlugin extends Plugin {
                         Log.w(TAG, "forceSyncNow finalize failed: " + name);
                     }
                 }
-                // Safety net: PATCH the full local file regardless of finalize
-                // outcome. Catches the case where the resumable session went
-                // silently stale (e.g. across process restarts) and finalize
-                // reports success but Drive's content is behind. doUpload now
-                // hydrates the file ID from prefs if the in-memory ref reset.
-                if (uploader != null) {
+                // Full-PATCH safety net only when finalize failed. Running
+                // both concurrently races: restartSessionAsync resets the
+                // resumable's lastChunkEnd=0 while the safety-net PATCH is
+                // still in flight against the same fileId, and the next
+                // periodic chunk can clobber the PATCH with bytes 0..N.
+                if (!ok && uploader != null) {
                     uploader.uploadAsync(file);
-                    if (!ok) { ok = true; if (reason == null) reason = "full_upload_fallback"; }
+                    ok = true;
+                    if (reason == null) reason = "full_upload_fallback";
+                }
+                if (uploader != null) {
                     java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
                     uploader.uploadOrphansAsync(sessionsDir);
                 }
