@@ -3666,11 +3666,19 @@
 
     let newParsed = 0;
     let processed = 0;
+    let evicted = 0;
     for (const fn of todo) {
       const summary = await parseSessionFile(fn);
       if (summary) {
         sessionsIndex[fn] = summary;
         newParsed++;
+      } else if (sessionsIndex[fn]) {
+        // summarizeCSV rejected the file (e.g. future-dated, validation
+        // failure). Evict the stale entry so it stops painting phantom
+        // days in the calendar. Without this delete, a cached bad summary
+        // from a previous schema version persists forever.
+        delete sessionsIndex[fn];
+        evicted++;
       }
       processed++;
       // Yield every 4 parses so the loader bar paints + event loop drains
@@ -3679,7 +3687,7 @@
       if (onProgress) onProgress(processed, todo.length);
       if (processed % 4 === 0) await new Promise(r => setTimeout(r, 0));
     }
-    if (newParsed > 0) persistIndex();
+    if (newParsed > 0 || evicted > 0) persistIndex();
 
     // Dedup: dual-save on mobile (JS path + native plugin) wrote the same
     // session to Drive under two filenames (one UTC-formatted, one local).
