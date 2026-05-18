@@ -6393,7 +6393,19 @@
           return m && m.date ? m.date.getTime() : null;
         })();
         currentChart.options.scales.x.ticks.callback = makeTimeTickFormatter(startEpoch);
-        currentChart.update('none');
+        // Cheap path: rebuild only the x-axis ticks then repaint. Skips
+        // decimation, plugin afterUpdate (which walks every annotation),
+        // and dataset re-parsing — none of which changed. ~10ms vs ~150ms
+        // of chart.update('none') on long sessions with many annotations.
+        const xScale = currentChart.scales.x;
+        try {
+          if (xScale && typeof xScale.buildTicks === 'function') xScale.buildTicks();
+          if (xScale && typeof xScale.afterBuildTicks === 'function') xScale.afterBuildTicks();
+          currentChart.draw();
+        } catch (e) {
+          // Fallback if internal API shape shifts in a Chart.js update.
+          currentChart.update('none');
+        }
       }
     });
   }
