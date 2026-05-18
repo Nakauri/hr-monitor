@@ -3569,6 +3569,17 @@
   // same browser need distinct IDs so a double-broadcast shows up clearly on
   // the receiver). The deviceLabel is something human-readable the user can
   // read in the overlay's warning when two tabs are fighting for the same key.
+  // Send presence-end for the current senderId over the relay socket if
+  // open, then drop the id so getDeviceIdentity() will mint a fresh one.
+  // Used by the recovery flow so a session resumed after a process kill
+  // never inherits the old (now-orphaned) presence entry.
+  function rotateSenderId() {
+    const oldId = sessionStorage.getItem('hr_monitor_device_id');
+    if (oldId && relaySocket && relaySocket.readyState === WebSocket.OPEN) {
+      try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: oldId })); } catch (e) {}
+    }
+    sessionStorage.removeItem('hr_monitor_device_id');
+  }
   function getDeviceIdentity() {
     let id = sessionStorage.getItem('hr_monitor_device_id');
     if (!id) {
@@ -3880,6 +3891,10 @@
         }
       }
       device.addEventListener('gattserverdisconnected', onDisconnected);
+      // Fresh session starts with empty buffers. Without this, any stale
+      // hrSeries from a prior session (e.g. one that died via FGS kill so
+      // resetSession never ran) gets dumped into the new file by autosave.
+      resetLiveDataBuffers();
       setSessionStart(Date.now());
       state.lastDataTime = Date.now();
       await attachConnection();
@@ -3962,6 +3977,11 @@
         }
       } catch (e) {}
       const ident = getDeviceIdentity();
+      // Empty buffers before startSession kicks off — same reasoning as
+      // connectWeb: a prior session that died without resetSession running
+      // can leave hours of stale hrSeries that autosave would dump into
+      // the new CSV.
+      resetLiveDataBuffers();
       await window.HRMNativeHrSession.startSession({
         broadcastKey: getOrCreateBroadcastKey(),
         senderId: ident.id,
@@ -4103,11 +4123,22 @@
     if (!ctx || !ctx.mac) throw new Error('no_mac_in_recovery_context');
     device = buildNativeDevice({ name: 'HR Strap', id: ctx.mac, connected: false });
     setStatus('Reconnecting strap...', 'pending');
+    // Buffers from the dead session must not leak into the resumed one.
+    // Without this, the autosave loop dumps the entire stale hrSeries into
+    // a new file under today's filename — the exact path that produced the
+    // May 18 phantom in the viewer cache.
+    resetLiveDataBuffers();
+    // Fresh senderId for the resumed session. The old id (ctx.senderId) is
+    // already orphaned in the relay's activeBroadcasters from before the
+    // FGS death; rotating + sending presence-end clears it instead of
+    // accumulating a ghost.
+    rotateSenderId();
+    const freshIdent = getDeviceIdentity();
     await window.HRMNativeHrSession.connect(ctx.mac);
     await window.HRMNativeHrSession.startSession({
       broadcastKey: ctx.broadcastKey || getOrCreateBroadcastKey(),
-      senderId: ctx.senderId || getDeviceIdentity().id,
-      senderLabel: ctx.senderLabel || getDeviceIdentity().label,
+      senderId: freshIdent.id,
+      senderLabel: ctx.senderLabel || freshIdent.label,
       broadcast: ctx.broadcastEnabled !== false,
       resumeFilename: ctx.activeCsvFilename || '',
       resumeSessionStartMs: ctx.sessionStartMs || 0,
@@ -4747,7 +4778,12 @@
     if (typeof renderBroadcastersPanel === 'function') renderBroadcastersPanel();
   }
 
-  function resetSession() {
+  // Every accumulating per-session buffer in one place. Called by both
+  // resetSession (user-initiated stop) and every fresh session-start path —
+  // a session start that inherits the prior session's hrSeries can dump
+  // hours of stale data into a new CSV via the autosave loop. The bug that
+  // produced the May 18 phantom traced to exactly that gap.
+  function resetLiveDataBuffers() {
     state.hrSeries = [];
     state.rmssdSeries = [];
     state.sdnnMatchSeries = [];
@@ -4763,6 +4799,11 @@
     state.ectopicEvents = [];
     state.connectionEvents = [];
     state.postureLog = [];
+    state.breathBuffer = [];
+  }
+
+  function resetSession() {
+    resetLiveDataBuffers();
     state.currentPosture = 'sitting';
     // Reset posture button UI
     document.querySelectorAll('.posture-btn').forEach(b => {
@@ -4772,7 +4813,6 @@
     state.currentRMSSD = null;
     state.currentWarn = null;
     state.lastAlertTime = 0;
-    state.breathBuffer = [];
     state.breathPhase = null;
     state.startTime = device && device.gatt.connected ? Date.now() : null;
     showWarningBanner(null);

@@ -1711,6 +1711,16 @@ public class NativeHrSessionPlugin extends Plugin {
 
     private void closeRelaySocket() {
         mainHandler.removeCallbacks(relayReconnectRunnable);
+        // Fire presence-end for this senderId before tearing down the socket.
+        // Without this the relay's activeBroadcasters map keeps the id around
+        // until its 15 s idle eviction fires; users see ghost "live recording"
+        // entries between a session stop and the next presence cleanup tick.
+        if (relaySocket != null && senderId != null && !senderId.isEmpty()) {
+            try {
+                String msg = "{\"type\":\"presence-end\",\"senderId\":\"" + escapeJson(senderId) + "\"}";
+                relaySocket.send(msg);
+            } catch (Throwable ignored) {}
+        }
         if (relaySocket != null) {
             try { relaySocket.close(1000, "session stop"); } catch (Exception ignored) {}
             relaySocket = null;
