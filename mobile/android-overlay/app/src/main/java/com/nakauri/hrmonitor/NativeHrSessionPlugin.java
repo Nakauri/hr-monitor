@@ -1283,10 +1283,6 @@ public class NativeHrSessionPlugin extends Plugin {
                     .edit().putLong("last_alive_ms", now).apply();
             } catch (Throwable ignored) {}
         }
-        FloatingOverlayService.HrUpdateListener overlay = floatingOverlayListener;
-        if (overlay != null) {
-            try { overlay.onHrUpdate(p.hr); } catch (Throwable ignored) {}
-        }
         // synchronized: BLE binder writes, main thread reads in publishTick.
         Double rmssd;
         Double sdnnMatch;
@@ -1379,6 +1375,11 @@ public class NativeHrSessionPlugin extends Plugin {
         }
 
         publishTick(p.hr, rmssd, p.contactOff, now);
+
+        FloatingOverlayService.HrUpdateListener overlay = floatingOverlayListener;
+        if (overlay != null) {
+            try { overlay.onHrUpdate(p.hr, rmssd != null ? rmssd : 0.0); } catch (Throwable ignored) {}
+        }
 
         JSObject ev = new JSObject();
         ev.put("hr", p.hr);
