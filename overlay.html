@@ -292,9 +292,16 @@
         z.style.height = '';
         z.style.overflow = '';
       } else {
-        z.style.width = size.w + 'px';
-        z.style.height = size.h + 'px';
-        z.style.overflow = 'hidden';
+        // Non-embed (standalone browser tab): the broadcaster's measured
+        // size is a hint, not a hard crop. Using width+overflow:hidden cut
+        // off the right side of the widget when the receiver's natural
+        // layout needed more pixels than the broadcaster reported (e.g.
+        // mobile sender → desktop receiver with different font metrics).
+        z.style.minWidth = size.w + 'px';
+        z.style.minHeight = size.h + 'px';
+        z.style.width = '';
+        z.style.height = '';
+        z.style.overflow = '';
       }
     }
   }
