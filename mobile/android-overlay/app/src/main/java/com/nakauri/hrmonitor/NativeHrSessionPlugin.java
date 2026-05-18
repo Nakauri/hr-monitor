@@ -559,6 +559,13 @@ public class NativeHrSessionPlugin extends Plugin {
                         uploader.uploadOrphanIfNeededAsync(sessionsDir, prev);
                     }
                 } catch (Throwable ignored) {}
+                // Also full-scan: any local CSV whose Drive copy is missing OR
+                // smaller than local (truncated upload from a session that
+                // died before its final flush). Catches the case where the
+                // dead session is NOT lastSessionFilename — e.g. user started
+                // multiple sessions after the kill and the truncated file
+                // is now two or three back in the lastSessionFilename chain.
+                try { uploader.uploadOrphansAsync(sessionsDir); } catch (Throwable ignored) {}
             }
         } catch (Throwable t) { /* never block session start */ }
 

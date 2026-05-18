@@ -216,21 +216,30 @@ public class NativeDriveUploader {
         return deleted;
     }
 
-    private java.util.Set<String> listDriveFilenames(String token, String folderId) throws IOException {
-        java.util.Set<String> out = new java.util.HashSet<>();
+    // Per-file Drive metadata. id is needed for PATCH (size-mismatch repair),
+    // size for the local-bigger-than-Drive detection that catches truncated
+    // uploads from a session that died before its final flush completed.
+    private static class DriveFileInfo {
+        final String id;
+        final long size;
+        DriveFileInfo(String id, long size) { this.id = id; this.size = size; }
+    }
+
+    private java.util.Map<String, DriveFileInfo> listDriveFiles(String token, String folderId) throws IOException {
+        java.util.Map<String, DriveFileInfo> out = new java.util.HashMap<>();
         String pageToken = null;
         do {
             okhttp3.HttpUrl.Builder b = okhttp3.HttpUrl.parse("https://www.googleapis.com/drive/v3/files")
                 .newBuilder()
                 .addQueryParameter("q", "'" + folderId + "' in parents and trashed=false")
-                .addQueryParameter("fields", "nextPageToken,files(name)")
+                .addQueryParameter("fields", "nextPageToken,files(id,name,size)")
                 .addQueryParameter("pageSize", "200")
                 .addQueryParameter("spaces", "drive");
             if (pageToken != null) b.addQueryParameter("pageToken", pageToken);
             Request req = new Request.Builder().url(b.build()).header("Authorization", "Bearer " + token).build();
             try (Response resp = client.newCall(req).execute()) {
                 if (!resp.isSuccessful()) {
-                    Log.w(TAG, "List filenames HTTP " + resp.code());
+                    Log.w(TAG, "List files HTTP " + resp.code());
                     return null;
                 }
                 String body = resp.body() != null ? resp.body().string() : "";
@@ -238,18 +247,31 @@ public class NativeDriveUploader {
                 JSONArray files = json.optJSONArray("files");
                 if (files != null) {
                     for (int i = 0; i < files.length(); i++) {
-                        String name = files.getJSONObject(i).optString("name");
-                        if (name != null && !name.isEmpty()) out.add(name);
+                        JSONObject f = files.getJSONObject(i);
+                        String name = f.optString("name");
+                        String id = f.optString("id");
+                        // Drive API returns size as a string (long can overflow JSON number).
+                        long size = 0;
+                        try { size = Long.parseLong(f.optString("size", "0")); } catch (NumberFormatException e) {}
+                        if (name != null && !name.isEmpty() && id != null && !id.isEmpty()) {
+                            out.put(name, new DriveFileInfo(id, size));
+                        }
                     }
                 }
                 pageToken = json.optString("nextPageToken", null);
                 if (pageToken != null && pageToken.isEmpty()) pageToken = null;
             } catch (Exception e) {
-                Log.w(TAG, "List filenames parse failed: " + e.getMessage());
+                Log.w(TAG, "List files parse failed: " + e.getMessage());
                 return null;
             }
         } while (pageToken != null);
         return out;
+    }
+
+    // Thin wrapper for the cleanup path which only needs filenames.
+    private java.util.Set<String> listDriveFilenames(String token, String folderId) throws IOException {
+        java.util.Map<String, DriveFileInfo> files = listDriveFiles(token, folderId);
+        return files == null ? null : files.keySet();
     }
 
     /**
@@ -272,22 +294,33 @@ public class NativeDriveUploader {
                     if (folderId != null) folderIdRef.set(folderId);
                 }
                 if (folderId == null) return;
-                java.util.Set<String> driveNames = listDriveFilenames(token, folderId);
-                if (driveNames == null) return;
+                java.util.Map<String, DriveFileInfo> driveFiles = listDriveFiles(token, folderId);
+                if (driveFiles == null) return;
                 String activeName = sessionFilenameRef.get();
-                int uploaded = 0;
+                int created = 0, patched = 0;
                 for (File f : files) {
                     if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
                     if (activeName != null && f.getName().equals(activeName)) continue;
                     if (f.length() == 0) continue;
-                    if (driveNames.contains(f.getName())) continue;
-                    Log.i(TAG, "uploadOrphans: re-uploading " + f.getName() + " (" + f.length() + " bytes)");
-                    // Synchronous upload in this background thread — sequential
-                    // is fine for cleanup work.
-                    try { doUpload(f); uploaded++; }
-                    catch (IOException io) { Log.w(TAG, "orphan upload failed: " + io.getMessage()); }
+                    DriveFileInfo info = driveFiles.get(f.getName());
+                    if (info == null) {
+                        Log.i(TAG, "uploadOrphans: creating " + f.getName() + " (" + f.length() + " bytes)");
+                        try { doUpload(f); created++; }
+                        catch (IOException io) { Log.w(TAG, "orphan create failed: " + io.getMessage()); }
+                    } else if (f.length() > info.size) {
+                        // Drive copy is truncated (session died before final flush
+                        // landed). PATCH the existing fileId with the full local
+                        // content instead of POSTing a duplicate.
+                        Log.i(TAG, "uploadOrphans: patching " + f.getName()
+                            + " (local=" + f.length() + " bytes, drive=" + info.size + " bytes)");
+                        try {
+                            byte[] data = readAllBytes(f);
+                            if (patchFile(token, info.id, data)) patched++;
+                        } catch (IOException io) { Log.w(TAG, "orphan patch failed: " + io.getMessage()); }
+                    }
+                    // else: sizes match — Drive already has the complete file, skip.
                 }
-                if (uploaded > 0) Log.i(TAG, "uploadOrphans: re-uploaded " + uploaded + " files");
+                if (created + patched > 0) Log.i(TAG, "uploadOrphans: created=" + created + " patched=" + patched);
             } catch (Throwable t) {
                 Log.w(TAG, "uploadOrphans threw: " + t.getMessage());
             }
@@ -313,10 +346,19 @@ public class NativeDriveUploader {
                     if (folderId != null) folderIdRef.set(folderId);
                 }
                 if (folderId == null) return;
-                java.util.Set<String> driveNames = listDriveFilenames(token, folderId);
-                if (driveNames == null || driveNames.contains(filename)) return;
-                Log.i(TAG, "uploadOrphan: re-uploading " + filename + " (" + f.length() + " bytes)");
-                doUpload(f);
+                java.util.Map<String, DriveFileInfo> driveFiles = listDriveFiles(token, folderId);
+                if (driveFiles == null) return;
+                DriveFileInfo info = driveFiles.get(filename);
+                if (info == null) {
+                    Log.i(TAG, "uploadOrphan: creating " + filename + " (" + f.length() + " bytes)");
+                    doUpload(f);
+                } else if (f.length() > info.size) {
+                    Log.i(TAG, "uploadOrphan: patching " + filename
+                        + " (local=" + f.length() + " bytes, drive=" + info.size + " bytes)");
+                    byte[] data = readAllBytes(f);
+                    patchFile(token, info.id, data);
+                }
+                // else: Drive already has the complete file, nothing to do.
             } catch (IOException io) {
                 Log.w(TAG, "uploadOrphanIfNeeded: " + io.getMessage());
             } catch (Throwable t) {
