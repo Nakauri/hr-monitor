@@ -1667,7 +1667,7 @@
          widget row, not the whole overlay (keeps warning-slot above). -->
     <div class="widget-row">
     <!-- HR widget -->
-    <div class="widget stage-normal" id="hr-widget">
+    <div class="widget stage-normal" id="hr-widget" title="Press and hold to pop out as a floating window">
       <div class="widget-header">
         <div class="header-left">
           <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
@@ -4010,6 +4010,98 @@
       connectInFlight = false;
     }
   }
+
+  // ===== Floating overlay (Pulsoid-style) =====
+  // Long-press the widget to pop it out:
+  //  - Capacitor: native plugin creates a SYSTEM_ALERT_WINDOW overlay.
+  //  - Chromium browsers: Document Picture-in-Picture window holds the
+  //    actual #hr-widget DOM, restored on close.
+  //  - Firefox / Safari / unsupported: brief toast explanation.
+  function openChromiumPip() {
+    if (!('documentPictureInPicture' in window)) return false;
+    const widget = document.getElementById('hr-widget');
+    if (!widget) return false;
+    const restorePoint = widget.nextSibling;
+    const parent = widget.parentNode;
+    window.documentPictureInPicture.requestWindow({ width: 240, height: 110 }).then(function (pipWin) {
+      // Mirror the parent's stylesheets into the PiP window so the widget
+      // renders with the same colors / fonts / layout. <link rel="stylesheet">
+      // and inline <style> both need cloning per the API.
+      Array.from(document.styleSheets).forEach(function (sheet) {
+        try {
+          const node = sheet.ownerNode;
+          if (!node) return;
+          pipWin.document.head.appendChild(node.cloneNode(true));
+        } catch (e) {}
+      });
+      pipWin.document.body.style.cssText = 'margin:0;background:#0a0a0a;display:flex;align-items:center;justify-content:center;padding:8px;';
+      pipWin.document.body.appendChild(widget);
+      pipWin.addEventListener('pagehide', function () {
+        if (restorePoint && restorePoint.parentNode === parent) {
+          parent.insertBefore(widget, restorePoint);
+        } else if (parent) {
+          parent.appendChild(widget);
+        }
+      }, { once: true });
+    }).catch(function (e) {
+      console.warn('PiP request failed:', e);
+      if (typeof showToast === 'function') showToast('Could not pop out the widget. Already popped out?', 4000);
+    });
+    return true;
+  }
+
+  function tryFloatingOverlay() {
+    const ns = window.HRMNativeHrSession;
+    if (ns && ns.isAvailable && typeof ns.startFloatingOverlay === 'function') {
+      ns.hasOverlayPermission().then(function (r) {
+        if (r && r.granted) {
+          ns.startFloatingOverlay().then(function (res) {
+            if (!res || !res.ok) {
+              if (typeof showToast === 'function') showToast('Could not start overlay: ' + (res && res.reason || 'unknown'), 4000);
+            }
+          });
+        } else {
+          if (typeof showToast === 'function') showToast('Floating overlay needs the "Display over other apps" permission. Opening Settings...', 5000);
+          setTimeout(function () { try { ns.requestOverlayPermission(); } catch (e) {} }, 800);
+        }
+      });
+      return;
+    }
+    if (openChromiumPip()) return;
+    if (typeof showToast === 'function') showToast('Pop-out not supported in this browser. Use Chrome / Edge for desktop or the Android app.', 5000);
+  }
+
+  // Pointer-event long-press detection: hold for 600 ms without moving
+  // more than 10 px to trigger. Cancels on pointerup / pointercancel /
+  // material drag. Same gesture across mobile and desktop.
+  (function wireLongPress() {
+    const widget = document.getElementById('hr-widget');
+    if (!widget) return;
+    const HOLD_MS = 600;
+    const MOVE_THRESHOLD = 10;
+    let timer = null;
+    let startX = 0, startY = 0;
+    function cancel() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    }
+    widget.addEventListener('pointerdown', function (e) {
+      startX = e.clientX;
+      startY = e.clientY;
+      cancel();
+      timer = setTimeout(function () {
+        timer = null;
+        tryFloatingOverlay();
+      }, HOLD_MS);
+    });
+    widget.addEventListener('pointermove', function (e) {
+      if (!timer) return;
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      if (dx * dx + dy * dy > MOVE_THRESHOLD * MOVE_THRESHOLD) cancel();
+    });
+    widget.addEventListener('pointerup', cancel);
+    widget.addEventListener('pointercancel', cancel);
+    widget.addEventListener('pointerleave', cancel);
+  })();
 
   // Native 'hr' event → processHRData. Attached once at startup on
   // Capacitor; piggy-backs on the plugin's continuous BLE notifications.
