@@ -3657,7 +3657,7 @@
     function needsReparse(fn) {
       const c = sessionsIndex[fn];
       return !c || c.__incomplete
-        || c.__schemaV !== 12
+        || c.__schemaV !== 13
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
         || !('quadPct' in c) || !('restingHR' in c);
     }
@@ -3726,10 +3726,15 @@
       // session shows as three separate per-day cards / charts.
       if (s && s.startEpoch && s.duration) {
         const endMs = s.startEpoch + s.duration * 60000;
+        const futureCutoff = Date.now() + 86400000;
         const dayCursor = new Date(s.startEpoch);
         dayCursor.setHours(0, 0, 0, 0);
         dayCursor.setDate(dayCursor.getDate() + 1);
         while (dayCursor.getTime() < endMs) {
+          // Defensive: never bucket a session more than a day into the
+          // future. summarizeCSV already rejects future-dated summaries
+          // but this stops legacy cached entries from painting phantom days.
+          if (dayCursor.getTime() > futureCutoff) break;
           const dateKey = localDateKeyFromEpoch(dayCursor.getTime());
           if (!sessionsByDate[dateKey]) sessionsByDate[dateKey] = [];
           sessionsByDate[dateKey].push(fn);
@@ -4308,11 +4313,24 @@
         };
       }
     }
+    // Sanity-check: a session that claims to extend more than a minute into
+    // the future is either a clock-skew artifact or a contaminated file
+    // (writer dumped stale state.hrSeries into a fresh filename). Refusing
+    // the summary here keeps the bad file out of sessionsIndex + the
+    // sessionsByDate buckets, so it can't paint phantom days in the calendar.
+    const summaryDuration = hr[hr.length - 1].t;
+    const summaryEndMs = startEpoch + summaryDuration * 60000;
+    const nowMs = Date.now();
+    if (startEpoch > nowMs + 60000 || summaryEndMs > nowMs + 60000) {
+      console.warn('[summarizeCSV] rejecting summary with future epoch',
+        { filename, startEpoch, duration: summaryDuration, endMs: summaryEndMs, nowMs });
+      return null;
+    }
     const summary = {
       filename,
       startEpoch,
       hrCount: hr.length,
-      duration: hr[hr.length - 1].t,
+      duration: summaryDuration,
       hrAvg: hrVals.length ? Math.round(hrVals.reduce((s, v) => s + v, 0) / hrVals.length) : 0,
       hrMax: maxHR,
       hrMin: minHR,
@@ -4339,7 +4357,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 12,
+      __schemaV: 13,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -8816,10 +8834,12 @@
       // Multi-day session: roll over onto every calendar day the session spans.
       if (s.startEpoch && s.duration) {
         const endMs = s.startEpoch + s.duration * 60000;
+        const futureCutoff = Date.now() + 86400000;
         const dayCursor = new Date(s.startEpoch);
         dayCursor.setHours(0, 0, 0, 0);
         dayCursor.setDate(dayCursor.getDate() + 1);
         while (dayCursor.getTime() < endMs) {
+          if (dayCursor.getTime() > futureCutoff) break;
           const dateKey = localDateKeyFromEpoch(dayCursor.getTime());
           if (!sessionsByDate[dateKey]) sessionsByDate[dateKey] = [];
           sessionsByDate[dateKey].push(fn);
