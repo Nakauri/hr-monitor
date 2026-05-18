@@ -4,13 +4,17 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.util.AttributeSet;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -20,6 +24,9 @@ import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 // Pulsoid-style floating BPM overlay. SYSTEM_ALERT_WINDOW + WindowManager
 // to render a small draggable pill on top of any app. Subscribes to HR ticks
@@ -36,9 +43,10 @@ public class FloatingOverlayService extends Service {
     private TextView bpmText;
     private TextView rmssdText;
     private TextView rmssdLabel;
+    private SparklineView sparkline;
     private WindowManager.LayoutParams params;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private String mode = "compact"; // "compact" | "card"
+    private String mode = "compact"; // "compact" | "card" | "chart"
 
     // Plugin's handleHrReading calls this on every HR tick. Both fields are
     // best-effort: bpm is 0 if no parse, rmssd is 0 if no RR window yet.
@@ -63,6 +71,7 @@ public class FloatingOverlayService extends Service {
             mainHandler.post(() -> {
                 if (bpmText != null) bpmText.setText(bpm > 0 ? String.valueOf(bpm) : "—");
                 if (rmssdText != null) rmssdText.setText(rmssd > 0 ? String.valueOf((int) Math.round(rmssd)) : "—");
+                if (sparkline != null && bpm > 0) sparkline.pushBpm(bpm);
             });
         };
         Log.i(TAG, "Overlay attached (mode=" + mode + ").");
@@ -111,6 +120,12 @@ public class FloatingOverlayService extends Service {
         bpmText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         bpmText.setTypeface(bpmText.getTypeface(), android.graphics.Typeface.BOLD);
         pill.addView(bpmText);
+
+        // Sparkline (mini live HR trace), visible only in chart mode.
+        sparkline = new SparklineView(this);
+        LinearLayout.LayoutParams sparkLp = new LinearLayout.LayoutParams(dp(60), dp(28));
+        sparkLp.leftMargin = dp(8);
+        pill.addView(sparkline, sparkLp);
 
         // RMSSD value + label, hidden in compact mode.
         rmssdText = new TextView(this);
@@ -185,7 +200,10 @@ public class FloatingOverlayService extends Service {
     }
 
     private void toggleMode() {
-        mode = mode.equals("compact") ? "card" : "compact";
+        // Cycle compact → card → chart → compact.
+        if ("compact".equals(mode)) mode = "card";
+        else if ("card".equals(mode)) mode = "chart";
+        else mode = "compact";
         try {
             getSharedPreferences("hr_monitor_session", 0).edit()
                 .putString(PREFS_MODE_KEY, mode).apply();
@@ -194,9 +212,11 @@ public class FloatingOverlayService extends Service {
     }
 
     private void applyMode() {
-        boolean card = "card".equals(mode);
-        if (rmssdText != null) rmssdText.setVisibility(card ? View.VISIBLE : View.GONE);
-        if (rmssdLabel != null) rmssdLabel.setVisibility(card ? View.VISIBLE : View.GONE);
+        boolean showRmssd = "card".equals(mode) || "chart".equals(mode);
+        boolean showSparkline = "chart".equals(mode);
+        if (rmssdText != null) rmssdText.setVisibility(showRmssd ? View.VISIBLE : View.GONE);
+        if (rmssdLabel != null) rmssdLabel.setVisibility(showRmssd ? View.VISIBLE : View.GONE);
+        if (sparkline != null) sparkline.setVisibility(showSparkline ? View.VISIBLE : View.GONE);
     }
 
     private void attachToWindow() {
@@ -211,8 +231,15 @@ public class FloatingOverlayService extends Service {
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.END;
-        params.x = dp(16);
+        // TOP|START so the drag math is intuitive: dx > 0 → window right,
+        // dx < 0 → window left. With Gravity.END the axis is inverted and
+        // dragging left actually pushed the pill right off-screen.
+        params.gravity = Gravity.TOP | Gravity.START;
+        // Initial position near the top-right corner. Width is unknown until
+        // first layout, so we approximate with the screen width minus a
+        // typical pill width — the user can drag wherever afterward.
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        params.x = Math.max(0, screenWidth - dp(200));
         params.y = dp(100);
         try {
             windowManager.addView(overlayView, params);
@@ -224,5 +251,71 @@ public class FloatingOverlayService extends Service {
 
     private int dp(int v) {
         return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    // Mini HR sparkline. Stores the last N BPM values and paints them as a
+    // single line. Auto-scales y to the visible value range so brief dips
+    // and spikes show clearly. Lightweight — no animation, just a fresh
+    // path on every invalidate.
+    static class SparklineView extends View {
+        private static final int CAPACITY = 60;
+        private final Deque<Integer> bpmHistory = new ArrayDeque<>(CAPACITY);
+        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+
+        SparklineView(Context ctx) {
+            super(ctx);
+            init();
+        }
+
+        SparklineView(Context ctx, AttributeSet attrs) {
+            super(ctx, attrs);
+            init();
+        }
+
+        private void init() {
+            linePaint.setColor(Color.parseColor("#9ADFC8"));
+            linePaint.setStyle(Paint.Style.STROKE);
+            linePaint.setStrokeWidth(getResources().getDisplayMetrics().density * 1.6f);
+            linePaint.setStrokeJoin(Paint.Join.ROUND);
+            linePaint.setStrokeCap(Paint.Cap.ROUND);
+        }
+
+        void pushBpm(int bpm) {
+            synchronized (bpmHistory) {
+                if (bpmHistory.size() >= CAPACITY) bpmHistory.removeFirst();
+                bpmHistory.addLast(bpm);
+            }
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int n;
+            int[] snap;
+            synchronized (bpmHistory) {
+                n = bpmHistory.size();
+                snap = new int[n];
+                int i = 0;
+                for (Integer v : bpmHistory) snap[i++] = v;
+            }
+            if (n < 2) return;
+            int min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
+            for (int v : snap) { if (v < min) min = v; if (v > max) max = v; }
+            int range = Math.max(1, max - min);
+            float w = getWidth();
+            float h = getHeight();
+            float padY = h * 0.15f;
+            float usableH = h - padY * 2;
+            path.reset();
+            for (int i = 0; i < n; i++) {
+                float x = (i / (float) (n - 1)) * w;
+                float y = padY + usableH - ((snap[i] - min) / (float) range) * usableH;
+                if (i == 0) path.moveTo(x, y);
+                else path.lineTo(x, y);
+            }
+            canvas.drawPath(path, linePaint);
+        }
     }
 }
