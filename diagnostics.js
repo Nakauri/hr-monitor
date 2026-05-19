@@ -16,6 +16,16 @@
   const REPO = 'Nakauri/hr-monitor';
   let cachedVersion = null;
 
+  // Demo mode is a clean public sandbox. The diagnostics modal must not
+  // reveal the visitor's own account email, Drive cache size, or broadcast
+  // key state when the page was loaded with ?demo=1.
+  function isDemoView() {
+    try {
+      const u = new URL(location.href);
+      return u.searchParams.get('demo') === '1' || /(?:^|[?&#])demo=1/.test(location.hash);
+    } catch (e) { return false; }
+  }
+
   // ----- Persistent log buffer ------------------------------------------
   // Ring buffer of the last 60 entries, persisted to localStorage so a
   // native Android crash + restart still surfaces the prelude. Anything
@@ -126,10 +136,12 @@
       oemHasKnownKiller: !!(window.HRMOem && window.HRMOem.hasKnownBackgroundKiller),
       oemLastError: window.__hrMonitorOemLastError || null,
       userAgent: navigator.userAgent,
-      localBroadcastKey: !!localStorage.getItem('hr_monitor_broadcast_key'),
-      driveSignedIn: !!(window.aortiAuth && window.aortiAuth.isSignedIn()),
-      driveEmail: (window.aortiAuth && window.aortiAuth.getEmail()) || null,
+      demoView: isDemoView(),
+      localBroadcastKey: isDemoView() ? false : !!localStorage.getItem('hr_monitor_broadcast_key'),
+      driveSignedIn: isDemoView() ? false : !!(window.aortiAuth && window.aortiAuth.isSignedIn()),
+      driveEmail: isDemoView() ? null : ((window.aortiAuth && window.aortiAuth.getEmail()) || null),
       driveMetaCount: (function () {
+        if (isDemoView()) return 0;
         try {
           const raw = localStorage.getItem('hrv_viewer_drive_meta');
           if (!raw) return 0;
@@ -137,6 +149,7 @@
         } catch (e) { return -1; }
       })(),
       driveLastSync: (function () {
+        if (isDemoView()) return null;
         try {
           const t = parseInt(localStorage.getItem('hrv_viewer_drive_lastsync') || '0', 10);
           if (!t) return null;
@@ -522,7 +535,7 @@
         </details>
         <details class="hrm-diag-section" open>
           <summary>Recent events (newest last)</summary>
-          <pre class="hrm-diag-log" id="hrm-events-log">${esc(formatLog(readLog()))}</pre>
+          <pre class="hrm-diag-log" id="hrm-events-log">${esc(d.demoView ? 'hidden in demo mode' : formatLog(readLog()))}</pre>
         </details>
         <div class="hrm-diag-actions">
           <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
@@ -540,20 +553,29 @@
 
     // Hydrate auth trace from localStorage. Set by drive-auth-native.js and
     // auth.js. Survives navigation because it's localStorage-based.
+    // Demo mode hides it entirely — the trace can contain account hints.
     try {
       const tracePane = document.getElementById('hrm-auth-trace');
       if (tracePane) {
-        const raw = localStorage.getItem('hrm_auth_trace');
-        const arr = raw ? JSON.parse(raw) : [];
-        if (!arr.length) {
-          tracePane.textContent = 'no auth events yet';
+        if (d.demoView) {
+          tracePane.textContent = 'hidden in demo mode';
         } else {
-          tracePane.textContent = arr.map(e => {
-            const when = new Date(e.t).toISOString().slice(11, 23);
-            const payload = e.payload != null ? ' ' + JSON.stringify(e.payload) : '';
-            return when + '  ' + e.step + payload;
-          }).join('\n');
+          const raw = localStorage.getItem('hrm_auth_trace');
+          const arr = raw ? JSON.parse(raw) : [];
+          if (!arr.length) {
+            tracePane.textContent = 'no auth events yet';
+          } else {
+            tracePane.textContent = arr.map(e => {
+              const when = new Date(e.t).toISOString().slice(11, 23);
+              const payload = e.payload != null ? ' ' + JSON.stringify(e.payload) : '';
+              return when + '  ' + e.step + payload;
+            }).join('\n');
+          }
         }
+      }
+      if (d.demoView) {
+        const eventsPane = document.getElementById('hrm-events-log');
+        if (eventsPane) eventsPane.textContent = 'hidden in demo mode';
       }
     } catch (e) { /* ignore */ }
 
@@ -709,6 +731,14 @@
     const lines = [];
     lines.push('HR Monitor diagnostics');
     lines.push('----------------------');
+    if (d.demoView) {
+      lines.push('(demo mode: personal fields suppressed)');
+      lines.push('Version:    v0.5 · ' + (v && v.shortSha ? v.shortSha : 'offline'));
+      lines.push('Built:      ' + (v && v.builtAt ? fmt(v.builtAt) : '—'));
+      lines.push('Runtime:    ' + d.runtime);
+      lines.push('User agent: ' + d.userAgent);
+      return lines.join('\n');
+    }
     lines.push('Version:    v0.5 · ' + (v && v.shortSha ? v.shortSha : 'offline'));
     lines.push('Built:      ' + (v && v.builtAt ? fmt(v.builtAt) : '—'));
     lines.push('Signed:     ' + (v ? (v.signed ? 'yes' : 'no') : '—'));

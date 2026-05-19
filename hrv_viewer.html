@@ -2826,11 +2826,20 @@
   // the transparent-for-OBS default. Visible only when (1) a broadcast key
   // is in localStorage AND (2) we've seen a tick from the relay in the
   // last 15 s — guards against stale keys after old sessions.
+  // Demo mode never reads the broadcast key or opens a relay socket, so the
+  // demo URL is a clean sandbox even if the visitor has stale state.
+  const __viewerDemoFlag = (function () {
+    try {
+      const u = new URL(location.href);
+      return u.searchParams.get('demo') === '1' || /(?:^|[?&#])demo=1/.test(location.hash);
+    } catch (e) { return false; }
+  })();
   let watchLiveSocket = null;
   let watchLiveLastTick = 0;
   function updateWatchLiveUI() {
     const link = document.getElementById('watch-live-link');
     if (!link) return;
+    if (__viewerDemoFlag) { link.hidden = true; return; }
     const key = localStorage.getItem('hr_monitor_broadcast_key');
     if (!key) { link.hidden = true; return; }
     link.href = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark';
@@ -2842,6 +2851,7 @@
   // re-checks visibility so the button auto-hides 15 s after the last
   // tick if the sender disconnected.
   (function connectWatchLiveRelay() {
+    if (__viewerDemoFlag) return;
     const key = localStorage.getItem('hr_monitor_broadcast_key');
     if (!key) return;
     try {
@@ -2911,7 +2921,11 @@
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
     const email = window.aortiAuth ? window.aortiAuth.getEmail() : null;
-    if (emailEl) emailEl.textContent = (driveAccessToken && email) ? email : '';
+    // Demo mode never paints the signed-in email anywhere visible. Visitors
+    // on the public demo URL see a clean sandbox even if they happen to be
+    // signed in to Drive themselves.
+    const showEmail = driveAccessToken && email && !__viewerDemoFlag;
+    if (emailEl) emailEl.textContent = showEmail ? email : '';
     if (driveAccessToken) {
       if (driveFolderId) {
         statusEl.textContent = driveRefreshing ? '↻' : 'on';
@@ -2920,7 +2934,7 @@
           : 'Signed in. Drive sessions sync automatically.';
         statusEl.classList.add('drive-syncing');
         setMobileDriveDot(driveRefreshing ? 'syncing' : 'synced',
-          driveRefreshing ? 'refreshing session' : 'on (' + (email || 'signed in') + ')');
+          driveRefreshing ? 'refreshing session' : 'on (' + (showEmail ? email : 'signed in') + ')');
       } else {
         statusEl.textContent = '…';
         statusEl.title = 'Signed in, connecting to folder';
