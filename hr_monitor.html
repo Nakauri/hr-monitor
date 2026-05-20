@@ -3076,8 +3076,37 @@
   // True when we're actually producing live HR data right now (BLE connected
   // AND publishing is on). This gates presence / ticks so a disconnected
   // desktop doesn't keep appearing as a live broadcaster on the phone.
+  // On Capacitor, native owns the relay; it can publish even while the JS UI
+  // is still in 'reconnecting' (e.g. recovery's first-HR gate not yet flipped).
   function isPublisherLive() {
-    return !!navigator.bluetooth && widgetPrefs.broadcast && state.connState === 'live';
+    if (!widgetPrefs.broadcast) return false;
+    if (!!navigator.bluetooth && state.connState === 'live') return true;
+    const ns = window.HRMNativeHrSession;
+    if (ns && ns.isPublishing && ns.isPublishing()) return true;
+    return false;
+  }
+  // True if a relay senderId belongs to this device. Checks both JS's
+  // sessionStorage-tracked dev.id AND native's actively-broadcasting senderId
+  // (when known). Catches the case where JS and native drifted apart, e.g.
+  // adoptNativeSenderIdentity missed a path or the WebView restarted with
+  // sessionStorage wiped before adoption could fire.
+  function isSelfSenderId(id) {
+    if (!id) return false;
+    const dev = getDeviceIdentity();
+    if (id === dev.id) return true;
+    const ns = window.HRMNativeHrSession;
+    if (ns && typeof ns.getActiveSenderId === 'function' && ns.getActiveSenderId() === id) return true;
+    return false;
+  }
+  // Drop any activeBroadcasters entries that are actually us. Called when we
+  // newly learn native's senderId (after adoption) so an entry added before
+  // adoption can't linger as a foreign-looking row.
+  function evictSelfFromBroadcasters() {
+    let dirty = false;
+    for (const id of Array.from(activeBroadcasters.keys())) {
+      if (isSelfSenderId(id)) { activeBroadcasters.delete(id); dirty = true; }
+    }
+    if (dirty) renderBroadcastersPanel();
   }
   function publishToRelay(payload) {
     if (!isPublisherLive()) return;
@@ -3140,9 +3169,10 @@
   function handleRelayMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
     if ((msg.type === 'tick' || msg.type === 'presence') && msg.senderId) {
-      const dev = getDeviceIdentity();
-      // Skip ourselves — no point listing our own device.
-      if (msg.senderId === dev.id) return;
+      // Skip ourselves — no point listing our own device. isSelfSenderId
+      // also catches the case where native's senderId hasn't been adopted
+      // into sessionStorage yet (or differs from dev.id for any reason).
+      if (isSelfSenderId(msg.senderId)) return;
       // startedAt is sticky: once we've recorded when a sender first appeared,
       // keep that. If the sender omits startedAt in subsequent heartbeats the
       // fallback Date.now() would otherwise reset the "X min" age label to
@@ -3164,8 +3194,8 @@
       // Ignore echoes of our own stop emissions — the relay mirrors every
       // publish back to every subscriber and we don't want to disconnect
       // ourselves because someone else handed our control-stop back to us.
-      if (msg.senderId && msg.senderId === dev.id) return;
-      if (msg.targetId === dev.id) {
+      if (isSelfSenderId(msg.senderId)) return;
+      if (msg.targetId === dev.id || isSelfSenderId(msg.targetId)) {
         // Another device just took over. Disconnect and stop publishing.
         setBroadcast(false);
         try { if (typeof disconnect === 'function') disconnect(); } catch (e) {}
@@ -3232,6 +3262,10 @@
       });
     }
     for (const [id, s] of activeBroadcasters) {
+      // Defensive: skip any entry that turns out to be self. Filter in
+      // handleRelayMessage prevents new self entries, but an existing one
+      // could have been added before native's senderId was known.
+      if (isSelfSenderId(id)) continue;
       entries.push({ id, label: s.label, startedAt: s.startedAt, self: false });
     }
     if (entries.length === 0) {
@@ -3615,6 +3649,7 @@
     sessionStorage.setItem('hr_monitor_device_id', nid);
     const nlabel = typeof ns.getActiveSenderLabel === 'function' ? ns.getActiveSenderLabel() : null;
     if (nlabel) sessionStorage.setItem('hr_monitor_device_label', nlabel);
+    try { evictSelfFromBroadcasters(); } catch (e) {}
   }
   function getDeviceIdentity() {
     let id = sessionStorage.getItem('hr_monitor_device_id');
