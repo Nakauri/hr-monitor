@@ -20,6 +20,12 @@
     let publishing = false;
     let csvFilename = null;
     let sessionStartMs = 0;
+    // Native's relay identity when actively publishing. JS adopts these on
+    // bootstrap so an Activity restart with a surviving FGS doesn't mint a
+    // fresh senderId (which would orphan the FGS broadcast as a "foreign"
+    // device in activeBroadcasters).
+    let activeSenderId = null;
+    let activeSenderLabel = null;
     // Populated from status().recoveryContext when the native plugin detects
     // a session that survived the previous process. Null otherwise.
     let recoveryContext = null;
@@ -67,6 +73,8 @@
             publishing = true;
             csvFilename = s.csvFile || csvFilename;
             sessionStartMs = s.sessionStartMs || 0;
+            if (s.senderId) activeSenderId = s.senderId;
+            if (s.senderLabel) activeSenderLabel = s.senderLabel;
             for (const cb of stateListeners) {
               try { cb({ ble: !!s.bleConnected, relay: !!s.relayLive, session: true }); } catch (e) {}
             }
@@ -123,6 +131,8 @@
       getCsvFilename: function () { return csvFilename; },
       getSessionStartMs: function () { return sessionStartMs; },
       getRecoveryContext: function () { return recoveryContext; },
+      getActiveSenderId: function () { return activeSenderId; },
+      getActiveSenderLabel: function () { return activeSenderLabel; },
       // Transitional. New callers should read getRecoveryContext() directly.
       isInterruptedRecoveryPending: function () { return !!recoveryContext && !publishing; },
       // Resolves once the initial status() IPC has completed. Lets the page
@@ -141,6 +151,8 @@
         // The publishingStarted event is authoritative for the publishing
         // flag flip. We still update sessionStartMs here for callers that
         // read it from the resolve value's path.
+        if (opts && opts.senderId) activeSenderId = opts.senderId;
+        if (opts && opts.senderLabel) activeSenderLabel = opts.senderLabel;
         return plugin.startSession(opts).then(function (r) {
           if (r && r.sessionStartMs) sessionStartMs = r.sessionStartMs;
           else if (opts && opts.resumeSessionStartMs) sessionStartMs = opts.resumeSessionStartMs;
@@ -149,6 +161,8 @@
       },
       stopSession: function () {
         // publishingStopped event flips the flag; this just forwards the call.
+        activeSenderId = null;
+        activeSenderLabel = null;
         return plugin.stopSession();
       },
       disconnect: function () { return plugin.disconnect(); },

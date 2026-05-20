@@ -3569,16 +3569,52 @@
   // same browser need distinct IDs so a double-broadcast shows up clearly on
   // the receiver). The deviceLabel is something human-readable the user can
   // read in the overlay's warning when two tabs are fighting for the same key.
-  // Send presence-end for the current senderId over the relay socket if
-  // open, then drop the id so getDeviceIdentity() will mint a fresh one.
-  // Used by the recovery flow so a session resumed after a process kill
-  // never inherits the old (now-orphaned) presence entry.
+  // Fire presence-end on the relay for a given senderId. Handles the three
+  // socket states: OPEN sends immediately, CONNECTING queues via the open
+  // event (5 s ceiling so the listener can't leak forever), CLOSING/CLOSED
+  // silently drop (the relay's 15 s idle timeout evicts the orphan anyway).
+  function sendPresenceEnd(id) {
+    const sock = relaySocket;
+    if (!sock || !id) return;
+    const msg = JSON.stringify({ type: 'presence-end', senderId: id });
+    if (sock.readyState === WebSocket.OPEN) {
+      try { sock.send(msg); } catch (e) {}
+      return;
+    }
+    if (sock.readyState === WebSocket.CONNECTING) {
+      let timer = null;
+      const onOpen = function () {
+        try { sock.send(msg); } catch (e) {}
+        try { sock.removeEventListener('open', onOpen); } catch (e) {}
+        if (timer) clearTimeout(timer);
+      };
+      sock.addEventListener('open', onOpen);
+      timer = setTimeout(function () {
+        try { sock.removeEventListener('open', onOpen); } catch (e) {}
+      }, 5000);
+    }
+  }
+  // Send presence-end for the current senderId, then drop the id so
+  // getDeviceIdentity() will mint a fresh one. Used by the recovery flow so
+  // a session resumed after a process kill never inherits the old (now-
+  // orphaned) presence entry.
   function rotateSenderId() {
     const oldId = sessionStorage.getItem('hr_monitor_device_id');
-    if (oldId && relaySocket && relaySocket.readyState === WebSocket.OPEN) {
-      try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: oldId })); } catch (e) {}
-    }
+    if (oldId) sendPresenceEnd(oldId);
     sessionStorage.removeItem('hr_monitor_device_id');
+  }
+  // Pull the native FGS's senderId into sessionStorage so getDeviceIdentity
+  // returns the same id native is publishing under. Otherwise a fresh WebView
+  // (e.g. Activity restart while FGS survives) lists the FGS as a foreign
+  // broadcaster instead of recognising it as self.
+  function adoptNativeSenderIdentity() {
+    const ns = window.HRMNativeHrSession;
+    if (!ns || typeof ns.getActiveSenderId !== 'function') return;
+    const nid = ns.getActiveSenderId();
+    if (!nid) return;
+    sessionStorage.setItem('hr_monitor_device_id', nid);
+    const nlabel = typeof ns.getActiveSenderLabel === 'function' ? ns.getActiveSenderLabel() : null;
+    if (nlabel) sessionStorage.setItem('hr_monitor_device_label', nlabel);
   }
   function getDeviceIdentity() {
     let id = sessionStorage.getItem('hr_monitor_device_id');
@@ -4164,6 +4200,11 @@
   // overlay management. The lifecycle controller calls this from its
   // performRehydrate hook before pulling the CSV.
   function prepareLiveUiFromNativeSession() {
+    // Adopt the native FGS's senderId before anything calls getDeviceIdentity.
+    // sessionStorage was wiped on Activity destroy; without this, JS mints a
+    // fresh senderId and the FGS's relay ticks (still under the old senderId)
+    // get listed in activeBroadcasters as a foreign "Stop session" entry.
+    adoptNativeSenderIdentity();
     const last = getLastStrap();
     device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: true });
     const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)

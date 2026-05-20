@@ -1125,6 +1125,15 @@ public class NativeHrSessionPlugin extends Plugin {
             ret.put("csvFile", csv.getFilename());
             ret.put("sessionStartMs", csv.getSessionStartMs());
         }
+        // Expose the relay identity so a fresh WebView (Activity restart with
+        // FGS surviving) adopts our senderId instead of minting a new one.
+        // Otherwise JS sees our own relay ticks as a foreign broadcaster.
+        // isEmpty guard matches the persistence check so an empty string
+        // can never round-trip through status() either.
+        if (active && senderId != null && !senderId.isEmpty()) {
+            ret.put("senderId", senderId);
+            ret.put("senderLabel", senderLabel == null ? "" : senderLabel);
+        }
         // When the in-memory AtomicBoolean disagrees with persisted state, the
         // process was killed mid-session. JS reads the recoveryContext block
         // synchronously from this snapshot — no event timing race.
