@@ -3108,6 +3108,33 @@
     }
     if (dirty) renderBroadcastersPanel();
   }
+  // Corrective sync: if native is actively publishing but JS state has
+  // drifted to 'idle' (e.g. the session-toggle says "Reconnect to..."), pull
+  // JS back into agreement with reality. Does nothing when JS is already
+  // 'live' or in legitimate 'reconnecting' (where recovery is mid-flight).
+  // Diagnostic capture on 2026-05-20 showed connState landing in 'idle' with
+  // native FGS still publishing — no HRMLog'd path explained the transition,
+  // so this periodic sync papers over the mystery while we hunt the cause.
+  function syncConnStateWithNative() {
+    if (state.connState !== 'idle') return;
+    const ns = window.HRMNativeHrSession;
+    if (!ns || typeof ns.isPublishing !== 'function' || !ns.isPublishing()) return;
+    if (window.HRMLog) window.HRMLog.event('connState sync', 'idle but native publishing -> forcing live');
+    try { adoptNativeSenderIdentity(); } catch (e) {}
+    if (!state.startTime) {
+      const startMs = typeof ns.getSessionStartMs === 'function' ? ns.getSessionStartMs() : 0;
+      if (typeof setSessionStart === 'function') {
+        setSessionStart(startMs > 0 ? startMs : Date.now());
+      } else {
+        state.startTime = startMs > 0 ? startMs : Date.now();
+      }
+    }
+    if (!device || !device._native) {
+      const last = typeof getLastStrap === 'function' ? getLastStrap() : null;
+      device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: true });
+    }
+    setConnState('live');
+  }
   function publishToRelay(payload) {
     if (!isPublisherLive()) return;
     // When the native HR session plugin is publishing (Capacitor only), it
@@ -3232,8 +3259,11 @@
     }, 5000);
   }
   // Clean up stale entries so the list doesn't linger after a broadcaster
-  // disappears without a clean close.
+  // disappears without a clean close. Also piggy-backs a JS<->native state
+  // sync so a drifted 'idle' connState gets corrected back to 'live' when
+  // native is still publishing.
   setInterval(() => {
+    try { syncConnStateWithNative(); } catch (e) {}
     const cutoff = Date.now() - 15000;
     let dirty = false;
     for (const [id, s] of activeBroadcasters) {
@@ -4922,6 +4952,9 @@
     };
   }
   function setConnState(connState) {
+    if (window.HRMLog && state.connState !== connState) {
+      window.HRMLog.event('connState', state.connState + ' -> ' + connState);
+    }
     state.connState = connState;
     document.body.classList.remove('conn-live', 'conn-reconnecting');
     if (connState === 'live') document.body.classList.add('conn-live');
