@@ -3141,13 +3141,13 @@
     let pageToken = null;
     do {
       const q = encodeURIComponent(`'${driveFolderId}' in parents and name contains 'hrv_session' and trashed=false`);
-      const params = 'files?q=' + q + "&fields=files(id,name,modifiedTime),nextPageToken&pageSize=200" +
+      const params = 'files?q=' + q + "&fields=files(id,name,modifiedTime,size),nextPageToken&pageSize=200" +
         (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
       const resp = await driveFetch(params);
       const data = await resp.json();
       for (const f of (data.files || [])) {
         if (/^hrv_session_.*\.csv$/.test(f.name)) {
-          files.set(f.name, { id: f.id, modifiedTime: f.modifiedTime });
+          files.set(f.name, { id: f.id, modifiedTime: f.modifiedTime, size: f.size });
         }
       }
       pageToken = data.nextPageToken || null;
@@ -3207,16 +3207,19 @@
     let firstStaleSample = null;
     for (const [name, meta] of driveFiles) {
       const cachedMeta = driveMetaCache[name];
-      const fresh = cachedMeta && cachedMeta.id === meta.id && cachedMeta.modifiedTime === meta.modifiedTime;
-      // Diagnostic: gate behind a runtime flag so the console isn't spammed
-      // 200 lines/min on a normal user. Flip in devtools to investigate
-      // "file in Drive but not in viewer" reports.
-      // Enable with: window.__hrv_viewer_debug = true
+      // Drive's modifiedTime doesn't reliably bump on every resumable PATCH
+      // chunk, so we also compare file size — bytes added by a chunk DO show
+      // up there. Without the size check, an actively-recording session's
+      // file is silently treated as "fresh" forever and the viewer never
+      // re-downloads new bytes (confirmed via debug logs 2026-05-21).
+      const fresh = cachedMeta && cachedMeta.id === meta.id
+        && cachedMeta.modifiedTime === meta.modifiedTime
+        && cachedMeta.size === meta.size;
       if (window.__hrv_viewer_debug) {
         console.info('[driveSync] cache check', name, {
           fresh,
           cached: cachedMeta || null,
-          drive: { id: meta.id, modifiedTime: meta.modifiedTime },
+          drive: { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size },
         });
       }
       let inStore = false;
@@ -3230,12 +3233,12 @@
         if (!cachedMeta) missingMeta++;
         else if (!fresh) {
           staleMeta++;
-          if (!firstStaleSample) firstStaleSample = { name, cached: cachedMeta, drive: { id: meta.id, modifiedTime: meta.modifiedTime } };
+          if (!firstStaleSample) firstStaleSample = { name, cached: cachedMeta, drive: { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size } };
         } else if (!inStore) missingStore++;
         try {
           const text = await driveDownloadSession(meta.id);
           await idbSet(name, text, IDB_DRIVE_STORE);
-          driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime };
+          driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size };
           // Flush meta to localStorage every 10 pulls so a mid-sync close
           // doesn't waste the work we already did.
           if (pulled % 10 === 9) drivePersistMeta();
