@@ -3208,6 +3208,17 @@
     for (const [name, meta] of driveFiles) {
       const cachedMeta = driveMetaCache[name];
       const fresh = cachedMeta && cachedMeta.id === meta.id && cachedMeta.modifiedTime === meta.modifiedTime;
+      // Diagnostic: gate behind a runtime flag so the console isn't spammed
+      // 200 lines/min on a normal user. Flip in devtools to investigate
+      // "file in Drive but not in viewer" reports.
+      // Enable with: window.__hrv_viewer_debug = true
+      if (window.__hrv_viewer_debug) {
+        console.info('[driveSync] cache check', name, {
+          fresh,
+          cached: cachedMeta || null,
+          drive: { id: meta.id, modifiedTime: meta.modifiedTime },
+        });
+      }
       let inStore = false;
       if (fresh) {
         const text = await idbGet(name, IDB_DRIVE_STORE);
@@ -3960,7 +3971,30 @@
 
   function summarizeCSV(filename, text) {
     const { rows, header } = parseCSV(text);
-    if (!rows.length) return null;
+    if (!rows.length) {
+      // Mid-upload: file has headers but no data rows yet (mobile is
+      // sending a resumable PATCH that hasn't trickled data through).
+      // Return a ghost stub instead of null so the file shows up in the
+      // calendar as a placeholder. needsReparse picks it up via the
+      // __incomplete flag and replaces it with a real summary once rows
+      // arrive on the next sync cycle. Other null-return paths below
+      // (no valid HR, future-dated) remain — those are genuinely invalid
+      // states that won't fix themselves.
+      return {
+        filename,
+        __incomplete: true,
+        __schemaV: 13,
+        startEpoch: deriveFileStartEpoch(filename),
+        duration: 0,
+        hrCount: 0,
+        hrAvg: 0, hrMax: 0, hrMin: 0,
+        rmssdAvg: null, rmssdMin: null,
+        palpCount: 0, warnCount: 0,
+        events: [], warnings: [], connections: [], postureLog: [],
+        hr: [], rmssd: [], sdnnMatch: [], sdnn5min: [], sdnnFullSeries: [],
+        palpTimes: [],
+      };
+    }
     const idx = {};
     header.forEach((h, i) => idx[h.trim()] = i);
 
@@ -9019,12 +9053,18 @@
         const perm = await dirHandle.queryPermission({ mode: 'read' });
         if (perm === 'granted') await loadSessions({ onProgress: showLoader });
       } else {
-        // Drive-only context. If the user is signed in, the auth-change
-        // callback fires ensureFolderSyncAndRender shortly, which does its
-        // own load. Skip the parse-labelled load here so the two paths
-        // don't race for the same banner during refresh.
+        // Drive-only context. Await the load synchronously here so init's
+        // final route() at the end of this function sees freshly-pulled
+        // data. The previous fire-and-forget pattern (initDriveUI's auth-
+        // change callback firing ensureFolderSyncAndRender async) left
+        // init finishing with an empty sessionsIndex on F5, so the user
+        // saw "no sessions yet" until the async chain completed — and
+        // sometimes the eventual re-render never landed.
         const isAuthed = !!(window.aortiAuth && typeof window.aortiAuth.isSignedIn === 'function' && window.aortiAuth.isSignedIn());
-        if (!isAuthed) {
+        if (isAuthed) {
+          try { await ensureFolderSyncAndRender(); }
+          catch (e) { console.error('[init] drive sync failed:', e); }
+        } else {
           await loadSessions({ onProgress: showSyncLoader });
         }
       }
