@@ -372,47 +372,80 @@ public class NativeDriveUploader {
         if (csv == null || !csv.exists() || csv.length() == 0) return;
         if (!inFlight.compareAndSet(false, true)) return;
         executor.submit(() -> {
+            try { runUploadWithRetry(csv); }
+            finally { inFlight.set(false); }
+        });
+    }
+
+    /**
+     * Synchronous upload — blocks the calling thread until the upload finishes
+     * (success or permanent failure). Returns true if the file made it to
+     * Drive. Called by forceSyncNow so the JS "Synced" status reflects the
+     * actual outcome instead of a fire-and-forget queue. If a periodic upload
+     * is already in flight, this waits up to 30 s for it to drain before
+     * starting; the periodic upload itself is what makes the file visible, so
+     * after it lands we return success without re-uploading.
+     */
+    public boolean uploadSync(File csv) {
+        if (csv == null || !csv.exists() || csv.length() == 0) return false;
+        long deadline = System.currentTimeMillis() + 30000L;
+        while (!inFlight.compareAndSet(false, true)) {
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(TAG, "uploadSync: another upload held inFlight for 30s, giving up");
+                return false;
+            }
+            try { Thread.sleep(200L); } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        try { return runUploadWithRetry(csv); }
+        finally { inFlight.set(false); }
+    }
+
+    /**
+     * Shared upload-with-retry loop. Retries transient failures (5xx, network
+     * blip, IOException) up to 3 times with exponential backoff. 401 has its
+     * own retry inside doUpload (token-refresh-and-retry). Permanent failures
+     * (400, 403, 404) don't retry. Returns true iff the last attempt landed
+     * a 2xx response.
+     */
+    private boolean runUploadWithRetry(File csv) {
+        final int MAX_TRIES = 3;
+        IOException lastIo = null;
+        for (int attempt = 1; attempt <= MAX_TRIES; attempt++) {
             try {
-                // Retry transient failures (5xx, network blip, IOException)
-                // up to 3 times with exponential backoff. 401 has its own
-                // retry path inside doUpload (token-refresh-and-retry).
-                // Permanent failures (400, 403, 404) don't get retried.
-                final int MAX_TRIES = 3;
-                IOException lastIo = null;
-                for (int attempt = 1; attempt <= MAX_TRIES; attempt++) {
-                    try {
-                        doUpload(csv);
-                        // Treat 5xx as a retry trigger even when doUpload itself
-                        // doesn't throw (it logs + returns on non-2xx).
-                        int s = lastHttpStatus;
-                        if (s >= 500 && s < 600 && attempt < MAX_TRIES) {
-                            long backoff = 1000L * (1L << (attempt - 1));  // 1s, 2s, 4s
-                            Log.w(TAG, "Drive 5xx (attempt " + attempt + "), retrying in " + backoff + "ms");
-                            Thread.sleep(backoff);
-                            continue;
-                        }
-                        return;  // success or permanent failure — don't retry
-                    } catch (IOException io) {
-                        lastIo = io;
-                        if (attempt < MAX_TRIES) {
-                            long backoff = 1000L * (1L << (attempt - 1));
-                            Log.w(TAG, "Drive IO failure (attempt " + attempt + "), retrying in " + backoff + "ms: " + io.getMessage());
-                            try { Thread.sleep(backoff); } catch (InterruptedException ie) {
-                                Thread.currentThread().interrupt();
-                                return;
-                            }
-                        }
+                doUpload(csv);
+                int s = lastHttpStatus;
+                if (s >= 500 && s < 600 && attempt < MAX_TRIES) {
+                    long backoff = 1000L * (1L << (attempt - 1));
+                    Log.w(TAG, "Drive 5xx (attempt " + attempt + "), retrying in " + backoff + "ms");
+                    try { Thread.sleep(backoff); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return false;
                     }
+                    continue;
                 }
-                if (lastIo != null) {
-                    Log.w(TAG, "Drive upload failed after " + MAX_TRIES + " tries: " + lastIo.getMessage());
+                return s >= 200 && s < 300;
+            } catch (IOException io) {
+                lastIo = io;
+                if (attempt < MAX_TRIES) {
+                    long backoff = 1000L * (1L << (attempt - 1));
+                    Log.w(TAG, "Drive IO failure (attempt " + attempt + "), retrying in " + backoff + "ms: " + io.getMessage());
+                    try { Thread.sleep(backoff); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return false;
+                    }
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "Upload threw: " + t.getMessage());
-            } finally {
-                inFlight.set(false);
+                return false;
             }
-        });
+        }
+        if (lastIo != null) {
+            Log.w(TAG, "Drive upload failed after " + MAX_TRIES + " tries: " + lastIo.getMessage());
+        }
+        return false;
     }
 
     /** Synchronous upload (call from a background thread only). */

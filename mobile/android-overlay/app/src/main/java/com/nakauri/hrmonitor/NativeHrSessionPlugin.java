@@ -786,19 +786,22 @@ public class NativeHrSessionPlugin extends Plugin {
                         Log.w(TAG, "forceSyncNow finalize failed: " + name);
                     }
                 }
-                // Always run the full-PATCH safety net. Finalize commits the
-                // resumable session but Drive's folder listing doesn't reliably
-                // expose the file content until a direct PATCH lands. Reverted
-                // the !ok gate (cb2dd8b May 17) because it caused the user-
-                // visible regression where tap-sync mid-recording didn't make
-                // the file appear in the viewer until session stop.
-                // The theoretical race with restartSessionAsync (both PATCH the
-                // same fileId concurrently) is benign: Drive serializes by
-                // fileId, last write wins, and the next periodic chunk re-sends
-                // from lastChunkEnd=0 anyway so content converges.
+                // Always run the full-PATCH safety net SYNCHRONOUSLY. Finalize
+                // commits the resumable session but Drive's folder listing
+                // doesn't reliably expose new content until a direct PATCH
+                // lands. uploadSync blocks until the upload finishes so the JS
+                // "Synced" status reflects the actual Drive state instead of a
+                // queued-but-not-yet-done promise.
                 if (uploader != null) {
-                    uploader.uploadAsync(file);
-                    if (!ok) { ok = true; if (reason == null) reason = "full_upload_fallback"; }
+                    boolean uploadOk = uploader.uploadSync(file);
+                    if (uploadOk) {
+                        ok = true;
+                        if (reason == null || reason.equals("trickle_committed")) {
+                            reason = ok && reason != null ? reason + "+full_patch" : "full_patch_ok";
+                        }
+                    } else if (!ok) {
+                        reason = reason == null ? "upload_failed" : reason + "+upload_failed";
+                    }
                     java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
                     uploader.uploadOrphansAsync(sessionsDir);
                 }
