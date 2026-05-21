@@ -3334,20 +3334,14 @@
     if (pulled + uploaded + written + evicted > 0) {
       persistIndex();
       await loadSessions();
-      // Only re-route if the current view's backing data is actually
-      // affected. Routing during a sync while the user is inside a day
-      // or session view was blowing away their in-progress interaction
-      // (clicks swallowed, state reset). The hash-based route stays the
-      // same either way, so re-render in place instead. route() still
-      // runs for the index/month/week/all views since those genuinely
-      // depend on the full sessionsIndex.
-      const { view } = parseHash();
-      if (view === 'session' || view === 'day') {
-        // Leave the current view alone. Next navigation will pick up
-        // the fresh data on its own.
-      } else {
-        route();
-      }
+      // Re-route after every successful sync so freshly-pulled data
+      // appears in the current view, including when the user is sitting
+      // on the session or day view for an actively-recording session
+      // (the primary live-monitoring use case). Earlier code skipped the
+      // re-route for session/day views to preserve in-progress
+      // interaction state, but that left the chart frozen on stale data
+      // even when the underlying file had grown by hours.
+      route();
     }
     return { pulled, uploaded, written, skipped };
   }
