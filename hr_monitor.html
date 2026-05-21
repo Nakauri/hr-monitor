@@ -6213,10 +6213,13 @@
         const dt = ((Date.now() - t0) / 1000).toFixed(1);
         if (window.HRMLog) window.HRMLog.event('force-sync result', { ok: !!(res && res.ok), reason: res && res.reason, seconds: dt });
         if (sub) {
+          // User-facing copy stays plain English. The technical reason
+          // (trickle_committed, full_patch_ok, etc.) still goes to the
+          // diagnostics events log above for debugging.
           if (res && res.ok) {
-            sub.textContent = 'Synced ' + dt + 's' + (res.reason ? ' (' + res.reason + ')' : '');
+            sub.textContent = 'Synced (' + dt + 's)';
           } else {
-            sub.textContent = 'Sync failed' + (res && res.reason ? ': ' + res.reason : '');
+            sub.textContent = 'Sync failed';
           }
         }
       } catch (e) {
