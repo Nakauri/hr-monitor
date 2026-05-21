@@ -6199,17 +6199,35 @@
       // the trickled CSV so it becomes visible in the user's Drive
       // folder mid-session, and re-uploads any orphaned prior sessions.
       const native = window.HRMNativeHrSession;
-      if (!native || !native.isPublishing || !native.isPublishing()) return;
+      if (!native || !native.isPublishing || !native.isPublishing()) {
+        if (window.HRMLog) window.HRMLog.event('force-sync skipped', 'not publishing');
+        return;
+      }
       const sub = $('drive-status');
       const orig = sub ? sub.textContent : '';
+      const t0 = Date.now();
+      if (window.HRMLog) window.HRMLog.event('force-sync start');
       try {
         if (sub) sub.textContent = 'Syncing…';
         const res = await native.forceSyncNow();
-        if (sub) sub.textContent = res && res.ok ? 'Synced' : 'Sync failed';
+        const dt = ((Date.now() - t0) / 1000).toFixed(1);
+        if (window.HRMLog) window.HRMLog.event('force-sync result', { ok: !!(res && res.ok), reason: res && res.reason, seconds: dt });
+        if (sub) {
+          if (res && res.ok) {
+            sub.textContent = 'Synced ' + dt + 's' + (res.reason ? ' (' + res.reason + ')' : '');
+          } else {
+            sub.textContent = 'Sync failed' + (res && res.reason ? ': ' + res.reason : '');
+          }
+        }
       } catch (e) {
+        if (window.HRMLog) window.HRMLog.event('force-sync threw', (e && e.message) || String(e));
         if (sub) sub.textContent = 'Sync failed';
       } finally {
-        setTimeout(() => { if (sub && (sub.textContent === 'Synced' || sub.textContent === 'Sync failed')) sub.textContent = orig; }, 2500);
+        setTimeout(() => {
+          if (sub && sub.textContent && (sub.textContent.startsWith('Synced') || sub.textContent.startsWith('Sync failed'))) {
+            sub.textContent = orig;
+          }
+        }, 5000);
       }
     });
     $('drive-signout').addEventListener('click', driveSignOut);
