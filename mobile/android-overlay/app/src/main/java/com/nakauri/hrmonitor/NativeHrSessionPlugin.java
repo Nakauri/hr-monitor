@@ -717,8 +717,14 @@ public class NativeHrSessionPlugin extends Plugin {
             if (resumable != null && resumable.isReady()) {
                 finalized = resumable.finalizeSync(snap.getFile());
             }
-            if (!finalized && uploader != null) {
-                uploader.uploadAsync(snap.getFile());
+            // Synchronous safety-net PATCH so the final file shows up in the
+            // viewer immediately on session-stop. Without this, finalize alone
+            // leaves an open resumable session that Drive treats as "in
+            // progress" — the file becomes listable only after the app closes
+            // and abandons the session. uploadSync blocks ~1-10 s; acceptable
+            // since session-stop is a deliberate UI action.
+            if (uploader != null) {
+                uploader.uploadSync(snap.getFile());
             }
             // Stamp this filename as the "last session" hint so the next
             // startSession can detect an orphaned upload and re-send it.
@@ -776,32 +782,45 @@ public class NativeHrSessionPlugin extends Plugin {
                 java.io.File file = w != null ? w.getFile() : null;
                 if (file == null) { reason = "csv_gone"; return; }
                 String name = file.getName();
+                boolean finalized = false;
                 if (resumable != null && resumable.isReady()) {
-                    ok = resumable.finalizeSync(file);
-                    if (ok) {
+                    finalized = resumable.finalizeSync(file);
+                    if (finalized) {
+                        ok = true;
                         Log.i(TAG, "forceSyncNow finalize OK: " + name);
-                        resumable.restartSessionAsync();
                         reason = "trickle_committed";
                     } else {
                         Log.w(TAG, "forceSyncNow finalize failed: " + name);
                     }
                 }
-                // Always run the full-PATCH safety net SYNCHRONOUSLY. Finalize
-                // commits the resumable session but Drive's folder listing
-                // doesn't reliably expose new content until a direct PATCH
-                // lands. uploadSync blocks until the upload finishes so the JS
-                // "Synced" status reflects the actual Drive state instead of a
-                // queued-but-not-yet-done promise.
+                // Run the safety-net PATCH BEFORE reopening the resumable
+                // session. Drive holds files with an open resumable session
+                // partially-shadowed from folder listings — if we reopen
+                // (restartSessionAsync) concurrently with uploadSync, the
+                // listing doesn't see the PATCH bytes until the next session
+                // ends. This was the May 21 regression: tap-sync mid-recording
+                // returned "Synced" but the viewer couldn't see the file until
+                // the app process closed (which abandoned the resumable
+                // session and let Drive's index recover).
                 if (uploader != null) {
                     boolean uploadOk = uploader.uploadSync(file);
                     if (uploadOk) {
                         ok = true;
-                        if (reason == null || reason.equals("trickle_committed")) {
-                            reason = ok && reason != null ? reason + "+full_patch" : "full_patch_ok";
-                        }
+                        if (reason == null) reason = "full_patch_ok";
+                        else if (reason.equals("trickle_committed")) reason = "trickle_committed+full_patch";
                     } else if (!ok) {
                         reason = reason == null ? "upload_failed" : reason + "+upload_failed";
                     }
+                }
+                // NOW reopen the resumable session for future periodic chunks.
+                // Sequential after uploadSync so no two operations race against
+                // the same fileId. restartSessionAsync itself is async (fires
+                // onto the resumable executor); we don't block on it.
+                if (finalized && resumable != null) {
+                    resumable.restartSessionAsync();
+                }
+                // Orphan re-upload runs unconditionally (different files).
+                if (uploader != null) {
                     java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
                     uploader.uploadOrphansAsync(sessionsDir);
                 }

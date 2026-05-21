@@ -450,6 +450,11 @@ public class NativeDriveUploader {
 
     /** Synchronous upload (call from a background thread only). */
     private void doUpload(File csv) throws IOException {
+        // Reset so an early-exit path (no token, no folder) doesn't leave a
+        // stale 2xx visible to runUploadWithRetry — which would otherwise
+        // report success and trick uploadSync into resolving "Synced" with
+        // no actual upload performed.
+        lastHttpStatus = 0;
         String token = AuthStorage.getValidAccessToken(context);
         if (token == null) {
             Log.i(TAG, "No valid Drive token; skipping upload");
