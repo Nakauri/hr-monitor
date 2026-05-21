@@ -786,17 +786,19 @@ public class NativeHrSessionPlugin extends Plugin {
                         Log.w(TAG, "forceSyncNow finalize failed: " + name);
                     }
                 }
-                // Full-PATCH safety net only when finalize failed. Running
-                // both concurrently races: restartSessionAsync resets the
-                // resumable's lastChunkEnd=0 while the safety-net PATCH is
-                // still in flight against the same fileId, and the next
-                // periodic chunk can clobber the PATCH with bytes 0..N.
-                if (!ok && uploader != null) {
-                    uploader.uploadAsync(file);
-                    ok = true;
-                    if (reason == null) reason = "full_upload_fallback";
-                }
+                // Always run the full-PATCH safety net. Finalize commits the
+                // resumable session but Drive's folder listing doesn't reliably
+                // expose the file content until a direct PATCH lands. Reverted
+                // the !ok gate (cb2dd8b May 17) because it caused the user-
+                // visible regression where tap-sync mid-recording didn't make
+                // the file appear in the viewer until session stop.
+                // The theoretical race with restartSessionAsync (both PATCH the
+                // same fileId concurrently) is benign: Drive serializes by
+                // fileId, last write wins, and the next periodic chunk re-sends
+                // from lastChunkEnd=0 anyway so content converges.
                 if (uploader != null) {
+                    uploader.uploadAsync(file);
+                    if (!ok) { ok = true; if (reason == null) reason = "full_upload_fallback"; }
                     java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
                     uploader.uploadOrphansAsync(sessionsDir);
                 }
