@@ -195,7 +195,18 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @Override
     public void load() {
+        NativeHrSessionPlugin orphan = instance;
         instance = this;
+        // A predecessor survives when the Activity is destroyed (swipe from
+        // recents) while the process + FGS stay alive. Its relay socket and
+        // GATT keep publishing under the old senderId. Shut it down so we
+        // never broadcast two streams; the persisted recovery flags route
+        // this successor through the normal resume path as one session.
+        if (orphan != null && orphan != this && orphan.sessionActive.get()) {
+            Log.i(TAG, "load: neutralizing orphaned predecessor session");
+            try { orphan.neutralizeOrphan(); }
+            catch (Throwable t) { Log.w(TAG, "neutralizeOrphan failed: " + t.getMessage()); }
+        }
         BluetoothManager bm = (BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
         if (bm != null) {
             adapter = bm.getAdapter();
@@ -496,6 +507,13 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @PluginMethod
     public void startSession(PluginCall call) {
+        // Already recording in this instance (double-start). Close the live
+        // relay socket under the CURRENT senderId before it's overwritten
+        // below, so the old id gets a clean presence-end instead of lingering
+        // as a ghost broadcaster.
+        if (sessionActive.get()) {
+            try { closeRelaySocket(); } catch (Throwable ignored) {}
+        }
         broadcastKey = call.getString("broadcastKey");
         senderId = call.getString("senderId", "android");
         senderLabel = call.getString("senderLabel", "HR Monitor Android");
@@ -748,6 +766,24 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         } catch (Throwable t) { /* cleanup is best-effort; never block stop */ }
         emitState();
+    }
+
+    /** Tear down this now-orphaned instance after a fresh Activity built a
+     *  successor. Closes the relay socket under THIS instance's senderId so
+     *  the old id gets a clean presence-end, drops GATT, cancels timers, and
+     *  flushes the CSV. Leaves the persisted sessionActive / cleanlyStopped
+     *  flags untouched so the successor resumes as one logical session, and
+     *  leaves the FGS running (the successor re-foregrounds it on resume). */
+    private void neutralizeOrphan() {
+        sessionActive.set(false);
+        mainHandler.removeCallbacks(heartbeatRunnable);
+        mainHandler.removeCallbacks(gattReconnectRunnable);
+        mainHandler.removeCallbacks(relayReconnectRunnable);
+        try { closeRelaySocket(); } catch (Throwable ignored) {}
+        try { closeGattQuietly(); } catch (Throwable ignored) {}
+        NativeCsvWriter snap;
+        synchronized (this) { snap = csv; csv = null; }
+        if (snap != null) { try { snap.close(); } catch (Throwable ignored) {} }
     }
 
     @PluginMethod

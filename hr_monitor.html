@@ -4022,18 +4022,32 @@
     // Authoritative check: ask native directly. The cached isPublishing()
     // flag is seeded async on shim init and races with a fast Start tap.
     let sessionAlive = false;
+    let bleUp = false;
     try {
       const s = await window.HRMNativeHrSession.status();
-      sessionAlive = !!(s && s.sessionActive && s.bleConnected);
+      sessionAlive = !!(s && s.sessionActive);
+      bleUp = !!(s && s.bleConnected);
     } catch (e) {}
+    // Adopt whenever a native session is active, even if BLE is mid-reconnect.
+    // Starting fresh here while native is still publishing spawns a second
+    // stream under a new senderId; the relay then shows two live broadcasters.
     if (sessionAlive) {
       const last = getLastStrap();
-      device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: true });
-      setSessionStart(Date.now());
+      device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: bleUp });
+      adoptNativeSenderIdentity();
+      const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
+        ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
+      setSessionStart(nativeStartMs > 0 ? nativeStartMs : Date.now());
       state.lastDataTime = Date.now();
-      setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
-      $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
-      setConnState('live');
+      if (bleUp) {
+        setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
+        $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
+        setConnState('live');
+      } else {
+        setStatus('Session running. Strap is reconnecting...', 'pending');
+        $('overlay-status').textContent = '• LIVE';
+        setConnState('reconnecting');
+      }
       return;
     }
     let picked = null;

@@ -330,7 +330,12 @@
         return;
       }
       plugin.status().then(function (s) {
-        if (s && s.sessionActive) {
+        // Redirect into the monitor when a session is live OR recoverable.
+        // interruptedRecovery means prefs say a session was running and the
+        // process was killed / the Activity recreated: the monitor's recovery
+        // bootstrap resumes it as one session. Without this branch the user
+        // lands on Start and a second tap spawns a duplicate stream.
+        if (s && (s.sessionActive || s.interruptedRecovery)) {
           // Mark this navigation as a resume so the monitor's inline
           // <head> script knows to keep the "Restoring session…" spinner
           // up. Without the flag, monitor treats the load as a fresh
