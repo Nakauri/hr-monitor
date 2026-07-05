@@ -25,11 +25,13 @@ public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        boolean shouldContinue = false;
         try {
             SharedPreferences prefs = context.getSharedPreferences("hr_monitor_session", 0);
             boolean sessionActive = prefs.getBoolean("sessionActive", false);
             boolean cleanlyStopped = prefs.getBoolean("cleanlyStopped", true);
-            if (sessionActive && !cleanlyStopped) {
+            shouldContinue = sessionActive && !cleanlyStopped;
+            if (shouldContinue) {
                 Intent startIntent = new Intent(context, NativeHrService.class);
                 startIntent.setAction(NativeHrService.ACTION_START);
                 startIntent.putExtra(NativeHrService.EXTRA_TITLE, "HR Monitor");
@@ -44,8 +46,9 @@ public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
         } catch (Throwable t) {
             Log.w(TAG, "Heartbeat receive failed: " + t.getMessage());
         }
-        // Always re-schedule. The receiver is the loop.
-        schedule(context);
+        // Re-arm only while a session is still meant to be running, so a
+        // delivered alarm after a clean stop doesn't restart the loop forever.
+        if (shouldContinue) schedule(context);
     }
 
     public static void schedule(Context context) {

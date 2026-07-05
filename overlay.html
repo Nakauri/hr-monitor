@@ -341,13 +341,16 @@
     }
     return out;
   }
+  function escapeText(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  }
   function updateMultiSenderBanner() {
     const active = activeSenders();
     const el = $('multi-sender-banner');
     if (!el) return;
     if (active.length > 1) {
       el.innerHTML = 'Multiple devices broadcasting to this key: <b>' +
-        active.map(s => s.label).join('</b>, <b>') +
+        active.map(s => escapeText(s.label)).join('</b>, <b>') +
         '</b>. Close the extras or the widget will keep flashing.';
       el.hidden = false;
     } else {

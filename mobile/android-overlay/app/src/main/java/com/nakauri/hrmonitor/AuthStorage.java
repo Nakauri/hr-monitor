@@ -43,6 +43,14 @@ import okhttp3.Response;
 public final class AuthStorage {
     private static final String TAG = "AuthStorage";
 
+    // Thrown when a refresh fails for a recoverable reason (network drop,
+    // timeout, 5xx, 429). The token is still good; the caller must NOT sign
+    // the user out on this. Genuine invalidation (401 / 400 invalid_grant)
+    // returns null instead, which does clear the stored auth.
+    public static final class TransientRefreshException extends Exception {
+        TransientRefreshException(String message) { super(message); }
+    }
+
     private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
     private static final String KEY_ALIAS = "aorti_auth_v1";
     private static final String PREFS_NAME = "aorti_auth";
@@ -101,6 +109,22 @@ public final class AuthStorage {
      */
     public static synchronized String getValidAccessToken(Context ctx, boolean forceRefresh) {
         try {
+            return getValidAccessTokenOrThrow(ctx, forceRefresh);
+        } catch (TransientRefreshException e) {
+            Log.w(TAG, "getValidAccessToken transient: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Same as getValidAccessToken but distinguishes a transient refresh
+     * failure (throws TransientRefreshException, token still valid) from a
+     * dead token (returns null, auth cleared). Callers that must not sign the
+     * user out on a network blip use this variant.
+     */
+    public static synchronized String getValidAccessTokenOrThrow(Context ctx, boolean forceRefresh)
+            throws TransientRefreshException {
+        try {
             SharedPreferences p = prefs(ctx);
             String accessCt = p.getString(PREF_ACCESS, null);
             String refreshCt = p.getString(PREF_REFRESH, null);
@@ -112,6 +136,8 @@ public final class AuthStorage {
             }
             String refreshToken = decrypt(key, refreshCt);
             return refreshAccessToken(ctx, refreshToken, key, p);
+        } catch (TransientRefreshException e) {
+            throw e;
         } catch (Exception e) {
             Log.w(TAG, "getValidAccessToken: " + e.getMessage());
             return null;
@@ -145,7 +171,8 @@ public final class AuthStorage {
         return ctx.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
-    private static String refreshAccessToken(Context ctx, String refreshToken, SecretKey key, SharedPreferences p) throws Exception {
+    private static String refreshAccessToken(Context ctx, String refreshToken, SecretKey key, SharedPreferences p)
+            throws Exception {
         JSONObject body = new JSONObject();
         body.put("refresh_token", refreshToken);
         Request req = new Request.Builder()
@@ -154,17 +181,24 @@ public final class AuthStorage {
             .header("Origin", APP_ORIGIN)
             .post(RequestBody.create(MediaType.parse("application/json"), body.toString()))
             .build();
-        try (Response resp = http().newCall(req).execute()) {
-            if (resp.code() == 401) {
+        Response resp;
+        try {
+            resp = http().newCall(req).execute();
+        } catch (java.io.IOException e) {
+            throw new TransientRefreshException("network: " + e.getMessage());
+        }
+        try (Response r = resp) {
+            int code = r.code();
+            String rawBody = r.body() != null ? r.body().string() : "{}";
+            if (code == 401 || (code == 400 && rawBody.contains("invalid_grant"))) {
                 Log.w(TAG, "Refresh token revoked, clearing auth");
                 clear(ctx);
                 return null;
             }
-            if (!resp.isSuccessful()) {
-                Log.w(TAG, "Refresh HTTP " + resp.code());
-                return null;
+            if (!r.isSuccessful()) {
+                // 5xx / 429 / other 4xx: recoverable, keep the token.
+                throw new TransientRefreshException("HTTP " + code);
             }
-            String rawBody = resp.body() != null ? resp.body().string() : "{}";
             JSONObject j = new JSONObject(rawBody);
             String newAccess = j.optString("access_token", null);
             if (newAccess == null || newAccess.isEmpty()) return null;

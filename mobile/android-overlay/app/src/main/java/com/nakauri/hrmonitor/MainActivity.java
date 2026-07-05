@@ -43,6 +43,9 @@ public class MainActivity extends BridgeActivity {
     // fence; JS owns its own shorter ceiling for recovery flows.
     private View restoreOverlay;
     private Runnable restoreSafetyTimer;
+    // One handler for the safety timer. removeCallbacks only cancels callbacks
+    // posted to the SAME handler, so arm + cancel must share this instance.
+    private final Handler restoreSafetyHandler = new Handler(Looper.getMainLooper());
     // Sits above the JS state controller's 30 s recovery ceiling so the
     // controller has room to render a recovery_failed UI before this fence
     // trips. Only relevant when JS never runs at all (renderer dead / WebView
@@ -286,10 +289,9 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void armRestoreSafetyTimer() {
-        Handler h = new Handler(Looper.getMainLooper());
-        if (restoreSafetyTimer != null) h.removeCallbacks(restoreSafetyTimer);
+        if (restoreSafetyTimer != null) restoreSafetyHandler.removeCallbacks(restoreSafetyTimer);
         restoreSafetyTimer = this::hideRestoreOverlayBySafetyTimer;
-        h.postDelayed(restoreSafetyTimer, OVERLAY_SAFETY_MS);
+        restoreSafetyHandler.postDelayed(restoreSafetyTimer, OVERLAY_SAFETY_MS);
     }
 
     /** Idempotent. Called by RestoreOverlayPlugin.hide() from JS, by the
@@ -303,7 +305,7 @@ public class MainActivity extends BridgeActivity {
             } catch (Throwable ignored) {}
             restoreOverlay = null;
             if (restoreSafetyTimer != null) {
-                new Handler(Looper.getMainLooper()).removeCallbacks(restoreSafetyTimer);
+                restoreSafetyHandler.removeCallbacks(restoreSafetyTimer);
                 restoreSafetyTimer = null;
             }
         });

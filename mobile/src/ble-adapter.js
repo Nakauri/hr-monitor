@@ -3,17 +3,18 @@
 // existing Web Bluetooth code (requestDevice → gatt.connect → service →
 // characteristic → startNotifications) runs unchanged on Android native.
 //
-// Important: we grab the plugin via Capacitor.registerPlugin which returns
-// the RAW bridge handle, not the plugin's ESM wrapper. That means every
-// call takes an options object (NOT positional args), binary values cross
-// the bridge as base64 strings, and notifications arrive via addListener
-// (not inline callbacks). We bridge both patterns to the shape Web
-// Bluetooth wants on the JS side.
+// Important: we read the plugin from Capacitor.Plugins.BluetoothLe (the raw
+// native bridge handle), falling back to registerPlugin only if that's
+// absent. That means every call takes an options object (NOT positional
+// args), binary values cross the bridge as hex strings, and notifications
+// arrive via addListener (not inline callbacks). We bridge both patterns to
+// the shape Web Bluetooth wants on the JS side.
 
 // Defer patching until DOMContentLoaded. Capacitor's bridge is guaranteed
 // to be on window by then. We're registered from <head> so our listener
 // fires before the main page's listener in hr_monitor.html — by the time
 // that code checks navigator.bluetooth, our patch is in place.
+(function () {
 try { window.__hrMonitorBleAdapterLoaded = true; } catch (e) {}
 
 function whenReady(cb) {
@@ -143,7 +144,18 @@ whenReady(function() {
             LOG_ERR('ble.dispatch threw', e && e.message ? e.message : String(e));
           }
         });
-        await BleClient.startNotifications({ deviceId, service: serviceUuid, characteristic: charUuid });
+        try {
+          await BleClient.startNotifications({ deviceId, service: serviceUuid, characteristic: charUuid });
+        } catch (e) {
+          // Listener was registered before startNotifications; remove it so a
+          // failed subscribe doesn't leak the event listener.
+          if (pluginListener && typeof pluginListener.remove === 'function') {
+            try { await pluginListener.remove(); } catch (er) {}
+            pluginListener = null;
+          }
+          LOG_ERR('ble.startNotifications threw', e && e.message ? e.message : String(e));
+          throw e;
+        }
         LOG('ble.startNotifications resolved');
         subscribed = true;
         return this;
@@ -194,6 +206,13 @@ whenReady(function() {
         const LOG_ERR = (window.HRMLog && window.HRMLog.error) ? window.HRMLog.error : function () {};
         // Plugin fires 'disconnect|<deviceId>' when the device drops.
         const eventName = 'disconnect|' + deviceId;
+        // A prior connect's listener survives a drop (the disconnect event
+        // clears `connected` but not the listener); remove it before adding
+        // a fresh one so reconnects don't stack listeners.
+        if (disconnectListener && typeof disconnectListener.remove === 'function') {
+          try { await disconnectListener.remove(); } catch (e) {}
+          disconnectListener = null;
+        }
         try {
           disconnectListener = await BleClient.addListener(eventName, () => {
             LOG('ble.disconnect event');
@@ -298,3 +317,4 @@ whenReady(function() {
     console.error('[ble-adapter] unhandled error in init:', err);
   }
 });
+})();

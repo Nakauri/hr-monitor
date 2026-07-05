@@ -96,12 +96,18 @@
 
     async function runRecovery(ctx) {
       setState('recovering');
+      const wait = awaitPublishingOrTimeout();
+      // Observe the wait's rejection here so a late timeout (or the cancel
+      // below) never reaches unhandledrejection; the try still awaits it.
+      wait.catch(function () {});
       try {
-        const wait = awaitPublishingOrTimeout();
         await performRecovery(ctx);
         await wait;
         await runRehydrate();
       } catch (e) {
+        // If performRecovery threw, `wait` is still pending with a live timer
+        // and subscription; cancel it so nothing leaks or fires late.
+        if (pendingRecovery) { try { pendingRecovery.cancel(); } catch (err) {} }
         const reason = (e && e.message) || 'recovery_failed';
         log('lifecycle: recovery failed: ' + reason);
         dismiss('recovery_failed');

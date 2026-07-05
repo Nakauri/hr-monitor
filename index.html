@@ -2080,14 +2080,10 @@
 
   // ===== Homepage sign-in: one tap, remembered =====
   // Intercepts clicks on any "Sign in with Google" / "Start" link that
-  // targets hr_monitor.html?mode=online. If a valid Drive token is
-  // already cached in localStorage (shared with the monitor and viewer
-  // via the same 'hr_monitor_drive_token' key), skip Google entirely
-  // and drop the user straight into the monitor. Otherwise, launch the
-  // Google OAuth token client inline, save the token the same way the
-  // monitor would, then redirect to the monitor. Monitor + viewer both
-  // pick up the token automatically on load because they watch the same
-  // localStorage key.
+  // targets hr_monitor.html?mode=online. If aortiAuth already has a valid
+  // session, skip Google and go straight to the monitor; otherwise run the
+  // shared sign-in flow, then redirect. Monitor + viewer share the same
+  // aortiAuth token store, so they pick up the session on load.
   (function () {
     const MONITOR_URL = './hr_monitor.html?mode=online';
 

@@ -2069,7 +2069,7 @@
     if (rrPresent) {
       while (offset + 1 < value.byteLength) {
         const raw = value.getUint16(offset, true);
-        rrs.push(raw * 1000 / 1024);
+        rrs.push(Math.round(raw * 1000 / 1024));
         offset += 2;
       }
     }
@@ -3049,7 +3049,7 @@
     if (!key) return;
     setStreamingStatus('connecting');
     try {
-      const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key);
+      const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key + '?role=publisher');
       relaySocket = ws;
       ws.addEventListener('open', () => {
         refreshRelayStatus();
@@ -3193,8 +3193,13 @@
   // Track everyone we've heard from in the last ~15 s. Shown in the Connection
   // section so the user can see who's broadcasting and Take Over if needed.
   const activeBroadcasters = new Map(); // senderId -> { label, lastAt, startedAt }
+  // Sender ids: web mints 6 hex chars in getDeviceIdentity; native uses the
+  // literal "android". Reject anything else so a hostile relay peer can't seed
+  // arbitrary strings into the broadcasters map (they surface in the DOM).
+  const SENDER_ID_RE = /^[a-z0-9_-]{1,64}$/i;
   function handleRelayMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
+    if (msg.senderId != null && !SENDER_ID_RE.test(String(msg.senderId))) return;
     if ((msg.type === 'tick' || msg.type === 'presence') && msg.senderId) {
       // Skip ourselves — no point listing our own device. isSelfSenderId
       // also catches the case where native's senderId hasn't been adopted
@@ -3314,11 +3319,11 @@
       // session control message over the same relay will reach them. No
       // Drive sign-in or extra handshake needed.
       return `
-        <div class="broadcaster-row${e.self ? ' is-self' : ''}" data-id="${e.id}">
+        <div class="broadcaster-row${e.self ? ' is-self' : ''}" data-id="${escapeText(e.id)}">
           <span class="broadcaster-dot"></span>
           <span class="broadcaster-label">${escapeText(e.label)}${suffix}</span>
           <span class="broadcaster-time">${ageLabel}</span>
-          <button class="broadcaster-takeover" data-id="${e.id}" data-self="${e.self ? '1' : '0'}">Stop session</button>
+          <button class="broadcaster-takeover" data-id="${escapeText(e.id)}" data-self="${e.self ? '1' : '0'}">Stop session</button>
         </div>
       `;
     });

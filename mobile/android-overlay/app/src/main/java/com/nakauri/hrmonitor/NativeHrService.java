@@ -31,6 +31,11 @@ public class NativeHrService extends Service {
     // BLE callbacks keep firing through Doze.
     private PowerManager.WakeLock wakeLock;
 
+    // Set while the hrm-fgs-stop worker is mid-upload. A second ACTION_STOP
+    // arriving in that window must not release the wake lock / drop foreground /
+    // stopSelf, or it kills the upload the worker is protecting.
+    private volatile boolean stopInFlight = false;
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -74,6 +79,13 @@ public class NativeHrService extends Service {
         }
 
         if (ACTION_STOP.equals(action)) {
+            // A stop worker is already running; the flag branches below would
+            // release the wake lock and stopSelf mid-upload. Bail after the
+            // mandatory startForeground.
+            if (stopInFlight) {
+                Log.i(TAG, "ACTION_STOP ignored — stop already in flight.");
+                return START_NOT_STICKY;
+            }
             // Stale-intent guard: if no session is active, this is a queued
             // intent from a prior session that delivered after the user
             // started a new one. Tear down the FGS but do not call
@@ -82,11 +94,46 @@ public class NativeHrService extends Service {
             boolean sessionLive = plugin != null && plugin.isSessionActive();
             setFgLossReason(this, sessionLive ? "user_stop_button" : "stale_action_stop");
             if (sessionLive) {
-                try { plugin.stopSessionInternal(); }
-                catch (Throwable t) { Log.w(TAG, "stopSessionInternal threw: " + t.getMessage()); }
-            } else {
-                Log.i(TAG, "ACTION_STOP ignored — no active session (stale intent).");
+                // stopSessionInternal does the final flush + blocking Drive
+                // upload, so it must run off the main thread. It stops the FGS
+                // itself when done; the service stays foreground and keeps the
+                // wake lock until the worker returns so Doze can't cut the
+                // upload. The generation guard means a session the user started
+                // while this stop was in flight is left running.
+                final int gen = plugin.getSessionGeneration();
+                final NativeHrSessionPlugin p = plugin;
+                stopInFlight = true;
+                Thread stopWorker = new Thread(() -> {
+                    boolean stopped = false;
+                    try {
+                        stopped = p.stopSessionInternalIfCurrent(gen);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "deferred stopSessionInternal threw: " + t.getMessage());
+                    } finally {
+                        if (stopped) {
+                            HrServiceHeartbeatReceiver.cancel(NativeHrService.this);
+                            releaseWakeLock();
+                        }
+                        // If not stopped, a newer session owns the FGS — leave it up.
+                        stopInFlight = false;
+                    }
+                }, "hrm-fgs-stop");
+                // Clear the flag if start() throws, else the Stop button stays dead.
+                try {
+                    stopWorker.start();
+                } catch (Throwable t) {
+                    stopInFlight = false;
+                    Log.w(TAG, "hrm-fgs-stop start failed: " + t.getMessage());
+                }
+                return START_NOT_STICKY;
             }
+            // A JS-initiated stop may have CAS'd sessionActive false and be
+            // blocked in uploadSync; its teardown tail owns service shutdown.
+            if (plugin != null && plugin.isStopTeardownInProgress()) {
+                Log.i(TAG, "ACTION_STOP ignored — JS stop teardown in progress.");
+                return START_NOT_STICKY;
+            }
+            Log.i(TAG, "ACTION_STOP ignored — no active session (stale intent).");
             HrServiceHeartbeatReceiver.cancel(this);
             releaseWakeLock();
             stopForeground(true);

@@ -225,6 +225,23 @@ public class NativeDriveUploader {
         DriveFileInfo(String id, long size) { this.id = id; this.size = size; }
     }
 
+    // Outcome of a single create/patch HTTP call. Returned up the call chain
+    // so the retry loop reads this instead of a shared volatile field (which
+    // raced between the session path and the orphan path).
+    private static class HttpResult {
+        final int status;
+        final boolean rateLimited;
+        final String fileId; // set by createFile on success
+        HttpResult(int status, boolean rateLimited, String fileId) {
+            this.status = status; this.rateLimited = rateLimited; this.fileId = fileId;
+        }
+        boolean ok() { return status >= 200 && status < 300; }
+    }
+
+    private static boolean isRateLimitBody(String body) {
+        return body != null && (body.contains("userRateLimitExceeded") || body.contains("rateLimitExceeded"));
+    }
+
     private java.util.Map<String, DriveFileInfo> listDriveFiles(String token, String folderId) throws IOException {
         java.util.Map<String, DriveFileInfo> out = new java.util.HashMap<>();
         String pageToken = null;
@@ -282,49 +299,62 @@ public class NativeDriveUploader {
      */
     public void uploadOrphansAsync(File sessionsDir) {
         if (sessionsDir == null || !sessionsDir.isDirectory()) return;
-        executor.submit(() -> {
-            try {
-                File[] files = sessionsDir.listFiles();
-                if (files == null) return;
-                String token = AuthStorage.getValidAccessToken(context);
-                if (token == null) return;
-                String folderId = folderIdRef.get();
-                if (folderId == null) {
-                    folderId = ensureFolder(token);
-                    if (folderId != null) folderIdRef.set(folderId);
-                }
-                if (folderId == null) return;
-                java.util.Map<String, DriveFileInfo> driveFiles = listDriveFiles(token, folderId);
-                if (driveFiles == null) return;
-                String activeName = sessionFilenameRef.get();
-                int created = 0, patched = 0;
-                for (File f : files) {
-                    if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
-                    if (activeName != null && f.getName().equals(activeName)) continue;
-                    if (f.length() == 0) continue;
-                    DriveFileInfo info = driveFiles.get(f.getName());
-                    if (info == null) {
-                        Log.i(TAG, "uploadOrphans: creating " + f.getName() + " (" + f.length() + " bytes)");
-                        try { doUpload(f); created++; }
-                        catch (IOException io) { Log.w(TAG, "orphan create failed: " + io.getMessage()); }
-                    } else if (f.length() > info.size) {
-                        // Drive copy is truncated (session died before final flush
-                        // landed). PATCH the existing fileId with the full local
-                        // content instead of POSTing a duplicate.
-                        Log.i(TAG, "uploadOrphans: patching " + f.getName()
-                            + " (local=" + f.length() + " bytes, drive=" + info.size + " bytes)");
-                        try {
-                            byte[] data = readAllBytes(f);
-                            if (patchFile(token, info.id, data)) patched++;
-                        } catch (IOException io) { Log.w(TAG, "orphan patch failed: " + io.getMessage()); }
-                    }
-                    // else: sizes match — Drive already has the complete file, skip.
-                }
-                if (created + patched > 0) Log.i(TAG, "uploadOrphans: created=" + created + " patched=" + patched);
-            } catch (Throwable t) {
-                Log.w(TAG, "uploadOrphans threw: " + t.getMessage());
+        executor.submit(() -> runOrphanScan(sessionsDir));
+    }
+
+    /**
+     * Synchronous orphan scan for WorkManager. Runs inline on the caller's
+     * thread and returns false only on a failure a retry might fix (folder
+     * resolve / list failure), so the Worker can map it to Result.retry().
+     */
+    public boolean uploadOrphansSync(File sessionsDir) {
+        if (sessionsDir == null || !sessionsDir.isDirectory()) return true;
+        return runOrphanScan(sessionsDir);
+    }
+
+    private boolean runOrphanScan(File sessionsDir) {
+        try {
+            File[] files = sessionsDir.listFiles();
+            if (files == null) return true;
+            String token = AuthStorage.getValidAccessToken(context);
+            if (token == null) return true; // signed out — nothing to do
+            String folderId = folderIdRef.get();
+            if (folderId == null) {
+                folderId = ensureFolder(token);
+                if (folderId != null) folderIdRef.set(folderId);
             }
-        });
+            if (folderId == null) return false;
+            java.util.Map<String, DriveFileInfo> driveFiles = listDriveFiles(token, folderId);
+            if (driveFiles == null) return false;
+            String activeName = sessionFilenameRef.get();
+            int created = 0, patched = 0;
+            for (File f : files) {
+                if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
+                if (activeName != null && f.getName().equals(activeName)) continue;
+                if (f.length() == 0) continue;
+                DriveFileInfo info = driveFiles.get(f.getName());
+                if (info == null) {
+                    Log.i(TAG, "uploadOrphans: creating " + f.getName() + " (" + f.length() + " bytes)");
+                    try { if (createOrphan(token, folderId, f)) created++; }
+                    catch (IOException io) { Log.w(TAG, "orphan create failed: " + io.getMessage()); }
+                } else if (f.length() > info.size) {
+                    // Drive copy is truncated (session died before final flush
+                    // landed). PATCH the existing fileId with the full local
+                    // content instead of POSTing a duplicate.
+                    Log.i(TAG, "uploadOrphans: patching " + f.getName()
+                        + " (local=" + f.length() + " bytes, drive=" + info.size + " bytes)");
+                    try {
+                        if (patchOrphan(token, info.id, f)) patched++;
+                    } catch (IOException io) { Log.w(TAG, "orphan patch failed: " + io.getMessage()); }
+                }
+                // else: sizes match — Drive already has the complete file, skip.
+            }
+            if (created + patched > 0) Log.i(TAG, "uploadOrphans: created=" + created + " patched=" + patched);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "uploadOrphans threw: " + t.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -351,12 +381,11 @@ public class NativeDriveUploader {
                 DriveFileInfo info = driveFiles.get(filename);
                 if (info == null) {
                     Log.i(TAG, "uploadOrphan: creating " + filename + " (" + f.length() + " bytes)");
-                    doUpload(f);
+                    createOrphan(token, folderId, f);
                 } else if (f.length() > info.size) {
                     Log.i(TAG, "uploadOrphan: patching " + filename
                         + " (local=" + f.length() + " bytes, drive=" + info.size + " bytes)");
-                    byte[] data = readAllBytes(f);
-                    patchFile(token, info.id, data);
+                    patchOrphan(token, info.id, f);
                 }
                 // else: Drive already has the complete file, nothing to do.
             } catch (IOException io) {
@@ -415,18 +444,20 @@ public class NativeDriveUploader {
         IOException lastIo = null;
         for (int attempt = 1; attempt <= MAX_TRIES; attempt++) {
             try {
-                doUpload(csv);
-                int s = lastHttpStatus;
-                if (s >= 500 && s < 600 && attempt < MAX_TRIES) {
+                HttpResult r = doUpload(csv);
+                int s = r.status;
+                // Retry 5xx, 429, and rate-limited 403 — all transient.
+                boolean retryable = (s >= 500 && s < 600) || s == 429 || (s == 403 && r.rateLimited);
+                if (retryable && attempt < MAX_TRIES) {
                     long backoff = 1000L * (1L << (attempt - 1));
-                    Log.w(TAG, "Drive 5xx (attempt " + attempt + "), retrying in " + backoff + "ms");
+                    Log.w(TAG, "Drive retryable status " + s + " (attempt " + attempt + "), retrying in " + backoff + "ms");
                     try { Thread.sleep(backoff); } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return false;
                     }
                     continue;
                 }
-                return s >= 200 && s < 300;
+                return r.ok();
             } catch (IOException io) {
                 lastIo = io;
                 if (attempt < MAX_TRIES) {
@@ -448,17 +479,12 @@ public class NativeDriveUploader {
         return false;
     }
 
-    /** Synchronous upload (call from a background thread only). */
-    private void doUpload(File csv) throws IOException {
-        // Reset so an early-exit path (no token, no folder) doesn't leave a
-        // stale 2xx visible to runUploadWithRetry — which would otherwise
-        // report success and trick uploadSync into resolving "Synced" with
-        // no actual upload performed.
-        lastHttpStatus = 0;
+    /** Synchronous session upload (call from a background thread only). */
+    private HttpResult doUpload(File csv) throws IOException {
         String token = AuthStorage.getValidAccessToken(context);
         if (token == null) {
             Log.i(TAG, "No valid Drive token; skipping upload");
-            return;
+            return new HttpResult(0, false, null);
         }
 
         String folderId = folderIdRef.get();
@@ -466,7 +492,7 @@ public class NativeDriveUploader {
             folderId = ensureFolder(token);
             if (folderId == null) {
                 Log.w(TAG, "Could not resolve sessions folder");
-                return;
+                return new HttpResult(0, false, null);
             }
             folderIdRef.set(folderId);
         }
@@ -490,32 +516,30 @@ public class NativeDriveUploader {
                 }
             } catch (Throwable ignored) {}
         }
-        boolean success;
+        HttpResult res;
         if (fileId == null) {
-            String newId = createFile(token, folderId, filename, csvBytes);
-            success = (newId != null);
-            if (success) {
-                sessionFileIdRef.set(newId);
-                Log.i(TAG, "Created Drive file: " + filename + " -> " + newId);
+            res = createFile(token, folderId, filename, csvBytes);
+            if (res.ok() && res.fileId != null && !res.fileId.isEmpty()) {
+                sessionFileIdRef.set(res.fileId);
+                Log.i(TAG, "Created Drive file: " + filename + " -> " + res.fileId);
             }
         } else {
-            success = patchFile(token, fileId, csvBytes);
+            res = patchFile(token, fileId, csvBytes);
             // 404 = file ID no longer exists (user deleted from Drive, or it
             // got trashed). Without this fallback, every subsequent upload
             // PATCHes a dead ID and silently fails. Clear the stale ID +
             // persisted ref, then CREATE a fresh file so sync stays alive.
-            if (!success && lastHttpStatus == 404) {
+            if (!res.ok() && res.status == 404) {
                 Log.w(TAG, "Drive PATCH 404 for fileId=" + fileId + " — clearing stale ref and creating fresh file");
                 sessionFileIdRef.set(null);
                 try {
                     context.getSharedPreferences("hr_monitor_session", 0).edit()
                         .putString("currentDriveFileId", "").apply();
                 } catch (Throwable ignored) {}
-                String newId = createFile(token, folderId, filename, csvBytes);
-                success = (newId != null);
-                if (success) {
-                    sessionFileIdRef.set(newId);
-                    Log.i(TAG, "Created replacement Drive file: " + filename + " -> " + newId);
+                res = createFile(token, folderId, filename, csvBytes);
+                if (res.ok() && res.fileId != null && !res.fileId.isEmpty()) {
+                    sessionFileIdRef.set(res.fileId);
+                    Log.i(TAG, "Created replacement Drive file: " + filename + " -> " + res.fileId);
                 }
             }
         }
@@ -525,23 +549,43 @@ public class NativeDriveUploader {
         // (slow network, GC pause). Force a refresh and retry once before
         // giving up. Surfaces a real auth-broken signal to JS only after the
         // retry also 401s.
-        if (!success && lastHttpStatus == 401) {
+        if (!res.ok() && res.status == 401) {
             Log.w(TAG, "Drive 401 — forcing token refresh + one retry");
             String fresh = AuthStorage.getValidAccessToken(context, /*forceRefresh=*/true);
             if (fresh != null && !fresh.equals(token)) {
                 if (fileId == null) {
-                    String newId = createFile(fresh, folderId, filename, csvBytes);
-                    if (newId != null) sessionFileIdRef.set(newId);
+                    res = createFile(fresh, folderId, filename, csvBytes);
+                    if (res.ok() && res.fileId != null && !res.fileId.isEmpty()) sessionFileIdRef.set(res.fileId);
                 } else {
-                    patchFile(fresh, fileId, csvBytes);
+                    res = patchFile(fresh, fileId, csvBytes);
                 }
             }
         }
+        return res;
     }
 
-    // Last HTTP status seen by patchFile/createFile so doUpload can branch
-    // on 401 specifically without parsing the response twice.
-    private volatile int lastHttpStatus = 0;
+    // Orphan create — never touches session refs (sessionFilenameRef /
+    // sessionFileIdRef / currentDriveFileId). Keeps the 401-refresh-and-retry.
+    private boolean createOrphan(String token, String folderId, File f) throws IOException {
+        byte[] data = readAllBytes(f);
+        HttpResult r = createFile(token, folderId, f.getName(), data);
+        if (r.status == 401) {
+            String fresh = AuthStorage.getValidAccessToken(context, /*forceRefresh=*/true);
+            if (fresh != null && !fresh.equals(token)) r = createFile(fresh, folderId, f.getName(), data);
+        }
+        return r.ok();
+    }
+
+    // Orphan patch — same ref-safety + 401 handling as createOrphan.
+    private boolean patchOrphan(String token, String fileId, File f) throws IOException {
+        byte[] data = readAllBytes(f);
+        HttpResult r = patchFile(token, fileId, data);
+        if (r.status == 401) {
+            String fresh = AuthStorage.getValidAccessToken(context, /*forceRefresh=*/true);
+            if (fresh != null && !fresh.equals(token)) r = patchFile(fresh, fileId, data);
+        }
+        return r.ok();
+    }
 
     private String ensureFolder(String token) throws IOException {
         String q = "name='" + DRIVE_FOLDER_NAME + "' and mimeType='" + FOLDER_MIME + "' and trashed=false";
@@ -591,7 +635,7 @@ public class NativeDriveUploader {
         }
     }
 
-    private String createFile(String token, String folderId, String filename, byte[] csvBytes) throws IOException {
+    private HttpResult createFile(String token, String folderId, String filename, byte[] csvBytes) throws IOException {
         // Multipart upload — same wire format as hr_monitor.html driveUploadSession.
         String boundary = "-------hr-monitor-" + Long.toHexString(System.nanoTime());
         String metaJson;
@@ -626,20 +670,22 @@ public class NativeDriveUploader {
             .post(RequestBody.create(MediaType.parse("multipart/related; boundary=" + boundary), body))
             .build();
         try (Response resp = client.newCall(req).execute()) {
-            lastHttpStatus = resp.code();
+            int status = resp.code();
             if (!resp.isSuccessful()) {
-                Log.w(TAG, "Create file HTTP " + resp.code() + " body=" + (resp.body() != null ? resp.body().string() : ""));
-                return null;
+                String errBody = resp.body() != null ? resp.body().string() : "";
+                Log.w(TAG, "Create file HTTP " + status + " body=" + errBody);
+                boolean rl = (status == 403 || status == 429) && isRateLimitBody(errBody);
+                return new HttpResult(status, rl, null);
             }
             JSONObject jr = new JSONObject(resp.body().string());
-            return jr.optString("id");
+            return new HttpResult(status, false, jr.optString("id"));
         } catch (Exception e) {
             Log.w(TAG, "Create file parse failed: " + e.getMessage());
-            return null;
+            return new HttpResult(0, false, null);
         }
     }
 
-    private boolean patchFile(String token, String fileId, byte[] csvBytes) throws IOException {
+    private HttpResult patchFile(String token, String fileId, byte[] csvBytes) throws IOException {
         Request req = new Request.Builder()
             .url("https://www.googleapis.com/upload/drive/v3/files/" + fileId + "?uploadType=media")
             .header("Authorization", "Bearer " + token)
@@ -647,12 +693,14 @@ public class NativeDriveUploader {
             .patch(RequestBody.create(MediaType.parse("text/csv"), csvBytes))
             .build();
         try (Response resp = client.newCall(req).execute()) {
-            lastHttpStatus = resp.code();
+            int status = resp.code();
             if (!resp.isSuccessful()) {
-                Log.w(TAG, "Patch HTTP " + resp.code());
-                return false;
+                String errBody = resp.body() != null ? resp.body().string() : "";
+                Log.w(TAG, "Patch HTTP " + status);
+                boolean rl = (status == 403 || status == 429) && isRateLimitBody(errBody);
+                return new HttpResult(status, rl, null);
             }
-            return true;
+            return new HttpResult(status, false, null);
         }
     }
 

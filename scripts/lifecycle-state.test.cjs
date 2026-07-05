@@ -122,6 +122,25 @@ async function testRecoveryThrows() {
   eq(ctl.getState(), 'failed', 'state failed after throw');
 }
 
+async function testRecoveryThrowsNoLateRejection() {
+  console.log('test: recovery throw does not leak a late unhandled rejection');
+  const unhandled = [];
+  const onUnhandled = function (reason) { unhandled.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  const h = mockHarness({
+    performRecovery: function () { h.calls.recovery++; return Promise.reject(new Error('ble_busy')); },
+    recoveryTimeoutMs: 20,
+  });
+  const ctl = ctlModule.create(h.config);
+  await ctl.bootstrap({ publishing: false, recoveryContext: { mac: 'AA:BB' } });
+  eq(ctl.getState(), 'failed', 'state failed after throw');
+  // Wait well past the timeout window: the pending wait must have been
+  // cancelled, so no recovery_timeout lands in unhandledrejection.
+  await tick(60);
+  process.removeListener('unhandledRejection', onUnhandled);
+  eq(unhandled.length, 0, 'no late unhandled rejection after recovery throw');
+}
+
 async function testResumeFromDim() {
   console.log('test: onResume rehydrates and dismisses');
   const h = mockHarness();
@@ -157,6 +176,7 @@ async function main() {
   await testRecoverySuccess();
   await testRecoveryTimeout();
   await testRecoveryThrows();
+  await testRecoveryThrowsNoLateRejection();
   await testResumeFromDim();
   await testResumeDuringRecoveryIsIgnored();
   console.log('\n' + passed + ' passed, ' + failed + ' failed');

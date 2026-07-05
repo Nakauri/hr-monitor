@@ -71,9 +71,19 @@ try { window.__hrMonitorFgsLoaded = true; } catch (e) {}
       const log = (window.HRMLog && window.HRMLog.event) ? window.HRMLog.event : function () {};
       const logErr = (window.HRMLog && window.HRMLog.error) ? window.HRMLog.error : function () {};
 
+      let startInFlight = null;
       async function start(initialTitle, initialBody) {
         log('fgs.start called', { started, title: initialTitle });
         if (started) return true;
+        // Memoize across the requestPermissions/startForegroundService awaits
+        // so two concurrent start() calls can't both launch the service.
+        if (startInFlight) return startInFlight;
+        startInFlight = startInternal(initialTitle, initialBody)
+          .finally(function () { startInFlight = null; });
+        return startInFlight;
+      }
+
+      async function startInternal(initialTitle, initialBody) {
         let permState = 'unknown';
         try {
           const perm = await ForegroundService.requestPermissions();

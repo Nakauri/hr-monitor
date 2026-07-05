@@ -115,7 +115,7 @@ public class NativeHrSessionPlugin extends Plugin {
     private BluetoothLeScanner scanner;
     private BluetoothGatt currentGatt;
     private BluetoothGattCharacteristic hrChar;
-    private final List<DiscoveredDevice> scanResults = new ArrayList<>();
+    private final List<DiscoveredDevice> scanResults = new java.util.concurrent.CopyOnWriteArrayList<>();
     private ScanCallback scanCallback;
     // 2 consecutive CCCD failures on a bonded handle = stale bond; trigger removeBond.
     private int cccdAttempts = 0;
@@ -123,6 +123,10 @@ public class NativeHrSessionPlugin extends Plugin {
     // Heartbeat: if no HR notification for STALE_HR_THRESHOLD_MS, force a reconnect.
     private volatile long lastHrAtMs = 0;
     private int gattReconnectAttempts = 0;
+    // A backoff reconnect is posted and not yet fired/cancelled. The heartbeat
+    // only schedules when none is pending, so a long backoff (>15 s heartbeat
+    // interval) isn't cancelled and rescheduled forever.
+    private volatile boolean reconnectPending = false;
     private static final long STALE_HR_THRESHOLD_MS = 60_000L;
     private static final long HEARTBEAT_INTERVAL_MS = 15_000L;
 
@@ -132,6 +136,13 @@ public class NativeHrSessionPlugin extends Plugin {
     private String senderLabel;
     private long sessionStartMs;
     private final AtomicBoolean sessionActive = new AtomicBoolean(false);
+    // Bumped each time a session becomes active. A deferred stop (background
+    // worker off the FGS Stop button) captures the generation and only tears
+    // down if it still matches, so a new session started meanwhile survives.
+    private final java.util.concurrent.atomic.AtomicInteger sessionGeneration =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    // True while a stop's teardown runs; FGS stale-intent branch defers to it.
+    private volatile boolean stopTeardownInProgress = false;
     // Throttle for the post-mortem alive-pulse pref write. shared_prefs.apply
     // is cheap but at 1 Hz the file rewrites would still churn — 10 sec is
     // fine resolution for "when did we last record" forensics.
@@ -507,6 +518,8 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @PluginMethod
     public void startSession(PluginCall call) {
+        // Bump generation before resource creation so a stale stop's recheck fails first.
+        sessionGeneration.incrementAndGet();
         // Already recording in this instance (double-start). Close the live
         // relay socket under the CURRENT senderId before it's overwritten
         // below, so the old id gets a clean presence-end instead of lingering
@@ -545,6 +558,11 @@ public class NativeHrSessionPlugin extends Plugin {
         committing.set(false);
 
         // CSV — append to prior file when resuming, fresh file otherwise.
+        // Close any writer still open from a prior start that never stopped so
+        // its file handle doesn't leak.
+        NativeCsvWriter prevWriter;
+        synchronized (this) { prevWriter = csv; csv = null; }
+        if (prevWriter != null) { try { prevWriter.close(); } catch (Throwable ignored) {} }
         synchronized (this) {
             try {
                 csv = new NativeCsvWriter(getContext(), sessionStartMs, resuming ? resumeFilename : null);
@@ -706,15 +724,50 @@ public class NativeHrSessionPlugin extends Plugin {
      */
     public boolean isSessionActive() { return sessionActive.get(); }
 
-    public void stopSessionInternal() {
+    public boolean isStopTeardownInProgress() { return stopTeardownInProgress; }
+
+    public int getSessionGeneration() { return sessionGeneration.get(); }
+
+    /**
+     * Stop the session ONLY if it is still the generation the caller intended
+     * to stop. Guards the deferred FGS-Stop worker against tearing down a new
+     * session the user started while the stop was in flight. Returns true if
+     * the stop ran.
+     */
+    public boolean stopSessionInternalIfCurrent(int expectedGeneration) {
+        if (sessionGeneration.get() != expectedGeneration) {
+            Log.i(TAG, "Deferred stop skipped — session generation changed.");
+            return false;
+        }
+        return stopSessionInternal();
+    }
+
+    public boolean stopSessionInternal() {
+        // Claim the stop atomically. If another stop (JS call + deferred FGS
+        // worker firing together) already flipped the flag, that stop owns
+        // teardown; don't double-run.
+        if (!sessionActive.compareAndSet(true, false)) {
+            Log.i(TAG, "stopSessionInternal skipped — already stopping.");
+            return false;
+        }
+        // Signal teardown so the FGS stale-intent branch defers to us while we
+        // block in uploadSync; cleared in the finally at method end.
+        stopTeardownInProgress = true;
+        try {
+        // Generation this stop intends to tear down. A session started during
+        // the blocking upload below bumps this; the teardown tail re-checks it
+        // so we don't close the new session's relay/GATT/FGS.
+        final int stopGen = sessionGeneration.get();
         NativeHrService.setFgLossReason(getContext(), "plugin_stop_session_internal");
-        sessionActive.set(false);
         // Set cleanlyStopped FIRST so heartbeat/boot receivers don't try to
         // resurrect this session if we're killed during the rest of teardown.
+        // Clear activeCsvFilename here too so OrphanRecoveryWorker stops
+        // skipping the file we just finished.
         try {
             getContext().getSharedPreferences("hr_monitor_session", 0).edit()
                 .putBoolean("sessionActive", false)
                 .putBoolean("cleanlyStopped", true)
+                .putString("activeCsvFilename", "")
                 .commit();
         } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
         JSObject stoppedEv = new JSObject();
@@ -723,6 +776,7 @@ public class NativeHrSessionPlugin extends Plugin {
         HrServiceHeartbeatReceiver.cancel(getContext());
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.removeCallbacks(gattReconnectRunnable);
+        reconnectPending = false;
         // Snapshot + null under lock so BLE binder reads can't observe a
         // half-closed writer. Resumable finalize and full-PATCH fallback
         // both run against the snapshot.
@@ -751,9 +805,16 @@ public class NativeHrSessionPlugin extends Plugin {
                     .edit().putString("lastSessionFilename", stoppedFilename).apply();
             } catch (Throwable ignored) {}
         }
-        closeRelaySocket();
-        closeGattQuietly();
-        stopNativeForegroundService();
+        // Teardown tail: only tear these down if no newer session claimed them
+        // while our upload blocked. A session started during the upload window
+        // owns its own relay socket, GATT, and FGS.
+        if (sessionGeneration.get() == stopGen) {
+            closeRelaySocket();
+            closeGattQuietly();
+            stopNativeForegroundService();
+        } else {
+            Log.i(TAG, "stopSessionInternal — newer session owns relay/GATT/FGS; skipping teardown tail.");
+        }
         // Fire-and-forget local CSV cleanup. Only deletes files that have
         // been verified-uploaded to Drive AND are at least 7 days old —
         // never touches the just-stopped session or anything Drive doesn't
@@ -766,6 +827,10 @@ public class NativeHrSessionPlugin extends Plugin {
             }
         } catch (Throwable t) { /* cleanup is best-effort; never block stop */ }
         emitState();
+        return true;
+        } finally {
+            stopTeardownInProgress = false;
+        }
     }
 
     /** Tear down this now-orphaned instance after a fresh Activity built a
@@ -778,6 +843,7 @@ public class NativeHrSessionPlugin extends Plugin {
         sessionActive.set(false);
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.removeCallbacks(gattReconnectRunnable);
+        reconnectPending = false;
         mainHandler.removeCallbacks(relayReconnectRunnable);
         try { closeRelaySocket(); } catch (Throwable ignored) {}
         try { closeGattQuietly(); } catch (Throwable ignored) {}
@@ -1136,9 +1202,15 @@ public class NativeHrSessionPlugin extends Plugin {
     @PluginMethod
     public void getValidAccessToken(PluginCall call) {
         executor().execute(() -> {
-            String token = AuthStorage.getValidAccessToken(getContext());
+            String token;
+            try {
+                token = AuthStorage.getValidAccessTokenOrThrow(getContext(), false);
+            } catch (AuthStorage.TransientRefreshException e) {
+                call.reject("refresh_transient");
+                return;
+            }
             if (token == null) {
-                call.reject("no_valid_token");
+                call.reject("refresh_invalid");
                 return;
             }
             JSObject ret = new JSObject();
@@ -1181,9 +1253,10 @@ public class NativeHrSessionPlugin extends Plugin {
         ret.put("sessionActive", active);
         ret.put("bleConnected", currentGatt != null);
         ret.put("relayLive", relayLive.get());
-        if (csv != null) {
-            ret.put("csvFile", csv.getFilename());
-            ret.put("sessionStartMs", csv.getSessionStartMs());
+        NativeCsvWriter statusWriter = csv;
+        if (statusWriter != null) {
+            ret.put("csvFile", statusWriter.getFilename());
+            ret.put("sessionStartMs", statusWriter.getSessionStartMs());
         }
         // Expose the relay identity so a fresh WebView (Activity restart with
         // FGS surviving) adopts our senderId instead of minting a new one.
@@ -1472,18 +1545,19 @@ public class NativeHrSessionPlugin extends Plugin {
         // resumable session is still INITIALIZING (in-flight, not yet
         // ready and not yet broken), skip this interval — we'd otherwise
         // create a duplicate Drive file with the same filename.
-        if (csv != null && !committing.get()) {
+        NativeCsvWriter uploadWriter = csv;
+        if (uploadWriter != null && !committing.get()) {
             long since = now - lastUploadMs.get();
             if (since >= DRIVE_UPLOAD_INTERVAL_MS) {
                 if (resumable != null && resumable.isReady()) {
                     lastUploadMs.set(now);
-                    resumable.appendChunkIfReadyAsync(csv.getFile());
+                    resumable.appendChunkIfReadyAsync(uploadWriter.getFile());
                 } else if (resumable != null && resumable.isBroken() && uploader != null) {
                     lastUploadMs.set(now);
-                    uploader.uploadAsync(csv.getFile());
+                    uploader.uploadAsync(uploadWriter.getFile());
                 } else if (resumable == null && uploader != null) {
                     lastUploadMs.set(now);
-                    uploader.uploadAsync(csv.getFile());
+                    uploader.uploadAsync(uploadWriter.getFile());
                 }
                 // else: resumable is initializing — skip this tick, retry next interval.
             }
@@ -1568,6 +1642,7 @@ public class NativeHrSessionPlugin extends Plugin {
     private void scheduleGattReconnect() {
         if (!sessionActive.get()) return;
         mainHandler.removeCallbacks(gattReconnectRunnable);
+        reconnectPending = true;
         gattReconnectAttempts++;
         long base = Math.min(30_000L, 2_000L * (1L << Math.min(gattReconnectAttempts - 1, 4)));
         long delay = (long) (base * (1.0 + (Math.random() * 0.4 - 0.2)));
@@ -1576,6 +1651,7 @@ public class NativeHrSessionPlugin extends Plugin {
     }
     @SuppressLint("MissingPermission")
     private void doGattReconnect() {
+        reconnectPending = false;
         if (!sessionActive.get()) return;
         BluetoothGatt g = currentGatt;
         if (gattReconnectAttempts > 5 || g == null) {
@@ -1620,7 +1696,7 @@ public class NativeHrSessionPlugin extends Plugin {
         @Override public void run() {
             if (!sessionActive.get()) return;
             long now = System.currentTimeMillis();
-            if (lastHrAtMs > 0 && now - lastHrAtMs > STALE_HR_THRESHOLD_MS) {
+            if (lastHrAtMs > 0 && now - lastHrAtMs > STALE_HR_THRESHOLD_MS && !reconnectPending) {
                 Log.w(TAG, "Heartbeat: no HR for " + (now - lastHrAtMs) + "ms — forcing reconnect");
                 scheduleGattReconnect();
             }
@@ -1710,7 +1786,7 @@ public class NativeHrSessionPlugin extends Plugin {
                 int lo = b[offset] & 0xff;
                 int hi = b[offset + 1] & 0xff;
                 int raw = (hi << 8) | lo;
-                rrs.add(raw * 1000 / 1024); // 1/1024 s → ms
+                rrs.add((int) Math.round(raw * 1000.0 / 1024.0)); // 1/1024 s → ms
                 offset += 2;
             }
             int[] arr = new int[rrs.size()];
@@ -1825,7 +1901,7 @@ public class NativeHrSessionPlugin extends Plugin {
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
         Request req = new Request.Builder()
-            .url("wss://hr-relay.nakauri.partykit.dev/parties/main/" + broadcastKey)
+            .url("wss://hr-relay.nakauri.partykit.dev/parties/main/" + broadcastKey + "?role=publisher")
             .build();
         // Stale callbacks (from a socket we replaced or closed) compare ws to
         // the volatile relaySocket field and bail. Required because OkHttp

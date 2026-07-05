@@ -4911,7 +4911,7 @@
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
           ${sessionCardActions(encodeURIComponent(fn))}
-          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${sessionLocalDateKey(s, meta) || fn}</div>
+          <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${escape(sessionLocalDateKey(s, meta) || fn)}</div>
           <div class="session-card-date">${meta && meta.date ? `${formatClockRange(sessionStartEpoch(s, meta), s.duration)} <span class="session-card-dur">(${dur})</span>` : `${dur} session`}</div>
           <div class="session-card-stats">
             <div class="session-card-stat">
@@ -6114,7 +6114,7 @@
       }
     }
     if (!s) {
-      document.getElementById('view-session').innerHTML = `<div class="stub-panel">Session not found: ${filename}</div>`;
+      document.getElementById('view-session').innerHTML = `<div class="stub-panel">Session not found: ${escape(filename)}</div>`;
       return;
     }
     // When the auto-poll pulls a longer version of the same session and the
@@ -8835,9 +8835,7 @@
   }
 
   function escape(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
 
   // ===== Demo mode =====

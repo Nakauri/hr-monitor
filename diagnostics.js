@@ -411,7 +411,7 @@
     if (v && v.shortSha) {
       const when = v.builtAt ? fmt(v.builtAt) : '';
       chip.title = 'v0.5 · ' + v.shortSha + (when ? ' · ' + when : '') + '\nClick for diagnostics';
-      if (!v.signed) avatar.classList.add('fresh');
+      if (avatar && !v.signed) avatar.classList.add('fresh');
     } else {
       chip.title = 'v0.5 · version unavailable (offline)\nClick for diagnostics';
     }

@@ -148,6 +148,40 @@ check('JS SDNN', jsSdnn, EXPECTED_SDNN);
 check('Java SDNN port', javaSdnn, EXPECTED_SDNN);
 check('JS vs Java SDNN parity', jsSdnn, javaSdnn);
 
+// -------- RR raw→ms conversion parity ----
+// JS: hr_monitor.html parseHR — rrs.push(Math.round(raw * 1000 / 1024))
+// Java: NativeHrSessionPlugin.java parseHrPacket —
+//   rrs.add((int) Math.round(raw * 1000.0 / 1024.0))
+// A raw 1/1024-second RR count must map to the same integer ms on both sides,
+// or the RMSSD/SDNN inputs and the CSV diverge. The old `raw * 1000 / 1024`
+// integer-truncation on the Java side lost up to ~1 ms per interval.
+function rrRawToMs_js(raw) { return Math.round(raw * 1000 / 1024); }
+function rrRawToMs_javaPort(raw) { return Math.round(raw * 1000.0 / 1024.0); }
+
+// Values chosen so round-vs-truncate disagree (fractional part ≥ 0.5).
+const goldenRawRR = [819, 820, 821, 1000, 1023, 1025, 512, 305, 2047, 410, 833, 847];
+
+console.log('\nRR raw→ms conversion parity:');
+let rrParityChecked = 0;
+let rrRoundBites = false;
+for (const raw of goldenRawRR) {
+  const js = rrRawToMs_js(raw);
+  const java = rrRawToMs_javaPort(raw);
+  const truncated = Math.trunc(raw * 1000 / 1024);
+  if (js !== truncated) rrRoundBites = true;
+  const pass = js === java;
+  if (!pass) {
+    ok = false;
+    console.log(`FAIL  raw=${raw} js=${js} java=${java}`);
+  }
+  rrParityChecked++;
+}
+console.log(`OK    ${rrParityChecked} raw values, js==java on all`);
+if (!rrRoundBites) {
+  ok = false;
+  console.log('FAIL  golden RR vector never exercises rounding vs truncation');
+}
+
 // -------- RMSSD stage classification parity ----
 // JS: hr_monitor.html:getRMSSDStage
 // Java: NativeHrSessionPlugin.java:rmssdStage

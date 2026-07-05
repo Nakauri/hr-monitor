@@ -23,16 +23,6 @@ if (!fs.existsSync(manifestPath)) {
 let xml = fs.readFileSync(manifestPath, 'utf8');
 let changed = false;
 
-// Ensure tools namespace is declared so tools:replace works on merged elements.
-if (!/xmlns:tools=/.test(xml)) {
-  xml = xml.replace(
-    /<manifest\s+xmlns:android="http:\/\/schemas\.android\.com\/apk\/res\/android"/,
-    '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"'
-  );
-  changed = true;
-  console.log('[inject-manifest] added xmlns:tools');
-}
-
 // Inject REQUEST_IGNORE_BATTERY_OPTIMIZATIONS before </manifest>.
 if (!/REQUEST_IGNORE_BATTERY_OPTIMIZATIONS/.test(xml)) {
   xml = xml.replace(
@@ -113,3 +103,16 @@ if (changed) {
 } else {
   console.log('[inject-manifest] no changes needed');
 }
+
+// Backups can exfiltrate the encrypted Keystore-backed token prefs; the app
+// must ship with allowBackup="false". Fail the build if the merged manifest
+// says otherwise.
+if (/android:allowBackup="true"/.test(xml)) {
+  console.error('[inject-manifest] FATAL: allowBackup="true" in merged manifest — refusing to build.');
+  process.exit(1);
+}
+if (!/android:allowBackup="false"/.test(xml)) {
+  console.error('[inject-manifest] FATAL: allowBackup="false" not found in merged manifest — refusing to build.');
+  process.exit(1);
+}
+console.log('[inject-manifest] allowBackup="false" verified');

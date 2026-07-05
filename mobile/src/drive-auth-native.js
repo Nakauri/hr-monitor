@@ -221,6 +221,7 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
         const expiresAt = Date.now() + expiresIn * 1000 - 60 * 1000;
         const email = exchange.email || (loginResult && loginResult.email) || null;
 
+        let driveSyncDegraded = false;
         try {
           await Native.storeAuthTokens({
             access_token: accessToken,
@@ -229,14 +230,20 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
             email: email,
           });
           trace('signIn:keystore_ok');
+          dMark('__hrMonitorDriveSyncDegraded', false);
         } catch (e) {
+          // Keystore write failed: the background uploader has no refresh
+          // token, so Drive sync will not run while the app is backgrounded.
+          // Sign-in still succeeds for the current session.
           trace('signIn:keystore_failed', (e && e.message) ? e.message : String(e));
-          console.warn('[drive-auth-native] storeAuthTokens failed', e);
+          console.error('[drive-auth-native] storeAuthTokens failed — background Drive sync disabled', e);
+          dMark('__hrMonitorDriveSyncDegraded', true);
+          driveSyncDegraded = true;
         }
 
         hideSignInOverlay();
         trace('signIn:complete');
-        return { accessToken, expiresIn, email };
+        return { accessToken, expiresIn, email, driveSyncDegraded };
       };
 
       window.__hrMonitorNativeDriveSignOut = async function () {
@@ -256,6 +263,11 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
             email: out.email || null,
           };
         } catch (e) {
+          // refresh_transient: network/5xx, token still valid — rethrow so
+          // auth.js keeps the session and retries. refresh_invalid (or any
+          // other): token dead — return null so auth.js signs out.
+          const msg = (e && e.message) ? e.message : String(e);
+          if (/refresh_transient/.test(msg)) throw new Error('refresh_transient');
           return null;
         }
       };

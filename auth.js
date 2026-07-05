@@ -21,8 +21,6 @@
   const POPUP_REDIRECT_URI = 'postmessage';
 
   const LS_KEY_V2 = 'aorti_auth_v2';
-  const LS_KEY_V1 = 'hr_monitor_drive_token';
-  const LS_PKCE_VERIFIER = 'aorti_pkce_verifier';
   const LS_OAUTH_STATE = 'aorti_oauth_state';
 
   const REFRESH_THRESHOLD_MS = 2 * 60 * 1000;
@@ -72,23 +70,8 @@
 
   function clearToken() {
     localStorage.removeItem(LS_KEY_V2);
-    localStorage.removeItem(LS_PKCE_VERIFIER);
-    localStorage.removeItem(LS_OAUTH_STATE);
+    sessionStorage.removeItem(LS_OAUTH_STATE);
   }
-
-  // One-shot migration. Older pages stored {token, expiresAt} under
-  // hr_monitor_drive_token. That token has no refresh pair, so we wipe and
-  // let the next page interaction re-run sign-in.
-  (function migrateV1() {
-    try {
-      const legacy = localStorage.getItem(LS_KEY_V1);
-      if (!legacy) return;
-      localStorage.removeItem(LS_KEY_V1);
-      // If a v2 record already exists, keep it. Otherwise just drop v1.
-    } catch {
-      // ignore
-    }
-  })();
 
   // ---------- crypto (PKCE + state) ----------------------------------------
 
@@ -172,6 +155,7 @@
     const state = makeStateToken();
     sessionStorage.setItem(LS_OAUTH_STATE, state);
 
+    try {
     let code;
     try {
       code = await new Promise((resolve, reject) => {
@@ -219,8 +203,6 @@
       trace('web_exchange_threw', (e && e.message) ? e.message : String(e));
       throw e;
     }
-    sessionStorage.removeItem(LS_OAUTH_STATE);
-
     if (!result.ok) {
       throw new Error('exchange_failed_' + (result.data.google_error || result.status));
     }
@@ -234,6 +216,10 @@
     notifyChange(record);
     trace('web_saved_v2', { email: record.email });
     return record;
+    } finally {
+      // Always clear the one-shot OAuth state, even if sign-in threw.
+      sessionStorage.removeItem(LS_OAUTH_STATE);
+    }
   }
 
   // ---------- sign-in (Capacitor) ------------------------------------------
@@ -301,6 +287,10 @@
           if (typeof window.__hrMonitorNativeDriveRefresh !== 'function') {
             throw new Error('native_refresh_unavailable');
           }
+          // A thrown error here is transient (network/5xx): keep the token
+          // and let it propagate so the caller retries, mirroring the web
+          // path's non-401 branch. Only a null return means the token is
+          // dead, which clears auth below.
           const out = await window.__hrMonitorNativeDriveRefresh();
           if (!out || !out.accessToken) {
             clearToken();
@@ -403,22 +393,6 @@
     // UI hooks for Stage 5 loading states — callers can subscribe.
     REFRESH_UI_DELAY_MS,
   };
-
-  // Back-compat: index.html / hr_monitor.html / hrv_viewer.html all listen
-  // for the legacy LS key. Mirror writes there until those pages are
-  // refactored. Empty value signals sign-out.
-  onAuthChange((record) => {
-    try {
-      if (record) {
-        localStorage.setItem(LS_KEY_V1, JSON.stringify({
-          token: record.access_token,
-          expiresAt: record.expires_at,
-        }));
-      } else {
-        localStorage.removeItem(LS_KEY_V1);
-      }
-    } catch { /* ignore */ }
-  });
 
   try { window.__aortiAuthLoaded = true; } catch {}
 })();

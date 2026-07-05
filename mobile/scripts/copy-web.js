@@ -60,6 +60,15 @@ const VIEWER_SHIM_TAGS = `
   <script src="./restore-overlay.js"></script>
 `;
 
+// Every shim under mobile/src copied next to the web files. One source of
+// truth for both the copy step and the watch list so a new shim can't be
+// copied but not watched (or vice versa).
+const MOBILE_ASSETS = [
+  'ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js',
+  'native-hr-session.js', 'drive-auth-native.js', 'foreground-service.js',
+  'battery-opt.js', 'wake-lock.js', 'oem-background.js', 'restore-overlay.js',
+];
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -70,8 +79,8 @@ function ensureDir(dir) {
 // and we don't want native app installs firing web analytics anyway).
 // If the vendor-injected markup changes, add another pattern here.
 const STRIP_PATTERNS = [
-  /^\s*<!--\s*Vercel Web Analytics[\s\S]*?-->\s*\n?/m,
-  /^\s*<script\s+defer\s+src="https:\/\/cdn\.vercel-insights\.com[^>]*><\/script>\s*\n?/m,
+  /^\s*<!--\s*Vercel Web Analytics[\s\S]*?-->\s*\n?/mg,
+  /^\s*<script\s+defer\s+src="https:\/\/cdn\.vercel-insights\.com[^>]*><\/script>\s*\n?/mg,
 ];
 
 function stripForMobile(html) {
@@ -136,8 +145,7 @@ function copyViewerWithInject(relative) {
 // copy-web also drops the mobile-only bootstrap + adapter files next to the
 // web files so relative paths just work.
 function copyMobileAssets() {
-  const assets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js', 'native-hr-session.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js', 'restore-overlay.js'];
-  for (const name of assets) {
+  for (const name of MOBILE_ASSETS) {
     const from = path.join(mobileRoot, 'src', name);
     const to = path.join(wwwDir, name);
     if (!fs.existsSync(from)) {
@@ -182,7 +190,7 @@ function buildOnce() {
 function watch() {
   buildOnce();
   const files = [...PASSTHROUGH, INJECT_TARGET, VIEWER_INJECT_TARGET, INDEX_OVERRIDE.from].map(f => path.join(repoRoot, f));
-  const mobileAssets = ['ble-adapter.js', 'capacitor-bootstrap.js', 'drive-auth-native.js', 'foreground-service.js', 'battery-opt.js', 'wake-lock.js', 'oem-background.js'].map(f => path.join(mobileRoot, 'src', f));
+  const mobileAssets = MOBILE_ASSETS.map(f => path.join(mobileRoot, 'src', f));
   const watched = [...files, ...mobileAssets].filter(f => fs.existsSync(f));
   console.log(`[copy-web] watching ${watched.length} files…`);
   let pending = null;

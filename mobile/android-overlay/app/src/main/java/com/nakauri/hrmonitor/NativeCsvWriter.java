@@ -55,8 +55,22 @@ public class NativeCsvWriter {
             String filename = "hrv_session_" + fmt.format(new Date(sessionStartMs)) + ".csv";
             target = new File(dir, filename);
         }
+        // A prior session killed mid-write can leave a partial last row with no
+        // trailing newline. Detect that before appending so the first new row
+        // doesn't concatenate onto it and corrupt both.
+        boolean needsLeadingNewline = false;
+        if (appending && target.length() > 0) {
+            try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(target, "r")) {
+                raf.seek(target.length() - 1);
+                needsLeadingNewline = (raf.read() != '\n');
+            } catch (IOException ignored) {}
+        }
         this.file = target;
         this.writer = new BufferedWriter(new FileWriter(file, appending));
+        if (needsLeadingNewline) {
+            writer.write("\n");
+            writer.flush();
+        }
         if (!appending) {
             writer.write(HEADER);
             writer.newLine();
