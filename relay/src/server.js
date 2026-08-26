@@ -14,9 +14,11 @@
 // retired. Until then non-publisher messages are logged, not dropped, so old
 // clients that don't send role=publisher keep broadcasting.
 const ENFORCE_PUBLISHER_ROLE = false;
-// Inbound messages are tiny JSON ticks; anything larger is junk. Enforced
-// regardless of the role flag.
-const MAX_MESSAGE_BYTES = 4096;
+// A tick carries three chart arrays (45 s of live points plus two 3-min trend
+// series) and runs past 12 KB late in a session. The cap exists to drop junk,
+// so it must stay well clear of our own wire format. See RELAY_TICK.md.
+const MAX_MESSAGE_BYTES = 32768;
+const encoder = new TextEncoder();
 
 export default class HRRelay {
   constructor(room) {
@@ -41,10 +43,16 @@ export default class HRRelay {
   }
 
   onMessage(message, sender) {
-    // Size cap + JSON-only, unconditional.
-    const size = typeof message === 'string'
-      ? message.length
-      : (message && typeof message.byteLength === 'number' ? message.byteLength : 0);
+    // Size cap + JSON-only, unconditional. String length counts UTF-16 units,
+    // which undercounts non-ASCII, so measure encoded bytes. UTF-16 length is
+    // never greater than the byte count, so it screens oversized junk first.
+    let size;
+    if (typeof message === 'string') {
+      if (message.length > MAX_MESSAGE_BYTES) return;
+      size = encoder.encode(message).length;
+    } else {
+      size = message && typeof message.byteLength === 'number' ? message.byteLength : 0;
+    }
     if (size > MAX_MESSAGE_BYTES) return;
     let text;
     try { text = typeof message === 'string' ? message : new TextDecoder().decode(message); }
