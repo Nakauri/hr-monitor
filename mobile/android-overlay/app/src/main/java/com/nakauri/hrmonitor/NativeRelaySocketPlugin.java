@@ -69,7 +69,9 @@ public class NativeRelaySocketPlugin extends Plugin {
             ret.put("opening", true);
             call.resolve(ret);
         } catch (Exception e) {
-            Log.e(TAG, "newWebSocket failed", e);
+            // 2-arg Log only; the Throwable overload ClassNotFoundExceptions
+            // on API 28.
+            Log.e(TAG, "newWebSocket failed: " + e);
             socket = null;
             currentUrl = null;
             call.reject("open failed: " + e.getMessage());

@@ -18,6 +18,14 @@
   try {
     if (sessionStorage.getItem('hrm_resuming') === '1') {
       document.documentElement.classList.add('restoring');
+      // Must clear recovery (30 s) then rehydrate (20 s) plus the gap between
+      // this parse and bootstrap. Already scheduled, so it still fires if the
+      // page script dies before the controller boots.
+      setTimeout(function () {
+        document.documentElement.classList.remove('restoring');
+        var o = document.getElementById('restore-overlay');
+        if (o) o.classList.remove('shown');
+      }, 65000);
     }
   } catch (e) {}
 </script>
@@ -4575,7 +4583,9 @@
       },
       log: function (msg) { if (window.HRMLog) window.HRMLog.event(msg); },
     });
-    ns.whenStatusReady().then(function () {
+    // The status IPC is a bridge call like any other; without a ceiling a
+    // hung one skips bootstrap entirely and only the fences clear the screen.
+    window.HRMLifecycleController.withDeadline(ns.whenStatusReady(), 15000, 'status_ready').then(function () {
       const publishing = !!(ns.isPublishing && ns.isPublishing());
       const recoveryContext = typeof ns.getRecoveryContext === 'function' ? ns.getRecoveryContext() : null;
       if (publishing) prepareLiveUiFromNativeSession();

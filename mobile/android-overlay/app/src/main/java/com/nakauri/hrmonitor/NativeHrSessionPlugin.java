@@ -442,7 +442,9 @@ public class NativeHrSessionPlugin extends Plugin {
                 call.reject("BLUETOOTH_CONNECT denied: " + e.getMessage());
             }
         } catch (Throwable t) {
-            Log.e(TAG, "doConnect failed: " + t.getMessage(), t);
+            // 2-arg Log only; the Throwable overload pulls in a class that
+            // ClassNotFoundExceptions on API 28.
+            Log.e(TAG, "doConnect failed: " + t);
             call.reject("connect failed: " + t.getMessage());
         }
     }
@@ -518,6 +520,17 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @PluginMethod
     public void startSession(PluginCall call) {
+        // Capacitor logs and rethrows when a plugin method throws; it never
+        // settles the call, so an unhandled throw hangs the JS caller forever.
+        try {
+            startSessionInternal(call);
+        } catch (Throwable t) {
+            Log.e(TAG, "startSession failed: " + t);
+            call.reject("start_session_failed: " + t.getMessage());
+        }
+    }
+
+    private void startSessionInternal(PluginCall call) {
         // Bump generation before resource creation so a stale stop's recheck fails first.
         sessionGeneration.incrementAndGet();
         // Already recording in this instance (double-start). Close the live
@@ -661,8 +674,13 @@ public class NativeHrSessionPlugin extends Plugin {
 
     @PluginMethod
     public void stopSession(PluginCall call) {
-        stopSessionInternal();
-        call.resolve(new JSObject().put("stopped", true));
+        try {
+            stopSessionInternal();
+            call.resolve(new JSObject().put("stopped", true));
+        } catch (Throwable t) {
+            Log.e(TAG, "stopSession failed: " + t);
+            call.reject("stop_session_failed: " + t.getMessage());
+        }
     }
 
     // ---- Floating overlay ------------------------------------------------
@@ -1171,8 +1189,10 @@ public class NativeHrSessionPlugin extends Plugin {
                 ret.put("sizeBytes", size);
                 ret.put("payloadBytes", text != null ? text.length() : 0);
                 call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("getSessionSnapshot failed: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                // Throwable, not Exception: an OutOfMemoryError on the file
+                // read would escape and leave the call unsettled.
+                call.reject("getSessionSnapshot failed: " + e.getMessage());
             }
         });
     }

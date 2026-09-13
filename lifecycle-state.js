@@ -15,7 +15,8 @@
 //     performRehydrate,     // async () => void; e.g. rehydrate from CSV
 //     onPublishingChanged,  // (cb) => unsubscribe; native shim hook
 //     onRecoveryFailed,     // (reason: string) => void; show error UI
-//     recoveryTimeoutMs,    // default 30000
+//     recoveryTimeoutMs,    // default 30000; ceiling on performRecovery
+//     rehydrateTimeoutMs,   // default 20000; ceiling on performRehydrate
 //     log,                  // optional logger fn(message)
 //   });
 //   await ctl.bootstrap({ publishing, recoveryContext });
@@ -30,6 +31,30 @@
 //   any  ── onResume ──────────────────▶ rehydrating ── done ──▶ idle
 
 (function () {
+  // Capacitor leaves a call unsettled when its plugin method throws, so an
+  // await on one can hang forever. Every such await carries a ceiling.
+  function withDeadline(promise, ms, label) {
+    return new Promise(function (resolve, reject) {
+      let settled = false;
+      const timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        reject(new Error('timeout_' + label));
+      }, ms);
+      Promise.resolve(promise).then(function (v) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(v);
+      }, function (e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      });
+    });
+  }
+
   function create(opts) {
     opts = opts || {};
     const hideOverlay = opts.hideOverlay || function () { return Promise.resolve(); };
@@ -40,7 +65,14 @@
     const onPublishingChanged = opts.onPublishingChanged || function () { return function () {}; };
     const onRecoveryFailed = opts.onRecoveryFailed || function () {};
     const recoveryTimeoutMs = typeof opts.recoveryTimeoutMs === 'number' ? opts.recoveryTimeoutMs : 30000;
+    const rehydrateTimeoutMs = typeof opts.rehydrateTimeoutMs === 'number' ? opts.rehydrateTimeoutMs : 20000;
     const log = opts.log || function () {};
+
+    // Page callbacks are supplied by the caller; a throw from one must not
+    // strand the controller mid-transition.
+    function safeCall(fn, label) {
+      try { fn(); } catch (e) { log('lifecycle: ' + label + ' threw: ' + (e && e.message)); }
+    }
 
     let state = 'idle';
     let unsubPublishing = null;
@@ -53,7 +85,7 @@
     }
 
     function dismiss(reason) {
-      onHide();
+      safeCall(onHide, 'onHide');
       Promise.resolve(hideOverlay()).catch(function (e) {
         log('lifecycle: hideOverlay failed: ' + (e && e.message));
       });
@@ -63,7 +95,7 @@
     async function runRehydrate() {
       setState('rehydrating');
       try {
-        await performRehydrate();
+        await withDeadline(performRehydrate(), rehydrateTimeoutMs, 'rehydrate');
       } catch (e) {
         log('lifecycle: rehydrate threw: ' + (e && e.message));
       } finally {
@@ -101,7 +133,7 @@
       // below) never reaches unhandledrejection; the try still awaits it.
       wait.catch(function () {});
       try {
-        await performRecovery(ctx);
+        await withDeadline(performRecovery(ctx), recoveryTimeoutMs, 'perform_recovery');
         await wait;
         await runRehydrate();
       } catch (e) {
@@ -126,7 +158,7 @@
         await runRehydrate();
       } else if (args.recoveryContext) {
         log('lifecycle: bootstrap recoveryContext present');
-        onShow();
+        safeCall(onShow, 'onShow');
         await runRecovery(args.recoveryContext);
       } else {
         log('lifecycle: bootstrap cold-start');
@@ -142,7 +174,7 @@
         log('lifecycle: onResume during recovery — leaving recovery to complete');
         return;
       }
-      onShow();
+      safeCall(onShow, 'onShow');
       await runRehydrate();
     }
 
@@ -160,7 +192,7 @@
     };
   }
 
-  const api = { create: create };
+  const api = { create: create, withDeadline: withDeadline };
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;
   }
