@@ -885,6 +885,15 @@
     background: transparent;
     border-color: var(--border-strong);
   }
+  /* Stop confirmation for long sessions; replaces the toggle in place. */
+  .stop-confirm[hidden] { display: none; }
+  .stop-confirm-text {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .stop-confirm-actions { display: flex; gap: 8px; }
+  .stop-confirm-actions button { flex: 1; min-height: 42px; font-weight: 600; }
 
   /* Toggle-switch row: inline label + switch for session-level on/off
      choices (currently: Broadcast to relay). Shared across any future
@@ -1769,6 +1778,13 @@
         <div class="status" id="status">Tap Start session to pair your strap and begin recording.</div>
         <div style="height: 10px;"></div>
         <button class="btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
+        <div class="stop-confirm" id="stop-confirm" role="group" aria-labelledby="stop-confirm-text" hidden>
+          <div class="stop-confirm-text" id="stop-confirm-text">Stop this session?</div>
+          <div class="stop-confirm-actions">
+            <button type="button" id="stop-confirm-keep">Keep recording</button>
+            <button type="button" class="btn-session-toggle" data-state="recording" id="stop-confirm-stop">Stop session</button>
+          </div>
+        </div>
         <div class="battery-display" id="battery-display">Battery: —</div>
         <!-- Broadcast toggle lives here now (was buried in Settings → Widgets)
              — session-level choice belongs next to the Active broadcasts
@@ -1910,7 +1926,7 @@
             Detection also requires a compensatory pause and skips when HR is trending down.
           </div>
           <div style="height: 14px;"></div>
-          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Text color stages</div>
+          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Text colour stages</div>
           <div style="font-size: 11px; color: var(--text-faint); margin-bottom: 8px;">
             The red (critical) stage matches your High HR alert above.
           </div>
@@ -2338,6 +2354,7 @@
       if (typeof refreshBattOpt === 'function') refreshBattOpt();
     } catch (e) {}
     const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    // Hides over 5 s rehydrate silently; the controller shows the overlay only past 60 s.
     const needsRehydrate = wasHidden && hiddenMs > REHYDRATE_ON_RESUME_MS
       && window.HRMNativeHrSession
       && window.HRMNativeHrSession.isPublishing
@@ -3068,6 +3085,8 @@
         try { handleRelayMessage(JSON.parse(ev.data)); } catch (e) {}
       });
       ws.addEventListener('close', () => {
+        // A replaced socket's late close must not drop the live one.
+        if (relaySocket !== ws) return;
         relaySocket = null;
         // Native plugin owns its own WebSocket on Capacitor; refreshRelayStatus
         // checks isPublishing() first and shows 'live' when native is healthy.
@@ -3862,6 +3881,7 @@
   function updateSessionToggle() {
     const btn = document.getElementById('session-toggle');
     if (!btn) return;
+    if (state.connState !== 'live' && state.connState !== 'reconnecting') hideStopConfirm();
     if (btn.disabled) {
       btn.setAttribute('data-state', 'idle');
       btn.textContent = 'Start session';
@@ -3896,13 +3916,9 @@
     }
     const cs = state.connState;
     if (cs === 'live' || cs === 'reconnecting') {
-      try { await disconnect(); } catch (e) {}
-      // Finalize session state so the next Start is a fresh recording.
-      // Autosave has already been flushing via the tick loop; we just seal
-      // the in-memory session. resetSession also clears the charts.
-      resetSession();
-      updateSessionToggle();
-      setStatus('Session stopped.');
+      const ranMs = state.startTime ? Date.now() - state.startTime : 0;
+      if (ranMs >= STOP_CONFIRM_AFTER_MS) { showStopConfirm(ranMs); return; }
+      await stopSessionNow();
     } else {
       // Silent permission chain. On native, if battery optimisation is
       // still on, fire the system request BEFORE connect so the dialog
@@ -3922,6 +3938,40 @@
       }
       try { await connect(); } catch (e) { /* connect already surfaces errors */ }
       updateSessionToggle();
+    }
+  }
+
+  const STOP_CONFIRM_AFTER_MS = 10 * 60 * 1000;
+  async function stopSessionNow() {
+    hideStopConfirm();
+    try { await disconnect(); } catch (e) {}
+    // Finalize session state so the next Start is a fresh recording.
+    // Autosave has already been flushing via the tick loop; we just seal
+    // the in-memory session. resetSession also clears the charts.
+    resetSession();
+    updateSessionToggle();
+    setStatus('Session stopped.');
+    try { $('session-toggle').focus(); } catch (e) {}
+  }
+  function showStopConfirm(ranMs) {
+    const box = $('stop-confirm');
+    const btn = $('session-toggle');
+    if (!box || !btn) return;
+    const totalMin = Math.floor(ranMs / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    const dur = h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
+    $('stop-confirm-text').textContent = 'Recording for ' + dur + '. Stop this session?';
+    btn.hidden = true;
+    box.hidden = false;
+    try { $('stop-confirm-keep').focus(); } catch (e) {}
+  }
+  function hideStopConfirm() {
+    const box = $('stop-confirm');
+    const btn = $('session-toggle');
+    if (box && !box.hidden) {
+      box.hidden = true;
+      if (btn) btn.hidden = false;
     }
   }
 
@@ -4034,35 +4084,25 @@
     state.audioOn = $('audio-on').checked;
     // Authoritative check: ask native directly. The cached isPublishing()
     // flag is seeded async on shim init and races with a fast Start tap.
-    let sessionAlive = false;
-    let bleUp = false;
-    try {
-      const s = await window.HRMNativeHrSession.status();
-      sessionAlive = !!(s && s.sessionActive);
-      bleUp = !!(s && s.bleConnected);
-    } catch (e) {}
+    if (recoveryInFlight) {
+      setStatus('Restoring the last session. Try again in a moment.', 'pending');
+      return;
+    }
+    const s = await queryNativeStatus();
+    // Unknown native state: a fresh start could stack on a live session.
+    if (!s) {
+      setStatus("Couldn't check the recording. Tap Start session to try again.", 'error');
+      updateSessionToggle();
+      return;
+    }
     // Adopt whenever a native session is active, even if BLE is mid-reconnect.
     // Starting fresh here while native is still publishing spawns a second
     // stream under a new senderId; the relay then shows two live broadcasters.
-    if (sessionAlive) {
-      const last = getLastStrap();
-      device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: bleUp });
-      adoptNativeSenderIdentity();
-      const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
-        ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
-      setSessionStart(nativeStartMs > 0 ? nativeStartMs : Date.now());
-      state.lastDataTime = Date.now();
-      if (bleUp) {
-        setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
-        $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
-        setConnState('live');
-      } else {
-        setStatus('Session running. Strap is reconnecting...', 'pending');
-        $('overlay-status').textContent = '• LIVE';
-        setConnState('reconnecting');
-      }
+    if (s.sessionActive) {
+      adoptNativeSessionUi(s);
       return;
     }
+    let startCall = null;
     let picked = null;
     const lastNative = getLastStrap();
     if (lastNative && lastNative.mac) {
@@ -4089,7 +4129,7 @@
       }
       // Virtual device stand-in so downstream code (device.name, etc.) works.
       device = buildNativeDevice({ name: picked.name || 'HR Strap', id: picked.mac, connected: false });
-      await window.HRMNativeHrSession.connect(picked.mac);
+      await nativeDeadline(window.HRMNativeHrSession.connect(picked.mac), NATIVE_CONNECT_MS, 'connect');
       // First-run battery optimization prompt. Without an exemption,
       // stock Android Doze and Samsung One UI both kill the FGS during
       // long screen-off periods. Asked once per device; user can re-prompt
@@ -4110,12 +4150,13 @@
       // can leave hours of stale hrSeries that autosave would dump into
       // the new CSV.
       resetLiveDataBuffers();
-      await window.HRMNativeHrSession.startSession({
+      startCall = window.HRMNativeHrSession.startSession({
         broadcastKey: getOrCreateBroadcastKey(),
         senderId: ident.id,
         senderLabel: ident.label,
         broadcast: !!widgetPrefs.broadcast,
       });
+      await nativeDeadline(startCall, NATIVE_START_MS, 'start_session');
       device.gatt.connected = true;
       setSessionStart(Date.now());
       state.lastDataTime = Date.now();
@@ -4130,13 +4171,82 @@
       updateSessionToggle();
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
-      if (/cancelled/i.test(msg)) setStatus('Search cancelled.');
+      if (/^timeout_/.test(msg)) {
+        await onNativeStartTimeout(msg, startCall);
+      } else if (/cancelled/i.test(msg)) setStatus('Search cancelled.');
       else setStatus('Connection failed: ' + msg, 'error');
       updateSessionToggle();
     }
     } finally {
       connectInFlight = false;
     }
+  }
+
+  // Ceilings on native calls; a call that never settles must not leave Start dead.
+  const NATIVE_STATUS_MS = 5000;
+  const NATIVE_CONNECT_MS = 10000;
+  const NATIVE_START_MS = 40000;
+  function nativeDeadline(promise, ms, label) {
+    return window.HRMLifecycleController
+      ? window.HRMLifecycleController.withDeadline(promise, ms, label)
+      : Promise.resolve(promise);
+  }
+  async function queryNativeStatus() {
+    try {
+      return await nativeDeadline(window.HRMNativeHrSession.status(), NATIVE_STATUS_MS, 'status');
+    } catch (e) {
+      if (window.HRMLog) window.HRMLog.event('native status failed', (e && e.message) || String(e));
+      return null;
+    }
+  }
+
+  // Puts the UI on a native session that is already running.
+  function adoptNativeSessionUi(s) {
+    const bleUp = !!(s && s.bleConnected);
+    const last = getLastStrap();
+    device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: bleUp });
+    adoptNativeSenderIdentity();
+    const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
+      ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
+    setSessionStart(nativeStartMs > 0 ? nativeStartMs : Date.now());
+    state.lastDataTime = Date.now();
+    if (bleUp) {
+      setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
+      $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
+      setConnState('live');
+    } else {
+      setStatus('Session running. Strap is reconnecting...', 'pending');
+      $('overlay-status').textContent = '• LIVE';
+      setConnState('reconnecting');
+    }
+  }
+
+  // Adopts a native session that went live after JS stopped waiting for it.
+  async function adoptLateNativeSession(source) {
+    if (connectInFlight || state.connState === 'live' || state.connState === 'reconnecting') return false;
+    const s = await queryNativeStatus();
+    if (!(s && s.sessionActive)) return false;
+    if (connectInFlight || state.connState === 'live' || state.connState === 'reconnecting') return false;
+    if (window.HRMLog) window.HRMLog.event('adopted late native session', source);
+    adoptNativeSessionUi(s);
+    updateSessionToggle();
+    return true;
+  }
+
+  // Timeout: re-query native and adopt a live session; native is never stopped from here.
+  async function onNativeStartTimeout(label, startCall) {
+    if (window.HRMLog) window.HRMLog.event('native call timed out', label);
+    const s = await queryNativeStatus();
+    if (s && s.sessionActive) {
+      adoptNativeSessionUi(s);
+      return;
+    }
+    if (startCall) {
+      Promise.resolve(startCall).then(function () { adoptLateNativeSession('start_session_late'); }, function () {});
+    }
+    setStatus(label === 'timeout_connect'
+      ? 'The strap did not answer. Tap Start session to try again.'
+      : 'The session did not start. Tap Start session to try again.', 'error');
   }
 
   // ===== Floating overlay (Pulsoid-style) =====
@@ -4344,8 +4454,24 @@
   // first HR notification to confirm data flow, but if it doesn't arrive
   // we leave the session alive — native keeps backoff-retrying GATT and
   // the regular onHr listener will pick up data whenever it lands.
-  async function performRecoveryFromContext(ctx) {
+  // token.cancelled means the controller's ceiling passed: keep native going, show nothing, adopt if live.
+  // Resolves once startSession resolves; the first-HR wait runs after, outside the ceiling.
+  let recoveryInFlight = false;
+  async function performRecoveryFromContext(ctx, token) {
     if (!ctx || !ctx.mac) throw new Error('no_mac_in_recovery_context');
+    recoveryInFlight = true;
+    try {
+      if (!(await recoverNativeSession(ctx, token))) return;
+    } finally {
+      recoveryInFlight = false;
+    }
+    finishRecoveryUi(ctx, token).catch(function (e) {
+      if (window.HRMLog) window.HRMLog.event('recovery finish threw', (e && e.message) || String(e));
+    });
+  }
+  // Returns true when the resumed session is this recovery's to finish.
+  async function recoverNativeSession(ctx, token) {
+    const cancelled = function () { return !!(token && token.cancelled); };
     device = buildNativeDevice({ name: 'HR Strap', id: ctx.mac, connected: false });
     setStatus('Reconnecting strap...', 'pending');
     // Buffers from the dead session must not leak into the resumed one.
@@ -4359,15 +4485,22 @@
     // accumulating a ghost.
     rotateSenderId();
     const freshIdent = getDeviceIdentity();
-    await window.HRMNativeHrSession.connect(ctx.mac);
-    await window.HRMNativeHrSession.startSession({
+    await nativeDeadline(window.HRMNativeHrSession.connect(ctx.mac), NATIVE_CONNECT_MS, 'connect');
+    // Once cancelled, start only if nothing else has touched the session.
+    if (cancelled() && (connectInFlight || state.connState !== 'idle')) return false;
+    await nativeDeadline(window.HRMNativeHrSession.startSession({
       broadcastKey: ctx.broadcastKey || getOrCreateBroadcastKey(),
       senderId: freshIdent.id,
       senderLabel: ctx.senderLabel || freshIdent.label,
       broadcast: ctx.broadcastEnabled !== false,
       resumeFilename: ctx.activeCsvFilename || '',
       resumeSessionStartMs: ctx.sessionStartMs || 0,
-    });
+    }), NATIVE_START_MS, 'start_session');
+    if (cancelled()) { adoptLateNativeSession('recovery_late'); return false; }
+    return true;
+  }
+  async function finishRecoveryUi(ctx, token) {
+    const cancelled = function () { return !!(token && token.cancelled); };
     // Native session is up. Mark the button as session-active immediately
     // so the user has a working Stop control while we wait for first HR.
     // setConnState now drives updateSessionToggle internally; no separate
@@ -4386,20 +4519,29 @@
     } catch (e) {
       if (window.HRMLog) window.HRMLog.event('recovery first-HR timeout', 'session alive, native retrying GATT');
     }
+    // The user may have stopped during the first-HR wait; never revive a stopped session.
+    if (state.connState === 'idle') return;
+    const quiet = cancelled();
+    const recoveredStart = state.startTime;
     if (firstHrArrived) {
-      setStatus('Resumed session after restart.', 'connected');
+      if (!quiet) setStatus('Resumed session after restart.', 'connected');
       setConnState('live');
     } else {
-      setStatus('Session resumed. Strap is reconnecting...', 'pending');
+      if (!quiet) setStatus('Session resumed. Strap is reconnecting...', 'pending');
       // Background flip: when HR data eventually lands, switch status to
       // live. Lives alongside wireNativeHr's main listener; both fire.
       const unsubLive = window.HRMNativeHrSession.onHr(function (d) {
+        if (state.connState === 'idle' || state.startTime !== recoveredStart) {
+          try { unsubLive(); } catch (e) {}
+          return;
+        }
         if (!d || !d.hr || d.hr <= 0) return;
         try { unsubLive(); } catch (e) {}
         setStatus('Live.', 'connected');
         setConnState('live');
       });
     }
+    if (quiet) return;
     try {
       const startMs = ctx.sessionStartMs || 0;
       const elapsedMs = startMs > 0 ? Math.max(0, Date.now() - startMs) : 0;
@@ -4544,7 +4686,7 @@
   // Lifecycle bootstrap. Run once after the native shim has had a chance
   // to populate window.HRMNativeHrSession (DOMContentLoaded). The controller
   // is the single owner of overlay visibility — no setIntervals, no fallback
-  // safety nets at this layer (the native 45 s fence covers WebView-dead).
+  // safety nets at this layer (the native 60 s fence covers WebView-dead).
   let __hrLifecycle = null;
   function bootstrapHrLifecycle() {
     if (!wireNativeHr()) {
@@ -4573,10 +4715,12 @@
         try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
       },
       performRehydrate: function () { return rehydrateFromNativeCsv(); },
-      performRecovery: function (ctx) { return performRecoveryFromContext(ctx); },
+      performRecovery: function (ctx, token) { return performRecoveryFromContext(ctx, token); },
       onPublishingChanged: function (cb) {
         return typeof ns.onPublishingChanged === 'function' ? ns.onPublishingChanged(cb) : function () {};
       },
+      isPublishing: function () { return !!(ns.isPublishing && ns.isPublishing()); },
+      onLateLive: function () { adoptLateNativeSession('recovery_ceiling'); },
       onRecoveryFailed: function (reason) {
         if (window.HRMLog) window.HRMLog.event('recovery failed', reason);
         try { showToast("Couldn't resume the previous session. Pair the strap and start a new one.", 6000); } catch (e) {}
@@ -4585,7 +4729,7 @@
     });
     // The status IPC is a bridge call like any other; without a ceiling a
     // hung one skips bootstrap entirely and only the fences clear the screen.
-    window.HRMLifecycleController.withDeadline(ns.whenStatusReady(), 15000, 'status_ready').then(function () {
+    window.HRMLifecycleController.withDeadline(ns.whenStatusReady(), window.HRMLifecycleController.BUDGETS.statusReadyMs, 'status_ready').then(function () {
       const publishing = !!(ns.isPublishing && ns.isPublishing());
       const recoveryContext = typeof ns.getRecoveryContext === 'function' ? ns.getRecoveryContext() : null;
       if (publishing) prepareLiveUiFromNativeSession();
@@ -5199,6 +5343,8 @@
     driveFileIdForSession = null;
     // Need either a local folder OR Drive sign-in to do anything useful.
     if (!autoSaveDirHandle && !driveAccessToken) return;
+    // On native, JS autosave runs only for a local folder; native owns Drive.
+    if (!autoSaveDirHandle && window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) return;
     if (autoSaveDirHandle) {
       const ok = await ensureAutoSavePermission();
       if (!ok) {
@@ -5227,13 +5373,8 @@
   const AUTOSAVE_FAIL_GIVEUP = 3;
   async function writeAutoSave() {
     if (!autoSaveFileHandle && !driveAccessToken) return;
-    // Only Drive upload is gated on native publishing — native already
-    // handles its own Drive uploads and double-uploading would create
-    // duplicate files. The user-picked local folder isn't touched by
-    // native, so JS writes there regardless.
-    const nativeDriveActive = !!(window.HRMNativeHrSession
-        && window.HRMNativeHrSession.isPublishing
-        && window.HRMNativeHrSession.isPublishing());
+    // The native plugin owns Drive uploads whenever it exists; JS only writes the local folder.
+    const nativeDriveActive = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable);
     const { csv, filename } = buildSessionCSV();
     if (autoSaveFileHandle) {
       try {
@@ -6198,6 +6339,18 @@
     // the next Start is a fresh recording. Replaces the old three-button row.
     const sessionToggle = $('session-toggle');
     sessionToggle.addEventListener('click', onSessionToggleClick);
+    const stopKeep = $('stop-confirm-keep');
+    function keepRecording() {
+      hideStopConfirm();
+      try { $('session-toggle').focus(); } catch (e) {}
+    }
+    if (stopKeep) stopKeep.addEventListener('click', keepRecording);
+    const stopBox = $('stop-confirm');
+    if (stopBox) stopBox.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); keepRecording(); }
+    });
+    const stopConfirm = $('stop-confirm-stop');
+    if (stopConfirm) stopConfirm.addEventListener('click', function () { stopSessionNow(); });
     updateSessionToggle();
     // Export CSV sits in the autosave row so it's next to the other storage
     // controls. No mid-session "discard" action — Stop already finalizes +

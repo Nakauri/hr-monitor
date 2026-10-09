@@ -47,6 +47,12 @@ public class NativeDriveUploader {
     private final AtomicReference<String> folderIdRef = new AtomicReference<>(null);
     private final AtomicReference<String> sessionFileIdRef = new AtomicReference<>(null);
     private final AtomicReference<String> sessionFilenameRef = new AtomicReference<>(null);
+    // Stopped files still in their stop upload, process-wide; orphan passes skip them to avoid a duplicate create.
+    private static final java.util.Set<String> FINALIZING =
+        java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+
+    public static void markFinalizing(String name) { if (name != null) FINALIZING.add(name); }
+    public static void clearFinalizing(String name) { if (name != null) FINALIZING.remove(name); }
 
     public NativeDriveUploader(Context context) {
         this.context = context.getApplicationContext();
@@ -71,6 +77,9 @@ public class NativeDriveUploader {
     public void markActiveSessionFilename(String name) {
         sessionFilenameRef.set(name);
     }
+
+    /** The current session's Drive file id as known to the full-PATCH path, or null. */
+    public String getSessionFileId() { return sessionFileIdRef.get(); }
 
     /** Shared folder lookup for sibling uploaders (e.g. resumable). Caches per-process. */
     public String getOrFetchFolderIdSync(String token) throws IOException {
@@ -331,6 +340,7 @@ public class NativeDriveUploader {
             for (File f : files) {
                 if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
                 if (activeName != null && f.getName().equals(activeName)) continue;
+                if (FINALIZING.contains(f.getName())) continue;
                 if (f.length() == 0) continue;
                 DriveFileInfo info = driveFiles.get(f.getName());
                 if (info == null) {
@@ -366,6 +376,7 @@ public class NativeDriveUploader {
         if (sessionsDir == null || filename == null || filename.isEmpty()) return;
         executor.submit(() -> {
             try {
+                if (FINALIZING.contains(filename)) return;
                 File f = new File(sessionsDir, filename);
                 if (!f.exists() || f.length() == 0) return;
                 String token = AuthStorage.getValidAccessToken(context);
@@ -394,6 +405,43 @@ public class NativeDriveUploader {
                 Log.w(TAG, "uploadOrphanIfNeeded threw: " + t.getMessage());
             }
         });
+    }
+
+    /** Full upload of a stopped file by id, else by name (create only if allowed); never touches session refs. */
+    public boolean uploadFinishedSync(File f, String knownFileId, boolean allowCreate) {
+        if (f == null || !f.exists() || f.length() == 0) return false;
+        // Let a session upload of this file land first, so its create is reused, not duplicated.
+        long deadline = System.currentTimeMillis() + 30000L;
+        while (!inFlight.compareAndSet(false, true)) {
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(TAG, "uploadFinishedSync: another upload held inFlight for 30s, giving up");
+                return false;
+            }
+            try { Thread.sleep(200L); } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        try {
+            if ((knownFileId == null || knownFileId.isEmpty()) && f.getName().equals(sessionFilenameRef.get())) {
+                knownFileId = sessionFileIdRef.get();
+            }
+            String token = AuthStorage.getValidAccessToken(context);
+            if (token == null) return false;
+            if (knownFileId != null && !knownFileId.isEmpty() && patchOrphan(token, knownFileId, f)) return true;
+            String folderId = getOrFetchFolderIdSync(token);
+            if (folderId == null) return false;
+            java.util.Map<String, DriveFileInfo> driveFiles = listDriveFiles(token, folderId);
+            if (driveFiles == null) return false;
+            DriveFileInfo info = driveFiles.get(f.getName());
+            if (info != null) return f.length() == info.size || patchOrphan(token, info.id, f);
+            return allowCreate && createOrphan(token, folderId, f);
+        } catch (Throwable t) {
+            Log.w(TAG, "uploadFinishedSync failed: " + t.getMessage());
+            return false;
+        } finally {
+            inFlight.set(false);
+        }
     }
 
     /** Attempt an upload of the given CSV file. No-op if signed-out, mid-flight, or file empty. */
@@ -499,7 +547,11 @@ public class NativeDriveUploader {
 
         byte[] csvBytes = readAllBytes(csv);
         String filename = csv.getName();
-        sessionFilenameRef.set(filename);
+        if (!adoptSessionFilename(filename)) {
+            // Another file is the session file now: upload this one by name and leave the refs alone.
+            Log.i(TAG, "doUpload: " + filename + " is not the session file; uploading by name");
+            return new HttpResult(uploadByNameStale(token, folderId, csv) ? 200 : 0, false, null);
+        }
 
         String fileId = sessionFileIdRef.get();
         if (fileId == null) {
@@ -508,11 +560,14 @@ public class NativeDriveUploader {
             // we'd POST a duplicate file instead of PATCHing the existing one,
             // and the viewer would see two files with the same name.
             try {
-                String prefId = context.getSharedPreferences("hr_monitor_session", 0)
-                    .getString("currentDriveFileId", null);
-                if (prefId != null && !prefId.isEmpty()) {
+                android.content.SharedPreferences prefs = context.getSharedPreferences("hr_monitor_session", 0);
+                String prefId = prefs.getString("currentDriveFileId", null);
+                // The persisted id must belong to this file; an empty name predates the name key.
+                String prefName = prefs.getString("currentDriveFileName", "");
+                boolean sameFile = prefName == null || prefName.isEmpty() || prefName.equals(filename);
+                if (prefId != null && !prefId.isEmpty() && sameFile) {
                     fileId = prefId;
-                    sessionFileIdRef.set(prefId);
+                    setSessionFileIdIfCurrent(filename, prefId);
                 }
             } catch (Throwable ignored) {}
         }
@@ -520,7 +575,7 @@ public class NativeDriveUploader {
         if (fileId == null) {
             res = createFile(token, folderId, filename, csvBytes);
             if (res.ok() && res.fileId != null && !res.fileId.isEmpty()) {
-                sessionFileIdRef.set(res.fileId);
+                setSessionFileIdIfCurrent(filename, res.fileId);
                 Log.i(TAG, "Created Drive file: " + filename + " -> " + res.fileId);
             }
         } else {
@@ -531,14 +586,14 @@ public class NativeDriveUploader {
             // persisted ref, then CREATE a fresh file so sync stays alive.
             if (!res.ok() && res.status == 404) {
                 Log.w(TAG, "Drive PATCH 404 for fileId=" + fileId + " — clearing stale ref and creating fresh file");
-                sessionFileIdRef.set(null);
+                setSessionFileIdIfCurrent(filename, null);
                 try {
                     context.getSharedPreferences("hr_monitor_session", 0).edit()
                         .putString("currentDriveFileId", "").apply();
                 } catch (Throwable ignored) {}
                 res = createFile(token, folderId, filename, csvBytes);
                 if (res.ok() && res.fileId != null && !res.fileId.isEmpty()) {
-                    sessionFileIdRef.set(res.fileId);
+                    setSessionFileIdIfCurrent(filename, res.fileId);
                     Log.i(TAG, "Created replacement Drive file: " + filename + " -> " + res.fileId);
                 }
             }
@@ -555,13 +610,38 @@ public class NativeDriveUploader {
             if (fresh != null && !fresh.equals(token)) {
                 if (fileId == null) {
                     res = createFile(fresh, folderId, filename, csvBytes);
-                    if (res.ok() && res.fileId != null && !res.fileId.isEmpty()) sessionFileIdRef.set(res.fileId);
+                    if (res.ok() && res.fileId != null && !res.fileId.isEmpty()) setSessionFileIdIfCurrent(filename, res.fileId);
                 } else {
                     res = patchFile(fresh, fileId, csvBytes);
                 }
             }
         }
         return res;
+    }
+
+    // Adopts filename only when no session file is set or it already is this one; false = stale upload.
+    private synchronized boolean adoptSessionFilename(String filename) {
+        String cur = sessionFilenameRef.get();
+        if (cur == null) {
+            sessionFilenameRef.set(filename);
+            sessionFileIdRef.set(null);
+            return true;
+        }
+        return cur.equals(filename);
+    }
+
+    // Orphan-style upload for a stale doUpload; no create while the file's stop upload may still commit it.
+    private boolean uploadByNameStale(String token, String folderId, File f) throws IOException {
+        java.util.Map<String, DriveFileInfo> driveFiles = listDriveFiles(token, folderId);
+        if (driveFiles == null) return false;
+        DriveFileInfo info = driveFiles.get(f.getName());
+        if (info != null) return f.length() == info.size || patchOrphan(token, info.id, f);
+        return !FINALIZING.contains(f.getName()) && createOrphan(token, folderId, f);
+    }
+
+    // A doUpload that outlives its session (reset or new file marked) must not seed the next session's id.
+    private synchronized void setSessionFileIdIfCurrent(String filename, String id) {
+        if (filename != null && filename.equals(sessionFilenameRef.get())) sessionFileIdRef.set(id);
     }
 
     // Orphan create — never touches session refs (sessionFilenameRef /

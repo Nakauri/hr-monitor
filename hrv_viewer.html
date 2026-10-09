@@ -3135,20 +3135,29 @@
     }
   }
 
+  // Duplicate names resolve to the oldest copy (id breaks ties) so the pick stays stable as copies grow.
+  function driveFileIsOlder(a, b) {
+    const ta = Date.parse(a.createdTime) || Infinity, tb = Date.parse(b.createdTime) || Infinity;
+    if (ta !== tb) return ta < tb;
+    return String(a.id) < String(b.id);
+  }
+
   async function driveListSessions() {
     if (!driveFolderId) return new Map();
     const files = new Map();
     let pageToken = null;
     do {
       const q = encodeURIComponent(`'${driveFolderId}' in parents and name contains 'hrv_session' and trashed=false`);
-      const params = 'files?q=' + q + "&fields=files(id,name,modifiedTime,size),nextPageToken&pageSize=200" +
+      const params = 'files?q=' + q + "&fields=files(id,name,createdTime,modifiedTime,size),nextPageToken&pageSize=200" +
+        '&orderBy=' + encodeURIComponent('modifiedTime desc') +
         (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
       const resp = await driveFetch(params);
       const data = await resp.json();
       for (const f of (data.files || [])) {
-        if (/^hrv_session_.*\.csv$/.test(f.name)) {
-          files.set(f.name, { id: f.id, modifiedTime: f.modifiedTime, size: f.size });
-        }
+        if (!/^hrv_session_.*\.csv$/.test(f.name)) continue;
+        const prev = files.get(f.name);
+        if (prev && !driveFileIsOlder(f, prev)) continue;
+        files.set(f.name, { id: f.id, createdTime: f.createdTime, modifiedTime: f.modifiedTime, size: f.size });
       }
       pageToken = data.nextPageToken || null;
     } while (pageToken);
@@ -3163,7 +3172,7 @@
   }
 
   // Upload a new file (not an update) to the Drive folder. Returns the
-  // server's { id, modifiedTime } so the meta cache can record it without
+  // server's { id, modifiedTime, size } so the meta cache can record it without
   // a follow-up list call.
   async function driveUploadFile(name, text) {
     if (!driveAccessToken || !driveFolderId) throw new Error('Drive not signed in');
@@ -3172,7 +3181,7 @@
     const body =
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
       `--${boundary}\r\nContent-Type: text/csv\r\n\r\n${text}\r\n--${boundary}--`;
-    const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime', {
+    const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime,size', {
       method: 'POST',
       headers: {
         'Authorization': await driveAuthHeader(),
@@ -3191,7 +3200,19 @@
   //                         desktop stays authoritative after phone uploads
   // The folder-write step only runs if the user has granted readwrite
   // permission; on denial the first two phases still happen.
-  async function driveSync(opts) {
+  // Single-flight per folder: same folder joins the running sync; a new folder queues a fresh one behind it.
+  let driveSyncInFlight = null, driveSyncFolderId = null;
+  function driveSync(opts) {
+    if (driveSyncInFlight && driveSyncFolderId === driveFolderId) return driveSyncInFlight;
+    const prior = driveSyncInFlight;
+    const run = prior ? prior.catch(() => {}).then(() => driveSyncRun(opts)) : driveSyncRun(opts);
+    const p = run.finally(() => { if (driveSyncInFlight === p) driveSyncInFlight = null; });
+    driveSyncInFlight = p;
+    driveSyncFolderId = driveFolderId;
+    return p;
+  }
+
+  async function driveSyncRun(opts) {
     const onProgress = opts && opts.onProgress;
     if (!driveAccessToken || !driveFolderId) {
       return { pulled: 0, uploaded: 0, written: 0, skipped: 0 };
@@ -3201,10 +3222,12 @@
     const cacheSize = Object.keys(driveMetaCache).length;
     console.info('[driveSync] start: drive=' + driveFiles.size + ' files, cache=' + cacheSize + ' entries');
 
-    // Phase 1: Drive → IDB
-    let pulled = 0, skipped = 0, done = 0;
+    // Phase 1: Drive → IDB. Meta alone never proves the blob exists; check the store's keys.
+    const storedNames = new Set(await idbKeys(IDB_DRIVE_STORE));
+    let pulled = 0, skipped = 0;
     let staleMeta = 0, missingMeta = 0, missingStore = 0;
     let firstStaleSample = null;
+    const toPull = [];
     for (const [name, meta] of driveFiles) {
       const cachedMeta = driveMetaCache[name];
       // Drive's modifiedTime doesn't reliably bump on every resumable PATCH
@@ -3222,33 +3245,28 @@
           drive: { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size },
         });
       }
-      let inStore = false;
-      if (fresh) {
-        const text = await idbGet(name, IDB_DRIVE_STORE);
-        inStore = typeof text === 'string';
-      }
-      if (fresh && inStore) {
-        skipped++;
-      } else {
-        if (!cachedMeta) missingMeta++;
-        else if (!fresh) {
-          staleMeta++;
-          if (!firstStaleSample) firstStaleSample = { name, cached: cachedMeta, drive: { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size } };
-        } else if (!inStore) missingStore++;
-        try {
-          const text = await driveDownloadSession(meta.id);
-          await idbSet(name, text, IDB_DRIVE_STORE);
-          driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size };
-          // Flush meta to localStorage every 10 pulls so a mid-sync close
-          // doesn't waste the work we already did.
-          if (pulled % 10 === 9) drivePersistMeta();
-          if (sessionsIndex[name]) delete sessionsIndex[name];
-          pulled++;
-        } catch (e) { console.warn('Drive download failed for', name, e); }
-      }
-      done++;
-      if (driveFiles.size > 0) setDriveProgress(`pulling ${done}/${driveFiles.size}`);
-      if (onProgress) onProgress(done, driveFiles.size);
+      if (fresh && storedNames.has(name)) { skipped++; continue; }
+      if (!cachedMeta) missingMeta++;
+      else if (!fresh) {
+        staleMeta++;
+        if (!firstStaleSample) firstStaleSample = { name, cached: cachedMeta, drive: { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size } };
+      } else missingStore++;
+      toPull.push([name, meta]);
+    }
+    for (let i = 0; i < toPull.length; i++) {
+      const [name, meta] = toPull[i];
+      try {
+        const text = await driveDownloadSession(meta.id);
+        await idbSet(name, text, IDB_DRIVE_STORE);
+        driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size };
+        // Flush meta to localStorage every 10 pulls so a mid-sync close
+        // doesn't waste the work we already did.
+        if (pulled % 10 === 9) drivePersistMeta();
+        if (sessionsIndex[name]) delete sessionsIndex[name];
+        pulled++;
+      } catch (e) { console.warn('Drive download failed for', name, e); }
+      setDriveProgress(`pulling ${i + 1}/${toPull.length}`);
+      if (onProgress) onProgress(i + 1, toPull.length);
     }
     console.info('[driveSync] phase1 done: skipped=' + skipped + ' pulled=' + pulled +
       ' missingMeta=' + missingMeta + ' staleMeta=' + staleMeta + ' missingStore=' + missingStore);
@@ -3278,7 +3296,7 @@
             const file = await fh.getFile();
             const text = await file.text();
             const meta = await driveUploadFile(name, text);
-            driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime };
+            driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size == null ? undefined : String(meta.size) };
             await idbSet(name, text, IDB_DRIVE_STORE);
             uploaded++;
           } catch (e) { console.warn('upload failed for', name, e); }
@@ -3551,7 +3569,14 @@
 
   function persistIndex() {
     if (isDemoMode()) return;  // demo data is in-memory only; never pollute the user's index
-    try { localStorage.setItem(LS_INDEX, JSON.stringify(sessionsIndex)); } catch (e) {}
+    let json = '';
+    try {
+      json = JSON.stringify(sessionsIndex);
+      localStorage.setItem(LS_INDEX, json);
+    } catch (e) {
+      // The in-memory index stays authoritative for this page load.
+      console.warn('[persistIndex] save failed, bytes=' + new TextEncoder().encode(json).length, e);
+    }
   }
 
   // Virtual sessions — synthetic "day:YYYY-MM-DD" entries built on demand by
@@ -3570,14 +3595,13 @@
         tooltip: `Stitched timeline for ${dayMatch[1]}`,
       };
     }
-    // hrv_session_2026-04-17T14-32-00.csv — filename timestamps come from
-    // toISOString() in the writer, i.e. UTC. Append 'Z' so Date() parses as UTC,
-    // then getHours()/getMinutes() give local time for display.
-    // Optional millisecond suffix `.NNN` tolerated for native writes that
-    // disambiguate quick stop+start collisions within the same second.
-    const m = fn.match(/^hrv_session_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(?:\.\d{3})?\.csv$/);
+    // hrv_session_2026-04-17T14-32-00.csv is a web write in UTC.
+    // hrv_session_2026-04-17T14-32-00.123.csv is a native write in device local time.
+    // Native files from 2026-04-21 to 04-24 have no .123 suffix and still parse as UTC.
+    const m = fn.match(/^hrv_session_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(\.\d{3})?\.csv$/);
     if (m) {
-      const date = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`);
+      const isLocal = !!m[5];
+      const date = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}${isLocal ? m[5] : 'Z'}`);
       // Recompute isoDate + isoTime in the user's LOCAL timezone so session cards
       // group under the date the user actually experienced, not UTC date.
       const pad = n => String(n).padStart(2, '0');
@@ -3587,7 +3611,7 @@
       // offset can check whether the file was literally recorded at that time
       // or whether something went wrong with TZ/DST.
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
-      const tooltip = `Recorded: ${date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })} (${tz})\nFilename (UTC): ${m[1]} ${m[2]}:${m[3]}:${m[4]}`;
+      const tooltip = `Recorded: ${date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })} (${tz})\nFilename (${isLocal ? 'local time' : 'UTC'}): ${m[1]} ${m[2]}:${m[3]}:${m[4]}`;
       return { date, isoDate: localDate, isoTime: localTime, filename: fn, kind: 'session', tooltip };
     }
     // hrv_daily_2026-04-17.csv — one file per calendar day, starts at local midnight
@@ -3597,6 +3621,30 @@
       return { date: dt, isoDate: `${d[1]}-${d[2]}-${d[3]}`, isoTime: '00:00:00', filename: fn, kind: 'daily' };
     }
     return null;
+  }
+
+  // A process death writes no disconnect row; the only trace is a jump between samples.
+  const DATA_JUMP_GAP_MIN = 0.5;
+  function dataJumpGaps(hrPoints) {
+    const out = [];
+    let prevT = null;
+    for (const p of hrPoints) {
+      if (p.v == null) continue;
+      if (prevT != null && p.t - prevT > DATA_JUMP_GAP_MIN) out.push({ start: prevT, end: p.t });
+      prevT = p.t;
+    }
+    return out;
+  }
+
+  function mergeGaps(gaps) {
+    const sorted = gaps.filter(g => g.end > g.start).sort((a, b) => a.start - b.start);
+    const out = [];
+    for (const g of sorted) {
+      const last = out[out.length - 1];
+      if (last && g.start <= last.end) last.end = Math.max(last.end, g.end);
+      else out.push({ start: g.start, end: g.end });
+    }
+    return out;
   }
 
   // Given raw gap spans from disconnect→connect events, drop any gap whose
@@ -3679,7 +3727,7 @@
     function needsReparse(fn) {
       const c = sessionsIndex[fn];
       return !c || c.__incomplete
-        || c.__schemaV !== 13
+        || c.__schemaV !== 15
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
         || !('quadPct' in c) || !('restingHR' in c);
     }
@@ -3703,11 +3751,9 @@
         evicted++;
       }
       processed++;
-      // Yield every 4 parses so the loader bar paints + event loop drains
-      // user taps. Without this, the main thread stays blocked through
-      // all 200+ parses on S8 and the bar never moves visibly.
+      // Yield after every parse so the loader bar paints and taps get through.
       if (onProgress) onProgress(processed, todo.length);
-      if (processed % 4 === 0) await new Promise(r => setTimeout(r, 0));
+      await new Promise(r => setTimeout(r, 0));
     }
     if (newParsed > 0 || evicted > 0) persistIndex();
 
@@ -3774,7 +3820,7 @@
     }
 
     for (const d of Object.keys(sessionsByDate)) {
-      sessionsByDate[d].sort();
+      sessionsByDate[d].sort(compareFilesByStart);
     }
   }
 
@@ -3986,7 +4032,7 @@
       return {
         filename,
         __incomplete: true,
-        __schemaV: 13,
+        __schemaV: 15,
         startEpoch: deriveFileStartEpoch(filename),
         duration: 0,
         hrCount: 0,
@@ -4042,7 +4088,8 @@
       const h = r[idx.hr_bpm] !== '' ? parseFloat(r[idx.hr_bpm]) : null;
       if (h != null && !isNaN(h)) hr.push({ t, v: h, ep });
       const rm = r[idx.rmssd_ms] !== '' ? parseFloat(r[idx.rmssd_ms]) : null;
-      if (rm != null && !isNaN(rm)) rmssd.push({ t, v: rm, ep });
+      // RMSSD <= 0 is a missing value, not a reading.
+      if (rm != null && !isNaN(rm) && rm > 0) rmssd.push({ t, v: rm, ep });
       if (idx.sdnn_match_ms != null) {
         const v = r[idx.sdnn_match_ms] !== '' ? parseFloat(r[idx.sdnn_match_ms]) : null;
         if (v != null && !isNaN(v) && v > 0) sdnnMatch.push({ t, v, ep });
@@ -4152,7 +4199,7 @@
     // somehow fired while HR samples were still arriving (buggy firmware,
     // spurious state change, recovered-instantly reconnect without a matching
     // connect row) should not mask regions with real data.
-    const connGaps = trimGapsByData(rawGaps, hr);
+    const connGaps = mergeGaps(trimGapsByData(rawGaps, hr).concat(dataJumpGaps(hr)));
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
 
     // Resting HR proxy: the LOWEST 5-min rolling mean across the session. Unlike
@@ -4410,7 +4457,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 13,
+      __schemaV: 15,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -4490,7 +4537,10 @@
         if (!isNaN(parsed)) ep = parsed;
       }
       if (r[idx.hr_bpm] !== '') hr.push({ x: t, y: parseFloat(r[idx.hr_bpm]), ep });
-      if (r[idx.rmssd_ms] !== '') rmssd.push({ x: t, y: parseFloat(r[idx.rmssd_ms]), ep });
+      if (r[idx.rmssd_ms] !== '') {
+        const v = parseFloat(r[idx.rmssd_ms]);
+        if (v > 0) rmssd.push({ x: t, y: v, ep });
+      }
       if (idx.sdnn_match_ms != null && r[idx.sdnn_match_ms] !== '') {
         const v = parseFloat(r[idx.sdnn_match_ms]);
         if (!isNaN(v) && v > 0) sdnnMatch.push({ x: t, y: v, ep });
@@ -4508,6 +4558,28 @@
   // values shifted from session-relative to day-relative (minutes from local
   // midnight). Routed through renderSession so the chart, zoom slider, marker
   // filters, and autonomic panel all reuse their session-view code paths.
+  // Session order is by start epoch; filenames mix UTC and local time.
+  function fileStartEpoch(fn) {
+    const s = sessionsIndex[fn];
+    if (s && s.startEpoch) return s.startEpoch;
+    const m = parseSessionFilename(fn);
+    return m ? m.date.getTime() : 0;
+  }
+  function compareFilesByStart(a, b) {
+    return (fileStartEpoch(a) - fileStartEpoch(b)) || (a < b ? -1 : a > b ? 1 : 0);
+  }
+
+  function dayFilesByStart(files) {
+    const out = [];
+    for (const fn of files) {
+      const s = sessionsIndex[fn];
+      const meta = parseSessionFilename(fn);
+      if (!s || !meta) continue;
+      out.push({ fn, s, start: sessionStartEpoch(s, meta) });
+    }
+    return out.sort((a, b) => a.start - b.start);
+  }
+
   async function buildDaySession(iso) {
     const files = (sessionsByDate[iso] || []).slice();
     if (!files.length) return null;
@@ -4622,15 +4694,11 @@
     // Day boundaries between consecutive sessions count as connection gaps so
     // the chart line breaks instead of drawing a horizontal bridge across
     // strap-off time.
-    const sortedFiles = files.slice().sort();
-    for (let i = 0; i + 1 < sortedFiles.length; i++) {
-      const a = sessionsIndex[sortedFiles[i]];
-      const b = sessionsIndex[sortedFiles[i + 1]];
-      const metaA = parseSessionFilename(sortedFiles[i]);
-      const metaB = parseSessionFilename(sortedFiles[i + 1]);
-      if (!a || !b || !metaA || !metaB) continue;
-      const aEnd = (metaA.date.getTime() - startOfDay) / 60000 + a.duration;
-      const bStart = (metaB.date.getTime() - startOfDay) / 60000;
+    const ordered = dayFilesByStart(files);
+    for (let i = 0; i + 1 < ordered.length; i++) {
+      const a = ordered[i], b = ordered[i + 1];
+      const aEnd = (a.start - startOfDay) / 60000 + a.s.duration;
+      const bStart = (b.start - startOfDay) / 60000;
       if (bStart > aEnd + 0.1) connGaps.push({ start: aEnd, end: bStart });
     }
 
@@ -4685,6 +4753,7 @@
     // activeDuration is the union of actual recorded minutes and is what
     // gets shown to the user as "X h Y m of recording" in the summary.
     const duration = 1440;
+    connGaps.splice(0, connGaps.length, ...mergeGaps(connGaps));
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
     const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
@@ -4806,6 +4875,10 @@
     // Cancel any active auto-poll from a previous session view. renderSession
     // will restart it if the next view is also a session.
     if (view !== 'session' && typeof clearAutoPoll === 'function') clearAutoPoll();
+    const exportBtn = document.getElementById('export-report');
+    // Android WebView ignores window.print() without a native PrintManager, so the app hides Export.
+    const isNativeApp = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+    if (exportBtn) exportBtn.style.display = (!isNativeApp && (view === 'session' || view === 'day')) ? '' : 'none';
     switch (view) {
       case 'index': renderIndex(); showOnly('view-index'); break;
       case 'session': await renderSession(arg); showOnly('view-session'); break;
@@ -4835,8 +4908,8 @@
     pageSize: 50,
   };
   const SORT_COMPARATORS = {
-    newest:      (a, b) => b.localeCompare(a),
-    oldest:      (a, b) => a.localeCompare(b),
+    newest:      (a, b) => compareFilesByStart(b, a),
+    oldest:      (a, b) => compareFilesByStart(a, b),
     longest:     (a, b) => (sessionsIndex[b]?.duration || 0) - (sessionsIndex[a]?.duration || 0),
     shortest:    (a, b) => (sessionsIndex[a]?.duration || 0) - (sessionsIndex[b]?.duration || 0),
     'best-hrv':  (a, b) => (sessionsIndex[b]?.rmssdAvg || 0) - (sessionsIndex[a]?.rmssdAvg || 0),
@@ -5698,7 +5771,7 @@
 
   function renderAll() {
     const el = document.getElementById('view-all');
-    const allFilenames = Object.keys(sessionsIndex).sort();
+    const allFilenames = Object.keys(sessionsIndex).sort(compareFilesByStart);
     if (!allFilenames.length) {
       el.innerHTML = `<div class="stub-panel">No sessions yet. Run your live HR monitor with auto-save enabled to build history.</div>`;
       return;
@@ -6326,7 +6399,7 @@
             <div class="chart-legend">
               <div class="chart-legend-item" title="The solid line on the chart is HR; the dashed green line is RMSSD."><span class="legend-swatch line"></span>RMSSD (dashed)</div>
               <div class="chart-legend-item toggleable" data-type="warning" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,152,88,0.35); border: 1px solid rgba(232,152,88,0.6);"></span>Warning span</div>
-              <div class="chart-legend-item toggleable" data-type="disconnect" title="Click to toggle"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>BLE gap</div>
+              <div class="chart-legend-item toggleable" data-type="disconnect" title="Click to toggle"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>Recording gap</div>
               <div class="chart-legend-item toggleable" data-type="event" title="Click to toggle · manual symptom markers added during a recording"><span class="legend-swatch vline"></span>Event marker</div>
               <div class="chart-legend-item toggleable" data-type="palp" title="Click to toggle"><span class="legend-swatch dot" style="background: #D76CBA;"></span>Palpitation cluster</div>
               <div class="chart-legend-item toggleable" data-type="delta" title="Click to toggle"><span class="legend-swatch" style="background: rgba(180,140,255,0.2); border: 1px solid rgba(180,140,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
@@ -6746,7 +6819,7 @@
       const { view, arg } = parseHash();
       const dir = e.key === 'ArrowLeft' ? -1 : 1;
       if (view === 'session') {
-        const all = Object.keys(sessionsIndex).sort();
+        const all = Object.keys(sessionsIndex).sort(compareFilesByStart);
         const idx = all.indexOf(decodeURIComponent(arg || ''));
         if (idx < 0) return;
         const next = idx + dir;
@@ -6961,11 +7034,11 @@
     if (totalWarnings > 0 || totalGaps > 0) {
       const lines = [];
       if (totalWarnings > 0) lines.push({ text: `${totalWarnings} warning segment${totalWarnings === 1 ? '' : 's'}`, sub: 'threshold crossings you configured in the live monitor' });
-      if (totalGaps > 0) lines.push({ text: `${totalGaps} BLE gap${totalGaps === 1 ? '' : 's'}`, sub: `${formatDuration(totalGapDur)} of lost-signal time total` });
+      if (totalGaps > 0) lines.push({ text: `${totalGaps} recording gap${totalGaps === 1 ? '' : 's'}`, sub: `${formatDuration(totalGapDur)} with no data recorded` });
       sections.push({
         key: 'connection',
         title: 'Warnings & connection',
-        desc: 'Warnings are the threshold crossings you set in the live monitor (HR high/low, HRV crash, palps elevated). BLE gaps are hardware; the strap dropped contact, so no data got recorded for those stretches.',
+        desc: 'Warnings are the threshold crossings you set in the live monitor (HR high/low, HRV crash, palps elevated). Recording gaps are stretches with no data. The strap lost contact, Bluetooth dropped, or the phone stopped the app.',
         lines,
       });
     }
@@ -7233,7 +7306,7 @@
         sections.push({
           key: 'posture',
           title: 'Posture & sleep',
-          desc: 'Sleep windows are detected automatically from stretches where your HR drifts toward its lowest values AND your HRV sits above the session median at the same time. That combination reliably shows up during actual sleep. Posture comes from whatever you tagged with the P button in the live monitor (lying, sitting, standing). Since HR changes dramatically with posture, tagging it consistently improves the quality of every other stat in this report.',
+          desc: 'Sleep windows are detected automatically from stretches where your HR drifts toward its lowest values AND your HRV sits above the session median at the same time. That combination reliably shows up during actual sleep. Posture comes from the Lying, Sitting and Standing buttons in the live monitor. Since HR changes dramatically with posture, tagging it consistently improves the quality of every other stat in this report.',
           lines,
         });
       }
@@ -7408,7 +7481,7 @@
       for (const c of s.palpClusters) items.push({ type: 'palp', t: c.start, label: c.count === 1 ? 'Ectopic beat' : `${c.count} palpitations in ${formatDuration(c.end - c.start)}` });
     }
     if (activeFilters.disconnect) {
-      for (const g of s.connGaps) items.push({ type: 'disconnect', t: g.start, label: `BLE gap · ${formatDuration(g.end - g.start)}` });
+      for (const g of s.connGaps) items.push({ type: 'disconnect', t: g.start, label: `Recording gap · ${formatDuration(g.end - g.start)}` });
     }
     if (activeFilters.delta && s.hrDeltas) {
       for (const d of s.hrDeltas) {
@@ -8251,7 +8324,7 @@
           border: 'rgba(160,160,160,0.55)',
           borderWidth: 1,
           t: g.start,
-          html: `<b>BLE connection gap</b><br/>${formatDuration(g.start)} → ${formatDuration(g.end)} (${dur})<br/><span style="color: var(--text-dim);">No HR data during this span.</span>`,
+          html: `<b>Recording gap</b><br/>${formatDuration(g.start)} → ${formatDuration(g.end)} (${dur})<br/><span style="color: var(--text-dim);">No HR data during this span.</span>`,
         });
       }
     }
@@ -8779,9 +8852,8 @@
     return `${h}:${String(m).padStart(2, '0')} ${ampm}`;
   }
   // Accepts either an epoch_ms number or a Date object as the start. Caller
-  // should prefer s.startEpoch (CSV first-row epoch_ms) — filename-derived
-  // Dates are wrong for Android sessions because the filename string carries
-  // local time but parseSessionFilename treats it as UTC.
+  // should prefer s.startEpoch (CSV first-row epoch_ms); filename-derived
+  // Dates are wrong for native files without a millisecond suffix.
   function formatClockRange(start, durationMin) {
     if (!start || durationMin == null) return '';
     const startEpoch = typeof start === 'number' ? start : start.getTime();
@@ -8910,7 +8982,7 @@
         }
       }
     }
-    for (const d of Object.keys(sessionsByDate)) sessionsByDate[d].sort();
+    for (const d of Object.keys(sessionsByDate)) sessionsByDate[d].sort(compareFilesByStart);
   }
 
   // ===== Init =====
@@ -9030,7 +9102,16 @@
     if (banner) banner.classList.remove('shown');
   }
 
+  // The native restore overlay belongs to the monitor; the viewer never shows it.
+  function hideRestoreOverlay() {
+    try { if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide(); } catch (e) {}
+  }
+
   async function init() {
+    hideRestoreOverlay();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') hideRestoreOverlay();
+    });
     const demo = isDemoMode();
     bindUiHandlers(demo);
     if (demo) {

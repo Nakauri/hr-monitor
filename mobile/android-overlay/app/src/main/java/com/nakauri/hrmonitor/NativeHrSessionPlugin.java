@@ -121,7 +121,9 @@ public class NativeHrSessionPlugin extends Plugin {
     private int cccdAttempts = 0;
     private boolean usingBondedHandle = false;
     // Heartbeat: if no HR notification for STALE_HR_THRESHOLD_MS, force a reconnect.
+    // Seeded at session start so a link that never delivers a first HR is caught too.
     private volatile long lastHrAtMs = 0;
+    private volatile boolean firstHrSeen = false;
     private int gattReconnectAttempts = 0;
     // A backoff reconnect is posted and not yet fired/cancelled. The heartbeat
     // only schedules when none is pending, so a long backoff (>15 s heartbeat
@@ -141,8 +143,11 @@ public class NativeHrSessionPlugin extends Plugin {
     // down if it still matches, so a new session started meanwhile survives.
     private final java.util.concurrent.atomic.AtomicInteger sessionGeneration =
         new java.util.concurrent.atomic.AtomicInteger(0);
-    // True while a stop's teardown runs; FGS stale-intent branch defers to it.
-    private volatile boolean stopTeardownInProgress = false;
+    // Stop upload workers still running, process-wide; the FGS stale-intent branch defers to them.
+    private static final java.util.concurrent.atomic.AtomicInteger stopWorkersRunning =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    // Stop worker's bound on the final commit, queue wait included.
+    private static final long STOP_FINALIZE_WAIT_MS = 180_000L;
     // Throttle for the post-mortem alive-pulse pref write. shared_prefs.apply
     // is cheap but at 1 Hz the file rewrites would still churn — 10 sec is
     // fine resolution for "when did we last record" forensics.
@@ -208,6 +213,7 @@ public class NativeHrSessionPlugin extends Plugin {
     public void load() {
         NativeHrSessionPlugin orphan = instance;
         instance = this;
+        NativeHrService.logLifecycle(getContext(), "plugin_load orphanActive=" + (orphan != null && orphan != this && orphan.sessionActive.get()));
         // A predecessor survives when the Activity is destroyed (swipe from
         // recents) while the process + FGS stay alive. Its relay socket and
         // GATT keep publishing under the old senderId. Shut it down so we
@@ -267,6 +273,10 @@ public class NativeHrSessionPlugin extends Plugin {
         // Don't null `instance`; the notification Stop button needs it alive.
         unregisterNetworkCallback();
         synchronized (this) {
+            if (workExecutor != null) {
+                workExecutor.shutdown();
+                workExecutor = null;
+            }
             if (authExecutor != null) {
                 authExecutor.shutdown();
                 authExecutor = null;
@@ -386,6 +396,10 @@ public class NativeHrSessionPlugin extends Plugin {
             }, timeoutMs);
         } catch (SecurityException e) {
             call.reject("BLUETOOTH_SCAN denied: " + e.getMessage());
+        } catch (Throwable t) {
+            // startScan throws IllegalStateException when Bluetooth is off; an escaped throw kills the process.
+            NativeHrService.logLifecycle(getContext(), "scan_failed " + t.getClass().getSimpleName());
+            call.reject("Bluetooth is off or unavailable");
         }
     }
 
@@ -396,7 +410,11 @@ public class NativeHrSessionPlugin extends Plugin {
         if (mac == null) { call.reject("mac required"); return; }
         if (adapter == null) { call.reject("Bluetooth adapter unavailable"); return; }
         // Off-bridge: rescan can block ~3 s.
-        executor().execute(() -> doConnect(call, mac));
+        try {
+            executor().execute(() -> doConnect(call, mac));
+        } catch (Throwable t) {
+            call.reject("connect failed: " + t.getMessage());
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -556,6 +574,7 @@ public class NativeHrSessionPlugin extends Plugin {
         boolean resuming = resumeFilename != null && !resumeFilename.isEmpty()
             && resumeStartMs != null && resumeStartMs > 0L;
         sessionStartMs = resuming ? resumeStartMs : System.currentTimeMillis();
+        NativeHrService.logLifecycle(getContext(), resuming ? "session_resume file=" + resumeFilename : "session_start");
         synchronized (rrWindow) { rrWindow.clear(); }
         synchronized (rrWindow5min) { rrWindow5min.clear(); }
         synchronized (rrWindow) {
@@ -657,7 +676,8 @@ public class NativeHrSessionPlugin extends Plugin {
                 .putString("activeCsvFilename", csv != null ? csv.getFile().getName() : "")
                 .apply();
         } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
-        lastHrAtMs = 0;
+        lastHrAtMs = System.currentTimeMillis();
+        firstHrSeen = false;
         gattReconnectAttempts = 0;
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
@@ -672,6 +692,7 @@ public class NativeHrSessionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    // Resolves once the stop flags are committed; the Drive upload continues on hrm-stop-upload.
     @PluginMethod
     public void stopSession(PluginCall call) {
         try {
@@ -742,113 +763,176 @@ public class NativeHrSessionPlugin extends Plugin {
      */
     public boolean isSessionActive() { return sessionActive.get(); }
 
-    public boolean isStopTeardownInProgress() { return stopTeardownInProgress; }
+    public static boolean isStopTeardownInProgress() { return stopWorkersRunning.get() > 0; }
 
     public int getSessionGeneration() { return sessionGeneration.get(); }
 
     /**
      * Stop the session ONLY if it is still the generation the caller intended
      * to stop. Guards the deferred FGS-Stop worker against tearing down a new
-     * session the user started while the stop was in flight. Returns true if
-     * the stop ran.
+     * session the user started while the stop was in flight. Returns the stop
+     * worker's latch, or null when nothing was stopped.
      */
-    public boolean stopSessionInternalIfCurrent(int expectedGeneration) {
+    public java.util.concurrent.CountDownLatch stopSessionInternalIfCurrent(int expectedGeneration) {
         if (sessionGeneration.get() != expectedGeneration) {
             Log.i(TAG, "Deferred stop skipped — session generation changed.");
-            return false;
+            return null;
         }
         return stopSessionInternal();
     }
 
-    public boolean stopSessionInternal() {
-        // Claim the stop atomically. If another stop (JS call + deferred FGS
-        // worker firing together) already flipped the flag, that stop owns
-        // teardown; don't double-run.
+    /** Returns after the stop flags commit; Drive work runs on hrm-stop-upload, whose end opens the latch. Null if already stopping. */
+    public java.util.concurrent.CountDownLatch stopSessionInternal() {
+        // Counted before the claim so a notification Stop landing in between takes the defer branch.
+        stopWorkersRunning.incrementAndGet();
+        // Claim the stop atomically; a concurrent JS + notification stop runs teardown once.
         if (!sessionActive.compareAndSet(true, false)) {
+            stopWorkersRunning.decrementAndGet();
             Log.i(TAG, "stopSessionInternal skipped — already stopping.");
-            return false;
+            return null;
         }
-        // Signal teardown so the FGS stale-intent branch defers to us while we
-        // block in uploadSync; cleared in the finally at method end.
-        stopTeardownInProgress = true;
-        try {
-        // Generation this stop intends to tear down. A session started during
-        // the blocking upload below bumps this; the teardown tail re-checks it
-        // so we don't close the new session's relay/GATT/FGS.
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        // Generation this stop tears down; a session started before the worker ends keeps its FGS.
         final int stopGen = sessionGeneration.get();
-        NativeHrService.setFgLossReason(getContext(), "plugin_stop_session_internal");
-        // Set cleanlyStopped FIRST so heartbeat/boot receivers don't try to
-        // resurrect this session if we're killed during the rest of teardown.
-        // Clear activeCsvFilename here too so OrphanRecoveryWorker stops
-        // skipping the file we just finished.
+        boolean workerStarted = false;
+        String finalizingName = null;
         try {
-            getContext().getSharedPreferences("hr_monitor_session", 0).edit()
-                .putBoolean("sessionActive", false)
-                .putBoolean("cleanlyStopped", true)
-                .putString("activeCsvFilename", "")
-                .commit();
-        } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
-        JSObject stoppedEv = new JSObject();
-        stoppedEv.put("reason", "plugin_stop");
-        notifyListeners("publishingStopped", stoppedEv);
-        HrServiceHeartbeatReceiver.cancel(getContext());
-        mainHandler.removeCallbacks(heartbeatRunnable);
-        mainHandler.removeCallbacks(gattReconnectRunnable);
-        reconnectPending = false;
-        // Snapshot + null under lock so BLE binder reads can't observe a
-        // half-closed writer. Resumable finalize and full-PATCH fallback
-        // both run against the snapshot.
-        NativeCsvWriter snap;
-        synchronized (this) { snap = csv; csv = null; }
-        if (snap != null) {
-            String stoppedFilename = snap.getFile().getName();
-            snap.close();
-            boolean finalized = false;
-            if (resumable != null && resumable.isReady()) {
-                finalized = resumable.finalizeSync(snap.getFile());
-            }
-            // Synchronous safety-net PATCH so the final file shows up in the
-            // viewer immediately on session-stop. Without this, finalize alone
-            // leaves an open resumable session that Drive treats as "in
-            // progress" — the file becomes listable only after the app closes
-            // and abandons the session. uploadSync blocks ~1-10 s; acceptable
-            // since session-stop is a deliberate UI action.
-            if (uploader != null) {
-                uploader.uploadSync(snap.getFile());
-            }
-            // Stamp this filename as the "last session" hint so the next
-            // startSession can detect an orphaned upload and re-send it.
+            NativeHrService.setFgLossReason(getContext(), "plugin_stop_session_internal");
+            // Snapshot + null under lock so BLE binder reads can't observe a half-closed writer.
+            NativeCsvWriter snap;
+            synchronized (this) { snap = csv; csv = null; }
+            final String stoppedFilename = snap != null ? snap.getFile().getName() : null;
+            // lastSessionFilename lands before resolve so a killed upload worker is caught by the next orphan pass.
             try {
-                getContext().getSharedPreferences("hr_monitor_session", 0)
-                    .edit().putString("lastSessionFilename", stoppedFilename).apply();
-            } catch (Throwable ignored) {}
-        }
-        // Teardown tail: only tear these down if no newer session claimed them
-        // while our upload blocked. A session started during the upload window
-        // owns its own relay socket, GATT, and FGS.
-        if (sessionGeneration.get() == stopGen) {
+                android.content.SharedPreferences.Editor ed = getContext()
+                    .getSharedPreferences("hr_monitor_session", 0).edit()
+                    .putBoolean("sessionActive", false)
+                    .putBoolean("cleanlyStopped", true)
+                    .putString("activeCsvFilename", "");
+                if (stoppedFilename != null) ed.putString("lastSessionFilename", stoppedFilename);
+                ed.commit();
+            } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
+            JSObject stoppedEv = new JSObject();
+            stoppedEv.put("reason", "plugin_stop");
+            notifyListeners("publishingStopped", stoppedEv);
+            HrServiceHeartbeatReceiver.cancel(getContext());
+            mainHandler.removeCallbacks(heartbeatRunnable);
+            mainHandler.removeCallbacks(gattReconnectRunnable);
+            reconnectPending = false;
+            // Relay closes now so presence-end carries this session's senderId and no tick follows Stop.
             closeRelaySocket();
             closeGattQuietly();
-            stopNativeForegroundService();
-        } else {
-            Log.i(TAG, "stopSessionInternal — newer session owns relay/GATT/FGS; skipping teardown tail.");
-        }
-        // Fire-and-forget local CSV cleanup. Only deletes files that have
-        // been verified-uploaded to Drive AND are at least 7 days old —
-        // never touches the just-stopped session or anything Drive doesn't
-        // already have. Runs on the upload executor; doesn't block stop.
-        try {
-            if (uploader != null) {
-                java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
-                long sevenDaysMs = 7L * 24L * 60L * 60L * 1000L;
-                uploader.cleanupLocalCachedAsync(sessionsDir, sevenDaysMs);
+            java.io.File stoppedFile = null;
+            String knownFileId = null;
+            java.util.concurrent.Future<NativeDriveResumableUploader.StopResult> finalize = null;
+            if (snap != null) {
+                snap.close();
+                stoppedFile = snap.getFile();
+                NativeDriveUploader.markFinalizing(stoppedFilename);
+                finalizingName = stoppedFilename;
+                if (uploader != null) knownFileId = uploader.getSessionFileId();
+                // Queued now, so the next session's resetSession/startSessionAsync run after it.
+                if (resumable != null) finalize = resumable.finalizeForStopAsync(stoppedFile);
             }
-        } catch (Throwable t) { /* cleanup is best-effort; never block stop */ }
-        emitState();
-        return true;
+            emitState();
+            final java.io.File workFile = stoppedFile;
+            final String workFileId = knownFileId;
+            final java.util.concurrent.Future<NativeDriveResumableUploader.StopResult> workFinalize = finalize;
+            final NativeDriveUploader workUploader = uploader;
+            Runnable work = () -> runStopUpload(workFile, workFileId, workFinalize, workUploader, stopGen, done);
+            workerStarted = true;
+            try {
+                new Thread(work, "hrm-stop-upload").start();
+            } catch (Throwable t) {
+                Log.w(TAG, "hrm-stop-upload start failed, running inline: " + t);
+                work.run();
+            }
+            return done;
         } finally {
-            stopTeardownInProgress = false;
+            if (!workerStarted) {
+                // Teardown threw before the worker took over: release the FGS, the flag and the skip mark here.
+                try { stopForegroundUnlessNewerSession(stopGen); } catch (Throwable ignored) {}
+                NativeDriveUploader.clearFinalizing(finalizingName);
+                stopWorkersRunning.decrementAndGet();
+                done.countDown();
+            }
         }
+    }
+
+    // Body of the hrm-stop-upload worker. Reads only its arguments, never this instance's session fields.
+    private void runStopUpload(java.io.File file, String knownFileId,
+            java.util.concurrent.Future<NativeDriveResumableUploader.StopResult> fut, NativeDriveUploader up,
+            int stopGen, java.util.concurrent.CountDownLatch done) {
+        String name = file != null ? file.getName() : null;
+        NativeHrService.logLifecycle(getContext(), "stop_worker_start file=" + name);
+        String outcome = "no_file";
+        try {
+            if (file != null) {
+                NativeDriveResumableUploader.StopResult fin = null;
+                boolean finTimedOut = false;
+                if (fut != null) {
+                    try {
+                        fin = fut.get(STOP_FINALIZE_WAIT_MS, TimeUnit.MILLISECONDS);
+                    } catch (java.util.concurrent.TimeoutException te) {
+                        finTimedOut = true;
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        finTimedOut = true;
+                    } catch (Throwable t) {
+                        Log.w(TAG, "stop finalize threw: " + t);
+                    }
+                }
+                String fileId = fin != null && fin.fileId != null ? fin.fileId : knownFileId;
+                // A finalize still in flight may commit later; never create a same-name copy beside it.
+                boolean safetyOk = up != null && up.uploadFinishedSync(file, fileId, !finTimedOut);
+                outcome = "finalize=" + (fin != null && fin.ok)
+                    + (finTimedOut ? " finalize_timeout" : "")
+                    + " fileId=" + (fileId != null) + " safety=" + safetyOk;
+                Log.i(TAG, "stop upload " + name + ": " + outcome);
+            }
+        } catch (Throwable t) {
+            outcome = "threw " + t;
+            Log.w(TAG, "stop upload threw: " + t);
+        } finally {
+            boolean fgsStopped = false;
+            try { fgsStopped = stopForegroundUnlessNewerSession(stopGen); } catch (Throwable ignored) {}
+            try {
+                if (up != null) {
+                    java.io.File sessionsDir = new java.io.File(getContext().getFilesDir(), "sessions");
+                    up.cleanupLocalCachedAsync(sessionsDir, 7L * 24L * 60L * 60L * 1000L);
+                }
+            } catch (Throwable ignored) {}
+            NativeDriveUploader.clearFinalizing(name);
+            stopWorkersRunning.decrementAndGet();
+            NativeHrService.logLifecycle(getContext(), "stop_worker_end " + outcome + " fgsStopped=" + fgsStopped);
+            done.countDown();
+        }
+    }
+
+    // Stops the FGS unless a newer session, on this or a successor instance, owns it; returns true if stopped.
+    private boolean stopForegroundUnlessNewerSession(int stopGen) {
+        NativeHrSessionPlugin cur = instance;
+        boolean newer = sessionGeneration.get() != stopGen || sessionActive.get()
+            || (cur != null && cur != this && cur.isSessionActive());
+        if (newer) {
+            Log.i(TAG, "stop worker — newer session owns the FGS; leaving it up.");
+            return false;
+        }
+        stopNativeForegroundService();
+        // A Start in the gap between the check and stopService gets its FGS back.
+        cur = instance;
+        NativeHrSessionPlugin live = sessionActive.get() ? this
+            : (cur != null && cur.isSessionActive() ? cur : null);
+        if (live != null) {
+            NativeHrService.logLifecycle(getContext(), "stop_worker_fgs_restarted");
+            live.startNativeForegroundService("HR Monitor", "Recording");
+        }
+        return true;
+    }
+
+    // A mid-session commit thread may outlive its session; it only touches Drive state while this holds.
+    private boolean stillSession(int gen) {
+        return sessionActive.get() && sessionGeneration.get() == gen;
     }
 
     /** Tear down this now-orphaned instance after a fresh Activity built a
@@ -894,6 +978,8 @@ public class NativeHrSessionPlugin extends Plugin {
             return;
         }
         lastFinalizeMs.set(System.currentTimeMillis());
+        final int syncGen = sessionGeneration.get();
+        try {
         new Thread(() -> {
             String reason = null;
             boolean ok = false;
@@ -922,7 +1008,10 @@ public class NativeHrSessionPlugin extends Plugin {
                 // returned "Synced" but the viewer couldn't see the file until
                 // the app process closed (which abandoned the resumable
                 // session and let Drive's index recover).
-                if (uploader != null) {
+                if (uploader != null && !stillSession(syncGen)) {
+                    // Stopped meanwhile: the stop worker owns this file's final upload.
+                    reason = reason == null ? "session_stopped" : reason + "+session_stopped";
+                } else if (uploader != null) {
                     boolean uploadOk = uploader.uploadSync(file);
                     if (uploadOk) {
                         ok = true;
@@ -936,7 +1025,7 @@ public class NativeHrSessionPlugin extends Plugin {
                 // Sequential after uploadSync so no two operations race against
                 // the same fileId. restartSessionAsync itself is async (fires
                 // onto the resumable executor); we don't block on it.
-                if (finalized && resumable != null) {
+                if (finalized && resumable != null && stillSession(syncGen)) {
                     resumable.restartSessionAsync();
                 }
                 // Orphan re-upload runs unconditionally (different files).
@@ -954,12 +1043,17 @@ public class NativeHrSessionPlugin extends Plugin {
                 call.resolve(ret);
             }
         }, "drive-force-sync").start();
+        } catch (Throwable t) {
+            committing.set(false);
+            call.reject("force_sync_failed: " + t.getMessage());
+        }
     }
 
     /** Periodic finalize+restart timer body. Runs on its own thread because
      *  finalizeSync is synchronous and would block the BLE binder thread
      *  if invoked from the tick handler. */
     private void finalizeAndRestartAsync() {
+        final int gen = sessionGeneration.get();
         new Thread(() -> {
             try {
                 NativeCsvWriter w = csv;
@@ -968,7 +1062,9 @@ public class NativeHrSessionPlugin extends Plugin {
                 String name = file.getName();
                 if (resumable != null && resumable.isReady()) {
                     boolean ok = resumable.finalizeSync(file);
-                    if (ok) {
+                    if (!stillSession(gen)) {
+                        Log.i(TAG, "periodic finalize: session stopped meanwhile; stop worker owns " + name);
+                    } else if (ok) {
                         Log.i(TAG, "periodic finalize OK: " + name);
                         resumable.restartSessionAsync();
                     } else {
@@ -1035,7 +1131,7 @@ public class NativeHrSessionPlugin extends Plugin {
                 ret.put("uri", uri.toString());
                 call.resolve(ret);
             } catch (Throwable t) {
-                Log.w(TAG, "exportCsv write failed: " + t.getMessage(), t);
+                Log.w(TAG, "exportCsv write failed: " + t);
                 call.reject("write_failed: " + t.getMessage());
             }
         });
@@ -1208,44 +1304,52 @@ public class NativeHrSessionPlugin extends Plugin {
         String refreshToken = call.getString("refresh_token");
         Long expiresAt = call.getLong("expires_at");
         String email = call.getString("email");
-        executor().execute(() -> {
+        authExecutor().execute(() -> {
             try {
                 AuthStorage.store(getContext(), accessToken, refreshToken,
                     expiresAt != null ? expiresAt : 0L, email);
                 call.resolve();
-            } catch (Exception e) {
-                call.reject("storeAuthTokens failed: " + e.getMessage(), e);
+            } catch (Throwable t) {
+                call.reject("storeAuthTokens failed: " + t.getMessage());
             }
         });
     }
 
     @PluginMethod
     public void getValidAccessToken(PluginCall call) {
-        executor().execute(() -> {
-            String token;
+        authExecutor().execute(() -> {
             try {
-                token = AuthStorage.getValidAccessTokenOrThrow(getContext(), false);
-            } catch (AuthStorage.TransientRefreshException e) {
-                call.reject("refresh_transient");
-                return;
+                String token;
+                try {
+                    token = AuthStorage.getValidAccessTokenOrThrow(getContext(), false);
+                } catch (AuthStorage.TransientRefreshException e) {
+                    call.reject("refresh_transient");
+                    return;
+                }
+                if (token == null) {
+                    call.reject("refresh_invalid");
+                    return;
+                }
+                JSObject ret = new JSObject();
+                ret.put("access_token", token);
+                ret.put("expires_at", AuthStorage.getExpiresAt(getContext()));
+                ret.put("email", AuthStorage.getEmail(getContext()));
+                call.resolve(ret);
+            } catch (Throwable t) {
+                call.reject("refresh_transient: " + t.getMessage());
             }
-            if (token == null) {
-                call.reject("refresh_invalid");
-                return;
-            }
-            JSObject ret = new JSObject();
-            ret.put("access_token", token);
-            ret.put("expires_at", AuthStorage.getExpiresAt(getContext()));
-            ret.put("email", AuthStorage.getEmail(getContext()));
-            call.resolve(ret);
         });
     }
 
     @PluginMethod
     public void clearAuth(PluginCall call) {
-        executor().execute(() -> {
-            AuthStorage.clear(getContext());
-            call.resolve();
+        authExecutor().execute(() -> {
+            try {
+                AuthStorage.clear(getContext());
+                call.resolve();
+            } catch (Throwable t) {
+                call.reject("clearAuth failed: " + t.getMessage());
+            }
         });
     }
 
@@ -1258,8 +1362,18 @@ public class NativeHrSessionPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    private java.util.concurrent.ExecutorService authExecutor;
+    // connect, snapshot, export and cache work; never queues behind a token refresh.
+    private java.util.concurrent.ExecutorService workExecutor;
     private synchronized java.util.concurrent.ExecutorService executor() {
+        if (workExecutor == null) {
+            workExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        }
+        return workExecutor;
+    }
+
+    // Token store, refresh and clear; a refresh can hold the AuthStorage lock across the network.
+    private java.util.concurrent.ExecutorService authExecutor;
+    private synchronized java.util.concurrent.ExecutorService authExecutor() {
         if (authExecutor == null) {
             authExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
         }
@@ -1340,10 +1454,12 @@ public class NativeHrSessionPlugin extends Plugin {
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothGatt.STATE_CONNECTED) {
                 Log.i(TAG, "GATT connected");
+                NativeHrService.logLifecycle(getContext(), "gatt_connected");
                 emitState();
                 gatt.discoverServices();
             } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
                 Log.i(TAG, "GATT disconnected status=" + status);
+                NativeHrService.logLifecycle(getContext(), "gatt_disconnected status=" + status + " sessionActive=" + sessionActive.get());
                 hrChar = null;
                 NativeCsvWriter w = csv;
                 if (w != null) w.appendConnectionRow("disconnected", System.currentTimeMillis());
@@ -1357,11 +1473,13 @@ public class NativeHrSessionPlugin extends Plugin {
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "Services discovery status=" + status);
+                NativeHrService.logLifecycle(getContext(), "services_discovery_failed status=" + status);
                 return;
             }
             android.bluetooth.BluetoothGattService svc = gatt.getService(HR_SERVICE);
             if (svc == null) {
                 Log.w(TAG, "HR service not present");
+                NativeHrService.logLifecycle(getContext(), "hr_service_missing");
                 return;
             }
             hrChar = svc.getCharacteristic(HR_MEASUREMENT);
@@ -1387,6 +1505,7 @@ public class NativeHrSessionPlugin extends Plugin {
             if (!CCCD.equals(descriptor.getUuid())) return;
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i(TAG, "CCCD write OK — notifications live");
+                NativeHrService.logLifecycle(getContext(), "notifications_live");
                 cccdAttempts = 0;
                 NativeCsvWriter w = csv;
                 if (w != null) w.appendConnectionRow("connected", System.currentTimeMillis());
@@ -1437,6 +1556,7 @@ public class NativeHrSessionPlugin extends Plugin {
     private void handleHrReading(HrParse p) {
         long now = System.currentTimeMillis();
         lastHrAtMs = now;
+        firstHrSeen = true;
         gattReconnectAttempts = 0;
         if (now - lastAliveWriteMs >= ALIVE_WRITE_INTERVAL_MS) {
             lastAliveWriteMs = now;
@@ -1521,7 +1641,7 @@ public class NativeHrSessionPlugin extends Plugin {
         if (writer != null) {
             writer.appendHrRow(
                 p.hr,
-                rmssd != null ? rmssd : 0.0,
+                rmssd,
                 sdnnMatch != null ? sdnnMatch : 0.0,
                 sdnn5min != null ? sdnn5min : 0.0,
                 sdnnFull != null ? sdnnFull : 0.0,
@@ -1621,6 +1741,7 @@ public class NativeHrSessionPlugin extends Plugin {
             i.setAction(NativeHrService.ACTION_START);
             i.putExtra(NativeHrService.EXTRA_TITLE, title);
             i.putExtra(NativeHrService.EXTRA_BODY, body);
+            i.putExtra(NativeHrService.EXTRA_SESSION_START_MS, sessionStartMs);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 getContext().startForegroundService(i);
             } else {
@@ -1641,7 +1762,7 @@ public class NativeHrSessionPlugin extends Plugin {
             android.app.NotificationManager nm = (android.app.NotificationManager)
                 ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
-            android.app.Notification n = NativeHrService.buildNotificationStatic(ctx, title, body);
+            android.app.Notification n = NativeHrService.buildNotificationStatic(ctx, title, body, sessionStartMs);
             nm.notify(NativeHrService.getNotificationId(), n);
         } catch (Throwable t) { /* non-fatal */ }
     }
@@ -1717,8 +1838,16 @@ public class NativeHrSessionPlugin extends Plugin {
             if (!sessionActive.get()) return;
             long now = System.currentTimeMillis();
             if (lastHrAtMs > 0 && now - lastHrAtMs > STALE_HR_THRESHOLD_MS && !reconnectPending) {
-                Log.w(TAG, "Heartbeat: no HR for " + (now - lastHrAtMs) + "ms — forcing reconnect");
-                scheduleGattReconnect();
+                if (!firstHrSeen) {
+                    // Connected-but-silent since start: rebuild the link now, then wait another full window.
+                    Log.w(TAG, "Heartbeat: no first HR after " + (now - lastHrAtMs) + "ms — full reconnect");
+                    NativeHrService.logLifecycle(getContext(), "stale_before_first_hr_reconnect gatt=" + (currentGatt != null));
+                    lastHrAtMs = now;
+                    fullReconnectGatt();
+                } else {
+                    Log.w(TAG, "Heartbeat: no HR for " + (now - lastHrAtMs) + "ms — forcing reconnect");
+                    scheduleGattReconnect();
+                }
             }
             // Re-check before re-posting: sessionActive may have flipped during this run.
             if (sessionActive.get()) mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);

@@ -13,18 +13,22 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * a single hide() method to JS so the page can dismiss it once the chart
  * is populated. Idempotent — multiple hides are fine.
  *
- * Safety net: MainActivity also schedules an automatic hide after 30 s,
- * so if this plugin is ever missing or the JS path fails, the overlay
- * goes away regardless.
+ * Safety net: MainActivity also schedules an automatic hide after 60 s
+ * (OVERLAY_SAFETY_MS), so if this plugin is ever missing or the JS path
+ * fails, the overlay goes away regardless.
  */
 @CapacitorPlugin(name = "RestoreOverlay")
 public class RestoreOverlayPlugin extends Plugin {
     @PluginMethod
     public void hide(PluginCall call) {
-        Activity activity = getActivity();
-        if (activity instanceof MainActivity) {
-            ((MainActivity) activity).hideRestoreOverlay();
+        try {
+            Activity activity = getActivity();
+            if (activity instanceof MainActivity) {
+                ((MainActivity) activity).hideRestoreOverlay();
+            }
+            call.resolve();
+        } catch (Throwable t) {
+            call.reject("hide failed: " + t.getMessage());
         }
-        call.resolve();
     }
 }

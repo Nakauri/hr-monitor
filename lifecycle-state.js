@@ -3,7 +3,7 @@
 // Owns the "Restoring session" overlay's visibility from the JS side, owns the
 // `html.restoring` class via the onShow/onHide callbacks the page wires in,
 // and is the single caller of HRMRestoreOverlay.hide(). Drives recovery flows
-// without polling: subscribes to publishingStarted, races a 30 s ceiling, calls
+// without polling: subscribes to publishingStarted, races a 25 s ceiling, calls
 // the page-provided performRecovery hook, and reports failure to the page so it
 // can render an actionable error UI.
 //
@@ -11,12 +11,16 @@
 //   const ctl = HRMLifecycleController.create({
 //     hideOverlay,          // () => Promise
 //     onShow, onHide,       // () => void; for html.restoring class etc
-//     performRecovery,      // async (ctx) => void; throws to signal failure
+//     performRecovery,      // async (ctx, token) => void; throws to signal failure
+//                           //   token.cancelled turns true once the ceiling passes
 //     performRehydrate,     // async () => void; e.g. rehydrate from CSV
 //     onPublishingChanged,  // (cb) => unsubscribe; native shim hook
+//     isPublishing,         // () => bool; native publishing flag
 //     onRecoveryFailed,     // (reason: string) => void; show error UI
-//     recoveryTimeoutMs,    // default 30000; ceiling on performRecovery
-//     rehydrateTimeoutMs,   // default 20000; ceiling on performRehydrate
+//     onLateLive,           // () => void; native went live after the ceiling
+//     recoveryTimeoutMs,    // default BUDGETS.recoveryMs; ceiling on performRecovery
+//     rehydrateTimeoutMs,   // default BUDGETS.rehydrateMs; ceiling on performRehydrate
+//     resumeOverlayMs,      // default 60000; shorter hides rehydrate without the overlay
 //     log,                  // optional logger fn(message)
 //   });
 //   await ctl.bootstrap({ publishing, recoveryContext });
@@ -27,10 +31,14 @@
 //   idle ── bootstrap publishing:true ──▶ rehydrating ── done ──▶ idle
 //   idle ── bootstrap recoveryCtx ──────▶ recovering   ── pub event ──▶ rehydrating
 //                                                       └─ timeout/throw ─▶ failed
+//   failed ── native publishing later ─▶ idle (onLateLive)
 //   idle ── bootstrap neither ──────────▶ idle
 //   any  ── onResume ──────────────────▶ rehydrating ── done ──▶ idle
 
 (function () {
+  // Worst case 10 + 25 + 15 = 50 s, inside the native 60 s overlay fence.
+  const BUDGETS = { statusReadyMs: 10000, recoveryMs: 25000, rehydrateMs: 15000 };
+
   // Capacitor leaves a call unsettled when its plugin method throws, so an
   // await on one can hang forever. Every such await carries a ceiling.
   function withDeadline(promise, ms, label) {
@@ -63,9 +71,12 @@
     const performRecovery = opts.performRecovery || function () { return Promise.resolve(); };
     const performRehydrate = opts.performRehydrate || function () { return Promise.resolve(); };
     const onPublishingChanged = opts.onPublishingChanged || function () { return function () {}; };
+    const isPublishing = opts.isPublishing || function () { return false; };
     const onRecoveryFailed = opts.onRecoveryFailed || function () {};
-    const recoveryTimeoutMs = typeof opts.recoveryTimeoutMs === 'number' ? opts.recoveryTimeoutMs : 30000;
-    const rehydrateTimeoutMs = typeof opts.rehydrateTimeoutMs === 'number' ? opts.rehydrateTimeoutMs : 20000;
+    const onLateLive = opts.onLateLive || function () {};
+    const recoveryTimeoutMs = typeof opts.recoveryTimeoutMs === 'number' ? opts.recoveryTimeoutMs : BUDGETS.recoveryMs;
+    const rehydrateTimeoutMs = typeof opts.rehydrateTimeoutMs === 'number' ? opts.rehydrateTimeoutMs : BUDGETS.rehydrateMs;
+    const resumeOverlayMs = typeof opts.resumeOverlayMs === 'number' ? opts.resumeOverlayMs : 60000;
     const log = opts.log || function () {};
 
     // Page callbacks are supplied by the caller; a throw from one must not
@@ -77,6 +88,7 @@
     let state = 'idle';
     let unsubPublishing = null;
     let pendingRecovery = null;
+    let lateLiveUnsub = null;
     let disposed = false;
 
     function setState(next) {
@@ -126,25 +138,53 @@
       });
     }
 
+    function readPublishing() {
+      try { return !!isPublishing(); } catch (e) { return false; }
+    }
+
+    function fireLateLive(source) {
+      if (lateLiveUnsub) { try { lateLiveUnsub(); } catch (e) {} lateLiveUnsub = null; }
+      if (disposed) return;
+      log('lifecycle: native live after recovery ceiling (' + source + ')');
+      if (state === 'failed') setState('idle');
+      try { onLateLive(); } catch (e) { log('lifecycle: onLateLive threw: ' + (e && e.message)); }
+    }
+
+    // A failed recovery keeps running natively; adopt it if it goes live.
+    function watchForLateLive() {
+      if (lateLiveUnsub) return;
+      lateLiveUnsub = onPublishingChanged(function (evt) {
+        if (evt && evt.publishing) fireLateLive('event');
+      });
+    }
+
     async function runRecovery(ctx) {
       setState('recovering');
+      // Cancelling suppresses the page's recovery UI only; native is never stopped.
+      const token = { cancelled: false };
       const wait = awaitPublishingOrTimeout();
       // Observe the wait's rejection here so a late timeout (or the cancel
       // below) never reaches unhandledrejection; the try still awaits it.
       wait.catch(function () {});
       try {
-        await withDeadline(performRecovery(ctx), recoveryTimeoutMs, 'perform_recovery');
+        await withDeadline(performRecovery(ctx, token), recoveryTimeoutMs, 'perform_recovery');
         await wait;
         await runRehydrate();
       } catch (e) {
         // If performRecovery threw, `wait` is still pending with a live timer
         // and subscription; cancel it so nothing leaks or fires late.
         if (pendingRecovery) { try { pendingRecovery.cancel(); } catch (err) {} }
+        token.cancelled = true;
         const reason = (e && e.message) || 'recovery_failed';
         log('lifecycle: recovery failed: ' + reason);
         dismiss('recovery_failed');
         setState('failed');
-        try { onRecoveryFailed(reason); } catch (err) {}
+        if (readPublishing()) {
+          fireLateLive('flag');
+        } else {
+          try { onRecoveryFailed(reason); } catch (err) {}
+          watchForLateLive();
+        }
       } finally {
         pendingRecovery = null;
       }
@@ -174,7 +214,7 @@
         log('lifecycle: onResume during recovery — leaving recovery to complete');
         return;
       }
-      safeCall(onShow, 'onShow');
+      if ((args.hiddenForMs || 0) > resumeOverlayMs) safeCall(onShow, 'onShow');
       await runRehydrate();
     }
 
@@ -182,6 +222,7 @@
       disposed = true;
       if (unsubPublishing) { try { unsubPublishing(); } catch (e) {} }
       if (pendingRecovery) { try { pendingRecovery.cancel(); } catch (e) {} }
+      if (lateLiveUnsub) { try { lateLiveUnsub(); } catch (e) {} lateLiveUnsub = null; }
     }
 
     return {
@@ -192,7 +233,7 @@
     };
   }
 
-  const api = { create: create, withDeadline: withDeadline };
+  const api = { create: create, withDeadline: withDeadline, BUDGETS: BUDGETS };
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;
   }

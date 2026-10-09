@@ -11,6 +11,9 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import okhttp3.MediaType;
@@ -38,6 +41,8 @@ import okhttp3.Response;
 public class NativeDriveResumableUploader {
     private static final String TAG = "NativeDriveResumable";
     private static final int CHUNK_BLOCK = 256 * 1024;  // hard Drive constraint
+    // Bound on a mid-session finalize (queue wait plus up to three PUTs).
+    private static final long FINALIZE_WAIT_MS = 180_000L;
 
     private final Context context;
     private final OkHttpClient client;
@@ -90,6 +95,7 @@ public class NativeDriveResumableUploader {
             context.getSharedPreferences("hr_monitor_session", 0).edit()
                 .putString("currentResumableUri", sessionUrl == null ? "" : sessionUrl)
                 .putString("currentDriveFileId", fileId == null ? "" : fileId)
+                .putString("currentDriveFileName", filename == null ? "" : filename)
                 .apply();
         } catch (Throwable ignored) {}
     }
@@ -180,6 +186,11 @@ public class NativeDriveResumableUploader {
         final String name = filename;
         executor.submit(() -> {
             try {
+                // A session reset or started since the commit owns these fields now.
+                if (!existingId.equals(fileId)) {
+                    Log.i(TAG, "restartSessionAsync skipped; session changed since commit of " + name);
+                    return;
+                }
                 this.lastChunkEnd = 0;
                 this.sessionUrl = null;
                 this.broken = false;
@@ -217,6 +228,7 @@ public class NativeDriveResumableUploader {
         if (!inFlight.compareAndSet(false, true)) return;
         executor.submit(() -> {
             try {
+                if (!csv.getName().equals(filename)) return;  // fields belong to another session
                 long fileLen = csv.length();
                 long avail = fileLen - lastChunkEnd;
                 if (avail < CHUNK_BLOCK) return;  // wait for more data
@@ -241,18 +253,31 @@ public class NativeDriveResumableUploader {
 
     /**
      * Send the final chunk (whatever's left after lastChunkEnd) with the
-     * actual total size. Called at session stop. SYNCHRONOUS — blocks until
-     * complete or failed. Returns true on success. Caller falls back to
-     * full-file PATCH if false.
+     * actual total size. Runs on the executor behind any queued chunk and
+     * blocks the caller up to FINALIZE_WAIT_MS. Returns true on success.
+     * Caller falls back to full-file PATCH if false.
      */
     public boolean finalizeSync(File csv) {
         if (!isReady()) return false;
         if (csv == null || !csv.exists()) return false;
+        Future<Boolean> f = executor.submit(() -> finalizeOnExecutor(csv));
         try {
-            // Wait for any in-flight chunk to finish so we don't race with a
-            // concurrent appendChunkIfReadyAsync that hasn't completed yet.
-            executor.submit(() -> { /* drain marker */ }).get();
-        } catch (Exception ignored) {}
+            return f.get(FINALIZE_WAIT_MS, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException te) {
+            Log.w(TAG, "finalizeSync: no result after " + FINALIZE_WAIT_MS + " ms; caller falls back");
+            return false;
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Throwable t) {
+            Log.w(TAG, "finalizeSync threw: " + t.getMessage());
+            return false;
+        }
+    }
+
+    private boolean finalizeOnExecutor(File csv) {
+        // A stop or new session since the caller checked isReady() owns these fields now.
+        if (!isReady() || !csv.getName().equals(filename)) return false;
         try {
             long fileLen = csv.length();
             // Always send a final chunk, even if it's 0 bytes — Drive needs a
@@ -262,8 +287,7 @@ public class NativeDriveResumableUploader {
             long endByte = fileLen - 1;
             // Retry the final chunk a couple of times on transient failures
             // (5xx, network blip). 401 is handled inside sendChunk. 4xx
-            // permanent failures mark broken and don't retry. Better to
-            // burn 6 seconds at session-stop than orphan a partial Drive file.
+            // permanent failures mark broken and don't retry.
             boolean ok = false;
             final int MAX_TRIES = 3;
             for (int attempt = 1; attempt <= MAX_TRIES; attempt++) {
@@ -285,10 +309,60 @@ public class NativeDriveResumableUploader {
             }
             return ok;
         } catch (Throwable t) {
-            Log.w(TAG, "finalizeSync threw: " + t.getMessage());
+            Log.w(TAG, "finalizeOnExecutor threw: " + t.getMessage());
             broken = true;
             return false;
         }
+    }
+
+    /** Outcome of a stop finalize. fileId is the Drive id when known, even if the commit failed. */
+    public static final class StopResult {
+        public final boolean ok;
+        public final String fileId;
+        StopResult(boolean ok, String fileId) { this.ok = ok; this.fileId = fileId; }
+    }
+
+    /** Stop commit: queued ahead of the next session's reset, reads a snapshot, writes no session field. */
+    public Future<StopResult> finalizeForStopAsync(final File csv) {
+        return executor.submit(() -> {
+            // Fields describing another file (reset, or never started for this one) are not ours.
+            if (csv == null || !csv.getName().equals(filename)) return new StopResult(false, null);
+            final String url = sessionUrl;
+            final long start = lastChunkEnd;
+            final String knownId = fileId;
+            final boolean wasBroken = broken;
+            if (url == null || wasBroken || !csv.exists()) {
+                return new StopResult(false, knownId);
+            }
+            final long total = csv.length();
+            final int MAX_TRIES = 3;
+            for (int attempt = 1; attempt <= MAX_TRIES; attempt++) {
+                try {
+                    String token = AuthStorage.getValidAccessToken(context);
+                    if (token == null) return new StopResult(false, knownId);
+                    PutResult r = putRange(url, token, csv, start, total - 1, true, total);
+                    if (r.status == 401) {
+                        String fresh = AuthStorage.getValidAccessToken(context, /*forceRefresh=*/true);
+                        if (fresh != null && !fresh.equals(token)) {
+                            r = putRange(url, fresh, csv, start, total - 1, true, total);
+                        }
+                    }
+                    if (r.status >= 200 && r.status < 300) {
+                        Log.i(TAG, "Stop finalize OK: " + csv.getName() + " (" + total + " bytes)");
+                        return new StopResult(true, r.fileId != null ? r.fileId : knownId);
+                    }
+                    Log.w(TAG, "Stop finalize HTTP " + r.status + " (attempt " + attempt + ")");
+                    if (r.status >= 400 && r.status < 500 && r.status != 408 && r.status != 429) break;
+                } catch (IOException io) {
+                    Log.w(TAG, "Stop finalize IO failure (attempt " + attempt + "): " + io.getMessage());
+                }
+                if (attempt < MAX_TRIES) {
+                    try { Thread.sleep(1000L * (1L << (attempt - 1))); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                }
+            }
+            return new StopResult(false, knownId);
+        });
     }
 
     // ---- HTTP helpers ----
@@ -379,6 +453,35 @@ public class NativeDriveResumableUploader {
     private volatile int lastChunkHttpStatus = 0;
 
     private boolean doSendChunk(String token, File csv, long startByte, long endByte, boolean finalChunk, long totalIfFinal) throws IOException {
+        PutResult r = putRange(sessionUrl, token, csv, startByte, endByte, finalChunk, totalIfFinal);
+        lastChunkHttpStatus = r.status;
+        int code = r.status;
+        if (finalChunk) {
+            if (code >= 200 && code < 300) {
+                if (r.fileId != null) { fileId = r.fileId; persistResumeKeys(); }
+                return true;
+            }
+            Log.w(TAG, "Final chunk HTTP " + code);
+            return false;
+        }
+        if (code == 308) return true;
+        if (code >= 200 && code < 300) {
+            // Drive thinks we're done — odd but accept. File ID may be in body.
+            Log.i(TAG, "Drive returned 2xx mid-stream; treating as accepted");
+            return true;
+        }
+        Log.w(TAG, "Intermediate chunk HTTP " + code);
+        return false;
+    }
+
+    private static final class PutResult {
+        final int status;
+        final String fileId;
+        PutResult(int status, String fileId) { this.status = status; this.fileId = fileId; }
+    }
+
+    /** PUT one byte range to an explicit session URL. Touches no session fields. */
+    private PutResult putRange(String url, String token, File csv, long startByte, long endByte, boolean finalChunk, long totalIfFinal) throws IOException {
         long chunkLen = endByte - startByte + 1;
         if (chunkLen < 0) chunkLen = 0;  // empty final chunk is legal
 
@@ -418,39 +521,24 @@ public class NativeDriveResumableUploader {
 
         RequestBody reqBody = RequestBody.create(MediaType.parse("text/csv"), body);
         Request req = new Request.Builder()
-            .url(sessionUrl)
+            .url(url)
             .header("Authorization", "Bearer " + token)
             .header("Content-Range", contentRange)
             .put(reqBody)
             .build();
         try (Response resp = client.newCall(req).execute()) {
-            lastChunkHttpStatus = resp.code();
             int code = resp.code();
-            if (finalChunk) {
-                if (code >= 200 && code < 300) {
-                    // Success — capture file ID for any subsequent ops.
-                    try {
-                        String b = resp.body() != null ? resp.body().string() : "";
-                        if (!b.isEmpty()) {
-                            JSONObject jr = new JSONObject(b);
-                            String id = jr.optString("id", null);
-                            if (id != null && !id.isEmpty()) { fileId = id; persistResumeKeys(); }
-                        }
-                    } catch (Exception ignored) {}
-                    return true;
-                }
-                Log.w(TAG, "Final chunk HTTP " + code);
-                return false;
-            } else {
-                if (code == 308) return true;
-                if (code >= 200 && code < 300) {
-                    // Drive thinks we're done — odd but accept. File ID may be in body.
-                    Log.i(TAG, "Drive returned 2xx mid-stream; treating as accepted");
-                    return true;
-                }
-                Log.w(TAG, "Intermediate chunk HTTP " + code);
-                return false;
+            String id = null;
+            if (finalChunk && code >= 200 && code < 300) {
+                try {
+                    String b = resp.body() != null ? resp.body().string() : "";
+                    if (!b.isEmpty()) {
+                        String parsed = new JSONObject(b).optString("id", null);
+                        if (parsed != null && !parsed.isEmpty()) id = parsed;
+                    }
+                } catch (Exception ignored) {}
             }
+            return new PutResult(code, id);
         }
     }
 }

@@ -11,11 +11,13 @@
 // the relay.
 //
 // Protocol with NativeRelaySocketPlugin.java:
-//   plugin.open({ url })       → opens socket, fires state event
+//   plugin.open({ url, socketId }) → opens socket, fires state event
 //   plugin.send({ text })       → enqueues a frame
-//   plugin.close()              → closes
-//   addListener('state', ...)   → { state: 'open'|'closed'|'error', detail? }
-//   addListener('message', ...) → { text }
+//   plugin.close({ socketId })  → closes
+//   addListener('state', ...)   → { state: 'open'|'closed'|'error', detail?, socketId? }
+//   addListener('message', ...) → { text, socketId? }
+// Events carrying another socketId are dropped; events without one (older
+// APKs) are treated as this socket's own.
 
 (function() {
   if (typeof window === 'undefined') return;
@@ -37,6 +39,10 @@
   const RELAY_URL_TEST = /partykit/i;
   const OriginalWebSocket = window.WebSocket;
 
+  function newSocketId() {
+    return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
   function NativeRelayWebSocket(url) {
     const ws = this;
     ws.url = url;
@@ -49,12 +55,32 @@
     ws.onmessage = null;
     ws.onclose = null;
     ws.onerror = null;
+    ws._socketId = newSocketId();
 
     let stateHandle = null;
     let messageHandle = null;
+    let closed = false;
+
+    function isOwn(data) {
+      return !data.socketId || data.socketId === ws._socketId;
+    }
+
+    // Error ends the socket like the browser WebSocket: onerror, then onclose.
+    function fail(message) {
+      if (ws.readyState === 3) return;
+      ws.readyState = 3;
+      cleanup();
+      if (typeof ws.onerror === 'function') {
+        try { ws.onerror({ type: 'error', message: message, target: ws }); } catch (e) {}
+      }
+      if (typeof ws.onclose === 'function') {
+        try { ws.onclose({ type: 'close', code: 1006, reason: message, wasClean: false, target: ws }); } catch (e) {}
+      }
+    }
 
     const stateListener = function(data) {
-      if (!data || !data.state) return;
+      if (!data || !data.state || !isOwn(data)) return;
+      if (ws.readyState === 3) return;
       if (data.state === 'open') {
         ws.readyState = 1;
         if (typeof ws.onopen === 'function') {
@@ -69,22 +95,20 @@
           } catch (e) {}
         }
       } else if (data.state === 'error') {
-        if (typeof ws.onerror === 'function') {
-          try {
-            ws.onerror({ type: 'error', message: data.detail || 'unknown', target: ws });
-          } catch (e) {}
-        }
+        fail(data.detail || 'unknown');
       }
     };
 
     const messageListener = function(data) {
-      if (!data || typeof data.text !== 'string') return;
+      if (!data || typeof data.text !== 'string' || !isOwn(data)) return;
+      if (ws.readyState === 3) return;
       if (typeof ws.onmessage === 'function') {
         try { ws.onmessage({ type: 'message', data: data.text, target: ws }); } catch (e) {}
       }
     };
 
     function cleanup() {
+      closed = true;
       try { if (stateHandle && stateHandle.remove) stateHandle.remove(); } catch (e) {}
       try { if (messageHandle && messageHandle.remove) messageHandle.remove(); } catch (e) {}
       stateHandle = null;
@@ -92,19 +116,21 @@
     }
     ws._cleanup = cleanup;
 
+    // A handle that resolves after close is removed at once.
+    function dropIfClosed(h) {
+      if (!closed) return false;
+      try { if (h && h.remove) h.remove(); } catch (e) {}
+      return true;
+    }
     Promise.resolve(plugin.addListener('state', stateListener))
-      .then(function(h) { stateHandle = h; })
+      .then(function(h) { if (!dropIfClosed(h)) stateHandle = h; })
       .catch(function() {});
     Promise.resolve(plugin.addListener('message', messageListener))
-      .then(function(h) { messageHandle = h; })
+      .then(function(h) { if (!dropIfClosed(h)) messageHandle = h; })
       .catch(function() {});
 
-    plugin.open({ url: url }).catch(function(e) {
-      ws.readyState = 3;
-      cleanup();
-      if (typeof ws.onerror === 'function') {
-        try { ws.onerror({ type: 'error', message: String(e), target: ws }); } catch (err) {}
-      }
+    plugin.open({ url: url, socketId: ws._socketId }).catch(function(e) {
+      fail(String(e));
     });
   }
 
@@ -126,9 +152,9 @@
 
   NativeRelayWebSocket.prototype.close = function() {
     if (this.readyState === 3) return;
-    this.readyState = 2; // CLOSING
+    this.readyState = 3;
     if (this._cleanup) this._cleanup();
-    plugin.close().catch(function() {});
+    plugin.close({ socketId: this._socketId }).catch(function() {});
   };
 
   NativeRelayWebSocket.prototype.addEventListener = function(type, fn) {

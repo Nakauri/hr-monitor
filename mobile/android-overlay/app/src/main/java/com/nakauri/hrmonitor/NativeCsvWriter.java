@@ -92,13 +92,16 @@ public class NativeCsvWriter {
     private int rowsSinceFlush = 0;
     private long lastFlushAtMs = 0;
 
-    public synchronized void appendHrRow(int hr, double rmssd, double sdnnMatch, double sdnn5min, double sdnnFull, long timestampMs) {
+    // Null RMSSD (warm-up, too few clean beats) is an empty field, as in buildSessionCSV.
+    // Row shape is checked by scripts/csv-format.test.cjs.
+    public synchronized void appendHrRow(int hr, Double rmssd, double sdnnMatch, double sdnn5min, double sdnnFull, long timestampMs) {
         if (writer == null) return;
         double tMin = Math.max(0, (timestampMs - sessionStartMs)) / 60_000.0;
+        String rmssdField = rmssd == null ? "" : String.format(Locale.US, "%.2f", rmssd);
         try {
             writer.write(String.format(Locale.US,
-                "%.4f,%d,%d,%.2f,%.2f,%.2f,%.2f,,,,,",
-                tMin, timestampMs, hr, rmssd, sdnnMatch, sdnn5min, sdnnFull));
+                "%.4f,%d,%d,%s,%.2f,%.2f,%.2f,,,,,",
+                tMin, timestampMs, hr, rmssdField, sdnnMatch, sdnn5min, sdnnFull));
             writer.newLine();
             rowsSinceFlush++;
             long now = System.currentTimeMillis();

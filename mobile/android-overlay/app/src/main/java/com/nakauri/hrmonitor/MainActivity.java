@@ -46,11 +46,8 @@ public class MainActivity extends BridgeActivity {
     // One handler for the safety timer. removeCallbacks only cancels callbacks
     // posted to the SAME handler, so arm + cancel must share this instance.
     private final Handler restoreSafetyHandler = new Handler(Looper.getMainLooper());
-    // Sits above the JS state controller's 30 s recovery ceiling so the
-    // controller has room to render a recovery_failed UI before this fence
-    // trips. Only relevant when JS never runs at all (renderer dead / WebView
-    // crashed mid-bootstrap).
-    private static final long OVERLAY_SAFETY_MS = 45000L;
+    // Above the JS restore worst case (10 + 25 + 15 = 50 s, lifecycle-state.js); trips only when JS never hides it.
+    private static final long OVERLAY_SAFETY_MS = 60000L;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -272,6 +269,7 @@ public class MainActivity extends BridgeActivity {
     // re-arms the safety timer so a stale onResume can't strand the user.
     public void showRestoreOverlay() {
         runOnUiThread(() -> {
+            new Thread(() -> NativeHrService.logLifecycle(this, "overlay_shown"), "hrm-lifecycle-log").start();
             try {
                 if (restoreOverlay != null && restoreOverlay.getParent() != null) {
                     armRestoreSafetyTimer();
@@ -316,6 +314,7 @@ public class MainActivity extends BridgeActivity {
     private void hideRestoreOverlayBySafetyTimer() {
         if (restoreOverlay != null) {
             Log.w(TAG, "Restore overlay auto-hidden by " + (OVERLAY_SAFETY_MS / 1000) + " s safety timer (JS hide() not received)");
+            NativeHrService.logLifecycle(this, "overlay_auto_hidden");
         }
         hideRestoreOverlay();
     }
