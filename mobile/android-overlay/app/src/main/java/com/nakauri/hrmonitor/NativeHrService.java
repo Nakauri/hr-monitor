@@ -16,7 +16,7 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 
 // Foreground service for active HR sessions. Owns only the notification +
-// process anchor; BLE / relay / CSV / Drive live in NativeHrSessionPlugin.
+// process anchor; BLE / relay / CSV / Drive live in HrEngine.
 public class NativeHrService extends Service {
     private static final String TAG = "NativeHrService";
     private static final String CHANNEL_ID = "hr_monitor_native";
@@ -69,6 +69,8 @@ public class NativeHrService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : ACTION_START;
+        logLifecycle(this, "service_start action=" + action + " engine=" + (HrEngine.peek() != null)
+            + " nullIntent=" + (intent == null));
 
         // startForeground must run within 5 s of startForegroundService, even on STOP.
         String title = intent != null && intent.getStringExtra(EXTRA_TITLE) != null
@@ -96,13 +98,13 @@ public class NativeHrService extends Service {
             // intent from a prior session that delivered after the user
             // started a new one. Tear down the FGS but do not call
             // stopSessionInternal (which would close the fresh GATT).
-            NativeHrSessionPlugin plugin = NativeHrSessionPlugin.instance;
-            boolean sessionLive = plugin != null && plugin.isSessionActive();
+            HrEngine engine = HrEngine.peek();
+            boolean sessionLive = engine != null && engine.isSessionActive();
             setFgLossReason(this, sessionLive ? "user_stop_button" : "stale_action_stop");
             if (sessionLive) {
-                // Holds the wake lock until the plugin's upload worker ends; the generation guard spares a newer session.
-                final int gen = plugin.getSessionGeneration();
-                final NativeHrSessionPlugin p = plugin;
+                // Holds the wake lock until the engine's upload worker ends; the generation guard spares a newer session.
+                final int gen = engine.getSessionGeneration();
+                final HrEngine p = engine;
                 stopInFlight = true;
                 Thread stopWorker = new Thread(() -> {
                     boolean stopped = false;
@@ -116,7 +118,7 @@ public class NativeHrService extends Service {
                         Log.w(TAG, "deferred stopSessionInternal threw: " + t.getMessage());
                     } finally {
                         // A session started during the upload owns the alarm and wake lock.
-                        NativeHrSessionPlugin cur = NativeHrSessionPlugin.instance;
+                        HrEngine cur = HrEngine.peek();
                         boolean newerLive = cur != null && cur.isSessionActive();
                         if (stopped && !newerLive) {
                             HrServiceHeartbeatReceiver.cancel(NativeHrService.this);
@@ -135,7 +137,7 @@ public class NativeHrService extends Service {
                 return START_NOT_STICKY;
             }
             // A stop's upload worker is still running; its tail owns service shutdown.
-            if (NativeHrSessionPlugin.isStopTeardownInProgress()) {
+            if (HrEngine.isStopTeardownInProgress()) {
                 Log.i(TAG, "ACTION_STOP ignored — stop upload worker in progress.");
                 return START_NOT_STICKY;
             }

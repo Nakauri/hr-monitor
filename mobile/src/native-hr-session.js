@@ -151,9 +151,13 @@
         // The publishingStarted event is authoritative for the publishing
         // flag flip. We still update sessionStartMs here for callers that
         // read it from the resolve value's path.
-        if (opts && opts.senderId) activeSenderId = opts.senderId;
-        if (opts && opts.senderLabel) activeSenderLabel = opts.senderLabel;
+        // Sender identity is recorded only once native confirms; an already-running session keeps its own.
         return plugin.startSession(opts).then(function (r) {
+          const running = !!(r && r.alreadyRunning);
+          const id = running ? (r.senderId || null) : (opts && opts.senderId) || null;
+          const label = running ? (r.senderLabel || null) : (opts && opts.senderLabel) || null;
+          if (id) activeSenderId = id;
+          if (label) activeSenderLabel = label;
           if (r && r.sessionStartMs) sessionStartMs = r.sessionStartMs;
           else if (opts && opts.resumeSessionStartMs) sessionStartMs = opts.resumeSessionStartMs;
           return r;

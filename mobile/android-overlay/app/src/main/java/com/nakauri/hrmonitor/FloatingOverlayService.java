@@ -30,7 +30,7 @@ import java.util.Deque;
 
 // Pulsoid-style floating BPM overlay. SYSTEM_ALERT_WINDOW + WindowManager
 // to render a small draggable pill on top of any app. Subscribes to HR ticks
-// from NativeHrSessionPlugin via a singleton listener slot. Two display modes
+// from HrEngine via a singleton listener slot. Two display modes
 // toggled by tapping the pill (anywhere except the close X):
 //   compact: logo + BPM
 //   card:    logo + BPM + RMSSD
@@ -67,7 +67,7 @@ public class FloatingOverlayService extends Service {
         buildView();
         applyMode();
         attachToWindow();
-        NativeHrSessionPlugin.floatingOverlayListener = (bpm, rmssd) -> {
+        HrEngine.floatingOverlayListener = (bpm, rmssd) -> {
             mainHandler.post(() -> {
                 if (bpmText != null) bpmText.setText(bpm > 0 ? String.valueOf(bpm) : "—");
                 if (rmssdText != null) rmssdText.setText(rmssd > 0 ? String.valueOf((int) Math.round(rmssd)) : "—");
@@ -84,7 +84,7 @@ public class FloatingOverlayService extends Service {
 
     @Override
     public void onDestroy() {
-        NativeHrSessionPlugin.floatingOverlayListener = null;
+        HrEngine.floatingOverlayListener = null;
         if (overlayView != null && windowManager != null) {
             try { windowManager.removeView(overlayView); } catch (Throwable ignored) {}
         }

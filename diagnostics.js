@@ -113,7 +113,7 @@
       fgsStarted: !!window.__hrMonitorFgsStarted,
       fgsPermission: window.__hrMonitorFgsPermission || null,
       fgsLastError: window.__hrMonitorFgsLastError || null,
-      // NativeHrSessionPlugin's own FGS (NativeHrService) — the actual one
+      // HrEngine's own FGS (NativeHrService) — the actual one
       // that runs during a session. The @capawesome FGS plugin above is
       // legacy / never started on the session path.
       nativeFgsRunning: !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing()),

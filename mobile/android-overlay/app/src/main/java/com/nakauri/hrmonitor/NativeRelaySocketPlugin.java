@@ -48,9 +48,16 @@ public class NativeRelaySocketPlugin extends Plugin {
 
     @Override
     public void load() {
-        // Shared client — matches NativeHrSessionPlugin's relay socket so
+        // Shared client — matches HrEngine's relay socket so
         // both code paths use the same connection pool. See HttpClientHolder.
         client = HttpClientHolder.webSocketClient();
+    }
+
+    // The JS observer socket belongs to this WebView; close it when the Activity goes.
+    @Override
+    protected void handleOnDestroy() {
+        closeExistingQuietly("activity destroyed");
+        super.handleOnDestroy();
     }
 
     @PluginMethod

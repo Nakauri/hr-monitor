@@ -7,7 +7,7 @@ Keep this file **in sync with the code** when any tick field is added, removed, 
 ## Senders (produce ticks)
 
 1. **`hr_monitor.html` → `broadcastTick()`** (around line ~2875). Runs in Chrome, Edge, Capacitor WebView when the JS-side BLE path owns the strap.
-2. **`NativeHrSessionPlugin.publishTick()`** in `mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/NativeHrSessionPlugin.java`. Runs natively on Android when the native plugin owns the strap.
+2. **`HrEngine.publishTick()`** in `mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/HrEngine.java`. Runs natively on Android when the native engine owns the strap.
 
 Either sender writes to the relay; consumers don't care which. Both must emit the same field set.
 
@@ -71,7 +71,7 @@ Either sender writes to the relay; consumers don't care which. Both must emit th
 
 1. Update **both** senders at the same time:
    - `hr_monitor.html` `broadcastTick()`
-   - `NativeHrSessionPlugin.publishTick()` (Java)
+   - `HrEngine.publishTick()` (Java)
 2. Update **every** viewer that reads the new field:
    - `overlay.html` `handleTick()`
    - Any watch-mode code in `hr_monitor.html`

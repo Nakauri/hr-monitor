@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Parity test — catches drift between the JS `computeRMSSD` in
-// hr_monitor.html and the Java `computeRmssd` in NativeHrSessionPlugin.java.
+// hr_monitor.html and the Java `computeRmssd` in HrEngine.java.
 //
 // Why this exists: these two functions compute RMSSD from RR intervals
 // for the same user's data. The JS version powers the live widget; the
@@ -37,7 +37,7 @@ function computeRMSSD_js(rrs) {
   return Math.sqrt(sumSq / count);
 }
 
-// -------- Java-equivalent implementation (JS port of NativeHrSessionPlugin.java) ----
+// -------- Java-equivalent implementation (JS port of HrEngine.java) ----
 // When the Java source changes, port the same changes here.
 function computeRMSSD_javaPort(rrs) {
   if (rrs.length < 2) return null;
@@ -83,7 +83,7 @@ const TOLERANCE = 1e-6;
 
 // -------- SDNN implementations ----
 // JS: hr_monitor.html computeSDNN
-// Java: NativeHrSessionPlugin.java computeSdnn
+// Java: HrEngine.java computeSdnn
 function computeSDNN_js(rrs) {
   if (rrs.length < 2) return null;
   const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
@@ -150,7 +150,7 @@ check('JS vs Java SDNN parity', jsSdnn, javaSdnn);
 
 // -------- RR raw→ms conversion parity ----
 // JS: hr_monitor.html parseHR — rrs.push(Math.round(raw * 1000 / 1024))
-// Java: NativeHrSessionPlugin.java parseHrPacket —
+// Java: GattHrDevice.java parseHrPacket —
 //   rrs.add((int) Math.round(raw * 1000.0 / 1024.0))
 // A raw 1/1024-second RR count must map to the same integer ms on both sides,
 // or the RMSSD/SDNN inputs and the CSV diverge. The old `raw * 1000 / 1024`
@@ -184,7 +184,7 @@ if (!rrRoundBites) {
 
 // -------- RMSSD stage classification parity ----
 // JS: hr_monitor.html:getRMSSDStage
-// Java: NativeHrSessionPlugin.java:rmssdStage
+// Java: HrEngine.java:rmssdStage
 // If these diverge, same RMSSD shows different colours on monitor vs relay
 // overlay — which happened at RMSSD=36 (JS normal/green, Java elevated/orange).
 function rmssdStage_js(rmssd, thresholdCritical) {
@@ -224,7 +224,7 @@ checkStage('excellent range',         80, 15, 'stage-low');
 
 // -------- HR stage classification parity ----
 // JS: hr_monitor.html:getHRStage
-// Java: NativeHrSessionPlugin.java:hrStage
+// Java: HrEngine.java:hrStage
 // Both use user-configurable thresholds pushed from JS via setStageThresholds.
 // Boundaries must match exactly (the `<=` on low is load-bearing).
 function hrStage_js(hr, t) {
@@ -267,7 +267,7 @@ checkHRStage('critical',             130, T, 'stage-critical');   // strict: = h
 
 if (!ok) {
   console.error('\nFAIL: RMSSD parity broken.');
-  console.error('  - If JS is right: update NativeHrSessionPlugin.java:computeRmssd + the port above.');
+  console.error('  - If JS is right: update HrEngine.java:computeRmssd + the port above.');
   console.error('  - If Java is right: update hr_monitor.html:computeRMSSD + the port above.');
   console.error('  - If expected value changed intentionally: recompute EXPECTED_RMSSD and document why.');
   process.exit(1);

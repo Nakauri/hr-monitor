@@ -158,15 +158,13 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         try {
-            // Source of truth: the AtomicBoolean inside the live plugin. The
-            // prefs are last-write-wins crash anchors, not the real state.
-            // Falling back to prefs only when the plugin hasn't initialised
-            // yet (race during process restart).
-            NativeHrSessionPlugin p = NativeHrSessionPlugin.instance;
+            // Source of truth: the engine's AtomicBoolean. The prefs are
+            // last-write-wins crash anchors, used only before the engine exists.
+            HrEngine e = HrEngine.peek();
             boolean active;
             boolean cleanly;
-            if (p != null) {
-                active = p.isSessionActive();
+            if (e != null) {
+                active = e.isSessionActive();
                 cleanly = !active;
             } else {
                 android.content.SharedPreferences prefs = getSharedPreferences("hr_monitor_session", 0);

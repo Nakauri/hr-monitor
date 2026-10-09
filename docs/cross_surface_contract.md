@@ -10,10 +10,10 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 
 | Value | JS location | Native location | Authority | Enforcement |
 |-------|-------------|-----------------|-----------|-------------|
-| RMSSD | `hr_monitor.html:computeRMSSD` (~L1857) | `NativeHrSessionPlugin.java:computeRmssd` | Filter RR∈[300, 2000] ms; drop successive diffs ≥200 ms; `sqrt(mean(diff²))` | `scripts/rmssd-parity.test.js` — golden vector |
-| RMSSD window size | `hr_monitor.html:~L2634` (`cutoff = now - 0.5` min) | `NativeHrSessionPlugin.java:RR_WINDOW_MS` | **30 seconds** | No test — single constant on each side, parity-critical comment tags both |
-| HR stage classification | `hr_monitor.html:getHRStage` (~L2294) | `NativeHrSessionPlugin.java:hrStage` + `setStageThresholds` | User-configurable thresholds pushed from JS via `HRMNativeHrSession.setStageThresholds({low,normal,elevated,high})` on init + every save | Single-source (JS pushes). Missing a test — TODO |
-| RMSSD stage classification | `hr_monitor.html:getRMSSDStage` (~L2319) | `NativeHrSessionPlugin.java:rmssdStage` | `<critical = stage-critical`, `<20 = stage-high`, `<35 = stage-elevated`, `<60 = stage-normal`, else `stage-low`. `critical` is user-configurable, pushed from JS via `setStageThresholds({rmssdCritical})`. Other cutoffs hard-coded in both | `scripts/rmssd-parity.test.js` — table of input rmssd + expected stage |
+| RMSSD | `hr_monitor.html:computeRMSSD` (~L1857) | `HrEngine.java:computeRmssd` | Filter RR∈[300, 2000] ms; drop successive diffs ≥200 ms; `sqrt(mean(diff²))` | `scripts/rmssd-parity.test.js` — golden vector |
+| RMSSD window size | `hr_monitor.html:~L2634` (`cutoff = now - 0.5` min) | `HrEngine.java:RR_WINDOW_MS` | **30 seconds** | No test — single constant on each side, parity-critical comment tags both |
+| HR stage classification | `hr_monitor.html:getHRStage` (~L2294) | `HrEngine.java:hrStage` + `setStageThresholds` | User-configurable thresholds pushed from JS via `HRMNativeHrSession.setStageThresholds({low,normal,elevated,high})` on init + every save | Single-source (JS pushes). Missing a test — TODO |
+| RMSSD stage classification | `hr_monitor.html:getRMSSDStage` (~L2319) | `HrEngine.java:rmssdStage` | `<critical = stage-critical`, `<20 = stage-high`, `<35 = stage-elevated`, `<60 = stage-normal`, else `stage-low`. `critical` is user-configurable, pushed from JS via `setStageThresholds({rmssdCritical})`. Other cutoffs hard-coded in both | `scripts/rmssd-parity.test.js` — table of input rmssd + expected stage |
 
 ## Data output (CSV)
 
@@ -26,7 +26,7 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 
 | Field | JS sender | Native sender | Authority | Enforcement |
 |-------|-----------|---------------|-----------|-------------|
-| All fields | `hr_monitor.html:broadcastTick` | `NativeHrSessionPlugin.java:publishTick` | `docs/RELAY_TICK.md` | Doc only. Gap: no schema test that validates both senders' output against a JSON Schema |
+| All fields | `hr_monitor.html:broadcastTick` | `HrEngine.java:publishTick` | `docs/RELAY_TICK.md` | Doc only. Gap: no schema test that validates both senders' output against a JSON Schema |
 | `prefs` mirror | JS emits `prefs` object | Native omits `prefs` | Viewers must treat absent `prefs` as "use local defaults" — consuming code in `overlay.html:handleTick` respects this | Missing test — TODO |
 
 ## Settings / preferences

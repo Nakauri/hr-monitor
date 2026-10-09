@@ -15,7 +15,7 @@ import java.util.TimeZone;
 
 // PARITY CRITICAL — schema must match hr_monitor.html buildSessionCSV().
 // Schema: time_min,epoch_ms,hr_bpm,rmssd_ms,sdnn_match_ms,sdnn_5min_ms,sdnn_full_ms,palpitation,event,warning,connection,posture
-public class NativeCsvWriter {
+public class NativeCsvWriter implements HrSink {
     private static final String TAG = "NativeCsvWriter";
     private static final String HEADER =
         "time_min,epoch_ms,hr_bpm,rmssd_ms,sdnn_match_ms,sdnn_5min_ms,sdnn_full_ms,palpitation,event,warning,connection,posture";
@@ -81,8 +81,8 @@ public class NativeCsvWriter {
 
     private int consecutiveFailures = 0;
     private int totalFailures = 0;
-    public int getConsecutiveFailures() { return consecutiveFailures; }
-    public int getTotalFailures() { return totalFailures; }
+    @Override public int getConsecutiveFailures() { return consecutiveFailures; }
+    @Override public int getTotalFailures() { return totalFailures; }
 
     // Batched fsync: flush every FLUSH_EVERY_N_ROWS or FLUSH_AFTER_MS, whichever
     // comes first. Connection rows force a flush (they're rare + significant).
@@ -140,6 +140,17 @@ public class NativeCsvWriter {
         }
     }
 
+    @Override
+    public void appendHr(int hr, Double rmssd, double sdnnMatch, double sdnn5min, double sdnnFull, long tsMs) {
+        appendHrRow(hr, rmssd, sdnnMatch, sdnn5min, sdnnFull, tsMs);
+    }
+
+    @Override
+    public void appendConnection(String state, long tsMs) {
+        appendConnectionRow(state, tsMs);
+    }
+
+    @Override
     public synchronized void close() {
         if (writer != null) {
             try { writer.flush(); writer.close(); } catch (IOException ignored) {}
@@ -148,7 +159,7 @@ public class NativeCsvWriter {
         }
     }
 
-    public File getFile() { return file; }
-    public String getFilename() { return file.getName(); }
-    public long getSessionStartMs() { return sessionStartMs; }
+    @Override public File getFile() { return file; }
+    @Override public String getFilename() { return file.getName(); }
+    @Override public long getSessionStartMs() { return sessionStartMs; }
 }

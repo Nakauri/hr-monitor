@@ -2112,7 +2112,7 @@
   const debugBLE = new URLSearchParams(location.search).get('debug') === '1';
   if (debugBLE) console.log('[HR] debug=1 — each BLE notification will be logged with raw hex.');
 
-  // PARITY CRITICAL — MUST MATCH NativeHrSessionPlugin.java:computeRmssd.
+  // PARITY CRITICAL — MUST MATCH HrEngine.java:computeRmssd.
   // The native plugin also ships RMSSD (to relay + CSV). If these drift,
   // the same recording shows different HRV numbers on different surfaces.
   // Change one, update the other, run `node scripts/rmssd-parity.test.js`.
@@ -2132,7 +2132,7 @@
     return Math.sqrt(sumSq / count);
   }
 
-  // PARITY CRITICAL — MUST MATCH NativeHrSessionPlugin.java:computeSdnn.
+  // PARITY CRITICAL — MUST MATCH HrEngine.java:computeSdnn.
   // Sample stddev (n-1) of in-range RR intervals. No successive-diff filter.
   function computeSDNN(rrs) {
     if (rrs.length < 2) return null;
@@ -2955,7 +2955,7 @@
     if (rrs.length > 0) {
       state.rrBuffer.push(...rrs.map(rr => ({ t: now, rr })));
       // 30 s rolling RR window. PARITY CRITICAL — must match
-      // NativeHrSessionPlugin.java:RR_WINDOW_MS. 30 s is the responsive-
+      // HrEngine.java:RR_WINDOW_MS. 30 s is the responsive-
       // monitoring choice; brief sympathetic / vagal events stay visible
       // on the live RMSSD number instead of being averaged away.
       const cutoff = now - 0.5;
@@ -2968,7 +2968,7 @@
       state.rrBuffer5min = state.rrBuffer5min.filter(r => r.t >= cutoff5);
       const sdnn5min = computeSDNN(state.rrBuffer5min.map(r => r.rr));
       // Welford running stats — same range filter as computeSDNN. PARITY
-      // CRITICAL — must match NativeHrSessionPlugin.java sdnnFull*.
+      // CRITICAL — must match HrEngine.java sdnnFull*.
       for (const rr of rrs) {
         if (rr >= 300 && rr <= 2000) {
           state.sdnnFullCount++;
@@ -3747,7 +3747,7 @@
   // Broadcast tick sender. Wire format is documented in RELAY_TICK.md.
   // The native plugin's publishTick (Android) MUST emit the same fields.
   // When adding or renaming a field, update all three: this function,
-  // NativeHrSessionPlugin.publishTick, and overlay.html's handleTick.
+  // HrEngine.publishTick, and overlay.html's handleTick.
   // Throttle floor: don't send relay ticks more often than this. Some
   // straps deliver per-RR ticks at 4 Hz on a fast HR; without a floor
   // we hammer the relay (and the overlay's render loop) at 4× the
@@ -4713,6 +4713,8 @@
         if (overlay) overlay.classList.remove('shown');
         document.documentElement.classList.remove('restoring');
         try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
+        // The native overlay is shown on every resume while recording; JS owns dismissing it.
+        if (window.HRMRestoreOverlay) { try { window.HRMRestoreOverlay.hide(); } catch (e) {} }
       },
       performRehydrate: function () { return rehydrateFromNativeCsv(); },
       performRecovery: function (ctx, token) { return performRecoveryFromContext(ctx, token); },
