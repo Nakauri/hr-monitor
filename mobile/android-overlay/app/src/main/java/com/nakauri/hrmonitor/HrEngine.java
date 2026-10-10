@@ -651,6 +651,7 @@ public final class HrEngine implements HrDevice.Callback {
                     scheduleGattReconnect();
                 }
             }
+            postSegmentTick();
             // Re-check before re-posting: sessionActive may have flipped during this run.
             if (sessionActive.get()) mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
         }
@@ -966,6 +967,196 @@ public final class HrEngine implements HrDevice.Callback {
     private static final long ALIVE_WRITE_INTERVAL_MS = 10_000L;
     private long lastAliveWriteMs = 0L;
 
+    // ---- v2 segments (local only; the legacy CSV stays in charge of status, resume, snapshot and upload) ----
+
+    private static final String SEGMENT_FLAVOUR = "personal";
+    private static final long SEGMENT_ROLL_SLACK_MS = 2_000L;
+    private final Clock segClock = new Clock() {
+        @Override public long wallMs() { return System.currentTimeMillis(); }
+        @Override public long monoMs() { return android.os.SystemClock.elapsedRealtime(); }
+    };
+    private final LifecycleLog segLog = new LifecycleLog() {
+        @Override public void log(String event) { NativeHrService.logLifecycle(appCtx, event); }
+    };
+    // Held from a stop's sink snapshot through its g,stop and close, and around a start's open,
+    // so the old session's g,stop always precedes the new one's g,start in a shared segment.
+    private final Object sinkHandoffLock = new Object();
+    // Roll and offset checks; never the engine's ioExecutor or an upload thread.
+    private final ExecutorService segmentTicker = Executors.newSingleThreadExecutor(
+        r -> new Thread(r, "hrm-segment-tick"));
+    // Ectopic and warning facts log a per-minute count instead of one line each.
+    private final java.util.Map<String, int[]> factLogCounts = new java.util.HashMap<>();
+    private final java.util.Map<String, Long> factLogAtMs = new java.util.HashMap<>();
+
+    // Random [a-z0-9]{6}, minted once per install.
+    private synchronized String segmentInstallId() {
+        android.content.SharedPreferences prefs = appCtx.getSharedPreferences("hr_monitor_session", 0);
+        String iid = prefs.getString("segment_iid", null);
+        if (iid != null && iid.matches("[a-z0-9]{6}")) return iid;
+        String alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+        java.security.SecureRandom rnd = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(6);
+        for (int i = 0; i < 6; i++) sb.append(alphabet.charAt(rnd.nextInt(alphabet.length())));
+        iid = sb.toString();
+        prefs.edit().putString("segment_iid", iid).commit();
+        return iid;
+    }
+
+    private String appVersionName() {
+        try {
+            return appCtx.getPackageManager().getPackageInfo(appCtx.getPackageName(), 0).versionName;
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private String strapName() {
+        try {
+            String mac = appCtx.getSharedPreferences("hr_monitor_session", 0).getString("lastConnectedMac", null);
+            if (mac == null || mac.isEmpty()) return "";
+            android.bluetooth.BluetoothDevice d = bleScanner.findBondedDevice(mac);
+            if (d == null) d = bleScanner.findScannedDevice(mac);
+            String n = d != null ? d.getName() : null;
+            return n != null ? n : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private SegmentWriter openSegmentWriter() throws java.io.IOException {
+        java.io.File dir = new java.io.File(appCtx.getFilesDir(), "segments");
+        return new SegmentWriter(dir, segmentInstallId(), segClock, TzSource.system(),
+            appVersionName(), strapName(), SEGMENT_FLAVOUR, segLog);
+    }
+
+    // Legacy is already open. A segment that fails to open leaves a legacy-only tee; a later hour retries.
+    private TeeSink openTee(HrSink legacy) {
+        SegmentWriter seg = null;
+        try {
+            seg = openSegmentWriter();
+        } catch (Throwable t) {
+            NativeHrService.logLifecycle(appCtx, "segment_open_fail reason=" + t.getMessage());
+        }
+        return new TeeSink(legacy, seg, this::openSegmentWriter, segClock, segLog);
+    }
+
+    // Closes a segment whose UTC hour has ended while the strap is silent; re-arms for the next hour.
+    private final Runnable segmentRollRunnable = new Runnable() {
+        @Override public void run() {
+            if (!sessionActive.get()) return;
+            postSegmentTick();
+            scheduleSegmentRoll();
+        }
+    };
+
+    // Offset check then roll check, on hrm-segment-tick.
+    private void postSegmentTick() {
+        try {
+            segmentTicker.execute(() -> {
+                try {
+                    HrSink s = sink;
+                    if (!(s instanceof TeeSink)) return;
+                    long now = System.currentTimeMillis();
+                    ((TeeSink) s).checkOffset(now);
+                    ((TeeSink) s).rollIfDue(now);
+                } catch (Throwable t) {
+                    Log.w(TAG, "segment tick threw: " + t);
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "segment tick not queued: " + t);
+        }
+    }
+
+    // The 10-minute wake alarm; closes an hour that ended during deep sleep.
+    public void segmentTickFromAlarm() {
+        if (sessionActive.get()) postSegmentTick();
+    }
+
+    private void scheduleSegmentRoll() {
+        mainHandler.removeCallbacks(segmentRollRunnable);
+        long now = System.currentTimeMillis();
+        long next = SegmentWriter.hourStart(now) + 3_600_000L + SEGMENT_ROLL_SLACK_MS;
+        mainHandler.postDelayed(segmentRollRunnable, Math.max(1_000L, next - now));
+    }
+
+    // Fact row from the WebView. Returns written, not_written, no_session or bad_kind.
+    public String logFact(String kind, Long tsMsArg, String text, Double value) {
+        String letter;
+        String[] fields;
+        if ("marker".equals(kind)) {
+            letter = "e";
+            fields = new String[] { text == null || text.isEmpty() ? "event" : text };
+        } else if ("posture".equals(kind)) {
+            letter = "p";
+            fields = new String[] { text == null ? "" : text, "btn" };
+        } else if ("symptom".equals(kind)) {
+            letter = "s";
+            fields = new String[] { text == null ? "" : text };
+        } else if ("warning".equals(kind)) {
+            letter = "w";
+            fields = new String[] { text == null ? "" : text, formatFactValue(value) };
+        } else if ("ectopic".equals(kind)) {
+            letter = "x";
+            fields = new String[0];
+        } else {
+            return "bad_kind";
+        }
+        HrSink s = sink;
+        if (s == null || !sessionActive.get()) return "no_session";
+        long now = System.currentTimeMillis();
+        long ts = tsMsArg != null && tsMsArg > 0L ? SegmentWriter.clampFactTs(tsMsArg, now) : now;
+        boolean written;
+        if (s instanceof TeeSink) {
+            written = ((TeeSink) s).writeFact(letter, fields, ts);
+        } else {
+            s.appendFact(letter, fields, ts);
+            written = false;
+        }
+        if ("x".equals(letter) || "w".equals(letter)) {
+            countFactLog(letter, written, now);
+        } else {
+            NativeHrService.logLifecycle(appCtx, "fact kind=" + letter + " written=" + written);
+        }
+        return written ? "written" : "not_written";
+    }
+
+    // counts[0] = facts since the last line, counts[1] = of those written.
+    private void countFactLog(String letter, boolean written, long now) {
+        synchronized (factLogCounts) {
+            int[] c = factLogCounts.get(letter);
+            if (c == null) { c = new int[2]; factLogCounts.put(letter, c); }
+            c[0]++;
+            if (written) c[1]++;
+            Long at = factLogAtMs.get(letter);
+            if (at == null || now - at >= 60_000L) {
+                NativeHrService.logLifecycle(appCtx, "fact kind=" + letter + " n=" + c[0] + " written=" + c[1]);
+                factLogAtMs.put(letter, now);
+                c[0] = 0;
+                c[1] = 0;
+            }
+        }
+    }
+
+    private void flushFactLogs() {
+        synchronized (factLogCounts) {
+            for (java.util.Map.Entry<String, int[]> e : factLogCounts.entrySet()) {
+                int[] c = e.getValue();
+                if (c[0] > 0) {
+                    NativeHrService.logLifecycle(appCtx, "fact kind=" + e.getKey() + " n=" + c[0] + " written=" + c[1] + " flush=stop");
+                }
+            }
+            factLogCounts.clear();
+            factLogAtMs.clear();
+        }
+    }
+
+    private static String formatFactValue(Double v) {
+        if (v == null || v.isNaN() || v.isInfinite()) return "";
+        return java.math.BigDecimal.valueOf(v).stripTrailingZeros().toPlainString();
+    }
+
     public boolean isSessionActive() { return sessionActive.get(); }
 
     public static boolean isStopTeardownInProgress() { return stopWorkersRunning.get() > 0; }
@@ -1072,17 +1263,23 @@ public final class HrEngine implements HrDevice.Callback {
         // Close any writer still open from a prior start that never stopped so
         // its file handle doesn't leak.
         HrSink prevWriter;
-        synchronized (this) { prevWriter = sink; sink = null; }
-        if (prevWriter != null) { try { prevWriter.close(); } catch (Throwable ignored) {} }
-        synchronized (this) {
+        HrSink opened;
+        synchronized (sinkHandoffLock) {
+            synchronized (this) { prevWriter = sink; sink = null; }
+            if (prevWriter != null) { try { prevWriter.close(); } catch (Throwable ignored) {} }
+            NativeCsvWriter legacy = null;
             try {
-                sink = new NativeCsvWriter(appCtx, sessionStartMs, resuming ? resumeFilename : null);
+                legacy = new NativeCsvWriter(appCtx, sessionStartMs, resuming ? resumeFilename : null);
             } catch (Exception e) {
                 Log.w(TAG, "Could not open CSV: " + e.getMessage());
-                sink = null;
             }
+            // The tee needs the legacy writer; a segment failure alone never leaves sink null.
+            HrSink next = legacy != null ? openTee(legacy) : null;
+            // g,start/resume lands before any row the published sink can take.
+            if (next != null) next.appendSession(sessionStartMs, resuming ? "resume" : "start", System.currentTimeMillis());
+            synchronized (this) { sink = next; }
+            opened = next;
         }
-        HrSink opened = sink;
         uploader.resetSession();
         resumable.resetSession();
         if (opened != null) {
@@ -1155,6 +1352,7 @@ public final class HrEngine implements HrDevice.Callback {
         gattReconnectAttempts = 0;
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
+        scheduleSegmentRoll();
         emitState();
         JSONObject startedEv = putSafe(new JSONObject(), "sessionStartMs", sessionStartMs);
         if (opened != null) putSafe(startedEv, "csvFile", opened.getFilename());
@@ -1197,7 +1395,14 @@ public final class HrEngine implements HrDevice.Callback {
             NativeHrService.setFgLossReason(appCtx, "plugin_stop_session_internal");
             // Snapshot + null under lock so BLE binder reads can't observe a half-closed writer.
             HrSink snap;
-            synchronized (this) { snap = sink; sink = null; }
+            synchronized (sinkHandoffLock) {
+                synchronized (this) { snap = sink; sink = null; }
+                if (snap != null) {
+                    snap.appendSession(snap.getSessionStartMs(), "stop", System.currentTimeMillis());
+                    snap.close();
+                }
+            }
+            flushFactLogs();
             final String stoppedFilename = snap != null ? snap.getFile().getName() : null;
             // lastSessionFilename lands before resolve so a killed upload worker is caught by the next orphan pass.
             try {
@@ -1213,6 +1418,7 @@ public final class HrEngine implements HrDevice.Callback {
             HrServiceHeartbeatReceiver.cancel(appCtx);
             mainHandler.removeCallbacks(heartbeatRunnable);
             mainHandler.removeCallbacks(gattReconnectRunnable);
+            mainHandler.removeCallbacks(segmentRollRunnable);
             reconnectPending = false;
             // Relay closes now so presence-end carries this session's senderId and no tick follows Stop.
             closeRelaySocket();
@@ -1221,7 +1427,6 @@ public final class HrEngine implements HrDevice.Callback {
             String knownFileId = null;
             java.util.concurrent.Future<NativeDriveResumableUploader.StopResult> finalize = null;
             if (snap != null) {
-                snap.close();
                 stoppedFile = snap.getFile();
                 NativeDriveUploader.markFinalizing(stoppedFilename);
                 finalizingName = stoppedFilename;
@@ -1512,6 +1717,7 @@ public final class HrEngine implements HrDevice.Callback {
                 sdnnMatch != null ? sdnnMatch : 0.0,
                 sdnn5min != null ? sdnn5min : 0.0,
                 sdnnFull != null ? sdnnFull : 0.0,
+                rrMs,
                 now);
             int consec = writer.getConsecutiveFailures();
             if (consec == CSV_FAIL_ALERT_THRESHOLD) {

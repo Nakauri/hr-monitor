@@ -205,6 +205,15 @@
       setStageThresholds: function (t) {
         return plugin.setStageThresholds(t || {});
       },
+      // Fire and forget: a fact row (marker, posture, symptom, warning, ectopic) in the native v2 segment.
+      logFact: function (kind, opts) {
+        if (typeof plugin.logFact !== 'function') return;
+        const o = opts || {};
+        const payload = { kind: kind, tsMs: Math.round(Number.isFinite(o.tsMs) ? o.tsMs : Date.now()) };
+        if (o.text != null) payload.text = String(o.text);
+        if (Number.isFinite(o.value)) payload.value = o.value;
+        try { plugin.logFact(payload).catch(() => {}); } catch (e) {}
+      },
       getSessionSnapshot: function (opts) {
         // opts.tailMinutes: trailing minutes only; older APKs ignore.
         return plugin.getSessionSnapshot(opts || {});

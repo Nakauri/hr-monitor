@@ -350,6 +350,29 @@ public class NativeHrSessionPlugin extends Plugin {
         }
     }
 
+    // {kind: marker|posture|symptom|warning|ectopic, tsMs, text?, value?} into the v2 segment.
+    @PluginMethod
+    public void logFact(PluginCall call) {
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) return;
+            JSObject data = call.getData();
+            Object ts = data != null ? data.opt("tsMs") : null;
+            Object val = data != null ? data.opt("value") : null;
+            String r = e.logFact(call.getString("kind"),
+                ts instanceof Number ? Long.valueOf(((Number) ts).longValue()) : null,
+                call.getString("text"),
+                val instanceof Number ? Double.valueOf(((Number) val).doubleValue()) : null);
+            if ("bad_kind".equals(r) || "no_session".equals(r)) {
+                call.reject(r);
+                return;
+            }
+            call.resolve(new JSObject().put("written", "written".equals(r)));
+        } catch (Throwable t) {
+            call.reject("log_fact_failed: " + t.getMessage());
+        }
+    }
+
     // ---- Floating overlay ------------------------------------------------
 
     @PluginMethod

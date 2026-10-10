@@ -22,6 +22,15 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 | CSV header order | `hr_monitor.html:writeAutoSave` | `NativeCsvWriter.java:appendHrRow` | `time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture` | Viewer's `summarizeCSV` parses by column name, not position — normalizes across sources. Gap: no parity test |
 | `connection` value | `hr_monitor.html` writes `connect` / `disconnect` | native writes `connected` / `disconnected` | Viewer normalizes both to `connect` / `disconnect` at parse time (`hrv_viewer.html:~L3575`) | Normalization is itself load-bearing; if removed, viewer gap-rendering breaks on native CSVs |
 
+## Data output (schema v2 hourly segments)
+
+| Value | Writer | Reader | Authority | Enforcement |
+|-------|--------|--------|-----------|-------------|
+| File name, header, row kinds and field counts | `SegmentWriter.java` (`NAME_REGEX`, `HEADER_FORMAT`, `KINDS`) | `hrv_viewer.html:SEG_NAME_RE`, `parseSegmentV2` | `docs/audit-2026-10-09/BLOCK-B-SPEC.md` section 2 | `scripts/segment-format.test.cjs` (writer and viewer regex), `scripts/jvm/run-segment-test.cjs` |
+| `rr` column | `HrEngine.java:onHr` passes post-conversion RR (`Math.round`) to `HrSink.appendHr` | viewer `buildV2Model` | Raw RR in ms, `;`-joined, same values `computeRmssd` sees | `scripts/rmssd-parity.test.js` covers the conversion; RMSSD maths unchanged |
+| SDNN (30 s, 5 min, full) | Legacy columns from `HrEngine.java:computeSdnn` | `hrv_viewer.html:sdnnFromRr` recomputes from `rr` | Filter RR in [300, 2000] ms; windows stamped with packet time; full value is running Welford; reset on `g` start and resume | `docs/audit-2026-10-09/harness-B/v2.test.cjs`, 0.01 ms against tee fixtures |
+| Day boundary | n/a | `hrv_viewer.html` day helper module (`dayWindow`, `dayKeyOf`, `localDateLabel`) | Local midnight (Khal 2026-10-09) | `scripts/day-boundary.test.cjs` |
+
 ## Relay tick wire format
 
 | Field | JS sender | Native sender | Authority | Enforcement |

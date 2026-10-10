@@ -42,6 +42,8 @@ public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
                     context.startService(startIntent);
                 }
                 Log.i(TAG, "Heartbeat: requested FGS start (sessionActive=true, cleanlyStopped=false)");
+                HrEngine engine = HrEngine.peek();
+                if (engine != null) engine.segmentTickFromAlarm();
             }
         } catch (Throwable t) {
             Log.w(TAG, "Heartbeat receive failed: " + t.getMessage());

@@ -3142,7 +3142,9 @@
     return String(a.id) < String(b.id);
   }
 
-  async function driveListSessions() {
+  // Legacy sessions from the root, then v2 segments from the <yyyy-mm> month folders (UTC month of the name).
+  // A poll (opts.poll) lists the current and previous month and reads closed months from the per-folder cache.
+  async function driveListSessions(opts) {
     if (!driveFolderId) return new Map();
     const files = new Map();
     let pageToken = null;
@@ -3161,6 +3163,51 @@
       }
       pageToken = data.nextPageToken || null;
     } while (pageToken);
+
+    const folders = [];
+    pageToken = null;
+    do {
+      const q = encodeURIComponent(`'${driveFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+      const resp = await driveFetch('files?q=' + q + '&fields=files(id,name),nextPageToken&pageSize=1000' +
+        (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''));
+      const data = await resp.json();
+      for (const f of (data.files || [])) if (/^\d{4}-\d{2}$/.test(f.name)) folders.push(f);
+      pageToken = data.nextPageToken || null;
+    } while (pageToken);
+    const now = new Date();
+    const ym = (d) => d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+    const openMonths = new Set([ym(now), ym(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)))]);
+    for (const folder of folders) {
+      const closed = !openMonths.has(folder.name);
+      let list = null;
+      if (closed && opts && opts.poll) {
+        const cached = await segIdxGet('month:' + folder.id);
+        if (cached && Array.isArray(cached.files)) list = cached.files;
+      }
+      if (!list) {
+        list = [];
+        pageToken = null;
+        do {
+          const q = encodeURIComponent(`'${folder.id}' in parents and trashed=false`);
+          const resp = await driveFetch('files?q=' + q + '&fields=files(id,name,createdTime,modifiedTime,size),nextPageToken&pageSize=1000' +
+            (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''));
+          const data = await resp.json();
+          for (const f of (data.files || [])) {
+            if (/^hrm_(\d{8})T(\d{2})Z_([a-z0-9]{6})\.csv$/.test(f.name)) {
+              list.push({ id: f.id, name: f.name, createdTime: f.createdTime, modifiedTime: f.modifiedTime, size: f.size });
+            }
+          }
+          pageToken = data.nextPageToken || null;
+        } while (pageToken);
+        if (closed) await segIdxPut('month:' + folder.id, { name: folder.name, files: list });
+      }
+      // The same name in two month folders: the oldest copy is the one the phone keeps writing.
+      for (const f of list) {
+        const prev = files.get(f.name);
+        if (prev && !driveFileIsOlder(f, prev)) continue;
+        files.set(f.name, { id: f.id, createdTime: f.createdTime, modifiedTime: f.modifiedTime, size: f.size });
+      }
+    }
     driveFilesByName = files;
     return files;
   }
@@ -3218,7 +3265,7 @@
       return { pulled: 0, uploaded: 0, written: 0, skipped: 0 };
     }
     setDriveProgress('syncing…');
-    const driveFiles = await driveListSessions();
+    const driveFiles = await driveListSessions(opts);
     const cacheSize = Object.keys(driveMetaCache).length;
     console.info('[driveSync] start: drive=' + driveFiles.size + ' files, cache=' + cacheSize + ' entries');
 
@@ -3263,6 +3310,9 @@
         // doesn't waste the work we already did.
         if (pulled % 10 === 9) drivePersistMeta();
         if (sessionsIndex[name]) delete sessionsIndex[name];
+        // A pulled update to a hidden or trimmed native file must be re-read, not re-persisted from its old summary.
+        // typeof: harness-V/sync.test.cjs runs this function without the v2 globals.
+        if (typeof legacyShadow === 'object') delete legacyShadow[name];
         pulled++;
       } catch (e) { console.warn('Drive download failed for', name, e); }
       setDriveProgress(`pulling ${i + 1}/${toPull.length}`);
@@ -3310,7 +3360,8 @@
     if (dirHandle) {
       const driveOnly = [];
       for (const name of driveFiles.keys()) {
-        if (!localNames.has(name)) driveOnly.push(name);
+        // Segments stay in the Drive cache only: a folder copy is read first and would freeze a growing hour.
+        if (!localNames.has(name) && !/^hrm_/.test(name)) driveOnly.push(name);
       }
       if (driveOnly.length > 0) {
         const canWrite = await ensureWritePermission();
@@ -3350,6 +3401,7 @@
         await idbDelete(key, IDB_DRIVE_STORE);
         if (driveMetaCache[key]) delete driveMetaCache[key];
         if (sessionsIndex[key]) delete sessionsIndex[key];
+        if (typeof legacyShadow === 'object') delete legacyShadow[key];
         evicted++;
       }
       if (evicted > 0) drivePersistMeta();
@@ -3382,6 +3434,8 @@
   // helper so the index list and day view stay in sync — any future action
   // (e.g. "Rename", "Download") lands here once and applies to both.
   function sessionCardActions(filenameEncoded) {
+    // A v2 session shares its hour files with other sessions; no per-session delete yet.
+    if (isV2SessionKey(decodeURIComponent(filenameEncoded))) return '';
     return `
       <button class="session-card-kebab" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Session actions" data-kebab="${filenameEncoded}">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="8" cy="13" r="1.6"/></svg>
@@ -3503,7 +3557,8 @@
     // Index + persisted cache
     try {
       delete sessionsIndex[filename];
-      localStorage.setItem(LS_INDEX, JSON.stringify(sessionsIndex));
+      delete legacyShadow[filename];
+      persistIndex();
     } catch (e) {}
     // Full-parse cache (if any)
     try {
@@ -3517,7 +3572,17 @@
   // Unified session-text reader. Prefers the local folder (if permission
   // granted), then falls back to the Drive IndexedDB cache. Throws if
   // neither source has the file.
-  async function readSessionText(filename) {
+  // Text for an index key: a v2 session is rebuilt from its segments; a native legacy file
+  // covered by v2 loses the covered rows (applyV2Precedence).
+  async function readSessionText(key) {
+    if (isV2SessionKey(key)) return v2SessionText(key);
+    const text = await readRecordingText(key);
+    if (precedenceTrim.has(key)) return legacyPrecedenceText(text, v2Model.spans).text;
+    return text;
+  }
+
+  // Raw bytes of one recording file (legacy session or v2 segment).
+  async function readRecordingText(filename) {
     if (isDemoMode()) {
       const r = await fetch('./demo/' + filename, { cache: 'force-cache' });
       if (r.ok) return await r.text();
@@ -3536,14 +3601,20 @@
   }
 
   // Collect filenames available from either source (local folder + Drive cache).
+  // Segment byte sizes land in recordingSizes, the seg-index freshness key.
   async function collectAvailableSessionFilenames() {
     const names = new Set();
+    for (const k of Object.keys(recordingSizes)) delete recordingSizes[k];
     if (dirHandle) {
       const ok = await ensureReadPermission();
       if (ok) {
         try {
           for await (const entry of dirHandle.values()) {
-            if (entry.kind === 'file' && /^hrv_session_.*\.csv$/.test(entry.name)) names.add(entry.name);
+            if (entry.kind !== 'file' || !isRecordingName(entry.name)) continue;
+            names.add(entry.name);
+            if (isSegmentName(entry.name)) {
+              try { recordingSizes[entry.name] = String((await entry.getFile()).size); } catch (e) {}
+            }
           }
         } catch (e) {}
       }
@@ -3551,7 +3622,11 @@
     try {
       const keys = await idbKeys(IDB_DRIVE_STORE);
       for (const k of keys) {
-        if (typeof k === 'string' && /^hrv_session_.*\.csv$/.test(k)) names.add(k);
+        if (typeof k !== 'string' || !isRecordingName(k)) continue;
+        if (isSegmentName(k) && !names.has(k) && driveMetaCache[k] && driveMetaCache[k].size != null) {
+          recordingSizes[k] = String(driveMetaCache[k].size);
+        }
+        names.add(k);
       }
     } catch (e) {}
     return Array.from(names);
@@ -3571,7 +3646,13 @@
     if (isDemoMode()) return;  // demo data is in-memory only; never pollute the user's index
     let json = '';
     try {
-      json = JSON.stringify(sessionsIndex);
+      // Legacy summaries only, unchanged by v2 precedence; v2 sessions live in the seg-index store.
+      const out = {};
+      for (const k of Object.keys(sessionsIndex)) {
+        if (!isV2SessionKey(k)) out[k] = legacyShadow[k] && precedenceTrim.has(k) ? legacyShadow[k] : sessionsIndex[k];
+      }
+      for (const k of Object.keys(legacyShadow)) if (!(k in out) && precedenceHide.has(k)) out[k] = legacyShadow[k];
+      json = JSON.stringify(out);
       localStorage.setItem(LS_INDEX, json);
     } catch (e) {
       // The in-memory index stays authoritative for this page load.
@@ -3584,13 +3665,546 @@
   // never sees day aggregates; renderSession + loadFullSession check here too.
   const virtualSessions = {};
 
+  // ===== Schema v2 hourly segments =====
+  // hrm_YYYYMMDDTHHZ_<iid>.csv, one per UTC hour and install. Format authority: SegmentWriter.java.
+  // A v2 session is indexed as 'v2:<iid>:<sessionId>' and read as a legacy-column CSV built from its rows.
+  const SEG_NAME_RE = /^hrm_(\d{8})T(\d{2})Z_([a-z0-9]{6})\.csv$/;
+  const SEG_FIELDS = { h: 3, c: 1, g: 2, e: 1, p: 2, s: 1, w: 2, x: 0, z: 1, k: 1 };
+  const LEGACY_HEADER = 'time_min,epoch_ms,hr_bpm,rmssd_ms,sdnn_match_ms,sdnn_5min_ms,sdnn_full_ms,palpitation,event,warning,connection,posture';
+  // Native legacy rows covered by v2 with less than this left over are not a session.
+  const V2_MIN_UNCOVERED_MS = 60000;
+
+  function isSegmentName(n) { return typeof n === 'string' && SEG_NAME_RE.test(n); }
+  function isRecordingName(n) { return typeof n === 'string' && (/^hrv_session_.*\.csv$/.test(n) || SEG_NAME_RE.test(n)); }
+  // Native Android legacy names carry .SSS; desktop web names do not and are never dropped for v2.
+  function isNativeLegacyName(n) { return /^hrv_session_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}\.csv$/.test(n || ''); }
+  function isV2SessionKey(k) { return /^v2:[a-z0-9]{6}:\d+$/.test(k || ''); }
+  function v2SessionKey(iid, sid) { return 'v2:' + iid + ':' + sid; }
+
+  // Parses up to the last LF; an unterminated last line is dropped. Unknown kinds and malformed rows are skipped.
+  // Returns null unless line 1 is a '#hrm,' header with v=2.
+  function parseSegmentV2(text, name) {
+    if (typeof text !== 'string') return null;
+    const end = text.lastIndexOf('\n');
+    if (end < 0) return null;
+    const lines = text.slice(0, end).split('\n');
+    const head = lines[0].replace(/\r$/, '');
+    if (!head.startsWith('#hrm,')) return null;
+    const hdr = {};
+    for (const part of head.split(',').slice(1)) {
+      const i = part.indexOf('=');
+      if (i > 0) hdr[part.slice(0, i)] = part.slice(i + 1);
+    }
+    if (hdr.v !== '2') return null;
+    const base = Number(hdr.base);
+    if (!hdr.base || !Number.isFinite(base)) return null;
+    const m = SEG_NAME_RE.exec(name || '');
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      let l = lines[i];
+      if (l.endsWith('\r')) l = l.slice(0, -1);
+      if (!l) continue;
+      const c = l.split(',');
+      const n = SEG_FIELDS[c[0]];
+      if (n == null || c.length !== n + 2 || c[1] === '') continue;
+      const t = Number(c[1]);
+      if (!Number.isFinite(t)) continue;
+      rows.push({ k: c[0], ep: base + t, f: c.slice(2) });
+    }
+    return {
+      name: name || '', iid: m ? m[3] : '', base, tz: Number(hdr.tz),
+      app: hdr.app || '', dev: hdr.dev || '', flavour: hdr.flavour || '', rows, bytes: end + 1,
+    };
+  }
+
+  // Compact span view of one segment: each g row, and each run of other rows with the ep range of its h and c rows.
+  function segmentOps(seg) {
+    const ops = [];
+    let run = null;
+    seg.rows.forEach((r, i) => {
+      if (r.k === 'g') {
+        run = null;
+        ops.push({ g: r.f[1], sid: r.f[0], ep: r.ep });
+        return;
+      }
+      if (!run) { run = { i0: i, i1: i, a: null, b: null, n: 0 }; ops.push(run); }
+      run.i1 = i;
+      if (r.k === 'h' || r.k === 'c') {
+        run.n++;
+        if (run.a == null || r.ep < run.a) run.a = r.ep;
+        if (run.b == null || r.ep > run.b) run.b = r.ep;
+      }
+    });
+    return ops;
+  }
+
+  function mergeSpans(spans) {
+    const sorted = spans.filter(s => s[1] >= s[0]).sort((x, y) => x[0] - y[0]);
+    const out = [];
+    for (const s of sorted) {
+      const last = out[out.length - 1];
+      if (last && s[0] <= last[1]) last[1] = Math.max(last[1], s[1]);
+      else out.push([s[0], s[1]]);
+    }
+    return out;
+  }
+
+  // Sessions per install, keyed by the sessionId on g rows. Rows belong to the session whose start, resume
+  // or cont row came last in file order. A span closes at its stop row, or else at its last h or c row
+  // before the install's next opening g row; facts, z, k and other sessions' or installs' rows never extend it.
+  // segs: [{ name, iid, base, ops }].
+  function buildV2Model(segs) {
+    const sessions = new Map();
+    const byIid = new Map();
+    for (const s of segs) {
+      if (!byIid.has(s.iid)) byIid.set(s.iid, []);
+      byIid.get(s.iid).push(s);
+    }
+    const close = (S) => {
+      if (!S || !S.sub) return;
+      const u = S.sub;
+      S.spans.push([u.a == null ? u.start : Math.min(u.start, u.a), u.b == null ? u.start : Math.max(u.start, u.b)]);
+      S.sub = null;
+    };
+    for (const [iid, list] of byIid) {
+      list.sort((a, b) => (a.base - b.base) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      const mine = [];
+      const get = (sid) => {
+        const key = v2SessionKey(iid, sid);
+        let S = sessions.get(key);
+        if (!S) {
+          S = { key, iid, sid: Number(sid), spans: [], parts: [], sub: null, rows: 0, stopped: false };
+          sessions.set(key, S);
+          mine.push(S);
+        }
+        return S;
+      };
+      let cur = null;
+      for (const seg of list) {
+        for (const op of seg.ops) {
+          if (op.g != null) {
+            if (!/^\d+$/.test(op.sid)) continue;
+            const S = get(op.sid);
+            if (op.g === 'stop') {
+              if (S.sub) {
+                S.sub.b = S.sub.b == null ? op.ep : Math.max(S.sub.b, op.ep);
+                close(S);
+              }
+              S.stopped = true;
+              if (cur === S) cur = null;
+            } else {
+              if (cur && cur !== S) close(cur);
+              close(S);
+              S.sub = { start: op.ep, a: null, b: null };
+              if (op.g === 'start' || op.g === 'resume') S.parts.push({ reset: op.ep });
+              cur = S;
+            }
+            continue;
+          }
+          if (!cur || !cur.sub) continue;
+          cur.parts.push({ seg: seg.name, i0: op.i0, i1: op.i1 });
+          cur.rows += op.n;
+          if (op.a != null) {
+            cur.sub.a = cur.sub.a == null ? op.a : Math.min(cur.sub.a, op.a);
+            cur.sub.b = cur.sub.b == null ? op.b : Math.max(cur.sub.b, op.b);
+          }
+        }
+      }
+      for (const S of mine) close(S);
+    }
+    const list = [];
+    const all = [];
+    for (const S of sessions.values()) {
+      delete S.sub;
+      S.spans = mergeSpans(S.spans);
+      S.firstEp = S.spans.length ? S.spans[0][0] : S.sid;
+      S.lastEp = S.spans.length ? S.spans[S.spans.length - 1][1] : S.sid;
+      S.segs = Array.from(new Set(S.parts.filter(p => p.seg).map(p => p.seg)));
+      list.push(S);
+      for (const sp of S.spans) all.push(sp);
+    }
+    return { sessions: list, byKey: sessions, spans: mergeSpans(all) };
+  }
+
+  // A session's rows in ep order, with a reset marker at each start and resume row.
+  function v2SessionRows(S, parsedByName) {
+    const out = [];
+    let seq = 0;
+    for (const p of S.parts) {
+      if (p.reset != null) { out.push({ k: 'reset', ep: p.reset, f: [], seq: seq++ }); continue; }
+      const seg = parsedByName.get(p.seg);
+      if (!seg) continue;
+      for (let i = p.i0; i <= p.i1 && i < seg.rows.length; i++) {
+        const r = seg.rows[i];
+        out.push({ k: r.k, ep: r.ep, f: r.f, seq: seq++ });
+      }
+    }
+    out.sort((a, b) => (a.ep - b.ep) || (a.seq - b.seq));
+    return out;
+  }
+
+  // PARITY with HrEngine.onHr and computeSdnn: RR 300 to 2000 ms; 30 s and 5 min windows stamped with the packet
+  // time; Welford over every in-range RR for the full value; windows and Welford reset on start and resume rows.
+  // Returns one { match, fiveMin, full } per h row (null where the phone wrote 0.00).
+  // Windows keep exact integer sums of the in-range RR, so each row is O(1) amortized.
+  function sdnnFromRr(rows) {
+    const out = [];
+    const win = () => ({ q: [], h: 0, cnt: 0, sum: 0, sq: 0 });
+    const push = (w, v, ts) => {
+      w.q.push({ rr: v, ts });
+      if (v >= 300 && v <= 2000) { w.cnt++; w.sum += v; w.sq += v * v; }
+    };
+    const prune = (w, cutoff) => {
+      while (w.h < w.q.length && w.q[w.h].ts < cutoff) {
+        const v = w.q[w.h++].rr;
+        if (v >= 300 && v <= 2000) { w.cnt--; w.sum -= v; w.sq -= v * v; }
+      }
+      if (w.h > 4096) { w.q = w.q.slice(w.h); w.h = 0; }
+    };
+    const sd = (w) => {
+      if (w.q.length - w.h < 2 || w.cnt < 2) return null;
+      return Math.sqrt((w.cnt * w.sq - w.sum * w.sum) / (w.cnt * (w.cnt - 1)));
+    };
+    let w30 = win(), w5 = win();
+    let n = 0, mean = 0, m2 = 0;
+    for (const r of rows) {
+      if (r.k === 'reset') { w30 = win(); w5 = win(); n = 0; mean = 0; m2 = 0; continue; }
+      if (r.k !== 'h') continue;
+      const now = r.ep;
+      const rr = r.f[2] ? r.f[2].split(';').map(Number).filter(Number.isFinite) : [];
+      for (const v of rr) push(w30, v, now);
+      prune(w30, now - 30000);
+      const match = sd(w30);
+      for (const v of rr) {
+        if (v >= 300 && v <= 2000) {
+          n++;
+          const delta = v - mean;
+          mean += delta / n;
+          m2 += delta * (v - mean);
+        }
+      }
+      for (const v of rr) push(w5, v, now);
+      prune(w5, now - 300000);
+      const fiveMin = sd(w5);
+      out.push({ match, fiveMin, full: n >= 2 ? Math.sqrt(m2 / (n - 1)) : null });
+    }
+    return out;
+  }
+
+  // One v2 session as a legacy-column CSV; summarizeCSV and loadFullSession read it unchanged.
+  function v2SessionCsv(sid, rows) {
+    const sd = sdnnFromRr(rows);
+    const lines = [LEGACY_HEADER];
+    const f2 = (v) => v == null ? '' : v.toFixed(2);
+    const line = (ep, cells) => {
+      const c = ['', '', '', '', '', '', '', '', '', '', '', ''];
+      c[0] = (Math.max(0, ep - sid) / 60000).toFixed(4);
+      c[1] = String(ep);
+      for (const k of Object.keys(cells)) c[k] = cells[k];
+      lines.push(c.join(','));
+    };
+    let hi = 0;
+    for (const r of rows) {
+      if (r.k === 'h') {
+        const s = sd[hi++];
+        lines.push((Math.max(0, r.ep - sid) / 60000).toFixed(4) + ',' + r.ep + ',' + r.f[0] + ',' + r.f[1] + ','
+          + f2(s.match) + ',' + f2(s.fiveMin) + ',' + f2(s.full) + ',,,,,');
+      } else if (r.k === 'c') line(r.ep, { 10: r.f[0] });
+      else if (r.k === 'e') line(r.ep, { 8: r.f[0] });
+      else if (r.k === 'w') line(r.ep, { 9: r.f[0] });
+      else if (r.k === 'x') line(r.ep, { 7: '1' });
+      else if (r.k === 'p') line(r.ep, { 11: r.f[0] });
+    }
+    return lines.join('\n') + '\n';
+  }
+
+  function inSpans(spans, ep) {
+    let lo = 0, hi = spans.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (ep < spans[mid][0]) hi = mid - 1;
+      else if (ep > spans[mid][1]) lo = mid + 1;
+      else return true;
+    }
+    return false;
+  }
+  function spansOverlap(spans, a, b) {
+    for (const s of spans) if (s[0] <= b && s[1] >= a) return true;
+    return false;
+  }
+
+  // v2 wins over native legacy rows inside its spans; callers pass only native legacy files.
+  // legacyRows: [{ ep, hr }]. uncoveredMs sums the kept HR rows' spacing, gaps over 10 s excluded.
+  function applyV2Precedence(legacyRows, v2Spans) {
+    const kept = [];
+    let dropped = 0;
+    for (const r of legacyRows) {
+      if (r.ep != null && Number.isFinite(r.ep) && inSpans(v2Spans, r.ep)) { dropped++; continue; }
+      kept.push(r);
+    }
+    let uncoveredMs = 0, prev = null;
+    for (const r of kept) {
+      if (!r.hr || r.ep == null) continue;
+      if (prev != null && r.ep > prev) uncoveredMs += Math.min(r.ep - prev, 10000);
+      prev = r.ep;
+    }
+    return { kept, dropped, uncoveredMs };
+  }
+
+  // A native legacy file's text with the v2-covered rows removed.
+  function legacyPrecedenceText(text, v2Spans) {
+    const lines = text.split(/\r?\n/);
+    const header = lines[0] || '';
+    const cols = header.split(',').map(h => h.trim());
+    const epI = cols.indexOf('epoch_ms'), hrI = cols.indexOf('hr_bpm');
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l) continue;
+      const c = l.split(',');
+      const ep = epI >= 0 && c[epI] !== '' ? Number(c[epI]) : null;
+      rows.push({ ep, hr: hrI >= 0 && c[hrI] !== '' && c[hrI] != null, line: l });
+    }
+    const r = applyV2Precedence(rows, v2Spans);
+    const tI = cols.indexOf('time_min');
+    const origin = r.kept.find(x => x.hr && x.ep != null && Number.isFinite(x.ep));
+    const lines2 = r.kept.map(x => {
+      if (!r.dropped || tI < 0 || !origin || x.ep == null || !Number.isFinite(x.ep)) return x.line;
+      const c = x.line.split(',');
+      c[tI] = (Math.max(0, x.ep - origin.ep) / 60000).toFixed(4);
+      return c.join(',');
+    });
+    return { text: [header].concat(lines2).join('\n') + '\n', dropped: r.dropped, uncoveredMs: r.uncoveredMs };
+  }
+
+  async function v2ParseParts(S, readText, memo) {
+    const out = new Map();
+    for (const name of S.segs) {
+      let seg = memo ? memo.get(name) : null;
+      if (!seg) {
+        seg = parseSegmentV2(await readText(name), name);
+        // Neighbouring sessions share hour files; a few parsed segments are enough, a year of them is not.
+        if (seg && memo) {
+          memo.set(name, seg);
+          while (memo.size > 8) memo.delete(memo.keys().next().value);
+        }
+      }
+      if (seg) out.set(name, seg);
+    }
+    return out;
+  }
+
+  function hashStr(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(36) + '.' + s.length;
+  }
+
+  // Adds v2 sessions to index and applies v2 precedence to its native legacy entries.
+  // readText(name) resolves a recording's raw text. opts: { cache (Map), memo (Map), sig, sizes { name: bytes } }.
+  // Returns { model, hide, trim, shadow, changed }: hidden and trimmed legacy names, their raw summaries,
+  // and keys whose summary was rebuilt.
+  async function composeV2Index(index, segEntries, readText, opts) {
+    opts = opts || {};
+    const cache = opts.cache || null;
+    const memo = opts.memo || new Map();
+    const sizes = opts.sizes || {};
+    const model = buildV2Model(segEntries);
+    const changed = new Set();
+    let done = 0;
+    for (const S of model.sessions) {
+      if (opts.onProgress) opts.onProgress(++done, model.sessions.length);
+      await new Promise(r => setTimeout(r, 0));
+      const sig = hashStr(JSON.stringify([S.parts, S.segs.map(n => sizes[n] == null ? null : String(sizes[n]))]));
+      const hit = cache ? cache.get('sess:' + S.key) : null;
+      let summary = null;
+      if (hit && hit.sig === sig) summary = hit.summary;
+      else {
+        try {
+          const parsed = await v2ParseParts(S, readText, memo);
+          summary = summarizeCSV(S.key, v2SessionCsv(S.sid, v2SessionRows(S, parsed)));
+        } catch (e) { console.warn('[v2] session summary failed', S.key, e); }
+        if (cache) cache.set('sess:' + S.key, { sig, summary });
+        changed.add(S.key);
+      }
+      if (summary) index[S.key] = summary;
+    }
+    const hide = new Set(), trim = new Set(), shadow = {};
+    for (const fn of Object.keys(index)) {
+      if (!isNativeLegacyName(fn)) continue;
+      const s = index[fn];
+      if (!s || !s.startEpoch) continue;
+      const a = s.startEpoch, b = s.startEpoch + (s.duration || 0) * 60000;
+      if (!spansOverlap(model.spans, a - 60000, b + 60000)) continue;
+      const near = model.spans.filter(sp => sp[0] <= b + 60000 && sp[1] >= a - 60000);
+      const sig = hashStr(JSON.stringify([s.hrCount, s.duration, s.startEpoch, near]));
+      const hit = cache ? cache.get('prec:' + fn) : null;
+      let res = hit && hit.sig === sig ? hit : null;
+      if (!res) {
+        let text;
+        try { text = await readText(fn); } catch (e) { continue; }
+        const r = legacyPrecedenceText(text, model.spans);
+        res = { sig, dropped: r.dropped, hide: false, summary: null };
+        if (r.dropped) {
+          if (r.uncoveredMs < V2_MIN_UNCOVERED_MS) res.hide = true;
+          else {
+            const t = summarizeCSV(fn, r.text);
+            if (t && !t.__incomplete) res.summary = t; else res.hide = true;
+          }
+        }
+        if (cache) cache.set('prec:' + fn, res);
+        changed.add(fn);
+      }
+      if (!res.dropped) continue;
+      shadow[fn] = s;
+      if (res.hide) { delete index[fn]; hide.add(fn); }
+      else { index[fn] = res.summary; trim.add(fn); }
+    }
+    return { model, hide, trim, shadow, changed };
+  }
+
+  // Dual saves of one recording under two names: keep the copy with more data.
+  function dedupHideSet(index) {
+    const dedupHide = new Set();
+    const bySignature = new Map();
+    for (const fn of Object.keys(index)) {
+      const s = index[fn];
+      if (!s || !s.startEpoch) continue;
+      const key = Math.round(s.startEpoch / 60000) + '_' + Math.round((s.duration || 0) * 6);
+      const prev = bySignature.get(key);
+      if (prev == null) { bySignature.set(key, fn); continue; }
+      const ps = index[prev];
+      const prevScore = (ps.hrCount || 0) + (ps.duration || 0) / 1000;
+      const curScore = (s.hrCount || 0) + (s.duration || 0) / 1000;
+      if (curScore > prevScore) { dedupHide.add(prev); bySignature.set(key, fn); }
+      else { dedupHide.add(fn); }
+    }
+    return dedupHide;
+  }
+
+  // v2 index state. seg-index is its own database: the shared kv database's version is pinned by the live app.
+  let v2Model = { sessions: [], byKey: new Map(), spans: [] };
+  let legacyShadow = {};
+  let precedenceTrim = new Set();
+  let precedenceHide = new Set();
+  const recordingSizes = {};
+  const SEG_IDX_DB = 'hrv_viewer_segidx';
+  const SEG_IDX_STORE = 'seg-index';
+  let _segIdxDb = null;
+  let v2Store = null;
+  function segIdxOpen() {
+    if (!_segIdxDb) {
+      _segIdxDb = new Promise((resolve) => {
+        try {
+          const req = indexedDB.open(SEG_IDX_DB, 1);
+          req.onupgradeneeded = () => {
+            if (!req.result.objectStoreNames.contains(SEG_IDX_STORE)) req.result.createObjectStore(SEG_IDX_STORE);
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
+      });
+    }
+    return _segIdxDb;
+  }
+  async function segIdxTx(mode, fn) {
+    const db = await segIdxOpen();
+    if (!db) return undefined;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(SEG_IDX_STORE, mode);
+        const r = fn(tx.objectStore(SEG_IDX_STORE));
+        tx.oncomplete = () => resolve(r && 'result' in r ? r.result : undefined);
+        tx.onerror = () => resolve(undefined);
+        tx.onabort = () => resolve(undefined);
+      } catch (e) { resolve(undefined); }
+    });
+  }
+  function segIdxGet(key) { return segIdxTx('readonly', s => s.get(key)); }
+  function segIdxPut(key, value) { return segIdxTx('readwrite', s => s.put(value, key)); }
+  function segIdxDel(key) { return segIdxTx('readwrite', s => s.delete(key)); }
+  // In-memory mirror of seg-index; writes go through to IndexedDB.
+  async function v2StoreLoad() {
+    if (v2Store) return v2Store;
+    v2Store = new Map();
+    const db = await segIdxOpen();
+    if (!db) return v2Store;
+    await new Promise((resolve) => {
+      try {
+        const tx = db.transaction(SEG_IDX_STORE, 'readonly');
+        const req = tx.objectStore(SEG_IDX_STORE).openCursor();
+        req.onsuccess = () => {
+          const c = req.result;
+          if (!c) return;
+          v2Store.set(c.key, c.value);
+          c.continue();
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch (e) { resolve(); }
+    });
+    return v2Store;
+  }
+  // Like the legacy __incomplete flag: v2 session and trimmed legacy summaries rebuild on the next load.
+  function v2InvalidateSummaries() {
+    for (const s of Object.values(legacyShadow)) if (s) s.__incomplete = true;
+    if (!v2Store) return;
+    for (const k of Array.from(v2Store.keys())) {
+      if (typeof k === 'string' && (k.startsWith('sess:') || k.startsWith('prec:'))) { v2Store.delete(k); segIdxDel(k); }
+    }
+  }
+  function v2StoreCache() {
+    return {
+      get: (k) => v2Store.get(k),
+      set: (k, v) => { v2Store.set(k, v); segIdxPut(k, v); },
+    };
+  }
+
+  // Segment span views, reused while a segment's byte size is unchanged. A rejected parse drops its entry.
+  async function v2LoadSegmentIndex(names, memo, onProgress) {
+    const out = [];
+    let n = 0, seen = 0;
+    for (const name of names) {
+      if (onProgress) onProgress(++seen, names.length);
+      const size = recordingSizes[name];
+      const prev = v2Store.get('seg:' + name);
+      if (prev && prev.__segV === 1 && size != null && String(prev.size) === String(size)) { out.push(prev); continue; }
+      let text;
+      try { text = await readRecordingText(name); } catch (e) { continue; }
+      const seg = parseSegmentV2(text, name);
+      if (!seg) {
+        if (prev) { v2Store.delete('seg:' + name); segIdxDel('seg:' + name); }
+        continue;
+      }
+      const bytes = size != null ? String(size) : String(new TextEncoder().encode(text).length);
+      recordingSizes[name] = bytes;
+      const entry = { __segV: 1, name, size: bytes, iid: seg.iid, base: seg.base, tz: seg.tz, ops: segmentOps(seg) };
+      v2Store.set('seg:' + name, entry);
+      segIdxPut('seg:' + name, entry);
+      if (memo) {
+        memo.set(name, seg);
+        while (memo.size > 8) memo.delete(memo.keys().next().value);
+      }
+      out.push(entry);
+      if (++n % 8 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+    return out;
+  }
+
+  async function v2SessionText(key) {
+    const S = v2Model.byKey.get(key);
+    if (!S) throw new Error('Session text not available: ' + key);
+    const parsed = await v2ParseParts(S, readRecordingText, null);
+    return v2SessionCsv(S.sid, v2SessionRows(S, parsed));
+  }
+
   function parseSessionFilename(fn) {
-    // Virtual day-timeline key: 'day:YYYY-MM-DD'. Midnight local time.
+    // Virtual day-timeline key: 'day:YYYY-MM-DD', starting at the day start (dayWindow).
     const dayMatch = fn && fn.match(/^day:(\d{4}-\d{2}-\d{2})$/);
     if (dayMatch) {
-      const date = new Date(dayMatch[1] + 'T00:00:00');
+      const date = new Date(dayWindow(dayMatch[1]).start);
       return {
-        date, isoDate: dayMatch[1], isoTime: '00:00:00',
+        date, isoDate: dayMatch[1], isoTime: String(DAY_START_HOUR).padStart(2, '0') + ':00:00',
         filename: fn, kind: 'day',
         tooltip: `Stitched timeline for ${dayMatch[1]}`,
       };
@@ -3613,6 +4227,23 @@
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
       const tooltip = `Recorded: ${date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })} (${tz})\nFilename (${isLocal ? 'local time' : 'UTC'}): ${m[1]} ${m[2]}:${m[3]}:${m[4]}`;
       return { date, isoDate: localDate, isoTime: localTime, filename: fn, kind: 'session', tooltip };
+    }
+    // hrm_20261009T07Z_ab12cd.csv: a v2 segment, named by its UTC hour and install id.
+    // v2:ab12cd:1791091200500: a v2 session, keyed by install id and sessionId (its start epoch).
+    const seg = fn.match(/^hrm_(\d{8})T(\d{2})Z_([a-z0-9]{6})\.csv$/);
+    const v2 = seg ? null : fn.match(/^v2:([a-z0-9]{6}):(\d+)$/);
+    if (seg || v2) {
+      const base = seg ? Date.UTC(+seg[1].slice(0, 4), +seg[1].slice(4, 6) - 1, +seg[1].slice(6, 8), +seg[2]) : +v2[2];
+      const date = new Date(base);
+      const pad = n => String(n).padStart(2, '0');
+      const localDate = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      const localTime = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+      const tooltip = `Recorded: ${date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })} (${tz})`;
+      return {
+        date, isoDate: localDate, isoTime: localTime, filename: fn, kind: seg ? 'segment' : 'v2session',
+        iid: seg ? seg[3] : v2[1], hourStart: seg ? base : null, tooltip,
+      };
     }
     // hrv_daily_2026-04-17.csv — one file per calendar day, starts at local midnight
     const d = fn.match(/^hrv_daily_(\d{4})-(\d{2})-(\d{2})\.csv$/);
@@ -3694,8 +4325,7 @@
   // load path populated sessionsIndex (real, demo, or empty).
   function sessionDayPortion(s, dateIso) {
     if (!s || !s.startEpoch || !s.duration) return null;
-    const dayStart = new Date(dateIso + 'T00:00:00').getTime();
-    const dayEnd = dayStart + 86400000;
+    const { start: dayStart, end: dayEnd } = dayWindow(dateIso);
     const sessStart = s.startEpoch;
     const sessEnd = sessStart + s.duration * 60000;
     const start = Math.max(sessStart, dayStart);
@@ -3713,12 +4343,19 @@
   async function loadSessions(opts) {
     const onProgress = opts && opts.onProgress;
     loadCachedIndex();
-    const filenames = await collectAvailableSessionFilenames();
-    if (filenames.length === 0 && !driveAccessToken) return;
+    legacyShadow = {};
+    const priorTrim = precedenceTrim;
+    precedenceTrim = new Set();
+    precedenceHide = new Set();
+    const allNames = await collectAvailableSessionFilenames();
+    if (allNames.length === 0 && !driveAccessToken) return;
+    const segNames = allNames.filter(isSegmentName);
+    const filenames = allNames.filter(n => !isSegmentName(n));
 
     // Drop cached entries for files that no longer exist in EITHER source
+    const present = new Set(filenames);
     for (const k of Object.keys(sessionsIndex)) {
-      if (!filenames.includes(k)) delete sessionsIndex[k];
+      if (!present.has(k)) delete sessionsIndex[k];
     }
 
     // Pre-pass: how many actually need reparsing? Reported as the loader's
@@ -3757,65 +4394,49 @@
     }
     if (newParsed > 0 || evicted > 0) persistIndex();
 
-    // Dedup: dual-save on mobile (JS path + native plugin) wrote the same
-    // session to Drive under two filenames (one UTC-formatted, one local).
-    // Group by rounded-startEpoch + rounded-duration, keep the file with
-    // the higher hrCount (more complete data; the JS copy loses events
-    // during visibility pauses).
-    const dedupHide = new Set();
-    const bySignature = new Map();
-    for (const fn of Object.keys(sessionsIndex)) {
-      const s = sessionsIndex[fn];
-      if (!s || !s.startEpoch) continue;
-      const key = Math.round(s.startEpoch / 60000) + '_' + Math.round((s.duration || 0) * 6);
-      const prev = bySignature.get(key);
-      if (prev == null) { bySignature.set(key, fn); continue; }
-      const ps = sessionsIndex[prev];
-      const prevScore = (ps.hrCount || 0) + (ps.duration || 0) / 1000;
-      const curScore = (s.hrCount || 0) + (s.duration || 0) / 1000;
-      if (curScore > prevScore) { dedupHide.add(prev); bySignature.set(key, fn); }
-      else { dedupHide.add(fn); }
+    // v2 segments become sessions; v2 then wins over native legacy rows it covers, before any figure is computed.
+    if (!isDemoMode()) {
+      await v2StoreLoad();
+      const memo = new Map();
+      const segEntries = await v2LoadSegmentIndex(segNames, memo, onProgress);
+      const res = await composeV2Index(sessionsIndex, segEntries, readRecordingText,
+        { cache: v2StoreCache(), memo, sizes: recordingSizes, onProgress });
+      v2Model = res.model;
+      legacyShadow = res.shadow;
+      precedenceTrim = res.trim;
+      precedenceHide = res.hide;
+      for (const k of res.changed) _sessionCache.delete(k);
+      for (const k of priorTrim) if (!precedenceTrim.has(k)) _sessionCache.delete(k);
+      const live = new Set(segNames.map(n => 'seg:' + n));
+      for (const S of v2Model.sessions) live.add('sess:' + S.key);
+      for (const fn of filenames) if (isNativeLegacyName(fn)) live.add('prec:' + fn);
+      for (const k of Array.from(v2Store.keys())) {
+        if (typeof k !== 'string' || live.has(k)) continue;
+        if (k.startsWith('seg:') || k.startsWith('sess:') || k.startsWith('prec:')) { v2Store.delete(k); segIdxDel(k); }
+      }
     }
 
-    // Group by date. Bucket by the startEpoch's LOCAL date (not the
-    // filename's parsed date) so mixed TZ filenames (web writes UTC,
-    // Android writes local) all land on the day the user actually
-    // experienced. Midnight-crossing sessions get pushed onto both days.
+    // Dedup: one recording saved under two names; keep the copy with more data.
+    const dedupHide = dedupHideSet(sessionsIndex);
+
+    // Group by the viewer day of startEpoch (not the filename, which is UTC for web and local for
+    // Android). A session that crosses a day start lands on every day it touches.
     sessionsByDate = {};
+    const futureCutoff = Date.now() + 86400000;
     for (const fn of Object.keys(sessionsIndex)) {
       if (dedupHide.has(fn)) continue;
       const s = sessionsIndex[fn];
-      let startDate;
+      let keys;
       if (s && s.startEpoch) {
-        const d = new Date(s.startEpoch);
-        startDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        keys = s.duration ? dayKeysSpanned(s.startEpoch, s.startEpoch + s.duration * 60000, futureCutoff) : [dayKeyOf(s.startEpoch)];
       } else {
         const meta = parseSessionFilename(fn);
         if (!meta) continue;
-        startDate = meta.isoDate;
+        keys = [meta.isoDate];
       }
-      if (!sessionsByDate[startDate]) sessionsByDate[startDate] = [];
-      sessionsByDate[startDate].push(fn);
-      // Multi-day session: bucket onto EVERY local calendar day the session
-      // spans, not just start + end. Day-view's sessionDayPortion() clips
-      // each day's display to its 0–24h slice so a 39-hour Thu→Fri→Sat
-      // session shows as three separate per-day cards / charts.
-      if (s && s.startEpoch && s.duration) {
-        const endMs = s.startEpoch + s.duration * 60000;
-        const futureCutoff = Date.now() + 86400000;
-        const dayCursor = new Date(s.startEpoch);
-        dayCursor.setHours(0, 0, 0, 0);
-        dayCursor.setDate(dayCursor.getDate() + 1);
-        while (dayCursor.getTime() < endMs) {
-          // Defensive: never bucket a session more than a day into the
-          // future. summarizeCSV already rejects future-dated summaries
-          // but this stops legacy cached entries from painting phantom days.
-          if (dayCursor.getTime() > futureCutoff) break;
-          const dateKey = localDateKeyFromEpoch(dayCursor.getTime());
-          if (!sessionsByDate[dateKey]) sessionsByDate[dateKey] = [];
-          sessionsByDate[dateKey].push(fn);
-          dayCursor.setDate(dayCursor.getDate() + 1);
-        }
+      for (const k of keys) {
+        if (!sessionsByDate[k]) sessionsByDate[k] = [];
+        sessionsByDate[k].push(fn);
       }
     }
 
@@ -4373,10 +4994,7 @@
     const byDay = {};
     {
       const buckets = new Map();
-      const ymdLocal = (ms) => {
-        const dd = new Date(ms);
-        return dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0') + '-' + String(dd.getDate()).padStart(2, '0');
-      };
+      const ymdLocal = (ms) => dayKeyOf(ms);
       for (const p of hr) {
         if (p.v == null || p.ep == null) continue;
         const k = ymdLocal(p.ep);
@@ -4583,7 +5201,8 @@
   async function buildDaySession(iso) {
     const files = (sessionsByDate[iso] || []).slice();
     if (!files.length) return null;
-    const startOfDay = new Date(iso + 'T00:00:00').getTime();
+    const { start: startOfDay, end: dayEndMs } = dayWindow(iso);
+    const DAY_MAX = (dayEndMs - startOfDay) / 60000;
 
     const loaded = await Promise.all(files.map(async fn => {
       try {
@@ -4598,7 +5217,7 @@
     // Match the shape loadFullSession returns: {x, y, ep}. The chart code and
     // several downstream helpers read .x / .y directly; using {t, v} silently
     // breaks chart rendering (the line never plots because points miss their x).
-    // Clip to this day's 24h window [0, 1440] minutes so midnight-crosser
+    // Clip to this day's window [0, DAY_MAX] minutes so midnight-crosser
     // sessions don't leak yesterday's or tomorrow's points into this day's
     // chart. Dedupe by epoch so dual-saves don't double-plot the same beat.
     const hrByEp = new Map();
@@ -4609,25 +5228,25 @@
       for (const p of sd.hr) {
         if (p.ep == null) continue;
         const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > 1440) continue;
+        if (x < 0 || x > DAY_MAX) continue;
         if (!hrByEp.has(p.ep)) hrByEp.set(p.ep, { x, y: p.y, ep: p.ep });
       }
       for (const p of sd.rmssd) {
         if (p.ep == null) continue;
         const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > 1440) continue;
+        if (x < 0 || x > DAY_MAX) continue;
         if (!rmssdByEp.has(p.ep)) rmssdByEp.set(p.ep, { x, y: p.y, ep: p.ep });
       }
       for (const p of sd.sdnnMatch) {
         if (p.ep == null) continue;
         const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > 1440) continue;
+        if (x < 0 || x > DAY_MAX) continue;
         if (!sdnnMatchByEp.has(p.ep)) sdnnMatchByEp.set(p.ep, { x, y: p.y, ep: p.ep });
       }
       for (const p of sd.sdnn5min) {
         if (p.ep == null) continue;
         const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > 1440) continue;
+        if (x < 0 || x > DAY_MAX) continue;
         if (!sdnn5minByEp.has(p.ep)) sdnn5minByEp.set(p.ep, { x, y: p.y, ep: p.ep });
       }
     }
@@ -4637,14 +5256,13 @@
     const sdnn5min = Array.from(sdnn5minByEp.values()).sort((a, b) => a.x - b.x);
 
     // Walk each session's summary and shift its events into day-minute space,
-    // then clip to [0, 1440] so cross-day sessions don't bleed markers into
+    // then clip to [0, DAY_MAX] so cross-day sessions don't bleed markers into
     // adjacent days. Marker families fall into two shapes:
     //   point  — anchored on {t}: events. Drop entirely if anchor falls outside the day.
     //   range  — anchored on {start, end}: warnSegs/palpClusters/connGaps/hrDeltas/
-    //            chillsWindows/postureSpans. Clip to [0, 1440]; drop if no overlap.
+    //            chillsWindows/postureSpans. Clip to [0, DAY_MAX]; drop if no overlap.
     //   flushes are range-primary with an additional peak {t}; clip the range, clamp t
     //   to within the clipped range, never delete on t-alone.
-    const DAY_MAX = 1440;
     const shiftPoint = (obj, off, anchor) => {
       const v = obj[anchor];
       if (typeof v !== 'number') return null;
@@ -4728,7 +5346,6 @@
     //   from 00:00). activeDuration: union of session portions for the
     //   summary stat. Both are needed; renderSession reads activeDuration
     //   and falls back to duration for non-virtual sessions.
-    const dayEndMs = startOfDay + 86400000;
     const portionIntervals = [];
     for (const fn of files) {
       const s = sessionsIndex[fn];
@@ -4748,11 +5365,9 @@
       activeDuration += ce - cs;
       activeDuration = activeDuration / 60000;
     }
-    // Always 24h for a virtual day — the chart x-axis spans 00:00 → 24:00
-    // regardless of where the session's data starts/ends within the day.
-    // activeDuration is the union of actual recorded minutes and is what
-    // gets shown to the user as "X h Y m of recording" in the summary.
-    const duration = 1440;
+    // The whole day window (23, 24 or 25 h) for a virtual day, wherever the data sits in it.
+    // activeDuration is the union of actual recorded minutes, shown as the recording total.
+    const duration = DAY_MAX;
     connGaps.splice(0, connGaps.length, ...mergeGaps(connGaps));
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
@@ -4930,13 +5545,13 @@
     const now = new Date();
     if (range === 'month') {
       const d = new Date(now.getFullYear(), now.getMonth(), 1);
-      return localDateKeyFromEpoch(d.getTime());
+      return localDateLabel(d.getTime());
     }
     const days = parseInt(range, 10);
     if (!isFinite(days)) return null;
     const d = new Date(now);
     d.setDate(d.getDate() - days);
-    return localDateKeyFromEpoch(d.getTime());
+    return localDateLabel(d.getTime());
   }
   function applyIndexFilterSort(allFilenames) {
     let list = allFilenames.slice();
@@ -5201,7 +5816,7 @@
       month -= 1;
     } else {
       const dates = Object.keys(sessionsByDate).sort();
-      const pick = dates.length ? new Date(dates[dates.length - 1] + 'T00:00:00') : new Date();
+      const pick = dates.length ? new Date(dates[dates.length - 1] + 'T00:00:00') : new Date(); // date-label
       year = pick.getFullYear();
       month = pick.getMonth();
     }
@@ -5219,8 +5834,7 @@
     // every day the session spans.
     function eventsInDayRange(s, dateStr, eventArr, tField) {
       if (!eventArr || !eventArr.length || !s.startEpoch) return 0;
-      const dayStart = new Date(dateStr + 'T00:00:00').getTime();
-      const dayEnd = dayStart + 86400000;
+      const { start: dayStart, end: dayEnd } = dayWindow(dateStr);
       let n = 0;
       for (const e of eventArr) {
         const t = e[tField || 't'];
@@ -5353,9 +5967,9 @@
     let iso = /^\d{4}-\d{2}-\d{2}$/.test(dateArg || '') ? dateArg : null;
     if (!iso) {
       const dates = Object.keys(sessionsByDate).sort();
-      iso = dates.length ? dates[dates.length - 1] : new Date().toISOString().slice(0, 10);
+      iso = dates.length ? dates[dates.length - 1] : localDateKeyToday();
     }
-    const date = new Date(iso + 'T00:00:00');
+    const date = new Date(iso + 'T00:00:00'); // date-label
     const title = date.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const files = sessionsByDate[iso] || [];
 
@@ -5543,10 +6157,10 @@
     // Resolve the week's Monday (ISO-ish — treat Sunday as start-of-week to match Month)
     let anchor;
     if (/^\d{4}-\d{2}-\d{2}$/.test(weekArg || '')) {
-      anchor = new Date(weekArg + 'T00:00:00');
+      anchor = new Date(weekArg + 'T00:00:00'); // date-label
     } else {
       const dates = Object.keys(sessionsByDate).sort();
-      anchor = dates.length ? new Date(dates[dates.length - 1] + 'T00:00:00') : new Date();
+      anchor = dates.length ? new Date(dates[dates.length - 1] + 'T00:00:00') : new Date(); // date-label
     }
     // Back up to Sunday of that week
     const weekStart = new Date(anchor);
@@ -5555,8 +6169,8 @@
     weekEnd.setDate(weekStart.getDate() + 6);
 
     const todayStr = localDateKeyToday();
-    const weekStartStr = localDateKeyFromEpoch(weekStart.getTime());
-    const weekEndStr = localDateKeyFromEpoch(weekEnd.getTime());
+    const weekStartStr = localDateLabel(weekStart.getTime());
+    const weekEndStr = localDateLabel(weekEnd.getTime());
     const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     const cols = [];
@@ -5571,8 +6185,7 @@
       // Duration-weighted avg HR across the day's sessions — more representative than
       // picking one session's average or using morning-only resting HR.
       let weightedHR = 0, totalDur = 0, totalPalp = 0, totalWarn = 0, totalShifts = 0, totalFlush = 0, totalChills = 0;
-      const dayStartMs = new Date(iso + 'T00:00:00').getTime();
-      const dayEndMs = dayStartMs + 86400000;
+      const { start: dayStartMs, end: dayEndMs } = dayWindow(iso);
       const inDay = (s, arr, k) => {
         if (!arr || !s.startEpoch) return 0;
         let n = 0;
@@ -5658,14 +6271,11 @@
     wireMetricSwitch(el, () => renderWeek(weekArg));
 
     // Wire nav
-    const dayMs = 86400000;
     document.getElementById('week-prev').addEventListener('click', () => {
-      const d = new Date(weekStart.getTime() - 7 * dayMs);
-      setHash('week/' + `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      setHash('week/' + isoAddDays(weekStartStr, -7));
     });
     document.getElementById('week-next').addEventListener('click', () => {
-      const d = new Date(weekStart.getTime() + 7 * dayMs);
-      setHash('week/' + `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      setHash('week/' + isoAddDays(weekStartStr, 7));
     });
     document.getElementById('week-today').addEventListener('click', () => {
       setHash('week/' + todayStr);
@@ -5740,11 +6350,9 @@
     if (gran === 'session') return dateKey + ' ' + meta.isoTime;
     if (gran === 'day') return dateKey;
     if (gran === 'week') {
-      const epoch = sessionStartEpoch(s, meta) || (meta.date && meta.date.getTime()) || 0;
-      const d = new Date(epoch);
-      d.setHours(0, 0, 0, 0);
+      const d = new Date(dayWindow(dateKey).start);
       d.setDate(d.getDate() - d.getDay()); // Sunday
-      return localDateKeyFromEpoch(d.getTime());
+      return localDateLabel(d.getTime());
     }
     if (gran === 'month') return dateKey.slice(0, 7);
     return dateKey;
@@ -6103,6 +6711,7 @@
       for (const fn of Object.keys(sessionsIndex)) {
         if (sessionsIndex[fn]) sessionsIndex[fn].__incomplete = true;
       }
+      v2InvalidateSummaries();
       persistIndex();
       pop.classList.remove('open');
       loadSessions().then(() => route());
@@ -6538,7 +7147,7 @@
     clearAutoPoll();
     autoPollTimer = setInterval(() => {
       if (!driveAccessToken || !driveFolderId) return;
-      driveSync().catch(e => console.warn('[auto-poll] driveSync failed', e));
+      driveSync({ poll: true }).catch(e => console.warn('[auto-poll] driveSync failed', e));
     }, AUTO_POLL_INTERVAL_MS);
   }
   function clearAutoPoll() {
@@ -6859,8 +7468,7 @@
     // are accumulated per-session.
     function dayUnionDuration() {
       if (!dayIso) return summaries.reduce((s, x) => s + (x.duration || 0), 0);
-      const dayStart = new Date(dayIso + 'T00:00:00').getTime();
-      const dayEnd = dayStart + 86400000;
+      const { start: dayStart, end: dayEnd } = dayWindow(dayIso);
       const intervals = [];
       for (const s of summaries) {
         if (!s) continue;
@@ -7687,6 +8295,7 @@
       if (sessionsIndex[fn]) delete sessionsIndex[fn].quadPct;
       if (sessionsIndex[fn]) sessionsIndex[fn].__incomplete = true;
     }
+    v2InvalidateSummaries();
     persistIndex();
   }
 
@@ -8869,18 +9478,61 @@
     if (meta && meta.date) return meta.date.getTime();
     return 0;
   }
-  // Local-tz YYYY-MM-DD from a UTC epoch. Used for every place that buckets
-  // or labels sessions by calendar day. Never use toISOString().slice(0,10)
-  // for date keys — for users west of UTC that returns the previous day.
+  // ===== Day helper module BEGIN =====
+  // Every day boundary in the viewer goes through here (scripts/day-boundary.test.cjs enforces it).
+  // A viewer day runs from DAY_START_HOUR local time on its date to the same hour next date, so DST days
+  // are 23 or 25 h. Day start is midnight (decision 2026-10-09); making it a setting is deferred.
+  // v2 day keys use the browser zone too; the segment's recorded offset (tz, z) is DEFERRED.
+  const DAY_START_HOUR = 0;
+  // Local-tz YYYY-MM-DD of an epoch. Never toISOString().slice(0,10): west of UTC that is the previous day.
   function localDateKeyFromEpoch(epochMs) {
     if (!epochMs) return '';
     const d = new Date(epochMs);
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
-  // Same for "now". Replaces new Date().toISOString().slice(0,10) which is
-  // UTC and shifts the "today" highlight by one day for users west of UTC.
+  // Calendar label for a cursor or week bound; pure local date, never shifted by the day start.
+  function localDateLabel(ms) {
+    return localDateKeyFromEpoch(ms);
+  }
+  function isoAddDays(iso, n) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+    if (!m) return '';
+    return localDateLabel(new Date(+m[1], +m[2] - 1, +m[3] + n, 12).getTime());
+  }
+  // [start, end) epochs of the viewer day named iso, in browser local time.
+  function dayWindow(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+    if (!m) return { start: NaN, end: NaN };
+    return {
+      start: new Date(+m[1], +m[2] - 1, +m[3], DAY_START_HOUR).getTime(),
+      end: new Date(+m[1], +m[2] - 1, +m[3] + 1, DAY_START_HOUR).getTime(),
+    };
+  }
+  // Viewer day of a data epoch (a sample, a session start, now). The last window is kept: callers walk samples in order.
+  let _dayKeyLast = { start: 0, end: 0, key: '' };
+  function dayKeyOf(ep) {
+    if (!ep) return '';
+    if (ep >= _dayKeyLast.start && ep < _dayKeyLast.end) return _dayKeyLast.key;
+    const k0 = localDateLabel(ep);
+    const k = ep < dayWindow(k0).start ? isoAddDays(k0, -1) : k0;
+    const w = dayWindow(k);
+    _dayKeyLast = { start: w.start, end: w.end, key: k };
+    return k;
+  }
+  // Every viewer day whose window overlaps [startMs, endMs); days starting after notAfterMs are left out.
+  function dayKeysSpanned(startMs, endMs, notAfterMs) {
+    const out = [dayKeyOf(startMs)];
+    for (let i = 0; i < 400; i++) {
+      const next = isoAddDays(out[out.length - 1], 1);
+      const w = dayWindow(next);
+      if (!(w.start < endMs) || (notAfterMs != null && w.start > notAfterMs)) break;
+      out.push(next);
+    }
+    return out;
+  }
+  // ===== Day helper module END =====
   function localDateKeyToday() {
-    return localDateKeyFromEpoch(Date.now());
+    return dayKeyOf(Date.now());
   }
   // Local YYYY-MM-DD that a session card should display. Derived from the
   // CSV's epoch_ms, NOT the filename — Android filenames are local time
@@ -8888,7 +9540,7 @@
   // sessions to the previous day.
   function sessionLocalDateKey(s, meta) {
     const ep = sessionStartEpoch(s, meta);
-    return ep ? localDateKeyFromEpoch(ep) : (meta && meta.isoDate) || '';
+    return ep ? dayKeyOf(ep) : (meta && meta.isoDate) || '';
   }
   // Chart timeline labels switch between duration and wall clock via this
   // toggle. Persisted so the user's preference sticks across sessions.
@@ -8950,36 +9602,24 @@
       + '<a href="./hrv_viewer.html" style="color:inherit;text-decoration:underline;">Exit demo</a>';
     document.body.insertBefore(bar, document.body.firstChild);
   }
+  // Demo index: every session onto each viewer day it touches.
   function rebuildSessionsByDate() {
     sessionsByDate = {};
+    const futureCutoff = Date.now() + 86400000;
     for (const fn of Object.keys(sessionsIndex)) {
       const s = sessionsIndex[fn];
       if (!s) continue;
-      let startKey;
+      let keys;
       if (s.startEpoch) {
-        const d = new Date(s.startEpoch);
-        startKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        keys = s.duration ? dayKeysSpanned(s.startEpoch, s.startEpoch + s.duration * 60000, futureCutoff) : [dayKeyOf(s.startEpoch)];
       } else {
         const meta = parseSessionFilename(fn);
         if (!meta) continue;
-        startKey = meta.isoDate;
+        keys = [meta.isoDate];
       }
-      if (!sessionsByDate[startKey]) sessionsByDate[startKey] = [];
-      sessionsByDate[startKey].push(fn);
-      // Multi-day session: roll over onto every calendar day the session spans.
-      if (s.startEpoch && s.duration) {
-        const endMs = s.startEpoch + s.duration * 60000;
-        const futureCutoff = Date.now() + 86400000;
-        const dayCursor = new Date(s.startEpoch);
-        dayCursor.setHours(0, 0, 0, 0);
-        dayCursor.setDate(dayCursor.getDate() + 1);
-        while (dayCursor.getTime() < endMs) {
-          if (dayCursor.getTime() > futureCutoff) break;
-          const dateKey = localDateKeyFromEpoch(dayCursor.getTime());
-          if (!sessionsByDate[dateKey]) sessionsByDate[dateKey] = [];
-          sessionsByDate[dateKey].push(fn);
-          dayCursor.setDate(dayCursor.getDate() + 1);
-        }
+      for (const k of keys) {
+        if (!sessionsByDate[k]) sessionsByDate[k] = [];
+        sessionsByDate[k].push(fn);
       }
     }
     for (const d of Object.keys(sessionsByDate)) sessionsByDate[d].sort(compareFilesByStart);

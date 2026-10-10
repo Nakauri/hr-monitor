@@ -140,8 +140,9 @@ public class NativeCsvWriter implements HrSink {
         }
     }
 
+    // rrMs is not a legacy column.
     @Override
-    public void appendHr(int hr, Double rmssd, double sdnnMatch, double sdnn5min, double sdnnFull, long tsMs) {
+    public void appendHr(int hr, Double rmssd, double sdnnMatch, double sdnn5min, double sdnnFull, int[] rrMs, long tsMs) {
         appendHrRow(hr, rmssd, sdnnMatch, sdnn5min, sdnnFull, tsMs);
     }
 
@@ -149,6 +150,10 @@ public class NativeCsvWriter implements HrSink {
     public void appendConnection(String state, long tsMs) {
         appendConnectionRow(state, tsMs);
     }
+
+    // Facts and session rows exist only in v2 segments.
+    @Override public void appendFact(String kind, String[] fields, long tsMs) { }
+    @Override public void appendSession(long id, String what, long tsMs) { }
 
     @Override
     public synchronized void close() {
