@@ -33,6 +33,7 @@ public class OrphanRecoveryWorker extends Worker {
     public Result doWork() {
         try {
             Context ctx = getApplicationContext();
+            SegmentUploadWorker.enqueue(ctx, "sweep", null);
             File sessionsDir = new File(ctx.getFilesDir(), "sessions");
             if (!sessionsDir.exists()) return Result.success();
 

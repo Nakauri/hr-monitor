@@ -191,6 +191,8 @@ public final class HrEngine implements HrDevice.Callback {
         }
         interruptedAtCreate = interrupted;
         markedBrokenAtCreate = marked;
+        // Process start: closed segments left by an earlier process go up once the network allows.
+        SegmentUploadWorker.enqueue(appCtx, "sweep", null);
         // Last, so a constructor that throws earlier never leaves a registered callback behind.
         registerNetworkCallback();
     }
@@ -1117,8 +1119,81 @@ public final class HrEngine implements HrDevice.Callback {
 
     private SegmentWriter openSegmentWriter() throws java.io.IOException {
         java.io.File dir = new java.io.File(appCtx.getFilesDir(), "segments");
-        return new SegmentWriter(dir, segmentInstallId(), segClock, TzSource.system(),
+        SegmentWriter w = new SegmentWriter(dir, segmentInstallId(), segClock, TzSource.system(),
             appVersionName(), strapName(), SEGMENT_FLAVOUR, segLog);
+        w.setCloseListener(this::onSegmentClosed);
+        return w;
+    }
+
+    // ---- v2 segment upload (B-c) ----
+    // Open-segment tick on its own thread [L1]: never ioExecutor, so an upload never stalls a strap connect.
+    private final java.util.concurrent.ScheduledExecutorService segmentUploadExecutor =
+        Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "hrm-segment-upload"));
+    // Wall clock decides when the tick is due, so time the CPU spent suspended still counts.
+    private static final long SEGMENT_UPLOAD_CHECK_MS = 5L * 60_000L;
+    // Due early by the 10-minute alarm interval, so a PATCH lands at most OPEN_PATCH_MS apart even in Doze.
+    private static final long SEGMENT_UPLOAD_DUE_SLACK_MS = 10L * 60_000L;
+    private final Object segmentUploadTickLock = new Object();
+    private java.util.concurrent.ScheduledFuture<?> segmentUploadTick;
+    private volatile long lastOpenUploadWallMs = 0L;
+
+    // Under the writer lock: queue only. reason null is the final close at stop.
+    private void onSegmentClosed(String name, String reason) {
+        try {
+            segmentUploadExecutor.execute(() -> SegmentUploadWorker.uploader(appCtx).forgetOpen(name));
+        } catch (Throwable t) {
+            Log.w(TAG, "forgetOpen not queued: " + t);
+        }
+        SegmentUploadWorker.enqueue(appCtx, reason == null ? "stop" : "closed", name);
+    }
+
+    // The live session's open segment, for the upload worker; null when no tee is open.
+    public SegmentReader.OpenSegment openSegmentForUpload() {
+        return openSegmentView();
+    }
+
+    private void startSegmentUploadTick() {
+        synchronized (segmentUploadTickLock) {
+            stopSegmentUploadTickLocked();
+            if (SegmentUploader.OPEN_PATCH_MS <= 0L) return;
+            lastOpenUploadWallMs = System.currentTimeMillis();
+            try {
+                segmentUploadTick = segmentUploadExecutor.scheduleWithFixedDelay(this::segmentUploadCheck,
+                    SEGMENT_UPLOAD_CHECK_MS, SEGMENT_UPLOAD_CHECK_MS, TimeUnit.MILLISECONDS);
+            } catch (Throwable t) {
+                Log.w(TAG, "segment upload tick not scheduled: " + t);
+            }
+        }
+    }
+
+    private void stopSegmentUploadTick() {
+        synchronized (segmentUploadTickLock) { stopSegmentUploadTickLocked(); }
+    }
+
+    private void stopSegmentUploadTickLocked() {
+        if (segmentUploadTick != null) {
+            segmentUploadTick.cancel(false);
+            segmentUploadTick = null;
+        }
+    }
+
+    // Runs on hrm-segment-upload. PATCHes the open segment once OPEN_PATCH_MS of wall time has passed.
+    private void segmentUploadCheck() {
+        try {
+            if (!sessionActive.get() || SegmentUploader.OPEN_PATCH_MS <= 0L) return;
+            long now = System.currentTimeMillis();
+            long last = lastOpenUploadWallMs;
+            if (now >= last && now - last < SegmentUploader.OPEN_PATCH_MS - SEGMENT_UPLOAD_DUE_SLACK_MS) return;
+            SegmentReader.OpenSegment open = openSegmentView();
+            String name = open != null ? open.openName() : null;
+            NativeHrService.logLifecycle(appCtx, "upload_enqueue name=" + (name != null ? name : "*") + " reason=open30");
+            SegmentUploader.Result r = SegmentUploadWorker.uploader(appCtx)
+                .run(SegmentUploader.Mode.OPEN_TICK, open, false, 0L);
+            // Busy: the worker holds the lock; the next check tries again.
+            if (r != SegmentUploader.Result.BUSY) lastOpenUploadWallMs = now;
+        } catch (Throwable t) {
+            Log.w(TAG, "segment upload tick threw: " + t);
+        }
     }
 
     // Legacy is already open. A segment that fails to open leaves a legacy-only tee; a later hour retries.
@@ -1162,7 +1237,9 @@ public final class HrEngine implements HrDevice.Callback {
 
     // The 10-minute wake alarm; closes an hour that ended during deep sleep.
     public void segmentTickFromAlarm() {
-        if (sessionActive.get()) postSegmentTick();
+        if (!sessionActive.get()) return;
+        postSegmentTick();
+        try { segmentUploadExecutor.execute(this::segmentUploadCheck); } catch (Throwable t) { Log.w(TAG, "upload check not queued: " + t); }
     }
 
     private void scheduleSegmentRoll() {
@@ -1444,6 +1521,7 @@ public final class HrEngine implements HrDevice.Callback {
         mainHandler.removeCallbacks(heartbeatRunnable);
         mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
         scheduleSegmentRoll();
+        startSegmentUploadTick();
         emitState();
         JSONObject startedEv = putSafe(new JSONObject(), "sessionStartMs", sessionStartMs);
         if (opened != null) putSafe(startedEv, "csvFile", opened.getFilename());
@@ -1510,6 +1588,7 @@ public final class HrEngine implements HrDevice.Callback {
             mainHandler.removeCallbacks(heartbeatRunnable);
             mainHandler.removeCallbacks(gattReconnectRunnable);
             mainHandler.removeCallbacks(segmentRollRunnable);
+            stopSegmentUploadTick();
             reconnectPending = false;
             // Relay closes now so presence-end carries this session's senderId and no tick follows Stop.
             closeRelaySocket();

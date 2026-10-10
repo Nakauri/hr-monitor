@@ -78,6 +78,7 @@ public class SegmentWriter implements HrSink {
     private long reopenNotBeforeMono = Long.MIN_VALUE;
     // Rows refused during the reopen backoff; logged as segment_skip when the file reopens or closes.
     private int skippedRows = 0;
+    private volatile CloseListener closeListener;
     private int consecutiveFailures = 0;
     private int totalFailures = 0;
     private long syncCount = 0;
@@ -98,6 +99,23 @@ public class SegmentWriter implements HrSink {
         lastFlushMono = clock.monoMs();
         lastSyncMono = lastFlushMono;
         open(hourStart(clock.wallMs()));
+    }
+
+    // Called under this writer's lock once a segment file is closed; must not block. reason null = final close.
+    public interface CloseListener {
+        void onSegmentClosed(String name, String reason);
+    }
+
+    public void setCloseListener(CloseListener l) { closeListener = l; }
+
+    private void notifyClosed(String name, String reason) {
+        CloseListener l = closeListener;
+        if (l == null) return;
+        try {
+            l.onSegmentClosed(name, reason);
+        } catch (Throwable t) {
+            log.log("segment_close_listener_throw reason=" + t);
+        }
     }
 
     public static long hourStart(long epochMs) {
@@ -275,12 +293,14 @@ public class SegmentWriter implements HrSink {
             noteFailure("close", e);
             dropStream("close");
             log.log("segment_close name=" + name + " bytes=" + file.length() + " reason=failed");
+            notifyClosed(name, "failed");
             return;
         }
         try { out.close(); } catch (IOException ignored) {}
         out = null;
         fos = null;
         log.log("segment_close name=" + name + " bytes=" + file.length() + (reason != null ? " reason=" + reason : ""));
+        notifyClosed(name, reason);
     }
 
     // Moves to the hour of tsMs when it is later than the open one; never to an earlier hour.

@@ -3103,10 +3103,11 @@
 
   async function driveEnsureFolder() {
     const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-    const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
+    // Oldest root wins, id breaking ties: the same pick as the phone's uploaders.
+    const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
     const data = await resp.json();
     if (data.files && data.files.length) {
-      driveFolderId = data.files[0].id;
+      driveFolderId = data.files.reduce((a, b) => (driveFileIsOlder(b, a) ? b : a)).id;
     } else {
       // Folder doesn't exist yet — viewer won't auto-create it (the live app does).
       driveFolderId = null;

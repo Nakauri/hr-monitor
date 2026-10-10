@@ -672,7 +672,8 @@ public class NativeDriveUploader {
         okhttp3.HttpUrl url = okhttp3.HttpUrl.parse("https://www.googleapis.com/drive/v3/files")
             .newBuilder()
             .addQueryParameter("q", q)
-            .addQueryParameter("fields", "files(id,name)")
+            .addQueryParameter("orderBy", "createdTime")
+            .addQueryParameter("fields", "files(id,name,createdTime)")
             .addQueryParameter("spaces", "drive")
             .build();
         Request req = new Request.Builder().url(url).header("Authorization", "Bearer " + token).build();
@@ -684,9 +685,20 @@ public class NativeDriveUploader {
             String body = resp.body() != null ? resp.body().string() : "";
             JSONObject json = new JSONObject(body);
             JSONArray files = json.optJSONArray("files");
-            if (files != null && files.length() > 0) {
-                return files.getJSONObject(0).optString("id");
+            // Oldest root wins, id breaking ties: the same pick as SegmentUploader and the viewer.
+            String bestId = null, bestTime = null;
+            for (int i = 0; files != null && i < files.length(); i++) {
+                JSONObject f = files.getJSONObject(i);
+                String id = f.optString("id", "");
+                String t = f.optString("createdTime", "");
+                if (id.isEmpty()) continue;
+                if (t.isEmpty()) t = "￿";
+                if (bestId == null || t.compareTo(bestTime) < 0 || (t.equals(bestTime) && id.compareTo(bestId) < 0)) {
+                    bestId = id;
+                    bestTime = t;
+                }
             }
+            if (bestId != null) return bestId;
         } catch (Exception e) {
             Log.w(TAG, "Folder query parse failed: " + e.getMessage());
             return null;
