@@ -35,6 +35,7 @@ public class ServiceStartPolicyTest {
         linkStates();
         autoEnd();
         texts();
+        detangle();
         System.out.println("\n" + passes + " passed, " + failures + " failed");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -290,6 +291,21 @@ public class ServiceStartPolicyTest {
                 && !ServiceStartPolicy.resumeDeclineCancelsAlarm("error"));
         check("[nit] a lost claim keeps the lock while another stop's upload runs",
             !ServiceStartPolicy.releaseAfterLiveStop(false, false, true) && ServiceStartPolicy.releaseAfterLiveStop(true, false, true));
+    }
+
+    // Detangle: the page reads the link state from status() and events; a failed pending handle re-arms, bounded.
+    static void detangle() {
+        System.out.println("[detangle] wire names and the pending re-arm backoff");
+        check("no session: linkState none, whatever the policy holds",
+            "none".equals(LinkStatePolicy.wireName(false, State.RECORDING)) && "none".equals(LinkStatePolicy.wireName(false, State.NOT_FOUND)));
+        check("live session: lowercase state names the page maps",
+            "recording".equals(LinkStatePolicy.wireName(true, State.RECORDING)) && "not_found".equals(LinkStatePolicy.wireName(true, State.NOT_FOUND))
+                && "resuming".equals(LinkStatePolicy.wireName(true, State.RESUMING)) && "reconnecting".equals(LinkStatePolicy.wireName(true, State.RECONNECTING)));
+        check("re-arm: 5 s, then doubling", LinkStatePolicy.pendingRearmDelayMs(1) == 5_000L && LinkStatePolicy.pendingRearmDelayMs(2) == 10_000L
+            && LinkStatePolicy.pendingRearmDelayMs(3) == 20_000L);
+        boolean bounded = true;
+        for (int n = 1; n < 200; n++) bounded &= LinkStatePolicy.pendingRearmDelayMs(n) > 0 && LinkStatePolicy.pendingRearmDelayMs(n) <= 300_000L;
+        check("re-arm never exceeds 5 min and never reaches 0 (no overflow)", bounded && LinkStatePolicy.pendingRearmDelayMs(200) == 300_000L);
     }
 
     static void texts() {

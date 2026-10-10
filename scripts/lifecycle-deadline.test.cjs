@@ -238,7 +238,7 @@ function recoverySandbox(resumeResult) {
     sessionStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
     buildNativeDevice: (d) => ({ name: d.name, gatt: { connected: false } }),
     setStatus: () => {}, resetLiveDataBuffers: () => calls.push('reset'), evictSelfFromBroadcasters: () => {},
-    adoptLateNativeSession: () => calls.push('adoptLate'),
+    refreshFromEngine: (why) => { calls.push('refresh:' + why); return Promise.resolve(null); },
     nativeDeadline: (p) => p, NATIVE_START_MS: 40000, NATIVE_CONNECT_MS: 10000,
     rotateSenderId: () => calls.push('rotate'), getDeviceIdentity: () => { calls.push('getDeviceIdentity'); return { id: 'zzzzzz', label: 'x' }; },
     getOrCreateBroadcastKey: () => 'k', Promise, Error,
@@ -262,6 +262,10 @@ async function recoveryAdoptsNeverStarts() {
   const sb2 = recoverySandbox({ resumed: false, alreadyRunning: true, senderId: 'c1c1c1', senderLabel: 'L' });
   await sb2.recoverNativeSession({ mac: 'AA:BB' }, { cancelled: false });
   check('alreadyRunning adopts its senderId', sb2.store.get('hr_monitor_device_id') === 'c1c1c1' && sb2.store.get('hr_monitor_device_label') === 'L');
+
+  const sbc = recoverySandbox({ resumed: true, senderId: 'f4f4f4' });
+  const late = await sbc.recoverNativeSession({ mac: 'AA:BB' }, { cancelled: true });
+  check('past the ceiling: returns false and re-pulls the engine (no page-side adopt)', late === false && sbc.calls.includes('refresh:recovery_late'));
 
   const sb3 = recoverySandbox({ resumed: false, reason: 'not_live' });
   let err = null;

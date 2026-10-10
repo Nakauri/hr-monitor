@@ -329,7 +329,11 @@
         if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
         return;
       }
-      plugin.status().then(function (s) {
+      // A status() reply can be lost by the bridge: each try gets 5 s, then 1, 2, 4, 8 s backoff until one
+      // settles. The overlay lifts after the first miss; a later reply still redirects into a live session.
+      const BACKOFF = [1000, 2000, 4000, 8000];
+      let settled = false;
+      const onStatus = function (s) {
         // Redirect into the monitor when a session is live OR recoverable.
         // interruptedRecovery means prefs say a session was running and the
         // process was killed / the Activity recreated: the monitor's recovery
@@ -348,9 +352,25 @@
         } else {
           if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
         }
-      }).catch(function () {
-        if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
-      });
+      };
+      const tryStatus = function (n) {
+        if (settled) return;
+        let over = false;
+        const next = function () {
+          if (over || settled) return;
+          over = true;
+          if (n === 0 && window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
+          setTimeout(function () { tryStatus(n + 1); }, BACKOFF[Math.min(n, BACKOFF.length - 1)]);
+        };
+        const timer = setTimeout(next, 5000);
+        Promise.resolve(plugin.status({ seq: 1000 + n, trace: true })).then(function (s) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          onStatus(s);
+        }, function () { clearTimeout(timer); next(); });
+      };
+      tryStatus(0);
     } catch (e) {
       if (window.HRMRestoreOverlay) window.HRMRestoreOverlay.hide();
     }

@@ -690,6 +690,132 @@ function step2Checks() {
 }
 step2Checks();
 
+// ---- Detangle (FABLE-DETANGLE.md): the engine is the truth, the page is a view -------------------
+// Guards the 2026-10-10 bug: the page minted its own senderId and kept a one-shot status, so the engine's
+// own ticks were filed as a foreign broadcaster and the toggle said Reconnect while native recorded.
+function detangleChecks() {
+  console.log('\n-- detangle');
+  const E = src['HrEngine.java'];
+  const P = src['NativeHrSessionPlugin.java'];
+  const G = src['GattHrDevice.java'];
+  const D = src['HrDevice.java'];
+  if (E != null) {
+    const ec = codeView(E);
+    const st = methodSpans(ec, 'public\\s+JSONObject\\s+statusJson')[0];
+    const body = st ? E.slice(st[0], st[1]) : '';
+    const missing = ['linkState', 'linkUp', 'generation', 'targetMac', 'strapName', 'posture', 'lastHrAtMs']
+      .filter(k => !body.includes('"' + k + '"'));
+    check('[step 1] statusJson carries linkState, linkUp, generation, targetMac, strapName, posture, lastHrAtMs',
+      !!st && missing.length === 0, missing.length ? 'missing: ' + missing.join(', ') : '');
+    const emits = indexesOf(E, 'emit("linkState"');
+    const applyLink = methodSpans(ec, 'private\\s+void\\s+applyLink')[0];
+    check('[step 1] emit("linkState" appears 2+ times, one inside applyLink', emits.length >= 2 && !!applyLink && emits.some(i => inside(i, [applyLink])),
+      'count=' + emits.length);
+    check('[step 1] no senderIdArg: the engine mints the id on start', !/\bsenderIdArg\b/.test(ec));
+    const start = methodSpans(ec, '\\bstartSessionInternal')[0];
+    check('[step 1, A6] startSessionInternal mints with mintSenderId() and returns senderId',
+      !!start && /mintSenderId\s*\(/.test(ec.slice(start[0], start[1])) && /putSafe\s*\(\s*ret\s*,\s*"senderId"/.test(E.slice(start[0], start[1])));
+    // A4: the page's connected state comes from a real link flag, never from a handle existing.
+    check('[A4] linkUp comes from the device link callbacks (isLinkUp), not hasHandle', /"linkUp"\s*,\s*device\.isLinkUp\s*\(\s*\)/.test(E));
+    // Step 5 (pending reconnect) is self-contained: each hook site is one call into its own method.
+    const spanOf = (sig) => { const m = methodSpans(ec, sig)[0]; return m ? ec.slice(m[0], m[1]) : ''; };
+    const pUp = spanOf('private\\s+void\\s+pendingOnLinkUp');
+    check('[A5] onLinkUp calls pendingOnLinkUp, which pulses the wake lock while NOT_FOUND',
+      /pendingOnLinkUp\s*\(/.test(spanOf('public\\s+void\\s+onLinkUp')) && /NOT_FOUND/.test(pUp) && /\.pulse\s*\(/.test(pUp));
+    for (const line of ['pending_connect armed', 'pending_connect fired', 'pending_connect cancelled reason=', 'pending_connect disabled']) {
+      check('[step 5] lifecycle line "' + line + '"', E.includes(line));
+    }
+    check('[step 5] NOT_FOUND entry arms through applyLink -> pendingOnTransition',
+      !!applyLink && /pendingOnTransition\s*\(/.test(ec.slice(applyLink[0], applyLink[1]))
+        && /NOT_FOUND[\s\S]*armPendingConnect\s*\(/.test(spanOf('private\\s+void\\s+pendingOnTransition')));
+    check('[step 5] a wake window end without a link arms through pendingOnWakeWindowEnd',
+      /pendingOnWakeWindowEnd\s*\(/.test(spanOf('private\\s+void\\s+onWakeWindowEnd'))
+        && /armPendingConnect\s*\(/.test(spanOf('private\\s+void\\s+pendingOnWakeWindowEnd')));
+    check('[step 5] a NOT_FOUND link down goes through pendingOnLinkDown first', /pendingOnLinkDown\s*\(/.test(spanOf('public\\s+void\\s+onLinkDown')));
+    // Runtime review 2: a link already up (pending mid-discovery) is never torn down by a direct attempt.
+    const wake = spanOf('public\\s+void\\s+onWake');
+    check('[rv2] onWake returns on device.isLinkUp() before link.onWake plans an attempt',
+      /device\.isLinkUp\s*\(\s*\)/.test(wake) && wake.search(/device\.isLinkUp\s*\(/) < wake.indexOf('link.onWake('));
+    check('[rv2] connect() in NOT_FOUND skips the direct attempt while the link is up',
+      /NOT_FOUND\s*&&\s*!device\.isLinkUp\s*\(\s*\)\s*\)\s*postResolveAndConnect/.test(spanOf('public\\s+void\\s+connect')));
+    // Runtime review 4: the posture survives a native resume in a new process.
+    check('[rv4] logFact persists lastPosture and resumeLocked restores it',
+      /putString\s*\(\s*"lastPosture"/.test(E) && /getString\s*\(\s*"lastPosture"/.test(E.slice(...(methodSpans(ec, 'private\\s+JSONObject\\s+resumeLocked')[0] || [0, 0]))));
+    const arm = spanOf('private\\s+void\\s+armPendingConnect');
+    // Runtime review 3: the setting is read again inside the ioExecutor task.
+    const lambdaAt = arm.indexOf('ioExecutor.execute(');
+    check('[rv3] armPendingConnect re-reads pendingReconnectEnabled inside its ioExecutor task',
+      lambdaAt >= 0 && /pendingReconnectEnabled\s*\(\s*\)/.test(arm.slice(lambdaAt)));
+    check('[step 5] arming reads the persisted pendingReconnectEnabled setting before any connect',
+      /pendingReconnectEnabled\s*\(\s*\)/.test(arm) && arm.indexOf('pendingReconnectEnabled') < arm.indexOf('pendingConnect('));
+  }
+  if (P != null) {
+    const pc = codeView(P);
+    const ss = methodSpans(pc, 'public\\s+void\\s+startSession')[0];
+    check('[step 1] plugin startSession never reads a senderId from JS', !!ss && !P.slice(ss[0], ss[1]).includes('"senderId"'));
+    const stp = methodSpans(pc, 'public\\s+void\\s+status')[0];
+    check('[step 0] plugin status() logs status_call on exit', !!stp && P.slice(stp[0], stp[1]).includes('status_call'));
+    const ping = methodSpans(pc, 'public\\s+void\\s+ping')[0];
+    const pb = ping ? P.slice(ping[0], ping[1]) : '';
+    check('[A1] plugin ping() logs bridge_ping, resolves, and catches Throwable',
+      !!ping && pb.includes('bridge_ping') && /call\.resolve\s*\(/.test(pb) && /catch\s*\(\s*Throwable\b/.test(pb));
+  }
+  if (G != null && D != null) {
+    const gc = codeView(G);
+    const autoTrue = [...gc.matchAll(/connectGatt\s*\(\s*appCtx\s*,\s*true\b/g)].map(m => m.index);
+    const pend = methodSpans(gc, 'public\\s+boolean\\s+pendingConnect')[0];
+    check('[step 5] the only autoConnect=true connectGatt is in pendingConnect, bonded handle only',
+      autoTrue.length === 1 && !!pend && inside(autoTrue[0], [pend]) && /findBondedDevice\s*\(/.test(gc.slice(pend[0], pend[1]))
+        && /closeGattQuietly\s*\(/.test(gc.slice(pend[0], autoTrue[0])), 'autoConnect=true sites=' + autoTrue.length);
+    check('[step 5, A4] HrDevice declares pendingConnect and isLinkUp', /boolean\s+pendingConnect\s*\(/.test(D) && /boolean\s+isLinkUp\s*\(/.test(D));
+  }
+  // Two-argument Log only (the 3-arg Throwable overload crashes the S8 at class load).
+  const threeArg = [];
+  for (const f of ['HrEngine.java', 'NativeHrSessionPlugin.java', 'GattHrDevice.java']) {
+    const s = src[f];
+    if (!s) continue;
+    const c = codeView(s);
+    const re = /\bLog\.[vdiwe]\s*\(/g;
+    let m;
+    while ((m = re.exec(c))) {
+      const b = (() => { let d = 0; for (let k = m.index + m[0].length - 1; k < c.length; k++) { if (c[k] === '(') d++; else if (c[k] === ')' && --d === 0) return k; } return -1; })();
+      const args = c.slice(m.index + m[0].length, b);
+      let depth = 0, commas = 0;
+      for (const ch of args) { if ('([{'.includes(ch)) depth++; else if (')]}'.includes(ch)) depth--; else if (ch === ',' && depth === 0) commas++; }
+      if (commas !== 1) threeArg.push(f + ':' + lineOf(s, m.index));
+    }
+  }
+  check('two-argument Log only in HrEngine, the plugin and GattHrDevice', threeArg.length === 0, threeArg.join(' '));
+
+  // Page: every native-only path sits behind NATIVE; desktop web keeps the old code.
+  const M = readRepo('hr_monitor.html');
+  if (M != null) {
+    const fnBody = (name) => {
+      const i = M.search(new RegExp('(?:async\\s+)?function\\s+' + name + '\\s*\\('));
+      if (i < 0) return null;
+      const b = blockFrom(M, M.indexOf(')', i));
+      return b ? M.slice(b[0], b[1]) : null;
+    };
+    const gdi = fnBody('getDeviceIdentity');
+    check('[step 4, A3] getDeviceIdentity never mints on NATIVE (returns before getRandomValues)',
+      !!gdi && /if\s*\(\s*NATIVE\s*\)/.test(gdi) && gdi.search(/if\s*\(\s*NATIVE\s*\)/) < gdi.indexOf('getRandomValues'));
+    const wl = fnBody('acquireWakeLock');
+    check('[step 4] acquireWakeLock returns on NATIVE before the native CPU lock', !!wl && /if\s*\(\s*NATIVE\s*\)\s*return/.test(wl)
+      && wl.search(/if\s*\(\s*NATIVE\s*\)\s*return/) < wl.indexOf('HRMWakeLock'));
+    const as = fnBody('startSessionAutoSave');
+    check('[step 4] startSessionAutoSave returns on NATIVE', !!as && /if\s*\(\s*NATIVE\s*\)\s*return/.test(as));
+    const gone = ['prepareLiveUiFromNativeSession', 'adoptNativeSessionUi', 'adoptNativeSenderIdentity', 'adoptLateNativeSession',
+      'syncConnStateWithNative', '_nativeRelayLive'].filter(n => M.includes(n));
+    check('[step 3] the merged adopt functions and _nativeRelayLive are gone', gone.length === 0, gone.join(', '));
+    check('[step 3] syncFromEngine exists and logs sync reason=', !!fnBody('syncFromEngine') && /sync reason=/.test(M));
+    // Runtime review 4: the page logs its posture fact for a start only, never on a resume or a publishing event.
+    const cn = fnBody('connectNative') || '';
+    check('[rv4] posture fact only after a start: in connectNative, never in an onPublishingChanged listener',
+      /logNativeFact\s*\(\s*'posture'/.test(cn) && !/onPublishingChanged\s*\(\s*function[\s\S]{0,200}logNativeFact\s*\(\s*'posture'/.test(M));
+  }
+}
+detangleChecks();
+
 if (failures) {
   console.error('\n' + failures + ' engine boundary check(s) FAILED.');
   process.exit(1);

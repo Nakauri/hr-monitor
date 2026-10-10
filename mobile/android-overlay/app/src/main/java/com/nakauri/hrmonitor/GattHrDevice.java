@@ -29,6 +29,7 @@ public class GattHrDevice implements HrDevice {
 
     // volatile: ioExecutor (connect), main (reconnect) and binder threads read it.
     private volatile BluetoothGatt currentGatt;
+    private volatile boolean linkUp = false;
     private BluetoothGattCharacteristic hrChar;
     // 2 consecutive CCCD failures on a bonded handle = stale bond; trigger removeBond.
     private int cccdAttempts = 0;
@@ -126,6 +127,19 @@ public class GattHrDevice implements HrDevice {
         }
     }
 
+    // The bonded handle only: autoConnect on an unbonded random address is unreliable.
+    @Override
+    @SuppressLint("MissingPermission")
+    public boolean pendingConnect(String mac) throws Exception {
+        BluetoothDevice bonded = bleScanner.findBondedDevice(mac);
+        if (bonded == null) return false;
+        closeGattQuietly();
+        usingBondedHandle = true;
+        // autoConnect=true waits on advertisements with no CPU held; it never fires while another app holds the strap.
+        currentGatt = bonded.connectGatt(appCtx, true, gattCallback);
+        return currentGatt != null;
+    }
+
     @Override
     public void disconnect() { closeGattQuietly(); }
 
@@ -134,6 +148,9 @@ public class GattHrDevice implements HrDevice {
 
     @Override
     public boolean hasHandle() { return currentGatt != null; }
+
+    @Override
+    public boolean isLinkUp() { return linkUp && currentGatt != null; }
 
     @Override
     public String address() {
@@ -155,6 +172,7 @@ public class GattHrDevice implements HrDevice {
             currentGatt = null;
             hrChar = null;
         }
+        linkUp = false;
     }
 
     // removeBond is hidden API; reflection is the canonical workaround.
@@ -180,11 +198,13 @@ public class GattHrDevice implements HrDevice {
             Callback c = cb;
             if (newState == BluetoothGatt.STATE_CONNECTED) {
                 Log.i(TAG, "GATT connected");
+                linkUp = true;
                 if (c != null) c.onLinkUp();
                 gatt.discoverServices();
             } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
                 Log.i(TAG, "GATT disconnected status=" + status);
                 hrChar = null;
+                linkUp = false;
                 if (c != null) c.onLinkDown(status);
             }
         }

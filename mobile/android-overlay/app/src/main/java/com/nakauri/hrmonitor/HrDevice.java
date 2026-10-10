@@ -29,5 +29,9 @@ public interface HrDevice {
     // Ends data streams; runs before every link teardown, disconnect() included.
     void stopStreams();
     boolean hasHandle();
+    // GATT link connected (a handle can exist while still connecting or pending).
+    boolean isLinkUp();
+    // Closes any handle, then leaves a background autoConnect handle on the bonded device; false when not bonded.
+    boolean pendingConnect(String mac) throws Exception;
     String address();
 }

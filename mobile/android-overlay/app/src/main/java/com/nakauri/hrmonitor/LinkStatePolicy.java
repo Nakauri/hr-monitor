@@ -33,6 +33,22 @@ public final class LinkStatePolicy {
 
     public synchronized State state() { return state; }
 
+    // status() and events: the lowercase state while a session records, "none" otherwise.
+    public static String wireName(boolean sessionActive, State s) {
+        if (!sessionActive || s == null) return "none";
+        return s.name().toLowerCase(java.util.Locale.US);
+    }
+
+    // A failed pending (autoConnect) handle is re-armed after 5 s, doubling to a 5 min cap.
+    public static final long PENDING_REARM_BASE_MS = 5_000L;
+    public static final long PENDING_REARM_MAX_MS = 5L * 60_000L;
+
+    public static long pendingRearmDelayMs(int attempt) {
+        int n = Math.max(1, attempt);
+        long d = PENDING_REARM_BASE_MS << Math.min(n - 1, 16);
+        return Math.min(d, PENDING_REARM_MAX_MS);
+    }
+
     public static boolean holdsCpu(State s) {
         return s != State.NOT_FOUND && s != State.ENDED && s != State.PRE_RESUME;
     }

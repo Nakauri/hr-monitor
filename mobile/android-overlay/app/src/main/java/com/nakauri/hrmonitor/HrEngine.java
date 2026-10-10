@@ -151,6 +151,11 @@ public final class HrEngine implements HrDevice.Callback {
     private final AtomicBoolean resolvePending = new AtomicBoolean(false);
     // The old senderId a resume rotated away from; the new socket's onOpen sends its presence-end first.
     private volatile String pendingPresenceEndId;
+    // NOT_FOUND: a background autoConnect handle on the bonded strap is armed (it is currentGatt).
+    private volatile boolean pendingArmed = false;
+    private volatile int pendingRearmAttempts = 0;
+    // Last posture fact the page logged this session; status() returns it so a reloaded page shows it.
+    private volatile String lastPosture;
 
     // The Service's wake lock and live-Stop path, filled in onStartCommand and cleared in onDestroy.
     public interface ServiceHooks {
@@ -592,10 +597,22 @@ public final class HrEngine implements HrDevice.Callback {
 
     public void emitState() {
         JSONObject ev = new JSONObject();
+        boolean active = sessionActive.get();
         putSafe(ev, "ble", device.hasHandle());
+        putSafe(ev, "linkUp", device.isLinkUp());
         putSafe(ev, "relay", relayLive.get());
-        putSafe(ev, "session", sessionActive.get());
+        putSafe(ev, "session", active);
+        putSafe(ev, "linkState", LinkStatePolicy.wireName(active, link.state()));
         emit("state", ev);
+    }
+
+    // A hint for the page; it re-reads status() after every event, so a lost one costs nothing.
+    private JSONObject linkStateEvent(LinkStatePolicy.State from, LinkStatePolicy.State to) {
+        JSONObject ev = new JSONObject();
+        putSafe(ev, "from", from == null ? JSONObject.NULL : LinkStatePolicy.wireName(true, from));
+        putSafe(ev, "to", LinkStatePolicy.wireName(sessionActive.get(), to));
+        putSafe(ev, "generation", sessionGeneration.get());
+        return ev;
     }
 
     // ---- Foreground Service lifecycle ------------------------------------
@@ -725,6 +742,8 @@ public final class HrEngine implements HrDevice.Callback {
                 boolean bonded = false;
                 try {
                     if (!sessionActive.get() || sessionGeneration.get() != gen) return;
+                    // A direct connect closes any pending handle first (never two GATT clients).
+                    cancelPending("direct_" + why);
                     bonded = device.connect(mac, false);
                     resolved = true;
                     // A Stop landed during the (up to 3 s) resolve: its teardown ran first, so close this link.
@@ -779,6 +798,7 @@ public final class HrEngine implements HrDevice.Callback {
 
     // stopStreams precedes disconnect on every path.
     private void disconnectDevice() {
+        cancelPending("stop");
         device.stopStreams();
         device.disconnect();
     }
@@ -802,6 +822,7 @@ public final class HrEngine implements HrDevice.Callback {
         if (t == null || !sessionActive.get()) return;
         NativeHrService.logLifecycle(appCtx, "link_state from=" + t.from.name().toLowerCase(java.util.Locale.US)
             + " to=" + t.to.name().toLowerCase(java.util.Locale.US));
+        emit("linkState", linkStateEvent(t.from, t.to));
         if (t.to == LinkStatePolicy.State.NOT_FOUND) {
             mainHandler.removeCallbacks(gattReconnectRunnable);
             reconnectPending = false;
@@ -811,6 +832,144 @@ public final class HrEngine implements HrDevice.Callback {
         if (h != null) {
             try { h.set(LinkStatePolicy.holdsCpu(t.to)); } catch (Throwable e) { Log.w(TAG, "hooks.set threw: " + e); }
         }
+        pendingOnTransition(t.to);
+    }
+
+    // ---- Pending reconnect (NOT_FOUND): self-contained; every hook is one call -------------------
+    // Setting pendingReconnectEnabled=false (persisted) gives exactly the alarm-only retry.
+
+    private final Runnable pendingRearmRunnable = () -> armPendingConnect("rearm");
+
+    public boolean pendingReconnectEnabled() {
+        try {
+            return appCtx.getSharedPreferences("hr_monitor_session", 0).getBoolean("pendingReconnectEnabled", true);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    public void setPendingReconnectEnabled(boolean on) {
+        try {
+            appCtx.getSharedPreferences("hr_monitor_session", 0).edit().putBoolean("pendingReconnectEnabled", on).commit();
+        } catch (Throwable t) {
+            Log.w(TAG, "pendingReconnectEnabled write failed: " + t);
+        }
+        NativeHrService.logLifecycle(appCtx, "pending_connect setting enabled=" + on);
+        if (!on) {
+            mainHandler.removeCallbacks(pendingRearmRunnable);
+            if (pendingArmed && sessionActive.get() && link.state() == LinkStatePolicy.State.NOT_FOUND) {
+                cancelPending("disabled");
+                try { ioExecutor.execute(this::closePendingHandle); } catch (Throwable t) { Log.w(TAG, "pending close not queued: " + t); }
+            }
+        } else {
+            armPendingConnect("enabled");
+        }
+    }
+
+    // Closes the pending handle only while nothing else has replaced it (NOT_FOUND, link down).
+    private void closePendingHandle() {
+        if (link.state() == LinkStatePolicy.State.NOT_FOUND && !device.isLinkUp()) device.disconnect();
+    }
+
+    private void pendingOnTransition(LinkStatePolicy.State to) {
+        if (to == LinkStatePolicy.State.NOT_FOUND) {
+            pendingRearmAttempts = 0;
+            armPendingConnect("not_found");
+        } else if (to == LinkStatePolicy.State.RECORDING) {
+            pendingRearmAttempts = 0;
+            mainHandler.removeCallbacks(pendingRearmRunnable);
+        }
+    }
+
+    // A wake window closed without a link: wait on the strap in the background until the next wake.
+    private void pendingOnWakeWindowEnd(long now) {
+        if (!link.shouldRetryAttempt(now) && !device.isLinkUp()) armPendingConnect("wake_end");
+    }
+
+    // A link that comes up in NOT_FOUND (pending or wake) holds the CPU through discovery and the CCCD write.
+    private void pendingOnLinkUp() {
+        if (pendingArmed) {
+            pendingArmed = false;
+            NativeHrService.logLifecycle(appCtx, "pending_connect fired");
+        }
+        if (sessionActive.get() && link.state() == LinkStatePolicy.State.NOT_FOUND && pendingReconnectEnabled()) {
+            ServiceHooks h = serviceHooks.get();
+            if (h != null) {
+                try { h.pulse(WAKE_PULSE_MS); } catch (Throwable t) { Log.w(TAG, "hooks.pulse threw: " + t); }
+            }
+        }
+    }
+
+    // NOT_FOUND link down outside a wake window is the pending handle's (armed, or fired and lost):
+    // re-arm after a bounded backoff. Returns true when handled here.
+    private boolean pendingOnLinkDown(int status) {
+        if (!pendingReconnectEnabled()) return false;
+        if (!pendingArmed && link.shouldRetryAttempt(System.currentTimeMillis())) return false;
+        onPendingFailed(status);
+        return true;
+    }
+
+    // Background autoConnect on the bonded strap: no CPU held, fires when the strap advertises again.
+    // Serialized on ioExecutor behind any direct connect; never two GATT clients (the handle IS currentGatt).
+    private void armPendingConnect(final String why) {
+        if (!sessionActive.get() || link.state() != LinkStatePolicy.State.NOT_FOUND) return;
+        if (!pendingReconnectEnabled()) {
+            NativeHrService.logLifecycle(appCtx, "pending_connect disabled why=" + why);
+            return;
+        }
+        final String mac = targetMac;
+        if (mac == null) return;
+        final int gen = sessionGeneration.get();
+        try {
+            ioExecutor.execute(() -> {
+                if (!sessionActive.get() || sessionGeneration.get() != gen
+                        || link.state() != LinkStatePolicy.State.NOT_FOUND || device.isLinkUp()) return;
+                // The setting can flip while this task waited behind a direct connect.
+                if (!pendingReconnectEnabled()) {
+                    NativeHrService.logLifecycle(appCtx, "pending_connect disabled why=" + why);
+                    return;
+                }
+                boolean armed = false;
+                // Set before connectGatt: a CONNECTED that beats the return must still read as the pending fire.
+                pendingArmed = true;
+                try {
+                    armed = device.pendingConnect(mac);
+                } catch (Throwable t) {
+                    Log.w(TAG, "pendingConnect threw: " + t);
+                }
+                // A stop that ran during connectGatt closed nothing new: close this handle here.
+                if (armed && (!sessionActive.get() || sessionGeneration.get() != gen)) {
+                    pendingArmed = false;
+                    device.disconnect();
+                    NativeHrService.logLifecycle(appCtx, "pending_connect cancelled reason=stop_race");
+                    return;
+                }
+                if (!armed) pendingArmed = false;
+                NativeHrService.logLifecycle(appCtx, armed
+                    ? "pending_connect armed mac=" + GattHrDevice.last4(mac) + " why=" + why
+                    : "pending_connect skipped reason=not_bonded mac=" + GattHrDevice.last4(mac));
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "pending connect not queued: " + t);
+        }
+    }
+
+    // The caller closes the handle (a direct connect or a teardown); this records it.
+    private void cancelPending(String reason) {
+        mainHandler.removeCallbacks(pendingRearmRunnable);
+        if (!pendingArmed) return;
+        pendingArmed = false;
+        NativeHrService.logLifecycle(appCtx, "pending_connect cancelled reason=" + reason);
+    }
+
+    // A failed pending handle is re-armed after a bounded backoff.
+    private void onPendingFailed(int status) {
+        pendingArmed = false;
+        pendingRearmAttempts++;
+        long delay = LinkStatePolicy.pendingRearmDelayMs(pendingRearmAttempts);
+        NativeHrService.logLifecycle(appCtx, "pending_connect failed status=" + status + " rearm_ms=" + delay);
+        mainHandler.removeCallbacks(pendingRearmRunnable);
+        mainHandler.postDelayed(pendingRearmRunnable, delay);
     }
 
     // 12 h, or the TEST_HOOKS duration bound to this session.
@@ -839,6 +998,11 @@ public final class HrEngine implements HrDevice.Callback {
             long now = System.currentTimeMillis();
             // The heartbeat stalls in Doze; the wake catches the state up first.
             applyLink(link.onTick(now));
+            // A link already up (a pending handle mid-discovery) is never torn down by a direct attempt.
+            if (device.isLinkUp()) {
+                NativeHrService.logLifecycle(appCtx, "wake_skip link_up origin=" + origin);
+                return;
+            }
             long bound = ServiceStartPolicy.autoEndBoundFor(origin, autoEndMs());
             LinkStatePolicy.WakePlan plan = link.onWake(now, bound);
             if (!plan.attempt) return;
@@ -878,7 +1042,11 @@ public final class HrEngine implements HrDevice.Callback {
     // The window's end decides, once: an armed auto-end with the strap still missing ends the session.
     private void onWakeWindowEnd(int gen) {
         if (!sessionActive.get() || sessionGeneration.get() != gen) return;
-        if (!link.onAttemptWindowEnd(System.currentTimeMillis())) return;
+        long now = System.currentTimeMillis();
+        if (!link.onAttemptWindowEnd(now)) {
+            pendingOnWakeWindowEnd(now);
+            return;
+        }
         ServiceHooks h = serviceHooks.get();
         NativeHrService.logLifecycle(appCtx, "auto_end_request service=" + (h != null));
         if (h == null) return;
@@ -973,14 +1141,18 @@ public final class HrEngine implements HrDevice.Callback {
         restoreStageThresholds(prefs.getString("stageThresholds", null));
         String tick = prefs.getString("tickPrefsJson", null);
         if (tick != null && !tick.isEmpty()) prefsJson = tick;
-        String newId = mintSenderId();
-        pendingPresenceEndId = oldId != null && !oldId.isEmpty() && !oldId.equals(newId) ? oldId : null;
+        String posture = prefs.getString("lastPosture", null);
+        lastPosture = posture == null || posture.isEmpty() ? null : posture;
+        // Before the start, whose relay socket's onOpen sends it ahead of any tick.
+        pendingPresenceEndId = oldId != null && !oldId.isEmpty() ? oldId : null;
         if (label == null || label.isEmpty()) label = "HR Monitor Android";
         targetMac = mac;
         boolean fresh = csv == null || csv.isEmpty() || startMs <= 0L;
         if (fresh) NativeHrService.logLifecycle(appCtx, "resume_fresh origin=" + origin + " csv=" + csv + " start=" + startMs);
-        JSONObject started = startSessionInternal(key, newId, label, enabled,
+        JSONObject started = startSessionInternal(key, label, enabled,
             fresh ? null : csv, fresh ? null : Long.valueOf(startMs), origin);
+        String newId = started.optString("senderId", "");
+        if (newId.equals(pendingPresenceEndId)) pendingPresenceEndId = null;
         String file = started.optString("csvFile", "");
         NativeHrService.logLifecycle(appCtx, "native_resume origin=" + origin + " file=" + file
             + " gen=" + sessionGeneration.get() + " old=" + oldId + " new=" + newId);
@@ -1586,6 +1758,12 @@ public final class HrEngine implements HrDevice.Callback {
         }
         HrSink s = sink;
         if (s == null || !sessionActive.get()) return "no_session";
+        if ("p".equals(letter) && text != null && !text.isEmpty()) {
+            lastPosture = text;
+            // Persisted so a native resume in a new process still reports it in status().
+            try { appCtx.getSharedPreferences("hr_monitor_session", 0).edit().putString("lastPosture", text).apply(); }
+            catch (Throwable ignored) {}
+        }
         long now = System.currentTimeMillis();
         long ts = tsMsArg != null && tsMsArg > 0L ? SegmentWriter.clampFactTs(tsMsArg, now) : now;
         boolean written;
@@ -1658,7 +1836,7 @@ public final class HrEngine implements HrDevice.Callback {
             String target = targetMac;
             if (sessionActive.get() && mac != null && mac.equalsIgnoreCase(target)) {
                 // In NOT_FOUND the person is reconnecting by hand: one attempt.
-                if (link.state() == LinkStatePolicy.State.NOT_FOUND) postResolveAndConnect(target, "app_connect", null);
+                if (link.state() == LinkStatePolicy.State.NOT_FOUND && !device.isLinkUp()) postResolveAndConnect(target, "app_connect", null);
                 JSONObject ret = putSafe(new JSONObject(), "connecting", true);
                 putSafe(ret, "adopted", true);
                 NativeHrService.logLifecycle(appCtx, "connect_adopted mac=" + GattHrDevice.last4(mac));
@@ -1676,6 +1854,7 @@ public final class HrEngine implements HrDevice.Callback {
         try {
             boolean bonded;
             try {
+                cancelPending("direct_js");
                 bonded = device.connect(mac, true);
             } catch (SecurityException e) {
                 settled = true;
@@ -1708,7 +1887,8 @@ public final class HrEngine implements HrDevice.Callback {
     public void disconnect() { disconnectDevice(); }
 
     // origin: ORIGIN_START for a plugin start, else the resume door (sticky, alarm, worker, replaced, js).
-    public JSONObject startSessionInternal(String broadcastKeyArg, String senderIdArg, String senderLabelArg,
+    // The engine mints the relay senderId on every start and resume; JS adopts it from the result, events and status.
+    public JSONObject startSessionInternal(String broadcastKeyArg, String senderLabelArg,
             Boolean broadcastOpt, String resumeFilename, Long resumeStartMs, String origin) throws AlreadyActiveException {
         // The plugin thread and the main thread (Service resume) both start; the check and the claim are one.
         synchronized (START_LOCK) {
@@ -1729,7 +1909,7 @@ public final class HrEngine implements HrDevice.Callback {
             // Bump generation before resource creation so a stale stop's recheck fails first.
             sessionGeneration.incrementAndGet();
             broadcastKey = broadcastKeyArg;
-            senderId = senderIdArg;
+            senderId = mintSenderId();
             senderLabel = senderLabelArg;
             broadcastEnabled = (broadcastOpt == null) ? true : broadcastOpt;
             // Relay needs a broadcastKey; offline mode runs without one.
@@ -1741,6 +1921,11 @@ public final class HrEngine implements HrDevice.Callback {
             boolean resuming = resumeFilename != null && !resumeFilename.isEmpty()
                 && resumeStartMs != null && resumeStartMs > 0L;
             sessionStartMs = resuming ? resumeStartMs : System.currentTimeMillis();
+            if (!resuming) {
+                lastPosture = null;
+                try { appCtx.getSharedPreferences("hr_monitor_session", 0).edit().remove("lastPosture").apply(); }
+                catch (Throwable ignored) {}
+            }
             NativeHrService.logLifecycle(appCtx, resuming ? "session_resume file=" + resumeFilename : "session_start");
             synchronized (rrWindow) { rrWindow.clear(); }
             synchronized (rrWindow5min) { rrWindow5min.clear(); }
@@ -1859,8 +2044,12 @@ public final class HrEngine implements HrDevice.Callback {
             putSafe(startedEv, "senderLabel", senderLabel);
             putSafe(startedEv, "origin", origin);
             emit("publishingStarted", startedEv);
+            emit("linkState", linkStateEvent(null, link.state()));
             JSONObject ret = putSafe(new JSONObject(), "started", true);
             if (opened != null) putSafe(ret, "csvFile", opened.getFilename());
+            putSafe(ret, "senderId", senderId);
+            putSafe(ret, "senderLabel", senderLabel);
+            putSafe(ret, "sessionStartMs", sessionStartMs);
             return ret;
         }
     }
@@ -2054,7 +2243,18 @@ public final class HrEngine implements HrDevice.Callback {
         }
         putSafe(ret, "sessionActive", active);
         putSafe(ret, "bleConnected", device.hasHandle());
+        putSafe(ret, "linkUp", device.isLinkUp());
         putSafe(ret, "relayLive", relayLive.get());
+        putSafe(ret, "linkState", LinkStatePolicy.wireName(active, link.state()));
+        putSafe(ret, "generation", sessionGeneration.get());
+        if (active) {
+            String mac = targetMac;
+            if (mac != null) putSafe(ret, "targetMac", mac);
+            putSafe(ret, "strapName", strapName());
+            String posture = lastPosture;
+            if (posture != null) putSafe(ret, "posture", posture);
+            putSafe(ret, "lastHrAtMs", lastHrAtMs);
+        }
         HrSink statusWriter = sink;
         if (statusWriter != null) {
             putSafe(ret, "csvFile", statusWriter.getFilename());
@@ -2114,6 +2314,7 @@ public final class HrEngine implements HrDevice.Callback {
     @Override
     public void onLinkUp() {
         NativeHrService.logLifecycle(appCtx, "gatt_connected");
+        pendingOnLinkUp();
         emitState();
     }
 
@@ -2125,6 +2326,7 @@ public final class HrEngine implements HrDevice.Callback {
         emitState();
         if (!sessionActive.get()) return;
         if (link.state() == LinkStatePolicy.State.NOT_FOUND) {
+            if (pendingOnLinkDown(status)) return;
             // A wake attempt's GATT failure: retried inside its window; the alarm and the app own the next wake.
             final int gen = sessionGeneration.get();
             mainHandler.post(() -> retryWakeAttempt(gen, "gatt_" + status));

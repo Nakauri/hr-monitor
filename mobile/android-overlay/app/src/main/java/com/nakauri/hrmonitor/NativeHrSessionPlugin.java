@@ -248,7 +248,6 @@ public class NativeHrSessionPlugin extends Plugin {
             if (e == null) return;
             JSONObject ret = e.startSessionInternal(
                 call.getString("broadcastKey"),
-                call.getString("senderId", "android"),
                 call.getString("senderLabel", "HR Monitor Android"),
                 call.getBoolean("broadcast"),
                 call.getString("resumeFilename"),
@@ -402,15 +401,55 @@ public class NativeHrSessionPlugin extends Plugin {
         }
     }
 
+    // The exit line pairs each JS status() with its native settle time (a lost reply has an exit and no JS reply).
     @PluginMethod
     public void status(PluginCall call) {
+        long t0 = android.os.SystemClock.elapsedRealtime();
+        String out = "resolved";
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) { out = "no_engine"; return; }
+            call.resolve(JSObject.fromJSONObject(e.statusJson()));
+        } catch (Throwable t) {
+            out = "rejected";
+            call.reject("status_failed: " + t.getMessage());
+        } finally {
+            try {
+                if (call.getBoolean("trace", true)) {
+                    NativeHrService.logLifecycle(getContext(), "status_call seq=" + call.getInt("seq", -1)
+                        + " ms=" + (android.os.SystemClock.elapsedRealtime() - t0) + " out=" + out);
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    // Persisted; false gives the alarm-only retry in NOT_FOUND. {enabled} -> {enabled}.
+    @PluginMethod
+    public void setPendingReconnect(PluginCall call) {
         try {
             HrEngine e = engineOrReject(call);
             if (e == null) return;
-            call.resolve(JSObject.fromJSONObject(e.statusJson()));
+            Boolean on = call.getBoolean("enabled");
+            if (on != null) e.setPendingReconnectEnabled(on);
+            call.resolve(new JSObject().put("enabled", e.pendingReconnectEnabled()));
         } catch (Throwable t) {
-            call.reject("status_failed: " + t.getMessage());
+            call.reject("set_pending_reconnect_failed: " + t.getMessage());
         }
+    }
+
+    // Bridge probe: the shim's throwaway first call, and its report of which reply arrived.
+    @PluginMethod
+    public void ping(PluginCall call) {
+        try {
+            call.resolve(new JSObject().put("ok", true));
+        } catch (Throwable t) {
+            call.reject("ping_failed: " + t.getMessage());
+        }
+        try {
+            String note = call.getString("note", "");
+            NativeHrService.logLifecycle(getContext(), "bridge_ping seq=" + call.getInt("seq", -1)
+                + (note == null || note.isEmpty() ? "" : " " + note));
+        } catch (Throwable ignored) {}
     }
 
     @PluginMethod

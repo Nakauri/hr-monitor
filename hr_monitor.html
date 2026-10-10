@@ -2035,6 +2035,25 @@
   const BATTERY_SERVICE = 0x180F;
   const BATTERY_CHAR = 0x2A19;
   let device = null, server = null, char = null, batteryChar = null;
+  // Native app: the engine owns session truth and the page is a view of its snapshot. Every
+  // native-only path sits behind this; desktop web keeps its own state machine unchanged.
+  // The bridge populates Capacitor.Plugins before page scripts; the shim registers later, at DOMContentLoaded.
+  const NATIVE = (() => {
+    try {
+      const cap = window.Capacitor;
+      return !!(cap && cap.isNativePlatform && cap.isNativePlatform() && cap.Plugins && cap.Plugins.NativeHrSession);
+    } catch (e) { return false; }
+  })();
+  function nativeShim() {
+    const ns = window.HRMNativeHrSession;
+    return ns && ns.isAvailable && ns.mode === 'full' ? ns : null;
+  }
+  // Native: false until the first status() settles; until then no relay sender can be told apart from us.
+  let engineReady = false;
+  function engineSnapshot() {
+    const ns = nativeShim();
+    return ns && typeof ns.getSnapshot === 'function' ? ns.getSnapshot() : null;
+  }
 
   const state = {
     startTime: null,
@@ -2342,11 +2361,12 @@
       destroyCharts();
       return;
     }
-    // Visible.
+    // Visible. Native: re-pull the engine; any event missed while hidden is in the next status().
+    if (NATIVE) { try { refreshFromEngine('visibility'); } catch (e) {} }
     try {
       if (device && device.gatt && device.gatt.connected && !wakeLock) {
         acquireWakeLock();
-      } else if (state.autoReconnect && device && device.gatt && !device.gatt.connected) {
+      } else if (!NATIVE && state.autoReconnect && device && device.gatt && !device.gatt.connected) {
         setStatus('Tab returned — retrying strap...');
         if (typeof tryReconnect === 'function') tryReconnect();
       }
@@ -3126,11 +3146,7 @@
     if (ns && ns.isPublishing && ns.isPublishing()) return true;
     return false;
   }
-  // True if a relay senderId belongs to this device. Checks both JS's
-  // sessionStorage-tracked dev.id AND native's actively-broadcasting senderId
-  // (when known). Catches the case where JS and native drifted apart, e.g.
-  // adoptNativeSenderIdentity missed a path or the WebView restarted with
-  // sessionStorage wiped before adoption could fire.
+  // True if a relay senderId belongs to this device: the page's id on web, the engine's on native.
   function isSelfSenderId(id) {
     if (!id) return false;
     const dev = getDeviceIdentity();
@@ -3148,33 +3164,6 @@
       if (isSelfSenderId(id)) { activeBroadcasters.delete(id); dirty = true; }
     }
     if (dirty) renderBroadcastersPanel();
-  }
-  // Corrective sync: if native is actively publishing but JS state has
-  // drifted to 'idle' (e.g. the session-toggle says "Reconnect to..."), pull
-  // JS back into agreement with reality. Does nothing when JS is already
-  // 'live' or in legitimate 'reconnecting' (where recovery is mid-flight).
-  // Diagnostic capture on 2026-05-20 showed connState landing in 'idle' with
-  // native FGS still publishing — no HRMLog'd path explained the transition,
-  // so this periodic sync papers over the mystery while we hunt the cause.
-  function syncConnStateWithNative() {
-    if (state.connState !== 'idle') return;
-    const ns = window.HRMNativeHrSession;
-    if (!ns || typeof ns.isPublishing !== 'function' || !ns.isPublishing()) return;
-    if (window.HRMLog) window.HRMLog.event('connState sync', 'idle but native publishing -> forcing live');
-    try { adoptNativeSenderIdentity(); } catch (e) {}
-    if (!state.startTime) {
-      const startMs = typeof ns.getSessionStartMs === 'function' ? ns.getSessionStartMs() : 0;
-      if (typeof setSessionStart === 'function') {
-        setSessionStart(startMs > 0 ? startMs : Date.now());
-      } else {
-        state.startTime = startMs > 0 ? startMs : Date.now();
-      }
-    }
-    if (!device || !device._native) {
-      const last = typeof getLastStrap === 'function' ? getLastStrap() : null;
-      device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: true });
-    }
-    setConnState('live');
   }
   function publishToRelay(payload) {
     if (!isPublisherLive()) return;
@@ -3200,7 +3189,6 @@
   // It can fall to "error" after a long sleep while the native socket
   // reconnects fine and keeps publishing — pill should reflect what's
   // actually going to the relay, not the JS-side observer.
-  let _nativeRelayLive = null;  // null = no signal; bool = latest state event
   function refreshRelayStatus() {
     if (!widgetPrefs.broadcast) { setStreamingStatus('off'); return; }
     const nativePub = !!(window.HRMNativeHrSession
@@ -3212,7 +3200,8 @@
       // healthy native broadcast that hasn't yet emitted state shows
       // 'offline' or 'error' because the JS-side WS check below assumes
       // JS owns the socket.
-      if (_nativeRelayLive === false) { setStreamingStatus('connecting'); return; }
+      const snap = engineSnapshot();
+      if (snap && snap.relayLive === false) { setStreamingStatus('connecting'); return; }
       setStreamingStatus(state.connState === 'live' ? 'live' : 'ready');
       return;
     }
@@ -3242,6 +3231,8 @@
     if (!msg || typeof msg !== 'object') return;
     if (msg.senderId != null && !SENDER_ID_RE.test(String(msg.senderId))) return;
     if ((msg.type === 'tick' || msg.type === 'presence') && msg.senderId) {
+      // Native: the engine's own ticks arrive before its id is known; the list waits for the first snapshot.
+      if (NATIVE && !engineReady) return;
       // Skip ourselves — no point listing our own device. isSelfSenderId
       // also catches the case where native's senderId hasn't been adopted
       // into sessionStorage yet (or differs from dev.id for any reason).
@@ -3291,8 +3282,12 @@
       // the local preview every time the strap bounces.
       const sessionActive = !!navigator.bluetooth && widgetPrefs.broadcast && !!state.startTime && state.connState !== 'idle';
       if (!sessionActive) return;
+      // Native: only while the engine reports the session, whichever channel told us it ended.
+      if (NATIVE) { const snap = engineSnapshot(); if (!snap || !snap.sessionActive) return; }
       if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) return;
       const dev = getDeviceIdentity();
+      // Native: the engine's id only; until the engine reports one, nothing is announced.
+      if (!dev.id) return;
       try {
         relaySocket.send(JSON.stringify({
           type: 'presence',
@@ -3305,11 +3300,8 @@
     }, 5000);
   }
   // Clean up stale entries so the list doesn't linger after a broadcaster
-  // disappears without a clean close. Also piggy-backs a JS<->native state
-  // sync so a drifted 'idle' connState gets corrected back to 'live' when
-  // native is still publishing.
+  // disappears without a clean close.
   setInterval(() => {
-    try { syncConnStateWithNative(); } catch (e) {}
     const cutoff = Date.now() - 15000;
     let dirty = false;
     for (const [id, s] of activeBroadcasters) {
@@ -3331,7 +3323,7 @@
     const entries = [];
     if (isPublisherLive() && state.startTime) {
       entries.push({
-        id: dev.id,
+        id: dev.id || 'self',
         label: dev.label,
         startedAt: state.startTime,
         self: true,
@@ -3429,7 +3421,7 @@
     if (!relaySocket || relaySocket.readyState === WebSocket.CLOSED) connectRelay();
     if (!widgetPrefs.broadcast && relaySocket && relaySocket.readyState === WebSocket.OPEN) {
       const dev = getDeviceIdentity();
-      try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {}
+      if (dev.id) { try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {} }
     }
     refreshRelayStatus();
   }
@@ -3679,55 +3671,13 @@
   // same browser need distinct IDs so a double-broadcast shows up clearly on
   // the receiver). The deviceLabel is something human-readable the user can
   // read in the overlay's warning when two tabs are fighting for the same key.
-  // Fire presence-end on the relay for a given senderId. Handles the three
-  // socket states: OPEN sends immediately, CONNECTING queues via the open
-  // event (5 s ceiling so the listener can't leak forever), CLOSING/CLOSED
-  // silently drop (the relay's 15 s idle timeout evicts the orphan anyway).
-  function sendPresenceEnd(id) {
-    const sock = relaySocket;
-    if (!sock || !id) return;
-    const msg = JSON.stringify({ type: 'presence-end', senderId: id });
-    if (sock.readyState === WebSocket.OPEN) {
-      try { sock.send(msg); } catch (e) {}
-      return;
-    }
-    if (sock.readyState === WebSocket.CONNECTING) {
-      let timer = null;
-      const onOpen = function () {
-        try { sock.send(msg); } catch (e) {}
-        try { sock.removeEventListener('open', onOpen); } catch (e) {}
-        if (timer) clearTimeout(timer);
-      };
-      sock.addEventListener('open', onOpen);
-      timer = setTimeout(function () {
-        try { sock.removeEventListener('open', onOpen); } catch (e) {}
-      }, 5000);
-    }
-  }
-  // Send presence-end for the current senderId, then drop the id so
-  // getDeviceIdentity() will mint a fresh one. Used by the recovery flow so
-  // a session resumed after a process kill never inherits the old (now-
-  // orphaned) presence entry.
-  function rotateSenderId() {
-    const oldId = sessionStorage.getItem('hr_monitor_device_id');
-    if (oldId) sendPresenceEnd(oldId);
-    sessionStorage.removeItem('hr_monitor_device_id');
-  }
-  // Pull the native FGS's senderId into sessionStorage so getDeviceIdentity
-  // returns the same id native is publishing under. Otherwise a fresh WebView
-  // (e.g. Activity restart while FGS survives) lists the FGS as a foreign
-  // broadcaster instead of recognising it as self.
-  function adoptNativeSenderIdentity() {
-    const ns = window.HRMNativeHrSession;
-    if (!ns || typeof ns.getActiveSenderId !== 'function') return;
-    const nid = ns.getActiveSenderId();
-    if (!nid) return;
-    sessionStorage.setItem('hr_monitor_device_id', nid);
-    const nlabel = typeof ns.getActiveSenderLabel === 'function' ? ns.getActiveSenderLabel() : null;
-    if (nlabel) sessionStorage.setItem('hr_monitor_device_label', nlabel);
-    try { evictSelfFromBroadcasters(); } catch (e) {}
-  }
+  // Native: the engine's id or null, never minted here (A3: always an object, callers read .id).
   function getDeviceIdentity() {
+    if (NATIVE) {
+      const snap = engineSnapshot();
+      const label = (snap && snap.senderLabel) || sessionStorage.getItem('hr_monitor_device_label') || deviceLabelFromUa();
+      return { id: (snap && snap.sessionActive && snap.senderId) || null, label };
+    }
     let id = sessionStorage.getItem('hr_monitor_device_id');
     if (!id) {
       const bytes = new Uint8Array(3);
@@ -3737,25 +3687,27 @@
     }
     let label = sessionStorage.getItem('hr_monitor_device_label');
     if (!label) {
-      // Cheap readable label: 'ua-short · id' — enough to tell a phone
-      // Chrome tab apart from a desktop Edge tab.
-      const ua = navigator.userAgent;
-      let name = 'Device';
-      if (/Android/i.test(ua)) name = 'Android';
-      else if (/iPhone|iPad|iPod/i.test(ua)) name = 'iOS';
-      else if (/Windows/i.test(ua)) name = 'Windows';
-      else if (/Mac OS X/i.test(ua)) name = 'Mac';
-      else if (/Linux/i.test(ua)) name = 'Linux';
-      let browser = '';
-      if (/Edg\//.test(ua)) browser = 'Edge';
-      else if (/OPR\/|Opera/.test(ua)) browser = 'Opera';
-      else if (/Firefox/.test(ua)) browser = 'Firefox';
-      else if (/Chrome/.test(ua)) browser = 'Chrome';
-      else if (/Safari/.test(ua)) browser = 'Safari';
-      label = browser ? name + ' ' + browser : name;
+      label = deviceLabelFromUa();
       sessionStorage.setItem('hr_monitor_device_label', label);
     }
     return { id, label };
+  }
+  // Cheap readable label: enough to tell a phone Chrome tab apart from a desktop Edge tab.
+  function deviceLabelFromUa() {
+    const ua = navigator.userAgent;
+    let name = 'Device';
+    if (/Android/i.test(ua)) name = 'Android';
+    else if (/iPhone|iPad|iPod/i.test(ua)) name = 'iOS';
+    else if (/Windows/i.test(ua)) name = 'Windows';
+    else if (/Mac OS X/i.test(ua)) name = 'Mac';
+    else if (/Linux/i.test(ua)) name = 'Linux';
+    let browser = '';
+    if (/Edg\//.test(ua)) browser = 'Edge';
+    else if (/OPR\/|Opera/.test(ua)) browser = 'Opera';
+    else if (/Firefox/.test(ua)) browser = 'Firefox';
+    else if (/Chrome/.test(ua)) browser = 'Chrome';
+    else if (/Safari/.test(ua)) browser = 'Safari';
+    return browser ? name + ' ' + browser : name;
   }
 
   // Broadcast tick sender. Wire format is documented in RELAY_TICK.md.
@@ -3770,6 +3722,7 @@
   let _broadcastTickPending = null;
   const BROADCAST_TICK_MIN_MS = 250;
   function broadcastTick() {
+    if (NATIVE) return;
     if (!overlayChannel) return;
     const now = Date.now();
     const elapsed = now - _lastBroadcastTickMs;
@@ -3904,6 +3857,12 @@
     if (currentPicker) {
       btn.setAttribute('data-state', 'connecting');
       btn.textContent = 'Cancel search';
+      return;
+    }
+    // Native: neutral until the engine has answered once, so a running session never reads as Reconnect.
+    if (NATIVE && !engineReady && state.connState === 'idle') {
+      btn.setAttribute('data-state', 'connecting');
+      btn.textContent = 'Checking session';
       return;
     }
     const cs = state.connState;
@@ -4113,7 +4072,9 @@
     // Starting fresh here while native is still publishing spawns a second
     // stream under a new senderId; the relay then shows two live broadcasters.
     if (s.sessionActive) {
-      adoptNativeSessionUi(s);
+      // A WebView that outlived the last session still holds its buffers.
+      if (state.connState === 'idle') resetLiveDataBuffers();
+      syncFromEngine(engineSnapshot(), 'start_adopt');
       return;
     }
     let startCall = null;
@@ -4158,29 +4119,23 @@
           }
         }
       } catch (e) {}
-      const ident = getDeviceIdentity();
       // Empty buffers before startSession kicks off — same reasoning as
       // connectWeb: a prior session that died without resetSession running
       // can leave hours of stale hrSeries that autosave would dump into
       // the new CSV.
       resetLiveDataBuffers();
+      // The engine mints the senderId and returns it; the page sends only its label.
       startCall = window.HRMNativeHrSession.startSession({
         broadcastKey: getOrCreateBroadcastKey(),
-        senderId: ident.id,
-        senderLabel: ident.label,
+        senderLabel: getDeviceIdentity().label,
         broadcast: !!widgetPrefs.broadcast,
       });
       await nativeDeadline(startCall, NATIVE_START_MS, 'start_session');
-      device.gatt.connected = true;
-      setSessionStart(Date.now());
-      state.lastDataTime = Date.now();
       saveLastStrap(device);
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-      startSessionAutoSave();
-      acquireWakeLock();
-      setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
-      $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
-      setConnState('live');
+      syncFromEngine(engineSnapshot(), 'start');
+      // The segment records the posture in force at a start; a resume keeps the engine's (status().posture).
+      logNativeFact('posture', { tsMs: Date.now(), text: state.currentPosture });
       logConnectionEvent('connect');
       updateSessionToggle();
     } catch (e) {
@@ -4189,7 +4144,7 @@
         // A session went live under us (a native resume): adopt it, never report a failure.
         const s = await queryNativeStatus();
         if (s && s.sessionActive) {
-          adoptNativeSessionUi(s);
+          syncFromEngine(engineSnapshot(), 'already_active');
         } else {
           setStatus("Couldn't check the recording. Tap Start session to try again.", 'error');
         }
@@ -4222,45 +4177,79 @@
     }
   }
 
-  // Puts the UI on a native session that is already running.
-  function adoptNativeSessionUi(s) {
-    const bleUp = !!(s && s.bleConnected);
-    // A WebView that outlived a failed recovery still holds the old session's buffers.
-    if (state.connState !== 'live' && state.connState !== 'reconnecting') resetLiveDataBuffers();
-    const last = getLastStrap();
-    device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: bleUp });
-    adoptNativeSenderIdentity();
-    // The status payload is fresher than the shim's cache, which is seeded once at load.
-    if (s && s.senderId) {
-      sessionStorage.setItem('hr_monitor_device_id', s.senderId);
-      if (s.senderLabel) sessionStorage.setItem('hr_monitor_device_label', s.senderLabel);
-      try { evictSelfFromBroadcasters(); } catch (e) {}
-    }
-    const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
-      ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
-    setSessionStart(nativeStartMs > 0 ? nativeStartMs : Date.now());
-    state.lastDataTime = Date.now();
-    if (bleUp) {
-      setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
-      $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
-      setConnState('live');
-    } else {
-      setStatus('Session running. Strap is reconnecting...', 'pending');
-      $('overlay-status').textContent = '• LIVE';
-      setConnState('reconnecting');
+  // Native: the one place session truth lands in the page. Runs on every snapshot change (each event,
+  // each settled status), on visibility, on bootstrap and on the 30 s heartbeat. It writes the id,
+  // start time, device stand-in, connState and posture from the engine; the page keeps no copy.
+  let _lastSyncKey = '';
+  function engineConnState(snap) {
+    switch (snap.linkState) {
+      case 'recording': return 'live';
+      case 'resuming': case 'reconnecting': case 'not_found': return 'reconnecting';
+      default: return snap.linkUp ? 'live' : 'reconnecting';
     }
   }
-
-  // Adopts a native session that went live after JS stopped waiting for it.
-  async function adoptLateNativeSession(source) {
-    if (connectInFlight || state.connState === 'live' || state.connState === 'reconnecting') return false;
-    const s = await queryNativeStatus();
-    if (!(s && s.sessionActive)) return false;
-    if (connectInFlight || state.connState === 'live' || state.connState === 'reconnecting') return false;
-    if (window.HRMLog) window.HRMLog.event('adopted late native session', source);
-    adoptNativeSessionUi(s);
-    updateSessionToggle();
-    return true;
+  function applyPostureFromEngine(p) {
+    if (!p || p === state.currentPosture || !/^(lying|sitting|standing)$/.test(p)) return;
+    const row = document.querySelector('.posture-row');
+    if (row && row.getAttribute('data-mode') === 'download') return;
+    state.currentPosture = p;
+    document.querySelectorAll('.posture-btn').forEach(b => b.classList.toggle('active', b.dataset.posture === p));
+  }
+  function syncFromEngine(snap, reason) {
+    if (!NATIVE || !snap) return;
+    const prevConn = state.connState;
+    if (!snap.sessionActive) {
+      // A start or a recovery in flight owns the toggle until it settles.
+      if (prevConn !== 'idle' && !connectInFlight && !recoveryInFlight) {
+        state.autoReconnect = false;
+        $('overlay-status').textContent = '• DISCONNECTED';
+        setConnState('idle');
+      }
+    } else {
+      if (snap.senderId) {
+        sessionStorage.setItem('hr_monitor_device_id', snap.senderId);
+        if (snap.senderLabel) sessionStorage.setItem('hr_monitor_device_label', snap.senderLabel);
+      }
+      // A WebView that outlived the last session still holds its buffers.
+      if (prevConn === 'idle' && !connectInFlight) resetLiveDataBuffers();
+      if (snap.sessionStartMs > 0) state.startTime = snap.sessionStartMs;
+      else if (state.startTime === null) state.startTime = Date.now();
+      state.autoReconnect = true;
+      const last = getLastStrap();
+      const name = snap.strapName || (device && device._native && device.name) || (last && last.name) || 'HR Strap';
+      if (!device || !device._native) device = buildNativeDevice({ name, id: snap.targetMac || 'native', connected: false });
+      else device.name = name;
+      device.gatt.connected = !!snap.linkUp;
+      applyPostureFromEngine(snap.posture);
+      const next = engineConnState(snap);
+      if (next !== prevConn) {
+        state.lastDataTime = Date.now();
+        if (next === 'live') {
+          setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
+          $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
+        } else {
+          setStatus('Session running. Strap is reconnecting...', 'pending');
+          $('overlay-status').textContent = '• LIVE';
+        }
+        setConnState(next);
+      }
+    }
+    try { evictSelfFromBroadcasters(); } catch (e) {}
+    try { updateSessionToggle(); } catch (e) {}
+    try { refreshRelayStatus(); } catch (e) {}
+    try { updateWatchMode(); } catch (e) {}
+    const key = snap.sessionActive + '|' + snap.linkState + '|' + state.connState + '|' + (snap.senderId || '-');
+    if (window.HRMLog && (key !== _lastSyncKey || !/^(status|heartbeat|event:)/.test(reason || ''))) {
+      window.HRMLog.event('sync reason=' + reason + ' link=' + snap.linkState + ' active=' + !!snap.sessionActive
+        + ' conn=' + state.connState + ' id=' + (snap.senderId || '-'));
+    }
+    _lastSyncKey = key;
+  }
+  // Re-pull the engine (retried until settled), then sync under this reason.
+  function refreshFromEngine(reason) {
+    const ns = nativeShim();
+    if (!ns || typeof ns.refresh !== 'function') return Promise.resolve(null);
+    return ns.refresh(reason).then(function (snap) { syncFromEngine(snap, reason); return snap; });
   }
 
   // Timeout: re-query native and adopt a live session; native is never stopped from here.
@@ -4268,11 +4257,11 @@
     if (window.HRMLog) window.HRMLog.event('native call timed out', label);
     const s = await queryNativeStatus();
     if (s && s.sessionActive) {
-      adoptNativeSessionUi(s);
+      syncFromEngine(engineSnapshot(), 'start_timeout');
       return;
     }
     if (startCall) {
-      Promise.resolve(startCall).then(function () { adoptLateNativeSession('start_session_late'); }, function () {});
+      Promise.resolve(startCall).then(function () { refreshFromEngine('start_session_late'); }, function () {});
     }
     setStatus(label === 'timeout_connect'
       ? 'The strap did not answer. Tap Start session to try again.'
@@ -4390,18 +4379,9 @@
         // Web-BLE-style contactSupported/contactDetected pair.
         processHRData(d.hr || 0, rrs, true, !d.contactOff);
       });
-      // Listen for native plugin state events so the relay-status pill
-      // reflects what's actually going to the relay (native socket), not
-      // the JS-side observer socket. Without this the pill shows "error"
-      // after a long sleep even though native is happily publishing.
-      if (typeof window.HRMNativeHrSession.onState === 'function') {
-        window.HRMNativeHrSession.onState(function (s) {
-          if (!s) return;
-          if (typeof s.relay === 'boolean') {
-            _nativeRelayLive = s.relay;
-            try { refreshRelayStatus(); } catch (e) {}
-          }
-        });
+      // Every engine change (event or settled status) lands through the one sync.
+      if (typeof window.HRMNativeHrSession.onSnapshot === 'function') {
+        window.HRMNativeHrSession.onSnapshot(function (snap, why) { syncFromEngine(snap, why); });
       }
       // Proactive GPU release before LMK fires. Activity.onTrimMemory at
       // RUNNING_CRITICAL forwards here; destroyCharts frees ~320 MB of
@@ -4427,27 +4407,6 @@
       return false;
     }
   }
-  // Set up the live UI from a still-publishing native session (process kept
-  // running through a WebView reload). Pure UI prep — no rehydrate, no
-  // overlay management. The lifecycle controller calls this from its
-  // performRehydrate hook before pulling the CSV.
-  function prepareLiveUiFromNativeSession() {
-    // Adopt the native FGS's senderId before anything calls getDeviceIdentity.
-    // sessionStorage was wiped on Activity destroy; without this, JS mints a
-    // fresh senderId and the FGS's relay ticks (still under the old senderId)
-    // get listed in activeBroadcasters as a foreign "Stop session" entry.
-    adoptNativeSenderIdentity();
-    const last = getLastStrap();
-    device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: true });
-    const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
-      ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
-    setSessionStart(nativeStartMs > 0 ? nativeStartMs : Date.now());
-    state.lastDataTime = Date.now();
-    setStatus('Connected to ' + device.name + '. Streaming live.', 'connected');
-    $('overlay-status').textContent = '• LIVE · ' + device.name.toUpperCase();
-    setConnState('live');
-  }
-
   // Waits for the first HR notification with a beat count > 0. Resolves
   // when BLE actually starts delivering data; rejects on timeout. Used by
   // the recovery flow to confirm GATT is alive before declaring success
@@ -4517,22 +4476,13 @@
     if (r.senderLabel) sessionStorage.setItem('hr_monitor_device_label', r.senderLabel);
     try { evictSelfFromBroadcasters(); } catch (e) {}
     if (r.sessionStartMs) ctx.sessionStartMs = r.sessionStartMs;
-    if (cancelled()) { adoptLateNativeSession('recovery_late'); return false; }
+    if (cancelled()) { refreshFromEngine('recovery_late'); return false; }
     return true;
   }
   async function finishRecoveryUi(ctx, token) {
     const cancelled = function () { return !!(token && token.cancelled); };
-    // Native session is up. Mark the button as session-active immediately
-    // so the user has a working Stop control while we wait for first HR.
-    // setConnState now drives updateSessionToggle internally; no separate
-    // call needed.
-    device.gatt.connected = true;
-    setSessionStart(ctx.sessionStartMs || Date.now());
-    state.lastDataTime = Date.now();
-    startSessionAutoSave();
-    acquireWakeLock();
-    $('overlay-status').textContent = '• LIVE';
-    setConnState('reconnecting');
+    // Native session is up: the toggle and chip follow the engine's link state from here.
+    syncFromEngine(engineSnapshot(), 'recovery');
     let firstHrArrived = false;
     try {
       await waitForFirstHr(12000);
@@ -4543,24 +4493,10 @@
     // The user may have stopped during the first-HR wait; never revive a stopped session.
     if (state.connState === 'idle') return;
     const quiet = cancelled();
-    const recoveredStart = state.startTime;
     if (firstHrArrived) {
       if (!quiet) setStatus('Resumed session after restart.', 'connected');
-      setConnState('live');
-    } else {
-      if (!quiet) setStatus('Session resumed. Strap is reconnecting...', 'pending');
-      // Background flip: when HR data eventually lands, switch status to
-      // live. Lives alongside wireNativeHr's main listener; both fire.
-      const unsubLive = window.HRMNativeHrSession.onHr(function (d) {
-        if (state.connState === 'idle' || state.startTime !== recoveredStart) {
-          try { unsubLive(); } catch (e) {}
-          return;
-        }
-        if (!d || !d.hr || d.hr <= 0) return;
-        try { unsubLive(); } catch (e) {}
-        setStatus('Live.', 'connected');
-        setConnState('live');
-      });
+    } else if (!quiet) {
+      setStatus('Session resumed. Strap is reconnecting...', 'pending');
     }
     if (quiet) return;
     try {
@@ -4720,10 +4656,6 @@
     }
     const ns = window.HRMNativeHrSession;
     if (ns && typeof ns.onPublishingChanged === 'function') {
-      // The segment records the posture in force when a session starts or resumes.
-      ns.onPublishingChanged(function (evt) {
-        if (evt && evt.publishing) logNativeFact('posture', { tsMs: Date.now(), text: state.currentPosture });
-      });
     }
     if (!(ns && typeof ns.whenStatusReady === 'function' && window.HRMLifecycleController)) return;
     __hrLifecycle = window.HRMLifecycleController.create({
@@ -4749,23 +4681,37 @@
         return typeof ns.onPublishingChanged === 'function' ? ns.onPublishingChanged(cb) : function () {};
       },
       isPublishing: function () { return !!(ns.isPublishing && ns.isPublishing()); },
-      onLateLive: function () { adoptLateNativeSession('recovery_ceiling'); },
+      onLateLive: function () { refreshFromEngine('recovery_ceiling'); },
       onRecoveryFailed: function (reason) {
         if (window.HRMLog) window.HRMLog.event('recovery failed', reason);
         try { showToast("Couldn't resume the previous session. Pair the strap and start a new one.", 6000); } catch (e) {}
       },
       log: function (msg) { if (window.HRMLog) window.HRMLog.event(msg); },
     });
-    // The status IPC is a bridge call like any other; without a ceiling a
-    // hung one skips bootstrap entirely and only the fences clear the screen.
-    window.HRMLifecycleController.withDeadline(ns.whenStatusReady(), window.HRMLifecycleController.BUDGETS.statusReadyMs, 'status_ready').then(function () {
-      const publishing = !!(ns.isPublishing && ns.isPublishing());
-      const recoveryContext = typeof ns.getRecoveryContext === 'function' ? ns.getRecoveryContext() : null;
-      if (publishing) prepareLiveUiFromNativeSession();
-      __hrLifecycle.bootstrap({ publishing: publishing, recoveryContext: recoveryContext });
-    }).catch(function () {
-      __hrLifecycle.bootstrap({ publishing: false, recoveryContext: null });
+    // Bootstrap branches on the first SETTLED snapshot; the shim retries status() until one settles.
+    // A slow bridge only lifts the overlays here; it never decides "no session".
+    let booted = false;
+    const slow = setTimeout(function () {
+      if (booted) return;
+      if (window.HRMLog) window.HRMLog.event('status slow', 'overlay lifted, still waiting for the engine');
+      const overlay = $('restore-overlay');
+      if (overlay) overlay.classList.remove('shown');
+      document.documentElement.classList.remove('restoring');
+      if (window.HRMRestoreOverlay) { try { window.HRMRestoreOverlay.hide(); } catch (e) {} }
+    }, window.HRMLifecycleController.BUDGETS.statusReadyMs);
+    ns.whenStatusReady().then(function () {
+      booted = true;
+      engineReady = true;
+      clearTimeout(slow);
+      const snap = engineSnapshot() || {};
+      syncFromEngine(snap, 'bootstrap');
+      __hrLifecycle.bootstrap({ publishing: !!snap.sessionActive, recoveryContext: snap.sessionActive ? null : (snap.recoveryContext || null) });
     });
+    // The engine is re-read every 30 s even with no event: a lost event costs at most this long.
+    setInterval(function () {
+      const n = nativeShim();
+      if (n && typeof n.refresh === 'function') n.refresh('heartbeat');
+    }, 30000);
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootstrapHrLifecycle, { once: true });
@@ -4778,9 +4724,8 @@
   // on visibility change if we're still recording.
   let wakeLock = null;
   async function acquireWakeLock() {
-    // Native PARTIAL_WAKE_LOCK first — the only thing that keeps CPU alive
-    // through Doze. Web Wake Lock ('screen') is page-visibility-bound and
-    // useless when the screen turns off, so it's the fallback for browsers.
+    // Native: the Service holds the CPU per link state (released in NOT_FOUND); a page lock would defeat that.
+    if (NATIVE) return;
     try {
       if (window.HRMWakeLock && window.HRMWakeLock.isAvailable) {
         await window.HRMWakeLock.acquire();
@@ -5175,7 +5120,7 @@
     // the iframe doesn't flicker off while the strap bounces back.
     if (connState === 'idle' && relaySocket && relaySocket.readyState === WebSocket.OPEN && navigator.bluetooth && widgetPrefs.broadcast) {
       const dev = getDeviceIdentity();
-      try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {}
+      if (dev.id) { try { relaySocket.send(JSON.stringify({ type: 'presence-end', senderId: dev.id })); } catch (e) {} }
     }
     // Re-render the local broadcasts panel so the self row appears/disappears
     // as our strap connects / drops.
@@ -5370,6 +5315,8 @@
   }
 
   async function startSessionAutoSave() {
+    // Native: the engine is the only recorder.
+    if (NATIVE) return;
     // New session begins — reset per-session Drive file so a new one is created.
     driveFileIdForSession = null;
     // Need either a local folder OR Drive sign-in to do anything useful.
@@ -5403,6 +5350,7 @@
   let autoSaveFailStreak = 0;
   const AUTOSAVE_FAIL_GIVEUP = 3;
   async function writeAutoSave() {
+    if (NATIVE) return;
     if (!autoSaveFileHandle && !driveAccessToken) return;
     // The native plugin owns Drive uploads whenever it exists; JS only writes the local folder.
     const nativeDriveActive = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable);
@@ -6266,6 +6214,8 @@
       // screenshot hit when the phone's presence heartbeat stopped during a
       // reconnecting loop and watch-mode deactivated.
       if (frame) frame.hidden = true;
+      // Native: unload the frame so a watch that should never have started stops its own relay socket.
+      if (NATIVE && frame && watchFrameSrc) { watchFrameSrc = null; frame.removeAttribute('src'); }
     }
   }
 

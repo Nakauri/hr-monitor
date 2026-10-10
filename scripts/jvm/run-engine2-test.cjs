@@ -11,6 +11,7 @@
 //   review batch: one-133-decides no-retry app-arms-autoend stopping-pre-resume mismatch-cancels-alarm
 //   lost-claim-leaks-lock ended-fixed-hours inexact-says-10min
 //   audit batch: release-during-other-teardown stale-no-age-limit decline-drops-alarm-on-stopping
+//   detangle: wire-name-inactive rearm-unbounded
 // Run: node scripts/jvm/run-engine2-test.cjs          (exit 0 = test passes AND every mutant fails)
 //      node scripts/jvm/run-engine2-test.cjs none     (the real classes only)
 
@@ -52,6 +53,9 @@ const MUTANTS = {
   'stale-no-age-limit': ['ServiceStartPolicy.java', 'return nowMs - anchor <= LinkStatePolicy.AUTO_END_NOT_FOUND_MS;', 'return true;'],
   'decline-drops-alarm-on-stopping': ['ServiceStartPolicy.java', 'return "not_live".equals(reason);', 'return !"error".equals(reason);'],
   'ended-fixed-hours': ['ServiceStartPolicy.java', 'String h = hoursLabel(autoEndMs);', 'String h = "12";'],
+  // Detangle 2026-10-10.
+  'wire-name-inactive': ['LinkStatePolicy.java', 'if (!sessionActive || s == null) return "none";', 'if (s == null) return "none";'],
+  'rearm-unbounded': ['LinkStatePolicy.java', 'return Math.min(d, PENDING_REARM_MAX_MS);', 'return d;'],
   'inexact-says-10min': ['ServiceStartPolicy.java', ': "Strap not found. Trying again from time to time."', ': "Strap not found. Trying again every 10 minutes."'],
 };
 

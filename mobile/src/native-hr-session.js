@@ -59,77 +59,202 @@
     }
     setMarker(true);
 
-    let publishing = false;
-    let csvFilename = null;
-    let sessionStartMs = 0;
-    // Native's relay identity when actively publishing. JS adopts these on
-    // bootstrap so an Activity restart with a surviving FGS doesn't mint a
-    // fresh senderId (which would orphan the FGS broadcast as a "foreign"
-    // device in activeBroadcasters).
-    let activeSenderId = null;
-    let activeSenderLabel = null;
-    // Populated from status().recoveryContext when the native plugin detects
-    // a session that survived the previous process. Null otherwise.
-    let recoveryContext = null;
+    // The engine's truth, pulled by status() and pushed by events. Either channel can be lost (a reply
+    // dropped by the bridge, an event fired before any listener), so every event re-pulls and a pull
+    // retries until it settles. The page reads only this; it keeps no session copy of its own.
+    const snapshot = {
+      sessionActive: false, linkState: 'none', linkUp: false, bleConnected: false, relayLive: false,
+      senderId: null, senderLabel: null, sessionStartMs: 0, csvFile: null, posture: null, generation: 0,
+      targetMac: null, strapName: null, lastHrAtMs: 0, interruptedRecovery: false, recoveryContext: null,
+    };
+    const STATUS_ATTEMPT_MS = 5000;
+    const STATUS_BACKOFF_MS = [1000, 2000, 4000, 8000];
+    const SEED_DEBOUNCE_MS = 200;
+    let everApplied = false;
+    let reqSeq = 0;
+    let lastAppliedReq = 0;
+    // Bumped by every event and local mutation; a reply to a request sent before it is stale.
+    let epoch = 0;
+    let cycle = null;
+    let seedAgain = null;
+    let seedTimer = null;
+    let refreshWaiters = [];
     const statusReadyCallbacks = [];
-    let statusReady = false;
     const hrListeners = [];
     const stateListeners = [];
     const errorListeners = [];
     const trimMemoryListeners = [];
     const sessionInterruptedListeners = [];
     const publishingListeners = [];
+    const snapshotListeners = [];
 
-    function setPublishing(next, payload) {
-      const prev = publishing;
-      publishing = !!next;
-      if (publishing && payload) {
-        if (payload.csvFile) csvFilename = payload.csvFile;
-        if (payload.sessionStartMs) sessionStartMs = payload.sessionStartMs;
-      }
-      if (!publishing) {
-        sessionStartMs = 0;
-        csvFilename = null;
-      }
-      if (prev !== publishing) {
-        const evt = { publishing: publishing, payload: payload || null };
-        for (const cb of publishingListeners) {
-          try { cb(evt); } catch (e) {}
-        }
-      }
+    // Timers through one pair so a host without setTimeout (a bare test vm) still seeds once.
+    function later(fn, ms) { return typeof setTimeout === 'function' ? setTimeout(fn, ms) : null; }
+    function cancel(t) { if (t != null && typeof clearTimeout === 'function') clearTimeout(t); }
+
+    function log(msg, data) {
+      try { if (window.HRMLog && window.HRMLog.event) window.HRMLog.event(msg, data); } catch (e) {}
+    }
+    function copy() { return Object.assign({}, snapshot); }
+    function emitTo(list, arg, arg2) {
+      for (const cb of list.slice()) { try { cb(arg, arg2); } catch (e) {} }
     }
 
-    function fireStatusReady() {
-      statusReady = true;
-      const cbs = statusReadyCallbacks.splice(0);
-      for (const cb of cbs) { try { cb(); } catch (e) {} }
+    // One fan-out for every change: publishing listeners on a flip, snapshot listeners always.
+    function changed(prevActive, reason, payload) {
+      if (prevActive !== snapshot.sessionActive) {
+        emitTo(publishingListeners, { publishing: snapshot.sessionActive, payload: payload || null, reason: reason });
+      }
+      emitTo(snapshotListeners, copy(), reason);
     }
 
-    // Seed from native state so a WebView reload doesn't lose what the
-    // process already knows. status() carries both the live snapshot and
-    // (when applicable) the recovery context for an interrupted session.
-    try {
-      if (typeof plugin.status === 'function') {
-        plugin.status().then(function (s) {
-          if (s && s.sessionActive) {
-            publishing = true;
-            csvFilename = s.csvFile || csvFilename;
-            sessionStartMs = s.sessionStartMs || 0;
-            if (s.senderId) activeSenderId = s.senderId;
-            if (s.senderLabel) activeSenderLabel = s.senderLabel;
-            for (const cb of stateListeners) {
-              try { cb({ ble: !!s.bleConnected, relay: !!s.relayLive, session: true }); } catch (e) {}
-            }
-          }
-          if (s && s.interruptedRecovery && s.recoveryContext) {
-            recoveryContext = s.recoveryContext;
-          }
-          fireStatusReady();
-        }).catch(function () { fireStatusReady(); });
+    function clearSession() {
+      snapshot.sessionActive = false;
+      snapshot.linkState = 'none';
+      snapshot.senderId = null;
+      snapshot.senderLabel = null;
+      snapshot.sessionStartMs = 0;
+      snapshot.csvFile = null;
+      snapshot.posture = null;
+      snapshot.linkUp = false;
+    }
+
+    // Local truth from an event or a call result; a status() in flight from before it is now stale.
+    function merge(fields, reason, payload) {
+      const prev = snapshot.sessionActive;
+      epoch++;
+      Object.assign(snapshot, fields);
+      if (!snapshot.sessionActive) clearSession();
+      changed(prev, reason, payload);
+      scheduleSeed(reason);
+    }
+
+    function applyStatus(s, reqId, reqEpoch) {
+      if (!s || reqId <= lastAppliedReq) return 'older';
+      if (reqEpoch !== epoch) return 'stale';
+      lastAppliedReq = reqId;
+      const prev = snapshot.sessionActive;
+      const active = !!s.sessionActive;
+      snapshot.sessionActive = active;
+      snapshot.bleConnected = !!s.bleConnected;
+      snapshot.linkUp = typeof s.linkUp === 'boolean' ? s.linkUp : !!s.bleConnected;
+      snapshot.relayLive = !!s.relayLive;
+      // An older APK sends no linkState: a handle means recording, else reconnecting.
+      snapshot.linkState = typeof s.linkState === 'string' ? s.linkState
+        : (active ? (s.bleConnected ? 'recording' : 'reconnecting') : 'none');
+      snapshot.generation = s.generation || 0;
+      snapshot.interruptedRecovery = !!s.interruptedRecovery;
+      snapshot.recoveryContext = s.interruptedRecovery ? (s.recoveryContext || snapshot.recoveryContext || null) : null;
+      if (active) {
+        snapshot.senderId = s.senderId || null;
+        snapshot.senderLabel = s.senderLabel || null;
+        snapshot.sessionStartMs = s.sessionStartMs || 0;
+        snapshot.csvFile = s.csvFile || null;
+        snapshot.posture = s.posture || null;
+        snapshot.targetMac = s.targetMac || null;
+        snapshot.strapName = s.strapName || null;
+        snapshot.lastHrAtMs = s.lastHrAtMs || 0;
       } else {
-        fireStatusReady();
+        clearSession();
       }
-    } catch (e) { fireStatusReady(); }
+      const first = !everApplied;
+      everApplied = true;
+      emitTo(stateListeners, { ble: snapshot.bleConnected, relay: snapshot.relayLive, session: active });
+      changed(prev, 'status', s);
+      if (first) {
+        const cbs = statusReadyCallbacks.splice(0);
+        for (const cb of cbs) { try { cb(); } catch (e) {} }
+      }
+      return 'applied';
+    }
+
+    function finishCycle(c) {
+      if (c.done) return;
+      c.done = true;
+      cancel(c.timer);
+      cancel(c.retry);
+      cycle = null;
+      if (seedAgain != null) {
+        const why = seedAgain;
+        seedAgain = null;
+        seed(why);
+        return;
+      }
+      const ws = refreshWaiters.splice(0);
+      for (const w of ws) { try { w(copy()); } catch (e) {} }
+    }
+
+    // One attempt of a cycle: a 5 s ceiling, then 1, 2, 4, 8 s backoff (8 s thereafter) until one settles.
+    // A late reply from an earlier attempt still counts; replies are ordered by request id.
+    function attempt(c) {
+      if (c.done) return;
+      const reqId = ++reqSeq;
+      const reqEpoch = epoch;
+      const n = c.attempts++;
+      const t0 = Date.now();
+      let over = false;
+      const next = function (why) {
+        if (over || c.done) return;
+        over = true;
+        cancel(c.timer); c.timer = null;
+        const wait = STATUS_BACKOFF_MS[Math.min(n, STATUS_BACKOFF_MS.length - 1)];
+        log(why === 'timeout' ? 'status timeout' : 'status failed', { seq: reqId, attempt: n + 1, retryMs: wait, reason: c.reason });
+        c.retry = later(function () { c.retry = null; attempt(c); }, wait);
+      };
+      if (n === 0) c.firstReq = reqId;
+      c.timer = later(function () { next('timeout'); }, STATUS_ATTEMPT_MS);
+      let p;
+      try { p = plugin.status({ seq: reqId, trace: c.reason !== 'heartbeat' }); } catch (e) { p = Promise.reject(e); }
+      Promise.resolve(p).then(function (s) {
+        const ms = Date.now() - t0;
+        if (reqId === firstStatusReq) status1 = { settled: true, ms: ms };
+        if (n > 0 || ms > 1000 || !everApplied || over) log('status reply ms=' + ms, { seq: reqId, attempt: n + 1, late: over, reason: c.reason });
+        if (c.done) { applyStatus(s, reqId, reqEpoch); return; }
+        const r = applyStatus(s, reqId, reqEpoch);
+        if (r === 'stale') { if (seedAgain == null) seedAgain = c.reason; }
+        finishCycle(c);
+      }, function () {
+        next('failed');
+      });
+    }
+
+    function seed(reason) {
+      if (cycle) {
+        if (seedAgain == null) seedAgain = reason;
+        return;
+      }
+      cycle = { reason: reason, attempts: 0, done: false, timer: null, retry: null };
+      attempt(cycle);
+    }
+
+    function scheduleSeed(reason) {
+      if (seedTimer) return;
+      seedTimer = later(function () { seedTimer = null; seed(reason); }, SEED_DEBOUNCE_MS);
+    }
+
+    // Discriminator for the lost first reply (FABLE-DETANGLE A1): a throwaway ping goes first, then
+    // status(); which one settled is reported to native once per page load as a bridge_ping line.
+    let firstStatusReq = 0;
+    let status1 = { settled: false, ms: null };
+    const probe = { settled: null, ms: null };
+    if (typeof plugin.ping === 'function') {
+      const tp = Date.now();
+      probe.settled = false;
+      try {
+        Promise.resolve(plugin.ping({ seq: 0 })).then(function () { probe.settled = true; probe.ms = Date.now() - tp; }, function () {});
+      } catch (e) {}
+    }
+    firstStatusReq = reqSeq + 1;
+    seed('load');
+    later(function () {
+      const note = 'discriminator probe=' + (probe.settled == null ? 'none' : (probe.settled ? 'settled' : 'lost'))
+        + ' probe_ms=' + (probe.ms == null ? '-' : probe.ms)
+        + ' status1=' + (status1.settled ? 'settled' : 'lost') + ' status1_ms=' + (status1.ms == null ? '-' : status1.ms);
+      log('bridge ' + note);
+      if (typeof plugin.ping === 'function') {
+        try { Promise.resolve(plugin.ping({ seq: 99, note: note })).catch(function () {}); } catch (e) {}
+      }
+    }, 10000);
 
     plugin.addListener('hr', function (data) {
       for (const cb of hrListeners) {
@@ -137,38 +262,62 @@
       }
     });
     plugin.addListener('state', function (data) {
-      for (const cb of stateListeners) {
-        try { cb(data); } catch (e) {}
+      if (data) {
+        const f = {};
+        if (typeof data.ble === 'boolean') f.bleConnected = data.ble;
+        if (typeof data.linkUp === 'boolean') f.linkUp = data.linkUp;
+        if (typeof data.relay === 'boolean') f.relayLive = data.relay;
+        // A state event can only end a session; a late one emitted before a stop must not revive it.
+        if (data.session === false) f.sessionActive = false;
+        if (typeof data.linkState === 'string') f.linkState = data.linkState;
+        merge(f, 'event:state', data);
       }
+      emitTo(stateListeners, data);
+    });
+    plugin.addListener('linkState', function (data) {
+      if (!data || typeof data.to !== 'string') return;
+      const f = { linkState: data.to };
+      if (data.generation) f.generation = data.generation;
+      merge(f, 'event:linkState', data);
     });
     plugin.addListener('bleError', function (data) {
       console.warn('[native-hr-session] bleError', data);
-      for (const cb of errorListeners) {
-        try { cb(data); } catch (e) {}
-      }
+      emitTo(errorListeners, data);
     });
     plugin.addListener('trimMemory', function (data) {
-      for (const cb of trimMemoryListeners) {
-        try { cb(data); } catch (e) {}
-      }
+      emitTo(trimMemoryListeners, data);
     });
     plugin.addListener('sessionInterrupted', function (data) {
       // Transitional. status().recoveryContext is the authoritative source.
-      if (data && !recoveryContext) recoveryContext = data;
-      for (const cb of sessionInterruptedListeners) {
-        try { cb(data); } catch (e) {}
-      }
+      if (data && !snapshot.recoveryContext) snapshot.recoveryContext = data;
+      emitTo(sessionInterruptedListeners, data);
+      scheduleSeed('event:sessionInterrupted');
     });
     plugin.addListener('publishingStarted', function (data) {
-      recoveryContext = null;
-      // A native resume rotates the senderId; the late-live adopt reads it from here.
-      if (data && data.senderId) activeSenderId = data.senderId;
-      if (data && data.senderLabel) activeSenderLabel = data.senderLabel;
-      setPublishing(true, data);
+      const f = { sessionActive: true, recoveryContext: null, interruptedRecovery: false };
+      if (data && data.senderId) f.senderId = data.senderId;
+      if (data && data.senderLabel) f.senderLabel = data.senderLabel;
+      if (data && data.sessionStartMs) f.sessionStartMs = data.sessionStartMs;
+      if (data && data.csvFile) f.csvFile = data.csvFile;
+      merge(f, 'event:publishingStarted', data);
     });
     plugin.addListener('publishingStopped', function (data) {
-      setPublishing(false, data);
+      merge({ sessionActive: false }, 'event:publishingStopped', data);
     });
+
+    // A start, resume or stop result is truth as of its resolve.
+    function adoptResult(r, reason) {
+      if (!r) return;
+      const f = { sessionActive: true, recoveryContext: null, interruptedRecovery: false };
+      // The engine's start counts as recording and a resume as resuming; the next status() confirms.
+      if (r.started && !r.alreadyRunning) f.linkState = 'recording';
+      else if (r.resumed) f.linkState = 'resuming';
+      if (r.senderId) f.senderId = r.senderId;
+      if (r.senderLabel) f.senderLabel = r.senderLabel;
+      if (r.sessionStartMs) f.sessionStartMs = r.sessionStartMs;
+      if (r.csvFile) f.csvFile = r.csvFile;
+      merge(f, reason, r);
+    }
 
     const reads = segmentReads(plugin);
     window.HRMNativeHrSession = {
@@ -176,18 +325,35 @@
       mode: 'full',
       listSegments: reads.listSegments,
       readSegment: reads.readSegment,
-      isPublishing: function () { return publishing; },
-      getCsvFilename: function () { return csvFilename; },
-      getSessionStartMs: function () { return sessionStartMs; },
-      getRecoveryContext: function () { return recoveryContext; },
-      getActiveSenderId: function () { return activeSenderId; },
-      getActiveSenderLabel: function () { return activeSenderLabel; },
+      getSnapshot: copy,
+      // cb(snapshot, reason) on every change: each event, each applied status(), each call result.
+      onSnapshot: function (cb) {
+        snapshotListeners.push(cb);
+        return function remove() {
+          const i = snapshotListeners.indexOf(cb);
+          if (i >= 0) snapshotListeners.splice(i, 1);
+        };
+      },
+      // Re-pull now (retrying until settled); resolves with the snapshot after that pull.
+      refresh: function (reason) {
+        // The heartbeat never waits: on a wedged bridge, waiters would pile up every 30 s.
+        if (reason === 'heartbeat') { seed(reason); return Promise.resolve(copy()); }
+        return new Promise(function (resolve) {
+          refreshWaiters.push(resolve);
+          seed(reason || 'refresh');
+        });
+      },
+      isPublishing: function () { return snapshot.sessionActive; },
+      getCsvFilename: function () { return snapshot.csvFile; },
+      getSessionStartMs: function () { return snapshot.sessionStartMs; },
+      getRecoveryContext: function () { return snapshot.recoveryContext; },
+      getActiveSenderId: function () { return snapshot.senderId; },
+      getActiveSenderLabel: function () { return snapshot.senderLabel; },
       // Transitional. New callers should read getRecoveryContext() directly.
-      isInterruptedRecoveryPending: function () { return !!recoveryContext && !publishing; },
-      // Resolves once the initial status() IPC has completed. Lets the page
-      // bootstrap branch on snapshot state synchronously, no polling.
+      isInterruptedRecoveryPending: function () { return !!snapshot.recoveryContext && !snapshot.sessionActive; },
+      // Resolves on the first SETTLED status(), never on a timer.
       whenStatusReady: function () {
-        if (statusReady) return Promise.resolve();
+        if (everApplied) return Promise.resolve();
         return new Promise(function (resolve) { statusReadyCallbacks.push(resolve); });
       },
       scan: function (opts) {
@@ -196,47 +362,39 @@
       connect: function (mac) {
         return plugin.connect({ mac: mac });
       },
+      // The engine mints the senderId; the page never sends one.
       startSession: function (opts) {
-        // The publishingStarted event is authoritative for the publishing
-        // flag flip. We still update sessionStartMs here for callers that
-        // read it from the resolve value's path.
-        // Sender identity is recorded only once native confirms; an already-running session keeps its own.
-        return plugin.startSession(opts).then(function (r) {
-          const running = !!(r && r.alreadyRunning);
-          const id = running ? (r.senderId || null) : (opts && opts.senderId) || null;
-          const label = running ? (r.senderLabel || null) : (opts && opts.senderLabel) || null;
-          if (id) activeSenderId = id;
-          if (label) activeSenderLabel = label;
-          if (r && r.sessionStartMs) sessionStartMs = r.sessionStartMs;
-          else if (opts && opts.resumeSessionStartMs) sessionStartMs = opts.resumeSessionStartMs;
+        const o = Object.assign({}, opts || {});
+        delete o.senderId;
+        return plugin.startSession(o).then(function (r) {
+          if (r && (r.started || r.alreadyRunning)) adoptResult(r, 'start');
           return r;
         });
       },
-      // Adopts the session native prefs say is live; never starts one. On resumed or alreadyRunning
-      // it records the identity and flips publishing, so a recovery wait resolves even when the
-      // Service resumed first and its publishingStarted fired before the page listened.
+      // Adopts the session native prefs say is live; never starts one.
       resumeSession: function (opts) {
         if (typeof plugin.resumeSession !== 'function') return Promise.reject(new Error('unsupported'));
         return plugin.resumeSession(opts || {}).then(function (r) {
-          if (r && (r.resumed || r.alreadyRunning)) {
-            if (r.senderId) activeSenderId = r.senderId;
-            if (r.senderLabel) activeSenderLabel = r.senderLabel;
-            if (r.sessionStartMs) sessionStartMs = r.sessionStartMs;
-            if (r.csvFile) csvFilename = r.csvFile;
-            recoveryContext = null;
-            setPublishing(true, r);
-          }
+          if (r && (r.resumed || r.alreadyRunning)) adoptResult(r, 'resume');
           return r;
         });
       },
       stopSession: function () {
-        // publishingStopped event flips the flag; this just forwards the call.
-        activeSenderId = null;
-        activeSenderLabel = null;
-        return plugin.stopSession();
+        return plugin.stopSession().then(function (r) {
+          merge({ sessionActive: false }, 'stop', r);
+          return r;
+        });
       },
       disconnect: function () { return plugin.disconnect(); },
-      status: function () { return plugin.status(); },
+      // A direct pull; its answer lands in the snapshot like any other.
+      status: function () {
+        const reqId = ++reqSeq;
+        const reqEpoch = epoch;
+        return plugin.status({ seq: reqId, trace: true }).then(function (s) {
+          applyStatus(s, reqId, reqEpoch);
+          return s;
+        });
+      },
       setPrefs: function (prefs) {
         return plugin.setPrefs({ prefs: prefs || {} });
       },
@@ -278,6 +436,8 @@
         const payload = { kind: kind, tsMs: Math.round(Number.isFinite(o.tsMs) ? o.tsMs : Date.now()) };
         if (o.text != null) payload.text = String(o.text);
         if (Number.isFinite(o.value)) payload.value = o.value;
+        // A status() already in flight carries the older posture: bump the epoch so it reads as stale.
+        if (kind === 'posture' && o.text != null && snapshot.sessionActive) { snapshot.posture = String(o.text); epoch++; }
         try { plugin.logFact(payload).catch(() => {}); } catch (e) {}
       },
       getSessionSnapshot: function (opts) {
