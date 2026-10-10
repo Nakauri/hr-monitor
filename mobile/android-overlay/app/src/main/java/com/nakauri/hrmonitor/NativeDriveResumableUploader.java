@@ -112,6 +112,19 @@ public class NativeDriveResumableUploader {
         });
     }
 
+    // A native resume of filenameArg: the dead process's upload session is gone. Stays broken so the
+    // periodic tick PATCHes the persisted currentDriveFileId through the full-file uploader; never opens
+    // a new file and never rewrites the persisted keys.
+    public void resumeBroken(String filenameArg) {
+        executor.submit(() -> {
+            sessionUrl = null;
+            fileId = null;
+            filename = filenameArg;
+            lastChunkEnd = 0;
+            broken = true;
+        });
+    }
+
     /**
      * Mark the resumable as broken without resetting any state. Called at
      * plugin load() when we detect an interrupted session — the in-memory

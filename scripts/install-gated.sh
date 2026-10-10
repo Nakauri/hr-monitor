@@ -10,7 +10,7 @@
 # Env: ADB (adb binary), ANDROID_SERIAL (device), HRM_BUILDCONFIG (generated BuildConfig.java to read).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ADB="${ADB:-/c/Users/Khal/AppData/Local/Android/Sdk/platform-tools/adb.exe}"
+ADB="${ADB:-$(command -v adb || echo "${LOCALAPPDATA:-$HOME/AppData/Local}/Android/Sdk/platform-tools/adb.exe")}"
 PKG="com.nakauri.hrmonitor"
 APK="$ROOT/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
 BC="${HRM_BUILDCONFIG:-$ROOT/mobile/android/app/build/generated/source/buildConfig/debug/com/nakauri/hrmonitor/BuildConfig.java}"

@@ -577,7 +577,7 @@ function step2Checks() {
     const plStop = pl ? methodSpans(codeView(pl), 'public\\s+void\\s+stopSession')[0] : null;
     check('[2] the in-app Stop goes through stopSessionInternal', !!plStop && /stopSessionInternal\s*\(/.test(codeView(pl).slice(plStop[0], plStop[1])));
     check('[4] the live-Stop tail releases through releaseAfterLiveStop and cancels through cancelAlarmAfterLiveStop',
-      /if\s*\(\s*ServiceStartPolicy\.releaseAfterLiveStop\s*\([^)]*\)\s*\)\s*\{[^}]*releaseWakeLock\s*\(/.test(lsBody)
+      /if\s*\(\s*ServiceStartPolicy\.releaseAfterLiveStop\s*\(\s*stopped\s*,\s*newerLive\s*,\s*HrEngine\.isStopTeardownInProgress\s*\(\s*\)\s*\)\s*\)\s*\{[^}]*releaseWakeLock\s*\(/.test(lsBody)
         && /cancelAlarmAfterLiveStop\s*\([^)]*\)\s*\)\s*HrServiceHeartbeatReceiver\.cancel/.test(lsBody)
         && !/if\s*\(\s*stopped\s*&&\s*!newerLive\s*\)/.test(lsBody));
     const stale = body.indexOf('StopPath.STALE');
@@ -596,6 +596,74 @@ function step2Checks() {
     const tail = at >= 0 ? R.slice(at) : '';
     check('[7] the alarm receiver logs fgs_start_denied when startForegroundService throws',
       at >= 0 && /catch\s*\(\s*Throwable[\s\S]{0,200}"fgs_start_denied/.test(tail));
+  }
+
+  // Audit batch 2026-10-10 (R3, I1, I2, nits).
+  if (E != null) {
+    const ec = codeView(E);
+    const ra = methodSpans(ec, 'private\\s+JSONObject\\s+resumeLocked')[0];
+    const raRaw = ra ? E.slice(ra[0], ra[1]) : '';
+    check('[R3] every resume gates stale prefs on resumeAllowedByAge(last_alive_ms, ...) and logs reason=stale',
+      /resumeAllowedByAge\s*\(\s*lastAlive\s*,/.test(raRaw) && /getLong\("last_alive_ms"/.test(raRaw) && raRaw.includes('"reason=stale age_h="'));
+    const st = methodSpans(ec, '\\bstartSessionInternal')[0];
+    const stBody = st ? ec.slice(st[0], st[1]) : '';
+    const ifAt = stBody.search(/if\s*\(\s*resuming\s*&&\s*opened\s*!=\s*null\s*\)\s*\{/);
+    let ok1 = false;
+    if (ifAt >= 0) {
+      const ifBlk = blockFrom(stBody, ifAt);
+      const afterIf = stBody.slice(ifBlk[1] + 1);
+      const elseM = afterIf.match(/^\s*else\s*\{/);
+      const elseBlk = elseM ? blockFrom(afterIf, elseM[0].length - 1) : null;
+      const inIf = stBody.slice(ifBlk[0], ifBlk[1]);
+      const inElse = elseBlk ? afterIf.slice(elseBlk[0], elseBlk[1]) : '';
+      const outside = stBody.slice(0, ifAt) + (elseBlk ? afterIf.slice(elseBlk[1]) : afterIf);
+      ok1 = /resumable\.resumeBroken\s*\(/.test(inIf) && !/resumable\.(startSessionAsync|resetSession)\s*\(/.test(inIf)
+        && /resumable\.startSessionAsync\s*\(/.test(inElse) && /resumable\.resetSession\s*\(/.test(inElse)
+        && !/resumable\.(startSessionAsync|resetSession)\s*\(/.test(outside);
+    }
+    check('[I1] a resume never resets or opens a resumable session (no duplicate Drive file); a fresh start does', ok1);
+    const ru = readSource('NativeDriveResumableUploader.java');
+    const rb = ru ? methodSpans(codeView(ru), 'public\\s+void\\s+resumeBroken')[0] : null;
+    const rbBody = rb ? codeView(ru).slice(rb[0], rb[1]) : '';
+    check('[I1] resumeBroken stays broken on the executor and never rewrites the persisted Drive keys',
+      /executor\.submit/.test(rbBody) && /broken\s*=\s*true/.test(rbBody) && !/persistResumeKeys|openSession|createFile/.test(rbBody));
+    check('[nit] the segment roll timer is gone (the heartbeat and the alarm tick)', !/segmentRollRunnable|scheduleSegmentRoll/.test(ec));
+    check('[nit] no unused HrEngine.get(Context)', !/static\s+HrEngine\s+get\s*\(/.test(ec));
+  }
+  if (P != null) {
+    const pc = codeView(P);
+    const pmRe2 = /@PluginMethod[\s\S]*?public\s+void\s+(\w+)\s*\(\s*PluginCall\s+\w+\s*\)\s*\{/g;
+    let m2;
+    const unguarded = [];
+    while ((m2 = pmRe2.exec(pc))) {
+      const b = blockFrom(pc, m2.index + m2[0].length - 1);
+      const body = pc.slice(b[0] + 1, b[1]);
+      for (const call of ['authExecutor().execute(', 'startActivityForResult(']) {
+        let i = body.indexOf(call);
+        while (i >= 0) {
+          let guarded = false;
+          const tre = /\btry\s*\{/g;
+          let t;
+          while ((t = tre.exec(body))) {
+            const tb = blockFrom(body, t.index + t[0].length - 1);
+            if (tb && i > tb[0] && i < tb[1] && /^\s*catch\s*\(\s*Throwable\b/.test(body.slice(tb[1] + 1))) guarded = true;
+          }
+          if (!guarded) unguarded.push(m2[1] + ':' + call);
+          i = body.indexOf(call, i + 1);
+        }
+      }
+    }
+    check('[I2] every authExecutor().execute( and startActivityForResult( in a @PluginMethod sits in try/catch (Throwable)',
+      unguarded.length === 0, unguarded.join(', '));
+    const load = methodSpans(pc, 'public\\s+void\\s+load')[0];
+    const resume = methodSpans(pc, 'protected\\s+void\\s+handleOnResume')[0];
+    check('[nit] a cold open wakes once: onWake in handleOnResume, not in load()',
+      !!load && !/\.onWake\s*\(/.test(pc.slice(load[0], load[1])) && !!resume && /\.onWake\s*\(/.test(pc.slice(resume[0], resume[1])));
+  }
+  if (S != null) {
+    const sc = codeView(S);
+    check('[nit] a declined resume drops the alarm only through resumeDeclineCancelsAlarm',
+      /idleStop\s*\([^;]*ServiceStartPolicy\.resumeDeclineCancelsAlarm\s*\(\s*reason\s*\)\s*\)/.test(sc));
   }
 
   // Test prefs are read only behind BuildConfig.TEST_HOOKS and the live session.

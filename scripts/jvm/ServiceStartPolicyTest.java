@@ -31,6 +31,7 @@ public class ServiceStartPolicyTest {
         lockInterleaveStopAfterClaim();
         lockInterleaveStopFirst();
         reviewBatch();
+        auditBatch();
         linkStates();
         autoEnd();
         texts();
@@ -255,8 +256,8 @@ public class ServiceStartPolicyTest {
         check("[3] a stale Stop that left prefs live keeps the alarm",
             !ServiceStartPolicy.staleStopCancelsAlarm(true) && ServiceStartPolicy.staleStopCancelsAlarm(false));
         check("[4] a live Stop that lost its claim still releases the wake lock (no newer session)",
-            ServiceStartPolicy.releaseAfterLiveStop(false, false) && ServiceStartPolicy.releaseAfterLiveStop(true, false)
-                && !ServiceStartPolicy.releaseAfterLiveStop(false, true));
+            ServiceStartPolicy.releaseAfterLiveStop(false, false, false) && ServiceStartPolicy.releaseAfterLiveStop(true, false, false)
+                && !ServiceStartPolicy.releaseAfterLiveStop(false, true, false));
         check("[4] the alarm goes only when this stop won and no newer session runs",
             ServiceStartPolicy.cancelAlarmAfterLiveStop(true, false) && !ServiceStartPolicy.cancelAlarmAfterLiveStop(false, false)
                 && !ServiceStartPolicy.cancelAlarmAfterLiveStop(true, true));
@@ -266,6 +267,29 @@ public class ServiceStartPolicyTest {
         String[] inexact = ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 0, false);
         check("[nit] inexact alarm: NOT_FOUND names no 10-minute interval", !inexact[1].contains("10 minutes")
             && ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 0, true)[1].contains("every 10 minutes"));
+    }
+
+    // Audit batch 2026-10-10: stale-prefs age gate (R3), declined-resume alarm, teardown-aware release.
+    static void auditBatch() {
+        System.out.println("audit batch");
+        long H12 = LinkStatePolicy.AUTO_END_NOT_FOUND_MS;
+        long now = 2_000_000_000_000L;
+        check("[R3] last sign of life 11 h ago resumes", ServiceStartPolicy.resumeAllowedByAge(now - 11L * 3_600_000L, now - 20L * 3_600_000L, now));
+        check("[R3] exactly 12 h resumes; 12 h plus 1 ms does not",
+            ServiceStartPolicy.resumeAllowedByAge(now - H12, 0L, now) && !ServiceStartPolicy.resumeAllowedByAge(now - H12 - 1, 0L, now));
+        check("[R3] days-old prefs (an upgrade over a dead session) never resume",
+            !ServiceStartPolicy.resumeAllowedByAge(now - 3L * 24L * 3_600_000L, now - 4L * 24L * 3_600_000L, now));
+        check("[R3] no HR yet: the start time is the anchor", ServiceStartPolicy.resumeAllowedByAge(0L, now - 60_000L, now)
+            && !ServiceStartPolicy.resumeAllowedByAge(0L, now - H12 - 60_000L, now));
+        check("[R3] no anchor at all never resumes", !ServiceStartPolicy.resumeAllowedByAge(0L, 0L, now));
+        check("[R3] a clock that went backwards counts as fresh", ServiceStartPolicy.resumeAllowedByAge(now + 3_600_000L, 0L, now));
+        check("[R3] stale age for the log", ServiceStartPolicy.staleAgeMs(now - 30L * 3_600_000L, 0L, now) == 30L * 3_600_000L
+            && "30".equals(ServiceStartPolicy.hoursLabel(ServiceStartPolicy.staleAgeMs(now - 30L * 3_600_000L, 0L, now))));
+        check("[nit] a declined resume drops the alarm only for not_live",
+            ServiceStartPolicy.resumeDeclineCancelsAlarm("not_live") && !ServiceStartPolicy.resumeDeclineCancelsAlarm("stopping")
+                && !ServiceStartPolicy.resumeDeclineCancelsAlarm("error"));
+        check("[nit] a lost claim keeps the lock while another stop's upload runs",
+            !ServiceStartPolicy.releaseAfterLiveStop(false, false, true) && ServiceStartPolicy.releaseAfterLiveStop(true, false, true));
     }
 
     static void texts() {

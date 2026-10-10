@@ -87,3 +87,6 @@ _local/
 # Claude Code local state and other editor/tool scratch at repo root.
 .claude/
 HTML HR Monitor Save State/
+
+# Local audit work, device logs and harnesses (personal health data)
+docs/audit-*/

@@ -2884,6 +2884,8 @@
   let driveAccessToken = null;
   let driveTokenExpiresAt = 0;
   let driveFolderId = null;
+  // Every root by age, oldest first; legacy files are listed from all of them, months from the oldest.
+  let driveRootIds = [];
   let driveFilesByName = new Map(); // filename -> { id, modifiedTime }
   let driveMetaCache = {};          // persistent companion to IndexedDB text store
   let driveRefreshing = false;
@@ -3108,9 +3110,11 @@
     const data = await resp.json();
     if (data.files && data.files.length) {
       driveFolderId = data.files.reduce((a, b) => (driveFileIsOlder(b, a) ? b : a)).id;
+      driveRootIds = data.files.slice().sort((a, b) => (driveFileIsOlder(a, b) ? -1 : driveFileIsOlder(b, a) ? 1 : 0)).map(f => f.id);
     } else {
       // Folder doesn't exist yet — viewer won't auto-create it (the live app does).
       driveFolderId = null;
+      driveRootIds = [];
     }
     // Pull the shared broadcast key so this device can subscribe to whatever
     // device is currently recording. Any signed-in device ends up on the same
@@ -3149,8 +3153,12 @@
     if (!driveFolderId) return new Map();
     const files = new Map();
     let pageToken = null;
+    // Older APKs write legacy files to whichever root they picked: list every root.
+    const legacyRoots = driveRootIds.length ? driveRootIds : [driveFolderId];
+    for (const rootId of legacyRoots) {
+    pageToken = null;
     do {
-      const q = encodeURIComponent(`'${driveFolderId}' in parents and name contains 'hrv_session' and trashed=false`);
+      const q = encodeURIComponent(`'${rootId}' in parents and name contains 'hrv_session' and trashed=false`);
       const params = 'files?q=' + q + "&fields=files(id,name,createdTime,modifiedTime,size),nextPageToken&pageSize=200" +
         '&orderBy=' + encodeURIComponent('modifiedTime desc') +
         (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
@@ -3164,6 +3172,7 @@
       }
       pageToken = data.nextPageToken || null;
     } while (pageToken);
+    }
 
     const folders = [];
     pageToken = null;
@@ -4147,7 +4156,8 @@
           const parsed = await v2ParseParts(S, readText, memo);
           summary = summarizeCSV(S.key, v2SessionCsv(S.sid, v2SessionRows(S, parsed)));
         } catch (e) { console.warn('[v2] session summary failed', S.key, e); }
-        if (cache) cache.set('sess:' + S.key, { sig, summary });
+        // An empty summary (a failed read) is never cached: the next load retries even at the same sizes.
+        if (cache && summary) cache.set('sess:' + S.key, { sig, summary });
         changed.add(S.key);
       }
       if (summary) index[S.key] = summary;

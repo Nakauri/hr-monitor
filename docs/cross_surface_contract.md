@@ -26,10 +26,10 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 
 | Value | Writer | Reader | Authority | Enforcement |
 |-------|--------|--------|-----------|-------------|
-| File name, header, row kinds and field counts | `SegmentWriter.java` (`NAME_REGEX`, `HEADER_FORMAT`, `KINDS`) | `hrv_viewer.html:SEG_NAME_RE`, `parseSegmentV2` | `docs/audit-2026-10-09/BLOCK-B-SPEC.md` section 2 | `scripts/segment-format.test.cjs` (writer and viewer regex), `scripts/jvm/run-segment-test.cjs` |
+| File name, header, row kinds and field counts | `SegmentWriter.java` (`NAME_REGEX`, `HEADER_FORMAT`, `KINDS`) | `hrv_viewer.html:SEG_NAME_RE`, `parseSegmentV2` | `SegmentWriter.java` (`KINDS`, `HEADER_FORMAT`) | `scripts/segment-format.test.cjs` (writer and viewer regex), `scripts/jvm/run-segment-test.cjs` |
 | `rr` column | `HrEngine.java:onHr` passes post-conversion RR (`Math.round`) to `HrSink.appendHr` | viewer `buildV2Model` | Raw RR in ms, `;`-joined, same values `computeRmssd` sees | `scripts/rmssd-parity.test.js` covers the conversion; RMSSD maths unchanged |
-| SDNN (30 s, 5 min, full) | Legacy columns from `HrEngine.java:computeSdnn` | `hrv_viewer.html:sdnnFromRr` recomputes from `rr` | Filter RR in [300, 2000] ms; windows stamped with packet time; full value is running Welford; reset on `g` start and resume | `docs/audit-2026-10-09/harness-B/v2.test.cjs`, 0.01 ms against tee fixtures |
-| Day boundary | n/a | `hrv_viewer.html` day helper module (`dayWindow`, `dayKeyOf`, `localDateLabel`) | Local midnight (Khal 2026-10-09) | `scripts/day-boundary.test.cjs` |
+| SDNN (30 s, 5 min, full) | Legacy columns from `HrEngine.java:computeSdnn` | `hrv_viewer.html:sdnnFromRr` recomputes from `rr` | Filter RR in [300, 2000] ms; windows stamped with packet time; full value is running Welford; reset on `g` start and resume | Local harness (not in the repo), 0.01 ms against tee fixtures |
+| Day boundary | n/a | `hrv_viewer.html` day helper module (`dayWindow`, `dayKeyOf`, `localDateLabel`) | Local midnight | `scripts/day-boundary.test.cjs` |
 
 ## Relay tick wire format
 

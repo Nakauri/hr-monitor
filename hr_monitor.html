@@ -5601,10 +5601,15 @@
   async function driveEnsureFolder() {
     // Look for existing folder named DRIVE_FOLDER_NAME owned by this app (drive.file scope)
     const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-    const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
+    // Oldest root wins, id breaking ties: the same pick as the viewer and the phone's uploaders.
+    const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
     const data = await resp.json();
     if (data.files && data.files.length) {
-      driveFolderId = data.files[0].id;
+      const older = (a, b) => {
+        const ta = Date.parse(a.createdTime) || Infinity, tb = Date.parse(b.createdTime) || Infinity;
+        return ta !== tb ? ta < tb : String(a.id) < String(b.id);
+      };
+      driveFolderId = data.files.reduce((a, b) => (older(b, a) ? b : a)).id;
     } else {
       const create = await driveFetch('files?fields=id', {
         method: 'POST',

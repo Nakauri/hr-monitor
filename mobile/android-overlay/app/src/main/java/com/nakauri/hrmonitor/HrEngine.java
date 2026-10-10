@@ -65,8 +65,6 @@ public final class HrEngine implements HrDevice.Callback {
         return new Obtained(e, true);
     }
 
-    public static HrEngine get(Context ctx) { return obtain(ctx).engine; }
-
     // Never creates.
     public static HrEngine peek() { return sInstance; }
 
@@ -84,10 +82,8 @@ public final class HrEngine implements HrDevice.Callback {
     // identically whether the sender is the web app or the native plugin.
     private static final long LIVE_WINDOW_MS = 45_000L;
     private static final long TREND_WINDOW_MS = 180_000L;
-    // Drive upload cadence — every 30 s. Same data pace as the JS auto-save.
-    // 5 min during a session. Final upload happens at stopSessionInternal.
-    // Crash loss = 5 min Drive lag; local CSV is always intact and re-uploads
-    // on next session-stop or reopen.
+    // Drive upload cadence during a session: 5 min. Final upload happens at stopSessionInternal.
+    // Crash loss = 5 min Drive lag; the local CSV stays intact and re-uploads at the next stop or reopen.
     private static final long DRIVE_UPLOAD_INTERVAL_MS = 300_000L;
     // Fire a csvError event once after this many consecutive write failures.
     // Below this threshold a single transient error is silently retried; at
@@ -952,8 +948,15 @@ public final class HrEngine implements HrDevice.Callback {
         boolean enabled = prefs.getBoolean("broadcastEnabled", true);
         String label = prefs.getString("senderLabel", "");
         String oldId = prefs.getString("senderId", "");
-        if (mac == null || mac.isEmpty()) {
-            // Nothing to reconnect to: end it as the A8 stale match does.
+        long lastAlive = prefs.getLong("last_alive_ms", 0L);
+        long now = System.currentTimeMillis();
+        String abandon = null;
+        if (mac == null || mac.isEmpty()) abandon = "reason=no_mac";
+        else if (!ServiceStartPolicy.resumeAllowedByAge(lastAlive, startMs, now)) {
+            abandon = "reason=stale age_h=" + ServiceStartPolicy.hoursLabel(ServiceStartPolicy.staleAgeMs(lastAlive, startMs, now));
+        }
+        if (abandon != null) {
+            // Nothing to reconnect to, or too old to be the same recording: end it as the A8 stale match does.
             android.content.SharedPreferences.Editor ed = prefs.edit()
                 .putBoolean("sessionActive", false)
                 .putBoolean("cleanlyStopped", true)
@@ -964,7 +967,7 @@ public final class HrEngine implements HrDevice.Callback {
             if (csv != null && !csv.isEmpty()) ed.putString("lastSessionFilename", csv);
             ed.commit();
             HrServiceHeartbeatReceiver.cancel(appCtx);
-            NativeHrService.logLifecycle(appCtx, "resume_abandon reason=no_mac origin=" + origin);
+            NativeHrService.logLifecycle(appCtx, "resume_abandon " + abandon + " origin=" + origin);
             return resumeNotLive("not_live");
         }
         restoreStageThresholds(prefs.getString("stageThresholds", null));
@@ -1387,10 +1390,9 @@ public final class HrEngine implements HrDevice.Callback {
     private static final long ALIVE_WRITE_INTERVAL_MS = 10_000L;
     private long lastAliveWriteMs = 0L;
 
-    // ---- v2 segments (local only; the legacy CSV stays in charge of status, resume, snapshot and upload) ----
+    // ---- v2 segments (uploaded by SegmentUploader; the legacy CSV stays in charge of status, resume and snapshot) ----
 
     private static final String SEGMENT_FLAVOUR = "personal";
-    private static final long SEGMENT_ROLL_SLACK_MS = 2_000L;
     private final Clock segClock = new Clock() {
         @Override public long wallMs() { return System.currentTimeMillis(); }
         @Override public long monoMs() { return android.os.SystemClock.elapsedRealtime(); }
@@ -1534,15 +1536,6 @@ public final class HrEngine implements HrDevice.Callback {
         return new TeeSink(legacy, seg, this::openSegmentWriter, segClock, segLog);
     }
 
-    // Closes a segment whose UTC hour has ended while the strap is silent; re-arms for the next hour.
-    private final Runnable segmentRollRunnable = new Runnable() {
-        @Override public void run() {
-            if (!sessionActive.get()) return;
-            postSegmentTick();
-            scheduleSegmentRoll();
-        }
-    };
-
     // Offset check then roll check, on hrm-segment-tick.
     private void postSegmentTick() {
         try {
@@ -1567,13 +1560,6 @@ public final class HrEngine implements HrDevice.Callback {
         if (!sessionActive.get()) return;
         postSegmentTick();
         try { segmentUploadExecutor.execute(this::segmentUploadCheck); } catch (Throwable t) { Log.w(TAG, "upload check not queued: " + t); }
-    }
-
-    private void scheduleSegmentRoll() {
-        mainHandler.removeCallbacks(segmentRollRunnable);
-        long now = System.currentTimeMillis();
-        long next = SegmentWriter.hourStart(now) + 3_600_000L + SEGMENT_ROLL_SLACK_MS;
-        mainHandler.postDelayed(segmentRollRunnable, Math.max(1_000L, next - now));
     }
 
     // Fact row from the WebView. Returns written, not_written, no_session or bad_kind.
@@ -1792,17 +1778,23 @@ public final class HrEngine implements HrDevice.Callback {
                 opened = next;
             }
             uploader.resetSession();
-            resumable.resetSession();
-            if (opened != null) {
-                // Stamp the active filename on the regular uploader so the
-                // cleanup pass knows not to delete the in-progress CSV even
-                // if the resumable path is doing all the actual uploads.
+            if (resuming && opened != null) {
+                // Same file as the dead process: PATCH its persisted Drive id (full-file path), never POST a twin.
+                resumable.resumeBroken(opened.getFile().getName());
                 uploader.markActiveSessionFilename(opened.getFile().getName());
-                // Open the resumable session up-front. Async; callers later
-                // read isReady() to decide chunk-vs-fallback. If openSession
-                // fails or auth isn't ready yet, the periodic upload path
-                // falls back to full PATCH transparently.
-                resumable.startSessionAsync(opened.getFile().getName());
+            } else {
+                resumable.resetSession();
+                if (opened != null) {
+                    // Stamp the active filename on the regular uploader so the
+                    // cleanup pass knows not to delete the in-progress CSV even
+                    // if the resumable path is doing all the actual uploads.
+                    uploader.markActiveSessionFilename(opened.getFile().getName());
+                    // Open the resumable session up-front. Async; callers later
+                    // read isReady() to decide chunk-vs-fallback. If openSession
+                    // fails or auth isn't ready yet, the periodic upload path
+                    // falls back to full PATCH transparently.
+                    resumable.startSessionAsync(opened.getFile().getName());
+                }
             }
 
             // Pre-session cleanup pass. Catches orphan CSVs from prior sessions
@@ -1859,7 +1851,6 @@ public final class HrEngine implements HrDevice.Callback {
             gattReconnectAttempts = 0;
             mainHandler.removeCallbacks(heartbeatRunnable);
             mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
-            scheduleSegmentRoll();
             startSegmentUploadTick();
             emitState();
             JSONObject startedEv = putSafe(new JSONObject(), "sessionStartMs", sessionStartMs);
@@ -1939,7 +1930,6 @@ public final class HrEngine implements HrDevice.Callback {
             HrServiceHeartbeatReceiver.cancel(appCtx);
             mainHandler.removeCallbacks(heartbeatRunnable);
             mainHandler.removeCallbacks(gattReconnectRunnable);
-            mainHandler.removeCallbacks(segmentRollRunnable);
             stopSegmentUploadTick();
             reconnectPending = false;
             // Relay closes now so presence-end carries this session's senderId and no tick follows Stop.

@@ -154,8 +154,7 @@ public class NativeHrSessionPlugin extends Plugin {
         }
         // Best effort; status() stays the snapshot JS reads at bootstrap.
         e.emitState();
-        // In NOT_FOUND, opening the app makes one strap attempt.
-        e.onWake(ServiceStartPolicy.ORIGIN_APP);
+        // handleOnResume follows on a cold open and makes the one onWake("app").
     }
 
     // Releases only this plugin's listener and executors; the engine and its session keep running.
@@ -516,12 +515,17 @@ public class NativeHrSessionPlugin extends Plugin {
         final String filename = call.getString("filename");
         final String csv = call.getString("csv");
         if (filename == null || csv == null) { call.reject("filename + csv required"); return; }
-        pendingExports.put(call.getCallbackId(), csv);
-        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-        i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("text/csv");
-        i.putExtra(Intent.EXTRA_TITLE, filename);
-        startActivityForResult(call, i, "exportCsvResult");
+        try {
+            pendingExports.put(call.getCallbackId(), csv);
+            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("text/csv");
+            i.putExtra(Intent.EXTRA_TITLE, filename);
+            startActivityForResult(call, i, "exportCsvResult");
+        } catch (Throwable t) {
+            pendingExports.remove(call.getCallbackId());
+            call.reject("export_failed: " + t.getMessage());
+        }
     }
 
     @com.getcapacitor.annotation.ActivityCallback
@@ -565,55 +569,68 @@ public class NativeHrSessionPlugin extends Plugin {
         String refreshToken = call.getString("refresh_token");
         Long expiresAt = call.getLong("expires_at");
         String email = call.getString("email");
-        authExecutor().execute(() -> {
-            try {
-                AuthStorage.store(getContext(), accessToken, refreshToken,
-                    expiresAt != null ? expiresAt : 0L, email);
-                call.resolve();
-                // Segments recorded while signed out wait for this.
-                SegmentUploadWorker.enqueue(getContext(), "sweep", null);
-            } catch (Throwable t) {
-                call.reject("storeAuthTokens failed: " + t.getMessage());
-            }
-        });
+        try {
+            authExecutor().execute(() -> {
+                try {
+                    AuthStorage.store(getContext(), accessToken, refreshToken,
+                        expiresAt != null ? expiresAt : 0L, email);
+                    call.resolve();
+                    // Segments recorded while signed out wait for this.
+                    SegmentUploadWorker.enqueue(getContext(), "sweep", null);
+                } catch (Throwable t) {
+                    call.reject("storeAuthTokens failed: " + t.getMessage());
+                }
+            });
+        } catch (Throwable t) {
+            call.reject("storeAuthTokens_failed: " + t.getMessage());
+        }
     }
 
     @PluginMethod
     public void getValidAccessToken(PluginCall call) {
-        authExecutor().execute(() -> {
-            try {
-                String token;
+        try {
+            authExecutor().execute(() -> {
                 try {
-                    token = AuthStorage.getValidAccessTokenOrThrow(getContext(), false);
-                } catch (AuthStorage.TransientRefreshException e) {
-                    call.reject("refresh_transient");
-                    return;
+                    String token;
+                    try {
+                        token = AuthStorage.getValidAccessTokenOrThrow(getContext(), false);
+                    } catch (AuthStorage.TransientRefreshException e) {
+                        call.reject("refresh_transient");
+                        return;
+                    }
+                    if (token == null) {
+                        call.reject("refresh_invalid");
+                        return;
+                    }
+                    JSObject ret = new JSObject();
+                    ret.put("access_token", token);
+                    ret.put("expires_at", AuthStorage.getExpiresAt(getContext()));
+                    ret.put("email", AuthStorage.getEmail(getContext()));
+                    call.resolve(ret);
+                } catch (Throwable t) {
+                    call.reject("refresh_transient: " + t.getMessage());
                 }
-                if (token == null) {
-                    call.reject("refresh_invalid");
-                    return;
-                }
-                JSObject ret = new JSObject();
-                ret.put("access_token", token);
-                ret.put("expires_at", AuthStorage.getExpiresAt(getContext()));
-                ret.put("email", AuthStorage.getEmail(getContext()));
-                call.resolve(ret);
-            } catch (Throwable t) {
-                call.reject("refresh_transient: " + t.getMessage());
-            }
-        });
+            });
+        } catch (Throwable t) {
+            // The JS auth layer reads refresh_transient as "try again", never as signed out.
+            call.reject("refresh_transient: " + t.getMessage());
+        }
     }
 
     @PluginMethod
     public void clearAuth(PluginCall call) {
-        authExecutor().execute(() -> {
-            try {
-                AuthStorage.clear(getContext());
-                call.resolve();
-            } catch (Throwable t) {
-                call.reject("clearAuth failed: " + t.getMessage());
-            }
-        });
+        try {
+            authExecutor().execute(() -> {
+                try {
+                    AuthStorage.clear(getContext());
+                    call.resolve();
+                } catch (Throwable t) {
+                    call.reject("clearAuth failed: " + t.getMessage());
+                }
+            });
+        } catch (Throwable t) {
+            call.reject("clearAuth_failed: " + t.getMessage());
+        }
     }
 
     @PluginMethod

@@ -70,12 +70,28 @@ public final class ServiceStartPolicy {
 
     // The live-Stop worker's tail: the wake lock goes unless a newer session owns it, claim won or lost;
     // the alarm goes only when this stop won.
-    public static boolean releaseAfterLiveStop(boolean stopped, boolean newerLive) {
-        return !newerLive;
+    public static boolean releaseAfterLiveStop(boolean stopped, boolean newerLive, boolean otherTeardownRunning) {
+        return !newerLive && (stopped || !otherTeardownRunning);
     }
 
     public static boolean cancelAlarmAfterLiveStop(boolean stopped, boolean newerLive) {
         return stopped && !newerLive;
+    }
+
+    // Stale prefs: resume only while the last sign of life (last HR, else the start) is within the
+    // auto-end horizon; a clock that went backwards counts as fresh.
+    public static boolean resumeAllowedByAge(long lastAliveMs, long sessionStartMs, long nowMs) {
+        long anchor = Math.max(lastAliveMs, sessionStartMs);
+        return nowMs - anchor <= LinkStatePolicy.AUTO_END_NOT_FOUND_MS;
+    }
+
+    public static long staleAgeMs(long lastAliveMs, long sessionStartMs, long nowMs) {
+        return Math.max(0L, nowMs - Math.max(lastAliveMs, sessionStartMs));
+    }
+
+    // A declined resume drops the alarm only when prefs are not live; error and stopping keep it for the next try.
+    public static boolean resumeDeclineCancelsAlarm(String reason) {
+        return "not_live".equals(reason);
     }
 
     // 43200000 -> "12", 1800000 -> "0.5".

@@ -209,8 +209,8 @@ public class NativeHrService extends Service {
                     return ServiceStartPolicy.sticky(decision, noStickyTest) ? START_STICKY : START_NOT_STICKY;
                 }
                 String reason = r.optString("reason", "");
-                // A resume that threw keeps the alarm for the next try; not_live and stopping drop it.
-                idleStop(startId, origin + " resume=" + reason, !"error".equals(reason));
+                // Only not_live drops the alarm; error and stopping keep it for the next try.
+                idleStop(startId, origin + " resume=" + reason, ServiceStartPolicy.resumeDeclineCancelsAlarm(reason));
                 return START_NOT_STICKY;
             }
             case IDLE_STOP:
@@ -280,7 +280,7 @@ public class NativeHrService extends Service {
                 boolean newerLive = cur != null && cur.isSessionActive();
                 if (ServiceStartPolicy.cancelAlarmAfterLiveStop(stopped, newerLive)) HrServiceHeartbeatReceiver.cancel(app);
                 stopInFlight = false;
-                if (ServiceStartPolicy.releaseAfterLiveStop(stopped, newerLive)) {
+                if (ServiceStartPolicy.releaseAfterLiveStop(stopped, newerLive, HrEngine.isStopTeardownInProgress())) {
                     releaseWakeLock();
                     releasePulse();
                 }
