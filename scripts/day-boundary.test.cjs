@@ -84,7 +84,7 @@ const sameSet = (got, want) => {
 };
 
 // Data epochs (a sample, a session start, now) take dayKeyOf.
-let r = sameSet(callers('dayKeyOf'), ['sessionLocalDateKey', 'localDateKeyToday', 'summarizeCSV', 'loadSessions', 'rebuildSessionsByDate']);
+let r = sameSet(callers('dayKeyOf'), ['sessionLocalDateKey', 'localDateKeyToday', 'summarizeCSV', 'loadSessionsRun', 'rebuildSessionsByDate']);
 check('dayKeyOf only at the data-epoch sites', r.ok, r.detail);
 // Calendar cursors and week bounds take localDateLabel.
 r = sameSet(callers('localDateLabel'), ['rangeCutoffISO', 'renderWeek', 'bucketKey']);

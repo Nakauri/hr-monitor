@@ -117,6 +117,10 @@
       // that runs during a session. The @capawesome FGS plugin above is
       // legacy / never started on the session path.
       nativeFgsRunning: !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing()),
+      sessionShimMarker: window.__hrMonitorNativeHrSessionRanInit === undefined ? null : String(window.__hrMonitorNativeHrSessionRanInit),
+      sessionShimAvailable: !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable),
+      sessionShimMode: (window.HRMNativeHrSession && window.HRMNativeHrSession.mode) || null,
+      sessionShimSegments: !!(window.HRMNativeHrSession && typeof window.HRMNativeHrSession.listSegments === 'function'),
       battoptLoaded: !!window.__hrMonitorBatteryOptLoaded,
       battoptRanInit: !!window.__hrMonitorBatteryOptRanInit,
       battoptGotPlugin: !!window.__hrMonitorBatteryOptGotPlugin,
@@ -482,8 +486,14 @@
           ['Viewer cache (sessions)', String(d.driveMetaCount), d.driveMetaCount > 0 ? 'ok' : ''],
           ['Last viewer sync', d.driveLastSync || 'never', d.driveLastSync ? 'ok' : ''],
         ])}
+        ${rows('Session shim', [
+          ['init marker', d.sessionShimMarker || 'not loaded', d.isNative ? ok(d.sessionShimMarker === 'true' || d.sessionShimMarker === 'reader') : ''],
+          ['isAvailable', yn(d.sessionShimAvailable), d.isNative ? ok(d.sessionShimAvailable) : ''],
+          ['mode', d.sessionShimMode || '—', ''],
+          ['phone recordings readable', yn(d.sessionShimSegments), d.isNative ? ok(d.sessionShimSegments) : ''],
+        ])}
         ${rows('Foreground service (background recording)', [
-          ['Native session FGS running', yn(d.nativeFgsRunning), d.isNative ? ok(d.nativeFgsRunning) : ''],
+          ['Native session FGS running', d.sessionShimMode === 'reader' ? 'skipped' : yn(d.nativeFgsRunning), d.isNative && d.sessionShimMode !== 'reader' ? ok(d.nativeFgsRunning) : ''],
           ['Legacy @capawesome plugin loaded', yn(d.fgsLoaded), ''],
           ['Legacy @capawesome started', yn(d.fgsStarted), ''],
           ['notification permission', (d.fgsPermission != null ? JSON.stringify(d.fgsPermission) : 'not required on this OS'), ''],
@@ -750,6 +760,10 @@
     lines.push('Drive:');
     lines.push('  native:   ' + (d.driveNativeOverride ? 'override present' : 'not overridden'));
     lines.push('  auth:     ' + (d.driveSignedIn ? 'signed in' : 'not signed in'));
+    lines.push('Session shim:');
+    lines.push('  marker:   ' + (d.sessionShimMarker || 'not loaded'));
+    lines.push('  avail:    ' + (d.sessionShimAvailable ? 'yes' : 'no') + (d.sessionShimMode ? ' (' + d.sessionShimMode + ')' : ''));
+    lines.push('  segments: ' + (d.sessionShimSegments ? 'yes' : 'no'));
     lines.push('FGS:');
     lines.push('  loaded:   ' + (d.fgsLoaded ? 'yes' : 'no'));
     lines.push('  plugin:   ' + (d.fgsGotPlugin ? 'yes' : 'no'));

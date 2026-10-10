@@ -860,6 +860,97 @@ public final class HrEngine implements HrDevice.Callback {
         }
     }
 
+    // ---- Local v2 segments for the in-app viewer (B-b2) ----
+    // Own thread: a read never queues behind a strap connect on ioExecutor, and the writer lock
+    // (held briefly for the open segment's length) is never taken on the plugin thread.
+    private final ExecutorService segmentReadExecutor = Executors.newSingleThreadExecutor(
+        r -> new Thread(r, "hrm-segment-read"));
+
+    private SegmentReader.OpenSegment openSegmentView() {
+        final HrSink s = sink;
+        if (!(s instanceof TeeSink)) return null;
+        final TeeSink tee = (TeeSink) s;
+        return new SegmentReader.OpenSegment() {
+            @Override public String openName() { return tee.openSegmentName(); }
+            @Override public long readableLength(String name) { return tee.segmentReadableLength(name); }
+        };
+    }
+
+    // Exactly one of ok or fail: a throw inside ok is logged, never turned into a second settle.
+    private static void settleOnce(Done<JSONObject> done, JSONObject ret, String err) {
+        if (ret == null) {
+            try { done.fail(err); } catch (Throwable t) { Log.w(TAG, "segment read fail threw: " + t); }
+            return;
+        }
+        try { done.ok(ret); } catch (Throwable t) { Log.w(TAG, "segment read ok threw: " + t); }
+    }
+
+    // {segments: [{name, base, size, mtime, open}]}, hours starting in [fromMs, toMs); null bounds are open.
+    public void listSegments(final Long fromMs, final Long toMs, Done<JSONObject> done) {
+        try {
+            segmentReadExecutor.execute(() -> {
+                JSONObject ret = null;
+                String err = "internal";
+                try {
+                    java.io.File dir = new java.io.File(appCtx.getFilesDir(), "segments");
+                    java.util.List<SegmentReader.Entry> list = SegmentReader.list(dir,
+                        fromMs != null ? fromMs : Long.MIN_VALUE, toMs != null ? toMs : Long.MAX_VALUE,
+                        openSegmentView());
+                    org.json.JSONArray arr = new org.json.JSONArray();
+                    for (SegmentReader.Entry en : list) {
+                        JSONObject o = new JSONObject();
+                        putSafe(o, "name", en.name);
+                        putSafe(o, "base", en.base);
+                        putSafe(o, "size", en.size);
+                        putSafe(o, "mtime", en.mtime);
+                        putSafe(o, "open", en.open);
+                        arr.put(o);
+                    }
+                    ret = putSafe(new JSONObject(), "segments", arr);
+                } catch (Throwable t) {
+                    err = "list_segments_failed: " + t.getMessage();
+                }
+                settleOnce(done, ret, err);
+            });
+        } catch (Throwable t) {
+            done.fail("list_segments_failed: " + t.getMessage());
+        }
+    }
+
+    // {name, text, size, open, truncated}: text runs to the last LF; size is its byte length.
+    public void readSegment(final String name, Done<JSONObject> done) {
+        try {
+            if (!SegmentReader.validName(name)) {
+                done.fail("bad_name");
+                return;
+            }
+            segmentReadExecutor.execute(() -> {
+                JSONObject ret = null;
+                String err = "internal";
+                try {
+                    java.io.File dir = new java.io.File(appCtx.getFilesDir(), "segments");
+                    SegmentReader.Read r = SegmentReader.read(dir, name, openSegmentView(), SegmentReader.MAX_READ_BYTES);
+                    if (r.truncated) {
+                        NativeHrService.logLifecycle(appCtx, "segment_read_truncated name=" + name + " bytes=" + r.size);
+                    }
+                    ret = new JSONObject();
+                    putSafe(ret, "name", r.name);
+                    putSafe(ret, "text", r.text);
+                    putSafe(ret, "size", r.size);
+                    putSafe(ret, "open", r.open);
+                    putSafe(ret, "truncated", r.truncated);
+                } catch (Throwable t) {
+                    ret = null;
+                    String m = t.getMessage();
+                    err = "not_found".equals(m) || "bad_name".equals(m) ? m : "read_segment_failed: " + m;
+                }
+                settleOnce(done, ret, err);
+            });
+        } catch (Throwable t) {
+            done.fail("read_segment_failed: " + t.getMessage());
+        }
+    }
+
     // Returns the active session's CSV contents + start epoch so the WebView
     // can rehydrate state.hrSeries / state.rmssdSeries after being reclaimed
     // mid-session. Fails if no session is active or the file is missing.

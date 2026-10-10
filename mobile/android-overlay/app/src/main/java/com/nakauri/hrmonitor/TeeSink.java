@@ -136,6 +136,23 @@ public final class TeeSink implements HrSink {
         } catch (Throwable t) { segmentFailed("tz", t); }
     }
 
+    // Open segment for a reader, under this lock then the writer's (the order every write takes).
+    public synchronized String openSegmentName() {
+        if (closed) return null;
+        try {
+            SegmentWriter s = segment;
+            return s != null ? s.openName() : null;
+        } catch (Throwable t) { segmentFailed("open_name", t); return null; }
+    }
+
+    public synchronized long segmentReadableLength(String name) {
+        if (closed) return -1L;
+        try {
+            SegmentWriter s = segment;
+            return s != null ? s.readableLength(name) : -1L;
+        } catch (Throwable t) { segmentFailed("read_len", t); return -1L; }
+    }
+
     @Override
     public synchronized void close() {
         closed = true;

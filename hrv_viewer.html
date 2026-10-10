@@ -3415,8 +3415,11 @@
     if (!parts.length) parts.push(skipped === 0 ? 'nothing to sync' : 'in sync');
     setDriveProgress(parts.join(' · '));
 
-    if (pulled + uploaded + written + evicted > 0) {
-      persistIndex();
+    const changed = pulled + uploaded + written + evicted > 0;
+    if (changed) persistIndex();
+    // The poll tick reloads once for Drive and the phone together.
+    if (changed && opts && opts.deferReload) return { pulled, uploaded, written, skipped, changed };
+    if (changed) {
       await loadSessions();
       // Re-route after every successful sync so freshly-pulled data
       // appears in the current view, including when the user is sitting
@@ -3427,7 +3430,7 @@
       // even when the underlying file had grown by hours.
       route();
     }
-    return { pulled, uploaded, written, skipped };
+    return { pulled, uploaded, written, skipped, changed };
   }
 
   // Kebab + dropdown markup injected into every session-card. Kept in a
@@ -3569,6 +3572,92 @@
     if (errors.length) throw new Error(errors.join('; '));
   }
 
+  // ===== Phone segments (in-app viewer) =====
+  // The phone's own v2 segments, read through native, so today shows without Drive.
+  const PHONE_CALL_MS = 15000;
+  const PHONE_POLL_WINDOW_MS = 2 * 3600000;
+  const phoneSegs = new Map();   // name -> { size, open } from the last full listing
+  const segSource = new Map();   // name -> 'phone' | 'drive', for names both sources hold
+  const phoneText = new Map();   // name -> { size, text }, the last few reads
+
+  async function phoneSegmentApi() {
+    const cap = window.Capacitor;
+    if (!(cap && cap.isNativePlatform && cap.isNativePlatform())) return null;
+    // The shim registers on DOMContentLoaded; this page's init can run before it.
+    if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
+    const s = window.HRMNativeHrSession;
+    return s && s.isAvailable && typeof s.listSegments === 'function' && typeof s.readSegment === 'function' ? s : null;
+  }
+
+  function phoneCall(p) {
+    let t = null;
+    const ceiling = new Promise((_, reject) => { t = setTimeout(() => reject(new Error('phone_timeout')), PHONE_CALL_MS); });
+    return Promise.race([p, ceiling]).finally(() => clearTimeout(t));
+  }
+
+  // Which copy the viewer reads: the phone's open hour always, else the longer copy, Drive on a tie.
+  // Sizes are bytes to the last LF on both sides.
+  function pickSegmentSource(phone, drive) {
+    if (!phone) return drive ? 'drive' : null;
+    if (!drive || drive.size == null || !Number.isFinite(Number(drive.size))) return 'phone';
+    if (phone.open) return 'phone';
+    return Number(phone.size) > Number(drive.size) ? 'phone' : 'drive';
+  }
+
+  // Every phone segment as a new Map, or null when this is not the app or the phone did not answer.
+  async function phoneListSegments() {
+    const api = await phoneSegmentApi();
+    if (!api) return null;
+    try {
+      const r = await phoneCall(api.listSegments({}));
+      const out = new Map();
+      for (const s of (r && r.segments) || []) {
+        if (s && isSegmentName(s.name)) out.set(s.name, { size: Number(s.size) || 0, open: !!s.open });
+      }
+      return out;
+    } catch (e) {
+      console.warn('[phone] listSegments failed', e);
+      return null;
+    }
+  }
+
+  // Lists only recent hours; merges new or grown segments into phoneSegs and reports whether any changed.
+  // The next load reuses phoneSegs (reusePhone) instead of listing every segment again.
+  async function phonePollUpdate() {
+    const api = await phoneSegmentApi();
+    if (!api) return false;
+    let changed = false;
+    try {
+      const r = await phoneCall(api.listSegments({ fromMs: Date.now() - PHONE_POLL_WINDOW_MS }));
+      for (const s of (r && r.segments) || []) {
+        if (!s || !isSegmentName(s.name)) continue;
+        const next = { size: Number(s.size) || 0, open: !!s.open };
+        const known = phoneSegs.get(s.name);
+        if (!known || known.size !== next.size || known.open !== next.open) { phoneSegs.set(s.name, next); changed = true; }
+      }
+    } catch (e) { console.warn('[phone] poll listSegments failed', e); }
+    return changed;
+  }
+
+  async function phoneReadSegment(name) {
+    const meta = phoneSegs.get(name);
+    const hit = phoneText.get(name);
+    if (hit && meta && hit.size === meta.size) {
+      phoneText.delete(name);
+      phoneText.set(name, hit);
+      return hit.text;
+    }
+    const api = await phoneSegmentApi();
+    if (!api) throw new Error('phone_unavailable');
+    const r = await phoneCall(api.readSegment(name));
+    if (!r || typeof r.text !== 'string') throw new Error('phone_read_empty');
+    phoneText.delete(name);
+    // Keyed by the bytes actually read: a truncated (over 2 MB) read never matches the listing, so it is read again.
+    phoneText.set(name, { size: Number(r.size) || 0, text: r.text });
+    while (phoneText.size > 32) phoneText.delete(phoneText.keys().next().value);
+    return r.text;
+  }
+
   // Unified session-text reader. Prefers the local folder (if permission
   // granted), then falls back to the Drive IndexedDB cache. Throws if
   // neither source has the file.
@@ -3588,6 +3677,17 @@
       if (r.ok) return await r.text();
       throw new Error('Demo session not found: ' + filename);
     }
+    if (segSource.get(filename) === 'phone') {
+      try { return await phoneReadSegment(filename); }
+      catch (e) {
+        console.warn('[phone] readSegment failed, trying the caches', filename, e);
+        // The seg-index keys on recordingSizes; key it to the copy actually read so the next load retries the phone.
+        segSource.set(filename, 'drive');
+        const m = driveMetaCache[filename];
+        if (m && m.size != null) recordingSizes[filename] = String(m.size);
+        else delete recordingSizes[filename];
+      }
+    }
     if (dirHandle) {
       try {
         const fh = await dirHandle.getFileHandle(filename);
@@ -3602,9 +3702,13 @@
 
   // Collect filenames available from either source (local folder + Drive cache).
   // Segment byte sizes land in recordingSizes, the seg-index freshness key.
-  async function collectAvailableSessionFilenames() {
+  // opts.reusePhone: use phoneSegs as the poll left it instead of listing every phone segment.
+  // Sources and sizes are built in locals and swapped in at the end, so a read during the awaits sees the last set.
+  async function collectAvailableSessionFilenames(opts) {
     const names = new Set();
-    for (const k of Object.keys(recordingSizes)) delete recordingSizes[k];
+    const sizes = {};
+    const source = new Map();
+    const phone = opts && opts.reusePhone ? new Map(phoneSegs) : (await phoneListSegments()) || new Map();
     if (dirHandle) {
       const ok = await ensureReadPermission();
       if (ok) {
@@ -3613,22 +3717,40 @@
             if (entry.kind !== 'file' || !isRecordingName(entry.name)) continue;
             names.add(entry.name);
             if (isSegmentName(entry.name)) {
-              try { recordingSizes[entry.name] = String((await entry.getFile()).size); } catch (e) {}
+              try { sizes[entry.name] = String((await entry.getFile()).size); } catch (e) {}
             }
           }
         } catch (e) {}
       }
     }
+    const fromFolder = new Set(names);
+    const inDriveCache = new Set();
     try {
       const keys = await idbKeys(IDB_DRIVE_STORE);
       for (const k of keys) {
         if (typeof k !== 'string' || !isRecordingName(k)) continue;
         if (isSegmentName(k) && !names.has(k) && driveMetaCache[k] && driveMetaCache[k].size != null) {
-          recordingSizes[k] = String(driveMetaCache[k].size);
+          sizes[k] = String(driveMetaCache[k].size);
         }
+        if (isSegmentName(k)) inDriveCache.add(k);
         names.add(k);
       }
     } catch (e) {}
+    for (const [n, p] of phone) {
+      if (fromFolder.has(n)) continue;
+      const meta = inDriveCache.has(n) ? driveMetaCache[n] : null;
+      const src = pickSegmentSource(p, meta && meta.size != null ? { size: meta.size } : null);
+      source.set(n, src);
+      names.add(n);
+      if (src === 'phone') sizes[n] = String(p.size);
+    }
+    // No await from here to the return.
+    phoneSegs.clear();
+    for (const [k, v] of phone) phoneSegs.set(k, v);
+    segSource.clear();
+    for (const [k, v] of source) segSource.set(k, v);
+    for (const k of Object.keys(recordingSizes)) delete recordingSizes[k];
+    Object.assign(recordingSizes, sizes);
     return Array.from(names);
   }
 
@@ -4176,7 +4298,9 @@
         if (prev) { v2Store.delete('seg:' + name); segIdxDel('seg:' + name); }
         continue;
       }
-      const bytes = size != null ? String(size) : String(new TextEncoder().encode(text).length);
+      // Re-read after the read: a failed phone read re-keys the name to the copy it fell back to.
+      const sizeNow = recordingSizes[name];
+      const bytes = sizeNow != null ? String(sizeNow) : String(new TextEncoder().encode(text).length);
       recordingSizes[name] = bytes;
       const entry = { __segV: 1, name, size: bytes, iid: seg.iid, base: seg.base, tz: seg.tz, ops: segmentOps(seg) };
       v2Store.set('seg:' + name, entry);
@@ -4340,14 +4464,40 @@
     };
   }
 
-  async function loadSessions(opts) {
+  // Single flight: a call during a load waits for it, then one more run covers every waiting caller.
+  let loadInFlight = null;
+  let loadQueued = null;
+  let loadQueuedOpts = null;
+  function loadSessions(opts) {
+    if (!loadInFlight) {
+      const p = loadSessionsRun(opts).finally(() => { if (loadInFlight === p) loadInFlight = null; });
+      loadInFlight = p;
+      return p;
+    }
+    const reuse = !!(opts && opts.reusePhone);
+    if (!loadQueued) {
+      loadQueuedOpts = { reusePhone: reuse, onProgress: opts && opts.onProgress };
+      loadQueued = loadInFlight.catch(() => {}).then(() => {
+        const o = loadQueuedOpts;
+        loadQueued = null;
+        loadQueuedOpts = null;
+        return loadSessions(o);
+      });
+    } else {
+      if (!reuse) loadQueuedOpts.reusePhone = false;
+      if (!loadQueuedOpts.onProgress && opts && opts.onProgress) loadQueuedOpts.onProgress = opts.onProgress;
+    }
+    return loadQueued;
+  }
+
+  async function loadSessionsRun(opts) {
     const onProgress = opts && opts.onProgress;
     loadCachedIndex();
     legacyShadow = {};
     const priorTrim = precedenceTrim;
     precedenceTrim = new Set();
     precedenceHide = new Set();
-    const allNames = await collectAvailableSessionFilenames();
+    const allNames = await collectAvailableSessionFilenames({ reusePhone: !!(opts && opts.reusePhone) });
     if (allNames.length === 0 && !driveAccessToken) return;
     const segNames = allNames.filter(isSegmentName);
     const filenames = allNames.filter(n => !isSegmentName(n));
@@ -7146,9 +7296,30 @@
   function startAutoPoll() {
     clearAutoPoll();
     autoPollTimer = setInterval(() => {
-      if (!driveAccessToken || !driveFolderId) return;
-      driveSync({ poll: true }).catch(e => console.warn('[auto-poll] driveSync failed', e));
+      autoPollTick().catch(e => console.warn('[auto-poll] failed', e));
     }, AUTO_POLL_INTERVAL_MS);
+  }
+  // Drive first, then the phone's recent hours (the open hour in the app); at most one reload per tick.
+  let autoPollBusy = false;
+  async function autoPollTick() {
+    if (autoPollBusy) return;
+    autoPollBusy = true;
+    try {
+      let reload = false;
+      if (driveAccessToken && driveFolderId) {
+        try {
+          const r = await driveSync({ poll: true, deferReload: true });
+          if (r && r.changed) reload = true;
+        } catch (e) { console.warn('[auto-poll] driveSync failed', e); }
+      }
+      if (await phonePollUpdate()) reload = true;
+      if (reload) {
+        await loadSessions({ reusePhone: true });
+        route();
+      }
+    } finally {
+      autoPollBusy = false;
+    }
   }
   function clearAutoPoll() {
     if (autoPollTimer) { clearInterval(autoPollTimer); autoPollTimer = null; }

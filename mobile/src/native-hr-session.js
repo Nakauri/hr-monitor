@@ -4,6 +4,48 @@
 (function () {
   function setMarker(v) { try { window.__hrMonitorNativeHrSessionRanInit = v; } catch (e) {} }
 
+  // data-mode="reader" (the viewer): local segment reads only. No status() seed, no event
+  // listeners, no session controls, so nothing monitor-only runs on that page.
+  const shimEl = document.currentScript;
+  const readerMode = !!(shimEl && shimEl.getAttribute('data-mode') === 'reader');
+
+  function segmentReads(plugin) {
+    return {
+      // {fromMs?, toMs?} -> {segments: [{name, base, size, mtime, open}]}; size is the last-LF length.
+      listSegments: function (opts) {
+        if (typeof plugin.listSegments !== 'function') return Promise.reject(new Error('unsupported'));
+        return plugin.listSegments(opts || {});
+      },
+      // name -> {name, text, size, open, truncated}; text ends at the segment's last LF.
+      readSegment: function (name) {
+        if (typeof plugin.readSegment !== 'function') return Promise.reject(new Error('unsupported'));
+        return plugin.readSegment({ name: name });
+      },
+    };
+  }
+
+  function initReader() {
+    const cap = window.Capacitor;
+    if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) {
+      setMarker('skipped:not-native');
+      return;
+    }
+    const plugin = cap.Plugins && cap.Plugins.NativeHrSession;
+    if (!plugin) {
+      setMarker('skipped:plugin-missing');
+      return;
+    }
+    const reads = segmentReads(plugin);
+    window.HRMNativeHrSession = {
+      isAvailable: true,
+      mode: 'reader',
+      listSegments: reads.listSegments,
+      readSegment: reads.readSegment,
+    };
+    setMarker('reader');
+    console.info('[native-hr-session] registered (reader).');
+  }
+
   function init() {
     const cap = window.Capacitor;
     if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) {
@@ -125,8 +167,12 @@
       setPublishing(false, data);
     });
 
+    const reads = segmentReads(plugin);
     window.HRMNativeHrSession = {
       isAvailable: true,
+      mode: 'full',
+      listSegments: reads.listSegments,
+      readSegment: reads.readSegment,
       isPublishing: function () { return publishing; },
       getCsvFilename: function () { return csvFilename; },
       getSessionStartMs: function () { return sessionStartMs; },
@@ -340,9 +386,10 @@
     console.info('[native-hr-session] registered.');
   }
 
+  const start = readerMode ? initReader : init;
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
+    document.addEventListener('DOMContentLoaded', start, { once: true });
   } else {
-    init();
+    start();
   }
 })();

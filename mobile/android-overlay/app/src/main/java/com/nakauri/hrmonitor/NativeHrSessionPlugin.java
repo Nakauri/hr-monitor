@@ -315,6 +315,34 @@ public class NativeHrSessionPlugin extends Plugin {
         }
     }
 
+    // Local v2 segments for the in-app viewer: {fromMs?, toMs?} -> {segments: [{name, base, size, mtime, open}]}.
+    @PluginMethod
+    public void listSegments(PluginCall call) {
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) return;
+            JSObject data = call.getData();
+            Object from = data != null ? data.opt("fromMs") : null;
+            Object to = data != null ? data.opt("toMs") : null;
+            e.listSegments(from instanceof Number ? Long.valueOf(((Number) from).longValue()) : null,
+                to instanceof Number ? Long.valueOf(((Number) to).longValue()) : null, jsDone(call));
+        } catch (Throwable t) {
+            call.reject("list_segments_failed: " + t.getMessage());
+        }
+    }
+
+    // {name} -> {name, text, size, open, truncated}; text ends at the segment's last LF.
+    @PluginMethod
+    public void readSegment(PluginCall call) {
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) return;
+            e.readSegment(call.getString("name"), jsDone(call));
+        } catch (Throwable t) {
+            call.reject("read_segment_failed: " + t.getMessage());
+        }
+    }
+
     @PluginMethod
     public void getSessionSnapshot(PluginCall call) {
         try {

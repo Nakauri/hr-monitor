@@ -28,6 +28,7 @@ const INJECT_TARGET = 'hr_monitor.html';
 // expired access token via NativeHrSession instead of throwing
 // `native_refresh_unavailable` and forcing the user to re-sign-in.
 // Doesn't need BLE / FGS / relay — those are session-control concerns.
+// Gets native-hr-session.js with data-mode="reader" for local segment reads.
 const VIEWER_INJECT_TARGET = 'hrv_viewer.html';
 
 const SHIM_TAGS = `
@@ -54,10 +55,12 @@ const VIEWER_SHIM_TAGS = `
        window.__hrMonitorNativeDriveRefresh is undefined and auth.js
        throws native_refresh_unavailable on token expiry, breaking sign-in.
        restore-overlay so the viewer can also dismiss the native splash if
-       a user lands here directly. -->
+       a user lands here directly. native-hr-session in reader mode reads
+       the phone's local segments; it starts no session code. -->
   <script src="./capacitor-bootstrap.js"></script>
   <script src="./drive-auth-native.js"></script>
   <script src="./restore-overlay.js"></script>
+  <script src="./native-hr-session.js" data-mode="reader"></script>
 `;
 
 // Every shim under mobile/src copied next to the web files. One source of

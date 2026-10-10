@@ -477,5 +477,23 @@ public class SegmentWriter implements HrSink {
     @Override public synchronized int getConsecutiveFailures() { return consecutiveFailures; }
     @Override public synchronized int getTotalFailures() { return totalFailures; }
     public synchronized long getSyncCount() { return syncCount; }
+
+    // For a reader of the open segment: flushes buffered rows (no fsync) and returns the file length,
+    // captured under this lock so a read stops there while writes continue. -1 when name is not open.
+    // A failed flush is a write failure: the stream drops and the next row reopens and trims.
+    public synchronized long readableLength(String name) {
+        if (out == null || file == null || name == null || !name.equals(file.getName())) return -1L;
+        try {
+            out.flush();
+        } catch (IOException e) {
+            noteFailure("read", e);
+            dropStream("read");
+            return -1L;
+        }
+        return file.length();
+    }
+
+    // Name of the segment this writer holds open, or null.
+    public synchronized String openName() { return out != null && file != null ? file.getName() : null; }
     public synchronized boolean isOpen() { return out != null; }
 }
