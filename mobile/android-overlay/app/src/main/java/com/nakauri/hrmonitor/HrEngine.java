@@ -52,6 +52,10 @@ public final class HrEngine implements HrDevice.Callback {
 
     private static volatile HrEngine sInstance;
 
+    // One claim lock for session start, resume, the stop claim and the notification Stop's live-or-stale decision.
+    public static final Object START_LOCK = new Object();
+    public static final SessionGate GATE = new SessionGate(START_LOCK);
+
     // Builds the engine on first call; never seeds session state from prefs.
     public static synchronized Obtained obtain(Context ctx) {
         HrEngine e = sInstance;
@@ -145,6 +149,28 @@ public final class HrEngine implements HrDevice.Callback {
     // only schedules when none is pending, so a long backoff (>15 s heartbeat
     // interval) isn't cancelled and rescheduled forever.
     private volatile boolean reconnectPending = false;
+    // The strap this session records from: set by connect, resume and every onStreamsLive.
+    private volatile String targetMac;
+    // Single flight for native resolve-and-connect attempts on ioExecutor.
+    private final AtomicBoolean resolvePending = new AtomicBoolean(false);
+    // The old senderId a resume rotated away from; the new socket's onOpen sends its presence-end first.
+    private volatile String pendingPresenceEndId;
+
+    // The Service's wake lock and live-Stop path, filled in onStartCommand and cleared in onDestroy.
+    public interface ServiceHooks {
+        void set(boolean hold);
+        void pulse(long ms);
+        void liveStop(int gen, String reason);
+    }
+    private final AtomicReference<ServiceHooks> serviceHooks = new AtomicReference<>();
+
+    private final LinkStatePolicy link = new LinkStatePolicy();
+    private volatile int lastHrValue = 0;
+    private volatile Double lastRmssdValue = null;
+    // A wake's strap attempt holds the CPU this long; the auto-end decision lands inside it.
+    private static final long WAKE_PULSE_MS = 45_000L;
+    private static final long WAKE_RETRY_DELAY_MS = 2_000L;
+    private volatile long autoEndUsedMs = LinkStatePolicy.AUTO_END_NOT_FOUND_MS;
     private static final long STALE_HR_THRESHOLD_MS = 60_000L;
     private static final long HEARTBEAT_INTERVAL_MS = 15_000L;
 
@@ -329,7 +355,13 @@ public final class HrEngine implements HrDevice.Callback {
         }
     }
 
-    public void setPrefs(String json) { prefsJson = json; }
+    // Persisted so a native-only resume publishes the same widget prefs to OBS.
+    public void setPrefs(String json) {
+        prefsJson = json;
+        try {
+            appCtx.getSharedPreferences("hr_monitor_session", 0).edit().putString("tickPrefsJson", json == null ? "" : json).apply();
+        } catch (Throwable ignored) {}
+    }
 
     public void setBroadcast(boolean enabled) {
         boolean prev = broadcastEnabled;
@@ -402,6 +434,15 @@ public final class HrEngine implements HrDevice.Callback {
         relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
                 if (ws != relaySocket) return;
+                // Before relayLive, so no tick under the new id precedes the old id's presence-end.
+                String endId = pendingPresenceEndId;
+                if (endId != null) {
+                    try {
+                        ws.send("{\"type\":\"presence-end\",\"senderId\":\"" + escapeJson(endId) + "\"}");
+                        NativeHrService.logLifecycle(appCtx, "presence_end_sent old=" + endId);
+                    } catch (Throwable t) { Log.w(TAG, "presence-end send failed: " + t); }
+                    pendingPresenceEndId = null;
+                }
                 relayLive.set(true);
                 relayReconnectAttempts = 0;
                 Log.i(TAG, "Relay open");
@@ -563,12 +604,12 @@ public final class HrEngine implements HrDevice.Callback {
 
     // ---- Foreground Service lifecycle ------------------------------------
 
-    private void startNativeForegroundService(String title, String body) {
+    // The Service builds its notification text from the link state; the intent carries none.
+    private void startNativeForegroundService() {
         try {
             Intent i = new Intent(appCtx, NativeHrService.class);
             i.setAction(NativeHrService.ACTION_START);
-            i.putExtra(NativeHrService.EXTRA_TITLE, title);
-            i.putExtra(NativeHrService.EXTRA_BODY, body);
+            i.putExtra(NativeHrService.EXTRA_ORIGIN, ServiceStartPolicy.ORIGIN_ENGINE);
             i.putExtra(NativeHrService.EXTRA_SESSION_START_MS, sessionStartMs);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 appCtx.startForegroundService(i);
@@ -577,6 +618,38 @@ public final class HrEngine implements HrDevice.Callback {
             }
         } catch (Throwable t) {
             Log.w(TAG, "Failed to start FGS: " + t.getMessage());
+        }
+    }
+
+    // {title, body} for the current link state; PRE_RESUME while no session records.
+    public String[] notificationText() {
+        LinkStatePolicy.State st = sessionActive.get() ? link.state() : LinkStatePolicy.State.PRE_RESUME;
+        return ServiceStartPolicy.text(st, lastHrValue, lastRmssdValue, System.currentTimeMillis() - sessionStartMs,
+            HrServiceHeartbeatReceiver.exactAlarmsAllowed(appCtx));
+    }
+
+    public LinkStatePolicy.State linkState() { return link.state(); }
+
+    private void updateNotification() {
+        String[] t = notificationText();
+        updateNativeForegroundService(t[0], t[1]);
+    }
+
+    // The stop claim won (notification Stop or in-app Stop): the ongoing notification says the session
+    // is saving while the uploads run. Only with a Service up, whose teardown removes it; notify only.
+    private void postStoppingNotification() {
+        if (serviceHooks.get() == null) return;
+        try {
+            String[] t = ServiceStartPolicy.text(LinkStatePolicy.State.STOPPING, 0, null, 0L);
+            NativeHrService.ensureChannelStatic(appCtx);
+            android.app.NotificationManager nm = (android.app.NotificationManager)
+                appCtx.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+            if (nm != null) {
+                nm.notify(NativeHrService.getNotificationId(),
+                    NativeHrService.buildNotificationStatic(appCtx, t[0], t[1], sessionStartMs));
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "stopping notification failed: " + t);
         }
     }
 
@@ -612,6 +685,8 @@ public final class HrEngine implements HrDevice.Callback {
     private final Runnable gattReconnectRunnable = this::doGattReconnect;
     private void scheduleGattReconnect() {
         if (!sessionActive.get()) return;
+        // NOT_FOUND: the alarm and the app own retries.
+        if (!LinkStatePolicy.heartbeatMayReconnect(link.state())) return;
         mainHandler.removeCallbacks(gattReconnectRunnable);
         reconnectPending = true;
         gattReconnectAttempts++;
@@ -623,6 +698,7 @@ public final class HrEngine implements HrDevice.Callback {
     private void doGattReconnect() {
         reconnectPending = false;
         if (!sessionActive.get()) return;
+        if (!LinkStatePolicy.heartbeatMayReconnect(link.state())) return;
         if (gattReconnectAttempts > 5 || !device.hasHandle()) {
             Log.i(TAG, "GATT reconnect: full reconnect (attempts=" + gattReconnectAttempts + ")");
             fullReconnectGatt();
@@ -632,7 +708,51 @@ public final class HrEngine implements HrDevice.Callback {
     }
     private void fullReconnectGatt() {
         if (!sessionActive.get()) return;
+        // C4: no handle to rebuild from (a fresh process); resolve the strap by MAC instead.
+        if (!device.hasHandle()) {
+            String mac = targetMac;
+            if (mac != null) postResolveAndConnect(mac, "reconnect", null);
+            return;
+        }
         device.fullReconnect();
+    }
+
+    interface ConnectResult { void done(boolean resolved, boolean bonded); }
+
+    // Native connects never take the PUBLIC fallback. Single flight; skipped once the session ends.
+    private void postResolveAndConnect(final String mac, final String why, final ConnectResult result) {
+        if (mac == null || !resolvePending.compareAndSet(false, true)) return;
+        final int gen = sessionGeneration.get();
+        try {
+            ioExecutor.execute(() -> {
+                boolean resolved = false;
+                boolean bonded = false;
+                try {
+                    if (!sessionActive.get() || sessionGeneration.get() != gen) return;
+                    bonded = device.connect(mac, false);
+                    resolved = true;
+                    // A Stop landed during the (up to 3 s) resolve: its teardown ran first, so close this link.
+                    // A newer live session keeps it (same strap; closing would drop its link).
+                    if (!sessionActive.get()) {
+                        NativeHrService.logLifecycle(appCtx, "resolve_after_stop why=" + why);
+                        disconnectDevice();
+                        return;
+                    }
+                } catch (HrDevice.ResolveFailedException rf) {
+                    resolved = false;
+                } catch (Throwable t) {
+                    Log.w(TAG, "resolveAndConnect " + why + " failed: " + t);
+                } finally {
+                    resolvePending.set(false);
+                }
+                if (result != null) {
+                    try { result.done(resolved, bonded); } catch (Throwable t) { Log.w(TAG, "connect result threw: " + t); }
+                }
+            });
+        } catch (Throwable t) {
+            resolvePending.set(false);
+            Log.w(TAG, "resolveAndConnect not queued: " + t);
+        }
     }
 
     // Heartbeat: catches silent BLE drops Doze can produce (no onConnectionStateChange
@@ -641,7 +761,9 @@ public final class HrEngine implements HrDevice.Callback {
         @Override public void run() {
             if (!sessionActive.get()) return;
             long now = System.currentTimeMillis();
-            if (lastHrAtMs > 0 && now - lastHrAtMs > STALE_HR_THRESHOLD_MS && !reconnectPending) {
+            applyLink(link.onTick(now));
+            if (LinkStatePolicy.heartbeatMayReconnect(link.state())
+                    && lastHrAtMs > 0 && now - lastHrAtMs > STALE_HR_THRESHOLD_MS && !reconnectPending) {
                 if (!firstHrSeen) {
                     // Connected-but-silent since start: rebuild the link now, then wait another full window.
                     Log.w(TAG, "Heartbeat: no first HR after " + (now - lastHrAtMs) + "ms — full reconnect");
@@ -663,6 +785,211 @@ public final class HrEngine implements HrDevice.Callback {
     private void disconnectDevice() {
         device.stopStreams();
         device.disconnect();
+    }
+
+    // ---- Link state, wakes, auto-end ---------------------------------------
+
+    public void setServiceHooks(ServiceHooks h) {
+        serviceHooks.set(h);
+        if (h == null) return;
+        try { h.set(sessionActive.get() && LinkStatePolicy.holdsCpu(link.state())); }
+        catch (Throwable t) { Log.w(TAG, "hooks.set threw: " + t); }
+    }
+
+    // Clears only if the slot still holds h; an old Service instance never clears a newer one's hooks.
+    public void clearServiceHooks(ServiceHooks h) {
+        if (h != null) serviceHooks.compareAndSet(h, null);
+    }
+
+    // Logs, updates the notification at once (notify only) and sets the CPU hold.
+    private void applyLink(LinkStatePolicy.Transition t) {
+        if (t == null || !sessionActive.get()) return;
+        NativeHrService.logLifecycle(appCtx, "link_state from=" + t.from.name().toLowerCase(java.util.Locale.US)
+            + " to=" + t.to.name().toLowerCase(java.util.Locale.US));
+        if (t.to == LinkStatePolicy.State.NOT_FOUND) {
+            mainHandler.removeCallbacks(gattReconnectRunnable);
+            reconnectPending = false;
+        }
+        updateNotification();
+        ServiceHooks h = serviceHooks.get();
+        if (h != null) {
+            try { h.set(LinkStatePolicy.holdsCpu(t.to)); } catch (Throwable e) { Log.w(TAG, "hooks.set threw: " + e); }
+        }
+    }
+
+    // 12 h, or the TEST_HOOKS duration bound to this session.
+    private long autoEndMs() {
+        long ms = LinkStatePolicy.AUTO_END_NOT_FOUND_MS;
+        try {
+            android.content.SharedPreferences p = appCtx.getSharedPreferences("hr_monitor_session", 0);
+            if (BuildConfig.TEST_HOOKS && sessionStartMs > 0L && p.getLong("test_auto_end_session", 0L) == sessionStartMs) {
+                ms = p.getLong("test_auto_end_ms", ms);
+            }
+        } catch (Throwable ignored) {}
+        return ms;
+    }
+
+    // The auto-end bound the last armed wake used, for the session_auto_end line.
+    public long autoEndUsedMs() { return autoEndUsedMs; }
+
+    // A Service start (origin alarm) or the app coming forward (origin app). Acts only in NOT_FOUND:
+    // one strap attempt window inside a wake pulse. GATT failures inside the window retry; only the
+    // window's end decides, and only an alarm wake past the auto-end bound can end the session.
+    public void onWake(String origin) {
+        try {
+            if (!sessionActive.get()) return;
+            if (ServiceStartPolicy.ORIGIN_ALARM.equals(origin)) segmentTickFromAlarm();
+            if (!ServiceStartPolicy.ORIGIN_ALARM.equals(origin) && !ServiceStartPolicy.ORIGIN_APP.equals(origin)) return;
+            long now = System.currentTimeMillis();
+            // The heartbeat stalls in Doze; the wake catches the state up first.
+            applyLink(link.onTick(now));
+            long bound = ServiceStartPolicy.autoEndBoundFor(origin, autoEndMs());
+            LinkStatePolicy.WakePlan plan = link.onWake(now, bound);
+            if (!plan.attempt) return;
+            ServiceHooks h = serviceHooks.get();
+            if (h != null) h.pulse(WAKE_PULSE_MS);
+            final int gen = sessionGeneration.get();
+            NativeHrService.logLifecycle(appCtx, "wake_attempt origin=" + origin + " autoEnd=" + plan.autoEnd
+                + " mac=" + GattHrDevice.last4(targetMac));
+            if (plan.autoEnd) autoEndUsedMs = bound;
+            mainHandler.postDelayed(() -> onWakeWindowEnd(gen), LinkStatePolicy.WAKE_ATTEMPT_MS);
+            wakeConnect(gen);
+        } catch (Throwable t) {
+            Log.w(TAG, "onWake threw: " + t);
+        }
+    }
+
+    private void wakeConnect(final int gen) {
+        String mac = targetMac;
+        if (mac == null) return;
+        postResolveAndConnect(mac, "wake", (resolved, bonded) -> {
+            NativeHrService.logLifecycle(appCtx, "wake_connect resolved=" + resolved + " bonded=" + bonded);
+            if (!resolved) retryWakeAttempt(gen, "resolve_fail");
+        });
+    }
+
+    // A GATT failure (often 133) or a resolve failure inside the window: try again shortly; never decides.
+    private void retryWakeAttempt(final int gen, String why) {
+        if (!sessionActive.get() || sessionGeneration.get() != gen) return;
+        if (!link.shouldRetryAttempt(System.currentTimeMillis())) return;
+        NativeHrService.logLifecycle(appCtx, "wake_retry why=" + why);
+        mainHandler.postDelayed(() -> {
+            if (sessionActive.get() && sessionGeneration.get() == gen
+                    && link.shouldRetryAttempt(System.currentTimeMillis())) wakeConnect(gen);
+        }, WAKE_RETRY_DELAY_MS);
+    }
+
+    // The window's end decides, once: an armed auto-end with the strap still missing ends the session.
+    private void onWakeWindowEnd(int gen) {
+        if (!sessionActive.get() || sessionGeneration.get() != gen) return;
+        if (!link.onAttemptWindowEnd(System.currentTimeMillis())) return;
+        ServiceHooks h = serviceHooks.get();
+        NativeHrService.logLifecycle(appCtx, "auto_end_request service=" + (h != null));
+        if (h == null) return;
+        try {
+            h.pulse(WAKE_PULSE_MS);
+            h.liveStop(gen, ServiceStartPolicy.REASON_AUTO_END);
+        } catch (Throwable t) {
+            Log.w(TAG, "liveStop threw: " + t);
+        }
+    }
+
+    // ---- Resume -------------------------------------------------------------
+
+    private boolean prefsLive() {
+        android.content.SharedPreferences p = appCtx.getSharedPreferences("hr_monitor_session", 0);
+        return ServiceStartPolicy.prefsLive(p.getBoolean("sessionActive", false), p.getBoolean("cleanlyStopped", true));
+    }
+
+    private JSONObject alreadyRunningJson() {
+        JSONObject r = putSafe(new JSONObject(), "resumed", false);
+        putSafe(r, "alreadyRunning", true);
+        putSafe(r, "senderId", senderId);
+        putSafe(r, "senderLabel", senderLabel);
+        putSafe(r, "sessionStartMs", sessionStartMs);
+        HrSink s = sink;
+        if (s != null) putSafe(r, "csvFile", s.getFilename());
+        return r;
+    }
+
+    private static JSONObject resumeNotLive(String reason) {
+        return putSafe(putSafe(new JSONObject(), "resumed", false), "reason", reason);
+    }
+
+    // 6 hex chars, the shape of the page's getDeviceIdentity.
+    private static String mintSenderId() {
+        byte[] b = new byte[3];
+        new java.security.SecureRandom().nextBytes(b);
+        return String.format(java.util.Locale.US, "%02x%02x%02x", b[0] & 0xff, b[1] & 0xff, b[2] & 0xff);
+    }
+
+    // The one resume implementation every door calls. Returns {resumed:true, senderId, senderLabel,
+    // sessionStartMs, csvFile, origin}, {alreadyRunning:true, ...} or {resumed:false, reason}.
+    public JSONObject resumeFromPrefs(final String origin) {
+        try {
+            return GATE.resume(
+                () -> sessionActive.get(),
+                this::prefsLive,
+                HrEngine::isStopTeardownInProgress,
+                this::alreadyRunningJson,
+                () -> resumeNotLive("not_live"),
+                () -> resumeNotLive("stopping"),
+                () -> resumeLocked(origin));
+        } catch (Throwable t) {
+            Log.w(TAG, "resumeFromPrefs threw: " + t);
+            NativeHrService.logLifecycle(appCtx, "resume_failed origin=" + origin + " " + t.getClass().getSimpleName());
+            return resumeNotLive("error");
+        }
+    }
+
+    // Under START_LOCK (GATE.resume) with prefs live and nothing recording.
+    private JSONObject resumeLocked(String origin) throws Exception {
+        android.content.SharedPreferences prefs = appCtx.getSharedPreferences("hr_monitor_session", 0);
+        String mac = prefs.getString("lastConnectedMac", "");
+        String csv = prefs.getString("activeCsvFilename", "");
+        long startMs = prefs.getLong("sessionStartMs", 0L);
+        String key = prefs.getString("broadcastKey", "");
+        boolean enabled = prefs.getBoolean("broadcastEnabled", true);
+        String label = prefs.getString("senderLabel", "");
+        String oldId = prefs.getString("senderId", "");
+        if (mac == null || mac.isEmpty()) {
+            // Nothing to reconnect to: end it as the A8 stale match does.
+            android.content.SharedPreferences.Editor ed = prefs.edit()
+                .putBoolean("sessionActive", false)
+                .putBoolean("cleanlyStopped", true)
+                .putString("activeCsvFilename", "")
+                .remove("test_no_sticky_session")
+                .remove("test_auto_end_ms")
+                .remove("test_auto_end_session");
+            if (csv != null && !csv.isEmpty()) ed.putString("lastSessionFilename", csv);
+            ed.commit();
+            HrServiceHeartbeatReceiver.cancel(appCtx);
+            NativeHrService.logLifecycle(appCtx, "resume_abandon reason=no_mac origin=" + origin);
+            return resumeNotLive("not_live");
+        }
+        restoreStageThresholds(prefs.getString("stageThresholds", null));
+        String tick = prefs.getString("tickPrefsJson", null);
+        if (tick != null && !tick.isEmpty()) prefsJson = tick;
+        String newId = mintSenderId();
+        pendingPresenceEndId = oldId != null && !oldId.isEmpty() && !oldId.equals(newId) ? oldId : null;
+        if (label == null || label.isEmpty()) label = "HR Monitor Android";
+        targetMac = mac;
+        boolean fresh = csv == null || csv.isEmpty() || startMs <= 0L;
+        if (fresh) NativeHrService.logLifecycle(appCtx, "resume_fresh origin=" + origin + " csv=" + csv + " start=" + startMs);
+        JSONObject started = startSessionInternal(key, newId, label, enabled,
+            fresh ? null : csv, fresh ? null : Long.valueOf(startMs), origin);
+        String file = started.optString("csvFile", "");
+        NativeHrService.logLifecycle(appCtx, "native_resume origin=" + origin + " file=" + file
+            + " gen=" + sessionGeneration.get() + " old=" + oldId + " new=" + newId);
+        postResolveAndConnect(mac, "resume", (resolved, bonded) ->
+            NativeHrService.logLifecycle(appCtx, "resume_connect bonded=" + bonded + " resolved=" + resolved));
+        JSONObject r = putSafe(new JSONObject(), "resumed", true);
+        putSafe(r, "senderId", newId);
+        putSafe(r, "senderLabel", label);
+        putSafe(r, "sessionStartMs", sessionStartMs);
+        putSafe(r, "csvFile", file);
+        putSafe(r, "origin", origin);
+        return r;
     }
 
     // ---- Drive --------------------------------------------------------------
@@ -1331,15 +1658,27 @@ public final class HrEngine implements HrDevice.Callback {
 
     public int getSessionGeneration() { return sessionGeneration.get(); }
 
+    public long getSessionStartMs() { return sessionStartMs; }
+
     public boolean hasAdapter() { return bleScanner.adapter() != null; }
 
     public void scan(long timeoutMs, Done<org.json.JSONArray> done) {
         bleScanner.scan(timeoutMs, mainHandler, done);
     }
 
-    // Off the plugin thread: the rescan can block ~3 s.
+    // Off the plugin thread: the rescan can block ~3 s. A live session's own strap is never torn down.
     public void connect(final String mac, Done<JSONObject> done) {
         try {
+            String target = targetMac;
+            if (sessionActive.get() && mac != null && mac.equalsIgnoreCase(target)) {
+                // In NOT_FOUND the person is reconnecting by hand: one attempt.
+                if (link.state() == LinkStatePolicy.State.NOT_FOUND) postResolveAndConnect(target, "app_connect", null);
+                JSONObject ret = putSafe(new JSONObject(), "connecting", true);
+                putSafe(ret, "adopted", true);
+                NativeHrService.logLifecycle(appCtx, "connect_adopted mac=" + GattHrDevice.last4(mac));
+                done.ok(ret);
+                return;
+            }
             ioExecutor.execute(() -> doConnect(mac, done));
         } catch (Throwable t) {
             done.fail("connect failed: " + t.getMessage());
@@ -1351,12 +1690,13 @@ public final class HrEngine implements HrDevice.Callback {
         try {
             boolean bonded;
             try {
-                bonded = device.connect(mac);
+                bonded = device.connect(mac, true);
             } catch (SecurityException e) {
                 settled = true;
                 done.fail("BLUETOOTH_CONNECT denied: " + e.getMessage());
                 return;
             }
+            targetMac = mac;
             // Cache MAC for auto-resume after process kill. .apply is fine —
             // stale-by-30s acceptable, the same MAC carries across kills.
             try {
@@ -1381,154 +1721,157 @@ public final class HrEngine implements HrDevice.Callback {
 
     public void disconnect() { disconnectDevice(); }
 
+    // origin: ORIGIN_START for a plugin start, else the resume door (sticky, alarm, worker, replaced, js).
     public JSONObject startSessionInternal(String broadcastKeyArg, String senderIdArg, String senderLabelArg,
-            Boolean broadcastOpt, String resumeFilename, Long resumeStartMs) throws AlreadyActiveException {
-        // A live session is never torn down by a second start; a resume of the same file reports it as running.
-        if (sessionActive.get()) {
-            HrSink cur = sink;
-            if (resumeFilename != null && cur != null && resumeFilename.equals(cur.getFilename())) {
-                JSONObject running = putSafe(new JSONObject(), "started", true);
-                putSafe(running, "alreadyRunning", true);
-                putSafe(running, "csvFile", cur.getFilename());
-                putSafe(running, "sessionStartMs", sessionStartMs);
-                putSafe(running, "senderId", senderId);
-                putSafe(running, "senderLabel", senderLabel);
-                return running;
-            }
-            throw new AlreadyActiveException();
-        }
-        // Bump generation before resource creation so a stale stop's recheck fails first.
-        sessionGeneration.incrementAndGet();
-        broadcastKey = broadcastKeyArg;
-        senderId = senderIdArg;
-        senderLabel = senderLabelArg;
-        broadcastEnabled = (broadcastOpt == null) ? true : broadcastOpt;
-        // Relay needs a broadcastKey; offline mode runs without one.
-        boolean canBroadcast = broadcastEnabled && broadcastKey != null && !broadcastKey.isEmpty();
-        // Resume context: when JS replays a sessionInterrupted event back into
-        // startSession, the prior session's filename + start ms come along so
-        // we can append to the existing CSV instead of fragmenting one logical
-        // recording across two files.
-        boolean resuming = resumeFilename != null && !resumeFilename.isEmpty()
-            && resumeStartMs != null && resumeStartMs > 0L;
-        sessionStartMs = resuming ? resumeStartMs : System.currentTimeMillis();
-        NativeHrService.logLifecycle(appCtx, resuming ? "session_resume file=" + resumeFilename : "session_start");
-        synchronized (rrWindow) { rrWindow.clear(); }
-        synchronized (rrWindow5min) { rrWindow5min.clear(); }
-        synchronized (rrWindow) {
-            sdnnFullCount = 0;
-            sdnnFullMean = 0.0;
-            sdnnFullM2 = 0.0;
-        }
-        synchronized (liveBuffer) { liveBuffer.clear(); }
-        synchronized (trendHrBuffer) { trendHrBuffer.clear(); }
-        synchronized (trendRmssdBuffer) { trendRmssdBuffer.clear(); }
-        lastUploadMs.set(0);
-        lastFinalizeMs.set(System.currentTimeMillis());
-        committing.set(false);
-
-        // CSV — append to prior file when resuming, fresh file otherwise.
-        // Close any writer still open from a prior start that never stopped so
-        // its file handle doesn't leak.
-        HrSink prevWriter;
-        HrSink opened;
-        synchronized (sinkHandoffLock) {
-            synchronized (this) { prevWriter = sink; sink = null; }
-            if (prevWriter != null) { try { prevWriter.close(); } catch (Throwable ignored) {} }
-            NativeCsvWriter legacy = null;
-            try {
-                legacy = new NativeCsvWriter(appCtx, sessionStartMs, resuming ? resumeFilename : null);
-            } catch (Exception e) {
-                Log.w(TAG, "Could not open CSV: " + e.getMessage());
-            }
-            // The tee needs the legacy writer; a segment failure alone never leaves sink null.
-            HrSink next = legacy != null ? openTee(legacy) : null;
-            // g,start/resume lands before any row the published sink can take.
-            if (next != null) next.appendSession(sessionStartMs, resuming ? "resume" : "start", System.currentTimeMillis());
-            synchronized (this) { sink = next; }
-            opened = next;
-        }
-        uploader.resetSession();
-        resumable.resetSession();
-        if (opened != null) {
-            // Stamp the active filename on the regular uploader so the
-            // cleanup pass knows not to delete the in-progress CSV even
-            // if the resumable path is doing all the actual uploads.
-            uploader.markActiveSessionFilename(opened.getFile().getName());
-            // Open the resumable session up-front. Async; callers later
-            // read isReady() to decide chunk-vs-fallback. If openSession
-            // fails or auth isn't ready yet, the periodic upload path
-            // falls back to full PATCH transparently.
-            resumable.startSessionAsync(opened.getFile().getName());
-        }
-
-        // Pre-session cleanup pass. Catches orphan CSVs from prior sessions
-        // that ended unclean (process kill, OEM kill, force-stop).
-        try {
-            java.io.File sessionsDir = new java.io.File(appCtx.getFilesDir(), "sessions");
-            long sevenDaysMs = 7L * 24L * 60L * 60L * 1000L;
-            uploader.cleanupLocalCachedAsync(sessionsDir, sevenDaysMs);
-            // Crash recovery: if the immediately-previous session ended
-            // uncleanly (process killed mid-trickle, no finalize), its
-            // resumable session was orphaned by Drive and the file never
-            // appeared in the user's folder. Re-upload from the local
-            // CSV so they can see it on the viewer.
-            try {
-                String prev = appCtx.getSharedPreferences("hr_monitor_session", 0)
-                    .getString("lastSessionFilename", null);
-                if (prev != null && !prev.isEmpty() && (opened == null || !prev.equals(opened.getFile().getName()))) {
-                    uploader.uploadOrphanIfNeededAsync(sessionsDir, prev);
+            Boolean broadcastOpt, String resumeFilename, Long resumeStartMs, String origin) throws AlreadyActiveException {
+        // The plugin thread and the main thread (Service resume) both start; the check and the claim are one.
+        synchronized (START_LOCK) {
+            // A live session is never torn down by a second start; a resume of the same file reports it as running.
+            if (sessionActive.get()) {
+                HrSink cur = sink;
+                if (resumeFilename != null && cur != null && resumeFilename.equals(cur.getFilename())) {
+                    JSONObject running = putSafe(new JSONObject(), "started", true);
+                    putSafe(running, "alreadyRunning", true);
+                    putSafe(running, "csvFile", cur.getFilename());
+                    putSafe(running, "sessionStartMs", sessionStartMs);
+                    putSafe(running, "senderId", senderId);
+                    putSafe(running, "senderLabel", senderLabel);
+                    return running;
                 }
-            } catch (Throwable ignored) {}
-            // Also full-scan: any local CSV whose Drive copy is missing OR
-            // smaller than local (truncated upload from a session that
-            // died before its final flush). Catches the case where the
-            // dead session is NOT lastSessionFilename — e.g. user started
-            // multiple sessions after the kill and the truncated file
-            // is now two or three back in the lastSessionFilename chain.
-            try { uploader.uploadOrphansAsync(sessionsDir); } catch (Throwable ignored) {}
-        } catch (Throwable t) { /* never block session start */ }
+                throw new AlreadyActiveException();
+            }
+            // Bump generation before resource creation so a stale stop's recheck fails first.
+            sessionGeneration.incrementAndGet();
+            broadcastKey = broadcastKeyArg;
+            senderId = senderIdArg;
+            senderLabel = senderLabelArg;
+            broadcastEnabled = (broadcastOpt == null) ? true : broadcastOpt;
+            // Relay needs a broadcastKey; offline mode runs without one.
+            boolean canBroadcast = broadcastEnabled && broadcastKey != null && !broadcastKey.isEmpty();
+            // Resume context: when JS replays a sessionInterrupted event back into
+            // startSession, the prior session's filename + start ms come along so
+            // we can append to the existing CSV instead of fragmenting one logical
+            // recording across two files.
+            boolean resuming = resumeFilename != null && !resumeFilename.isEmpty()
+                && resumeStartMs != null && resumeStartMs > 0L;
+            sessionStartMs = resuming ? resumeStartMs : System.currentTimeMillis();
+            NativeHrService.logLifecycle(appCtx, resuming ? "session_resume file=" + resumeFilename : "session_start");
+            synchronized (rrWindow) { rrWindow.clear(); }
+            synchronized (rrWindow5min) { rrWindow5min.clear(); }
+            synchronized (rrWindow) {
+                sdnnFullCount = 0;
+                sdnnFullMean = 0.0;
+                sdnnFullM2 = 0.0;
+            }
+            synchronized (liveBuffer) { liveBuffer.clear(); }
+            synchronized (trendHrBuffer) { trendHrBuffer.clear(); }
+            synchronized (trendRmssdBuffer) { trendRmssdBuffer.clear(); }
+            lastUploadMs.set(0);
+            lastFinalizeMs.set(System.currentTimeMillis());
+            committing.set(false);
 
-        if (canBroadcast) openRelaySocket();
+            // CSV — append to prior file when resuming, fresh file otherwise.
+            // Close any writer still open from a prior start that never stopped so
+            // its file handle doesn't leak.
+            HrSink prevWriter;
+            HrSink opened;
+            synchronized (sinkHandoffLock) {
+                synchronized (this) { prevWriter = sink; sink = null; }
+                if (prevWriter != null) { try { prevWriter.close(); } catch (Throwable ignored) {} }
+                NativeCsvWriter legacy = null;
+                try {
+                    legacy = new NativeCsvWriter(appCtx, sessionStartMs, resuming ? resumeFilename : null);
+                } catch (Exception e) {
+                    Log.w(TAG, "Could not open CSV: " + e.getMessage());
+                }
+                // The tee needs the legacy writer; a segment failure alone never leaves sink null.
+                HrSink next = legacy != null ? openTee(legacy) : null;
+                // g,start/resume lands before any row the published sink can take.
+                if (next != null) next.appendSession(sessionStartMs, resuming ? "resume" : "start", System.currentTimeMillis());
+                synchronized (this) { sink = next; }
+                opened = next;
+            }
+            uploader.resetSession();
+            resumable.resetSession();
+            if (opened != null) {
+                // Stamp the active filename on the regular uploader so the
+                // cleanup pass knows not to delete the in-progress CSV even
+                // if the resumable path is doing all the actual uploads.
+                uploader.markActiveSessionFilename(opened.getFile().getName());
+                // Open the resumable session up-front. Async; callers later
+                // read isReady() to decide chunk-vs-fallback. If openSession
+                // fails or auth isn't ready yet, the periodic upload path
+                // falls back to full PATCH transparently.
+                resumable.startSessionAsync(opened.getFile().getName());
+            }
 
-        // Start our own foreground service so Android keeps the process
-        // alive + BLE callbacks firing while backgrounded.
-        startNativeForegroundService("HR Monitor", "Recording");
+            // Pre-session cleanup pass. Catches orphan CSVs from prior sessions
+            // that ended unclean (process kill, OEM kill, force-stop).
+            try {
+                java.io.File sessionsDir = new java.io.File(appCtx.getFilesDir(), "sessions");
+                long sevenDaysMs = 7L * 24L * 60L * 60L * 1000L;
+                uploader.cleanupLocalCachedAsync(sessionsDir, sevenDaysMs);
+                // Crash recovery: if the immediately-previous session ended
+                // uncleanly (process killed mid-trickle, no finalize), its
+                // resumable session was orphaned by Drive and the file never
+                // appeared in the user's folder. Re-upload from the local
+                // CSV so they can see it on the viewer.
+                try {
+                    String prev = appCtx.getSharedPreferences("hr_monitor_session", 0)
+                        .getString("lastSessionFilename", null);
+                    if (prev != null && !prev.isEmpty() && (opened == null || !prev.equals(opened.getFile().getName()))) {
+                        uploader.uploadOrphanIfNeededAsync(sessionsDir, prev);
+                    }
+                } catch (Throwable ignored) {}
+                // Also full-scan: any local CSV whose Drive copy is missing OR
+                // smaller than local (truncated upload from a session that
+                // died before its final flush). Catches the case where the
+                // dead session is NOT lastSessionFilename — e.g. user started
+                // multiple sessions after the kill and the truncated file
+                // is now two or three back in the lastSessionFilename chain.
+                try { uploader.uploadOrphansAsync(sessionsDir); } catch (Throwable ignored) {}
+            } catch (Throwable t) { /* never block session start */ }
 
-        sessionActive.set(true);
-        // Persist crash-safety flags + resume context. .commit() on the
-        // booleans because SIGKILL between here and the heartbeat alarm
-        // would lose the "we're recording" signal. Other keys are .apply
-        // (best-effort) since they're rewritten at next session start
-        // regardless.
-        try {
-            appCtx.getSharedPreferences("hr_monitor_session", 0).edit()
-                .putBoolean("sessionActive", true)
-                .putBoolean("cleanlyStopped", false)
-                .commit();
-            appCtx.getSharedPreferences("hr_monitor_session", 0).edit()
-                .putLong("sessionStartMs", sessionStartMs)
-                .putString("broadcastKey", broadcastKey == null ? "" : broadcastKey)
-                .putString("senderId", senderId == null ? "" : senderId)
-                .putString("senderLabel", senderLabel == null ? "" : senderLabel)
-                .putBoolean("broadcastEnabled", broadcastEnabled)
-                .putString("activeCsvFilename", opened != null ? opened.getFile().getName() : "")
-                .apply();
-        } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
-        lastHrAtMs = System.currentTimeMillis();
-        firstHrSeen = false;
-        gattReconnectAttempts = 0;
-        mainHandler.removeCallbacks(heartbeatRunnable);
-        mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
-        scheduleSegmentRoll();
-        startSegmentUploadTick();
-        emitState();
-        JSONObject startedEv = putSafe(new JSONObject(), "sessionStartMs", sessionStartMs);
-        if (opened != null) putSafe(startedEv, "csvFile", opened.getFilename());
-        emit("publishingStarted", startedEv);
-        JSONObject ret = putSafe(new JSONObject(), "started", true);
-        if (opened != null) putSafe(ret, "csvFile", opened.getFilename());
-        return ret;
+            if (canBroadcast) openRelaySocket();
+
+            sessionActive.set(true);
+            // One .commit(): a SIGKILL right after must not lose the live flag, the key or the senderId a resume needs.
+            try {
+                appCtx.getSharedPreferences("hr_monitor_session", 0).edit()
+                    .putBoolean("sessionActive", true)
+                    .putBoolean("cleanlyStopped", false)
+                    .putLong("sessionStartMs", sessionStartMs)
+                    .putString("broadcastKey", broadcastKey == null ? "" : broadcastKey)
+                    .putString("senderId", senderId == null ? "" : senderId)
+                    .putString("senderLabel", senderLabel == null ? "" : senderLabel)
+                    .putBoolean("broadcastEnabled", broadcastEnabled)
+                    .putString("activeCsvFilename", opened != null ? opened.getFile().getName() : "")
+                    .commit();
+            } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
+            lastHrValue = 0;
+            lastRmssdValue = null;
+            long linkNow = System.currentTimeMillis();
+            applyLink(ServiceStartPolicy.ORIGIN_START.equals(origin) ? link.onStart(linkNow) : link.onResume(linkNow));
+            // After the commit, so the onStartCommand this triggers always reads prefs live.
+            startNativeForegroundService();
+            lastHrAtMs = System.currentTimeMillis();
+            firstHrSeen = false;
+            gattReconnectAttempts = 0;
+            mainHandler.removeCallbacks(heartbeatRunnable);
+            mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
+            scheduleSegmentRoll();
+            startSegmentUploadTick();
+            emitState();
+            JSONObject startedEv = putSafe(new JSONObject(), "sessionStartMs", sessionStartMs);
+            if (opened != null) putSafe(startedEv, "csvFile", opened.getFilename());
+            putSafe(startedEv, "senderId", senderId);
+            putSafe(startedEv, "senderLabel", senderLabel);
+            putSafe(startedEv, "origin", origin);
+            emit("publishingStarted", startedEv);
+            JSONObject ret = putSafe(new JSONObject(), "started", true);
+            if (opened != null) putSafe(ret, "csvFile", opened.getFilename());
+            return ret;
+        }
     }
 
     /**
@@ -1550,11 +1893,17 @@ public final class HrEngine implements HrDevice.Callback {
         // Counted before the claim so a notification Stop landing in between takes the defer branch.
         stopWorkersRunning.incrementAndGet();
         // Claim the stop atomically; a concurrent JS + notification stop runs teardown once.
-        if (!sessionActive.compareAndSet(true, false)) {
+        // Under START_LOCK so it never lands between a resume's claim and its prefs commit.
+        boolean claimed;
+        synchronized (START_LOCK) { claimed = sessionActive.compareAndSet(true, false); }
+        if (!claimed) {
             stopWorkersRunning.decrementAndGet();
             Log.i(TAG, "stopSessionInternal skipped — already stopping.");
             return null;
         }
+        link.onEnded();
+        pendingPresenceEndId = null;
+        postStoppingNotification();
         final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
         // Generation this stop tears down; a session started before the worker ends keeps its FGS.
         final int stopGen = sessionGeneration.get();
@@ -1579,7 +1928,10 @@ public final class HrEngine implements HrDevice.Callback {
                     .getSharedPreferences("hr_monitor_session", 0).edit()
                     .putBoolean("sessionActive", false)
                     .putBoolean("cleanlyStopped", true)
-                    .putString("activeCsvFilename", "");
+                    .putString("activeCsvFilename", "")
+                    .remove("test_no_sticky_session")
+                    .remove("test_auto_end_ms")
+                    .remove("test_auto_end_session");
                 if (stoppedFilename != null) ed.putString("lastSessionFilename", stoppedFilename);
                 ed.commit();
             } catch (Throwable t) { Log.w(TAG, "session-state commit failed: " + t.getMessage()); }
@@ -1690,14 +2042,26 @@ public final class HrEngine implements HrDevice.Callback {
         // A Start in the gap between the check and stopService gets its FGS back.
         if (sessionActive.get()) {
             NativeHrService.logLifecycle(appCtx, "stop_worker_fgs_restarted");
-            startNativeForegroundService("HR Monitor", "Recording");
+            startNativeForegroundService();
         }
         return true;
     }
 
     public JSONObject statusJson() {
         JSONObject ret = new JSONObject();
-        boolean active = sessionActive.get();
+        boolean active;
+        boolean prefsActive = false;
+        boolean cleanly = true;
+        android.content.SharedPreferences prefs = null;
+        // One snapshot: a resume between its claim and its prefs commit never reads as a recovery.
+        synchronized (START_LOCK) {
+            active = sessionActive.get();
+            try {
+                prefs = appCtx.getSharedPreferences("hr_monitor_session", 0);
+                prefsActive = prefs.getBoolean("sessionActive", false);
+                cleanly = prefs.getBoolean("cleanlyStopped", true);
+            } catch (Throwable ignored) {}
+        }
         putSafe(ret, "sessionActive", active);
         putSafe(ret, "bleConnected", device.hasHandle());
         putSafe(ret, "relayLive", relayLive.get());
@@ -1719,11 +2083,7 @@ public final class HrEngine implements HrDevice.Callback {
         // process was killed mid-session. JS reads the recoveryContext block
         // synchronously from this snapshot — no event timing race.
         try {
-            android.content.SharedPreferences prefs = appCtx
-                .getSharedPreferences("hr_monitor_session", 0);
-            boolean prefsActive = prefs.getBoolean("sessionActive", false);
-            boolean cleanly = prefs.getBoolean("cleanlyStopped", true);
-            boolean recoveryPending = prefsActive && !cleanly && !active;
+            boolean recoveryPending = prefs != null && prefsActive && !cleanly && !active;
             putSafe(ret, "interruptedRecovery", recoveryPending);
             if (recoveryPending) {
                 putSafe(ret, "recoveryContext", buildRecoveryContext(prefs,
@@ -1773,12 +2133,23 @@ public final class HrEngine implements HrDevice.Callback {
         HrSink w = sink;
         if (w != null) w.appendConnection("disconnected", System.currentTimeMillis());
         emitState();
-        if (sessionActive.get()) scheduleGattReconnect();
+        if (!sessionActive.get()) return;
+        if (link.state() == LinkStatePolicy.State.NOT_FOUND) {
+            // A wake attempt's GATT failure: retried inside its window; the alarm and the app own the next wake.
+            final int gen = sessionGeneration.get();
+            mainHandler.post(() -> retryWakeAttempt(gen, "gatt_" + status));
+            return;
+        }
+        applyLink(link.onLinkDown(System.currentTimeMillis()));
+        scheduleGattReconnect();
     }
 
     @Override
     public void onStreamsLive() {
         NativeHrService.logLifecycle(appCtx, "notifications_live");
+        String addr = device.address();
+        if (addr != null) targetMac = addr;
+        applyLink(link.onHr(System.currentTimeMillis()));
         HrSink w = sink;
         if (w != null) w.appendConnection("connected", System.currentTimeMillis());
     }
@@ -1798,6 +2169,8 @@ public final class HrEngine implements HrDevice.Callback {
     public void onHr(int hr, int[] rrMs, boolean contactOff, long tsMs) {
         long now = tsMs;
         lastHrAtMs = now;
+        lastHrValue = hr;
+        applyLink(link.onHr(now));
         firstHrSeen = true;
         gattReconnectAttempts = 0;
         if (now - lastAliveWriteMs >= ALIVE_WRITE_INTERVAL_MS) {
@@ -1960,14 +2333,10 @@ public final class HrEngine implements HrDevice.Callback {
             android.os.PowerManager pm = (android.os.PowerManager) appCtx.getSystemService(android.content.Context.POWER_SERVICE);
             if (pm != null && pm.isInteractive()) notifInterval = 5000L;
         } catch (Throwable ignored) {}
+        lastRmssdValue = rmssd;
         if (now - lastNotifUpdateMs >= notifInterval && sessionActive.get()) {
             lastNotifUpdateMs = now;
-            long elapsedMs = now - sessionStartMs;
-            long mm = elapsedMs / 60000L;
-            long ss = (elapsedMs / 1000L) % 60;
-            String body = String.format(java.util.Locale.US, "Recording · %d:%02d", mm, ss);
-            String title = "HR " + hr + " bpm" + (rmssd != null ? " · HRV " + Math.round(rmssd) + "ms" : "");
-            updateNativeForegroundService(title, body);
+            updateNotification();
         }
     }
 
@@ -1985,6 +2354,23 @@ public final class HrEngine implements HrDevice.Callback {
         if (elevated != null) stageElevated = elevated;
         if (high != null) stageHigh = high;
         if (rmssdCritical != null) stageRmssdCritical = rmssdCritical;
+        // Persisted so a native-only resume publishes the same bands.
+        try {
+            appCtx.getSharedPreferences("hr_monitor_session", 0).edit().putString("stageThresholds",
+                stageLow + "," + stageNormal + "," + stageElevated + "," + stageHigh + "," + stageRmssdCritical).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    // "70,90,110,130,15" from setStageThresholds; anything malformed keeps the current bands.
+    private void restoreStageThresholds(String csv) {
+        if (csv == null || csv.isEmpty()) return;
+        String[] p = csv.split(",");
+        if (p.length != 5) return;
+        try {
+            int[] v = new int[5];
+            for (int i = 0; i < 5; i++) v[i] = Integer.parseInt(p[i].trim());
+            stageLow = v[0]; stageNormal = v[1]; stageElevated = v[2]; stageHigh = v[3]; stageRmssdCritical = v[4];
+        } catch (NumberFormatException ignored) {}
     }
 
     private String hrStage(int hr) {

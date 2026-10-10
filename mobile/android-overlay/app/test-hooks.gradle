@@ -1,0 +1,12 @@
+// test-hooks.gradle: appended to the generated app/build.gradle (CI always; locally once).
+// BuildConfig.TEST_HOOKS gates the device-test prefs; true only when HRM_TEST_HOOKS=1 for that gradle run.
+// A build without this append fails to compile, so a missing switch fails closed.
+
+android {
+    buildFeatures {
+        buildConfig true
+    }
+    defaultConfig {
+        buildConfigField "boolean", "TEST_HOOKS", (System.getenv("HRM_TEST_HOOKS") == "1" ? "true" : "false")
+    }
+}

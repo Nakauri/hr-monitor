@@ -32,18 +32,21 @@ public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
             boolean cleanlyStopped = prefs.getBoolean("cleanlyStopped", true);
             shouldContinue = sessionActive && !cleanlyStopped;
             if (shouldContinue) {
+                // The Service resumes a dead session or wakes a live one (onWake owns the segment tick).
                 Intent startIntent = new Intent(context, NativeHrService.class);
                 startIntent.setAction(NativeHrService.ACTION_START);
-                startIntent.putExtra(NativeHrService.EXTRA_TITLE, "HR Monitor");
-                startIntent.putExtra(NativeHrService.EXTRA_BODY, "Reconnecting after restart");
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(startIntent);
-                } else {
-                    context.startService(startIntent);
+                startIntent.putExtra(NativeHrService.EXTRA_ORIGIN, ServiceStartPolicy.ORIGIN_ALARM);
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(startIntent);
+                    } else {
+                        context.startService(startIntent);
+                    }
+                    Log.i(TAG, "Heartbeat: requested FGS start (sessionActive=true, cleanlyStopped=false)");
+                } catch (Throwable t) {
+                    // API 31+: an inexact alarm carries no FGS-start allowance; only the exact alarm clock does.
+                    NativeHrService.logLifecycle(context, "fgs_start_denied " + t.getClass().getSimpleName());
                 }
-                Log.i(TAG, "Heartbeat: requested FGS start (sessionActive=true, cleanlyStopped=false)");
-                HrEngine engine = HrEngine.peek();
-                if (engine != null) engine.segmentTickFromAlarm();
             }
         } catch (Throwable t) {
             Log.w(TAG, "Heartbeat receive failed: " + t.getMessage());
@@ -53,12 +56,37 @@ public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
         if (shouldContinue) schedule(context);
     }
 
+    // True when the 10-minute alarm is an exact alarm clock (always below API 31).
+    public static boolean exactAlarmsAllowed(Context context) {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            return am != null && am.canScheduleExactAlarms();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
     public static void schedule(Context context) {
+        scheduleAt(context, System.currentTimeMillis() + INTERVAL_MS);
+    }
+
+    // The worker's API 31+ handoff: WorkManager may not start a foreground service there; the alarm may.
+    public static void scheduleSoon(Context context, long delayMs) {
+        scheduleAt(context, System.currentTimeMillis() + Math.max(0L, delayMs));
+    }
+
+    private static void scheduleAt(Context context, long triggerAt) {
         try {
             AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
             if (am == null) return;
             PendingIntent pi = pendingIntent(context, false);
-            long triggerAt = System.currentTimeMillis() + INTERVAL_MS;
+            // API 31+: exact alarms can be revoked; setAlarmClock would throw without the grant.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                NativeHrService.logLifecycle(context, "alarm_inexact");
+                return;
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 // Tap-target for the alarm chip — opens MainActivity. Required
                 // by setAlarmClock (the chip wants somewhere to take the user).

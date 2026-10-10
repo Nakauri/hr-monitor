@@ -27,7 +27,8 @@ public class GattHrDevice implements HrDevice {
     private final BleScanner bleScanner;
     private volatile Callback cb;
 
-    private BluetoothGatt currentGatt;
+    // volatile: ioExecutor (connect), main (reconnect) and binder threads read it.
+    private volatile BluetoothGatt currentGatt;
     private BluetoothGattCharacteristic hrChar;
     // 2 consecutive CCCD failures on a bonded handle = stale bond; trigger removeBond.
     private int cccdAttempts = 0;
@@ -43,9 +44,9 @@ public class GattHrDevice implements HrDevice {
 
     @Override
     @SuppressLint("MissingPermission")
-    public boolean connect(String mac) throws Exception {
+    public boolean connect(String mac, boolean allowPublic) throws Exception {
         BluetoothAdapter adapter = bleScanner.adapter();
-        // Handle resolution: bond cache → scan cache → rescan → PUBLIC fallback.
+        // Handle resolution: bond cache → scan cache → rescan → PUBLIC fallback (JS connects only).
         // Coospo straps advertise as RANDOM; PUBLIC fallback connects but never
         // delivers notifications. See docs/ble-connect.md.
         usingBondedHandle = false;
@@ -63,6 +64,10 @@ public class GattHrDevice implements HrDevice {
             }
         }
         if (device == null) {
+            if (!allowPublic) {
+                NativeHrService.logLifecycle(appCtx, "resolve_fail mac=" + last4(mac));
+                throw new ResolveFailedException(last4(mac));
+            }
             Log.w(TAG, "connect: PUBLIC fallback for " + mac);
             device = adapter.getRemoteDevice(mac);
         }
@@ -71,6 +76,12 @@ public class GattHrDevice implements HrDevice {
         // autoConnect=false joins existing ACL links; =true waits on advertisements.
         currentGatt = device.connectGatt(appCtx, false, gattCallback);
         return usingBondedHandle;
+    }
+
+    static String last4(String mac) {
+        if (mac == null) return "null";
+        String m = mac.replace(":", "");
+        return m.length() <= 4 ? m : m.substring(m.length() - 4);
     }
 
     @Override
@@ -95,17 +106,18 @@ public class GattHrDevice implements HrDevice {
     public void fullReconnect() {
         BluetoothAdapter adapter = bleScanner.adapter();
         if (adapter == null) return;
-        String mac = null;
-        if (currentGatt != null && currentGatt.getDevice() != null) {
-            mac = currentGatt.getDevice().getAddress();
-        }
+        BluetoothGatt g = currentGatt;
+        BluetoothDevice cur = g != null ? g.getDevice() : null;
+        if (cur == null) return;
+        String mac = cur.getAddress();
         if (mac == null) return;
         BluetoothDevice device = bleScanner.findBondedDevice(mac);
         if (device == null) device = bleScanner.findScannedDevice(mac);
+        // Never getRemoteDevice (PUBLIC): the live handle keeps the address type it was resolved with.
         if (device == null) {
-            try { device = adapter.getRemoteDevice(mac); } catch (Throwable ignored) {}
+            NativeHrService.logLifecycle(appCtx, "full_reconnect_reuse mac=" + last4(mac));
+            device = cur;
         }
-        if (device == null) return;
         closeGattQuietly();
         try {
             currentGatt = device.connectGatt(appCtx, false, gattCallback);

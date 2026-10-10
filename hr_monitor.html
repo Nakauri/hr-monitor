@@ -4185,7 +4185,15 @@
       updateSessionToggle();
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
-      if (/^timeout_/.test(msg)) {
+      if (/already_active/.test(msg)) {
+        // A session went live under us (a native resume): adopt it, never report a failure.
+        const s = await queryNativeStatus();
+        if (s && s.sessionActive) {
+          adoptNativeSessionUi(s);
+        } else {
+          setStatus("Couldn't check the recording. Tap Start session to try again.", 'error');
+        }
+      } else if (/^timeout_/.test(msg)) {
         await onNativeStartTimeout(msg, startCall);
       } else if (/cancelled/i.test(msg)) setStatus('Search cancelled.');
       else setStatus('Connection failed: ' + msg, 'error');
@@ -4217,9 +4225,17 @@
   // Puts the UI on a native session that is already running.
   function adoptNativeSessionUi(s) {
     const bleUp = !!(s && s.bleConnected);
+    // A WebView that outlived a failed recovery still holds the old session's buffers.
+    if (state.connState !== 'live' && state.connState !== 'reconnecting') resetLiveDataBuffers();
     const last = getLastStrap();
     device = buildNativeDevice({ name: (last && last.name) || 'HR Strap', id: 'native', connected: bleUp });
     adoptNativeSenderIdentity();
+    // The status payload is fresher than the shim's cache, which is seeded once at load.
+    if (s && s.senderId) {
+      sessionStorage.setItem('hr_monitor_device_id', s.senderId);
+      if (s.senderLabel) sessionStorage.setItem('hr_monitor_device_label', s.senderLabel);
+      try { evictSelfFromBroadcasters(); } catch (e) {}
+    }
     const nativeStartMs = (window.HRMNativeHrSession && window.HRMNativeHrSession.getSessionStartMs)
       ? (window.HRMNativeHrSession.getSessionStartMs() || 0) : 0;
     setSessionStart(nativeStartMs > 0 ? nativeStartMs : Date.now());
@@ -4493,23 +4509,14 @@
     // a new file under today's filename — the exact path that produced the
     // May 18 phantom in the viewer cache.
     resetLiveDataBuffers();
-    // Fresh senderId for the resumed session. The old id (ctx.senderId) is
-    // already orphaned in the relay's activeBroadcasters from before the
-    // FGS death; rotating + sending presence-end clears it instead of
-    // accumulating a ghost.
-    rotateSenderId();
-    const freshIdent = getDeviceIdentity();
-    await nativeDeadline(window.HRMNativeHrSession.connect(ctx.mac), NATIVE_CONNECT_MS, 'connect');
-    // Once cancelled, start only if nothing else has touched the session.
-    if (cancelled() && (connectInFlight || state.connState !== 'idle')) return false;
-    await nativeDeadline(window.HRMNativeHrSession.startSession({
-      broadcastKey: ctx.broadcastKey || getOrCreateBroadcastKey(),
-      senderId: freshIdent.id,
-      senderLabel: ctx.senderLabel || freshIdent.label,
-      broadcast: ctx.broadcastEnabled !== false,
-      resumeFilename: ctx.activeCsvFilename || '',
-      resumeSessionStartMs: ctx.sessionStartMs || 0,
-    }), NATIVE_START_MS, 'start_session');
+    // Native owns the resume (the same one the Service runs): it rotates the senderId, sends
+    // presence-end for the old one and reconnects the strap. JS only adopts what it returns.
+    const r = await nativeDeadline(window.HRMNativeHrSession.resumeSession({ origin: 'js' }), NATIVE_START_MS, 'resume_session');
+    if (!r || !(r.resumed || r.alreadyRunning)) throw new Error((r && r.reason) || 'not_live');
+    if (r.senderId) sessionStorage.setItem('hr_monitor_device_id', r.senderId);
+    if (r.senderLabel) sessionStorage.setItem('hr_monitor_device_label', r.senderLabel);
+    try { evictSelfFromBroadcasters(); } catch (e) {}
+    if (r.sessionStartMs) ctx.sessionStartMs = r.sessionStartMs;
     if (cancelled()) { adoptLateNativeSession('recovery_late'); return false; }
     return true;
   }

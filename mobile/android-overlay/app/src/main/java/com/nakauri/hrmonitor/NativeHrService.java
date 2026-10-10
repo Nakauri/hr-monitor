@@ -9,36 +9,60 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
-// Foreground service for active HR sessions. Owns only the notification +
-// process anchor; BLE / relay / CSV / Drive live in HrEngine.
+import org.json.JSONObject;
+
+// Foreground service for active HR sessions. Every start door (the engine, the alarm, the worker,
+// a sticky restart, an app update) lands here; a dead session resumes through HrEngine.resumeFromPrefs.
 public class NativeHrService extends Service {
     private static final String TAG = "NativeHrService";
     private static final String CHANNEL_ID = "hr_monitor_native";
     private static final int NOTIFICATION_ID = 7703;
+    private static final int ENDED_NOTIFICATION_ID = 7704;
 
     public static final String ACTION_START = "com.nakauri.hrmonitor.NATIVE_HR_START";
     public static final String ACTION_STOP = "com.nakauri.hrmonitor.NATIVE_HR_STOP";
-    public static final String EXTRA_TITLE = "title";
-    public static final String EXTRA_BODY = "body";
+    // engine | alarm | worker | replaced; a null intent (sticky restart) is "sticky".
+    public static final String EXTRA_ORIGIN = "origin";
     // On the Stop PendingIntent: the session it was built for. 0 = unknown.
     public static final String EXTRA_SESSION_START_MS = "sessionStartMs";
-    // Bound on keeping the wake lock for the plugin's stop upload worker.
+    // Bound on keeping the wake lock for the engine's stop upload worker.
     private static final long STOP_WORKER_WAIT_MS = 10L * 60L * 1000L;
+    // onDestroy with a live session re-posts the FGS at most this often.
+    private static final long FGS_RESTART_MIN_MS = 60_000L;
+    private static volatile long lastFgsRestartMs = 0L;
 
-    // Service-owned PARTIAL_WAKE_LOCK. Held for the session's lifetime so
-    // BLE callbacks keep firing through Doze.
+    // Service-owned PARTIAL_WAKE_LOCK, held per link state (released in NOT_FOUND).
     private PowerManager.WakeLock wakeLock;
+    // Timed lock for a wake's strap attempt.
+    private PowerManager.WakeLock pulseLock;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // Set while the hrm-fgs-stop worker is mid-upload. A second ACTION_STOP
     // arriving in that window must not release the wake lock / drop foreground /
     // stopSelf, or it kills the upload the worker is protecting.
     private volatile boolean stopInFlight = false;
+
+    private final HrEngine.ServiceHooks hooks = new HrEngine.ServiceHooks() {
+        @Override public void set(boolean hold) {
+            if (hold) acquireWakeLock();
+            else if (!stopInFlight) releaseWakeLock();
+        }
+        @Override public void pulse(long ms) { pulseWakeLock(ms); }
+        @Override public void liveStop(int gen, String reason) {
+            mainHandler.post(() -> {
+                HrEngine e = HrEngine.peek();
+                if (e != null) startLiveStop(e, gen, reason);
+            });
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -46,7 +70,7 @@ public class NativeHrService extends Service {
         ensureChannel();
     }
 
-    private void acquireWakeLock() {
+    private synchronized void acquireWakeLock() {
         if (wakeLock != null && wakeLock.isHeld()) return;
         try {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -59,102 +83,244 @@ public class NativeHrService extends Service {
         }
     }
 
-    private void releaseWakeLock() {
+    private synchronized void releaseWakeLock() {
         try {
             if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         } catch (Throwable ignored) {}
         wakeLock = null;
     }
 
+    private synchronized void pulseWakeLock(long ms) {
+        try {
+            if (pulseLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm == null) return;
+                pulseLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HRMonitor:Wake");
+                pulseLock.setReferenceCounted(false);
+            }
+            pulseLock.acquire(ms);
+        } catch (Throwable t) {
+            Log.w(TAG, "pulseWakeLock failed: " + t.getMessage());
+        }
+    }
+
+    private synchronized void releasePulse() {
+        try {
+            if (pulseLock != null && pulseLock.isHeld()) pulseLock.release();
+        } catch (Throwable ignored) {}
+    }
+
+    private static String originOf(Intent intent) {
+        if (intent == null) return ServiceStartPolicy.ORIGIN_STICKY;
+        String o = intent.getStringExtra(EXTRA_ORIGIN);
+        // No origin: treat as our own start, which never resumes.
+        return o != null && !o.isEmpty() ? o : ServiceStartPolicy.ORIGIN_ENGINE;
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        String action = intent != null ? intent.getAction() : ACTION_START;
-        logLifecycle(this, "service_start action=" + action + " engine=" + (HrEngine.peek() != null)
-            + " nullIntent=" + (intent == null));
+        String action = intent != null && intent.getAction() != null ? intent.getAction() : ACTION_START;
+        String origin = originOf(intent);
+        SharedPreferences prefs = getSharedPreferences("hr_monitor_session", 0);
+        boolean prefsLive = ServiceStartPolicy.prefsLive(prefs.getBoolean("sessionActive", false),
+            prefs.getBoolean("cleanlyStopped", true));
+        HrEngine peeked = HrEngine.peek();
+        boolean active = peeked != null && peeked.isSessionActive();
+        logLifecycle(this, "service_start action=" + action + " origin=" + origin + " engine=" + (peeked != null)
+            + " active=" + active + " prefsLive=" + prefsLive);
 
-        // startForeground must run within 5 s of startForegroundService, even on STOP.
-        String title = intent != null && intent.getStringExtra(EXTRA_TITLE) != null
-            ? intent.getStringExtra(EXTRA_TITLE) : "HR Monitor";
-        String body = intent != null && intent.getStringExtra(EXTRA_BODY) != null
-            ? intent.getStringExtra(EXTRA_BODY) : "Recording";
+        // startForeground first, on every path: each startForegroundService is a fresh 5 s contract.
         long startMs = intent != null ? intent.getLongExtra(EXTRA_SESSION_START_MS, 0L) : 0L;
-        if (startMs <= 0L) startMs = prefsSessionStartMs(this);
-        Notification n = buildNotificationStatic(this, title, body, startMs);
+        if (startMs <= 0L) startMs = prefs.getLong("sessionStartMs", 0L);
+        boolean stopping = stopInFlight || HrEngine.isStopTeardownInProgress();
+        LinkStatePolicy.State shown = ServiceStartPolicy.notificationState(stopping, active,
+            active ? peeked.linkState() : LinkStatePolicy.State.PRE_RESUME);
+        String[] text = shown == LinkStatePolicy.State.STOPPING || !active
+            ? ServiceStartPolicy.text(shown, 0, null, 0L) : peeked.notificationText();
         try {
-            startForeground(NOTIFICATION_ID, n);
+            startForeground(NOTIFICATION_ID, buildNotificationStatic(this, text[0], text[1], startMs));
         } catch (Throwable t) {
             Log.w(TAG, "startForeground failed: " + t.getMessage());
         }
 
+        long liveSessionStartMs = active ? peeked.getSessionStartMs() : prefs.getLong("sessionStartMs", 0L);
+        boolean noStickyTest = false;
+        if (BuildConfig.TEST_HOOKS && liveSessionStartMs > 0L
+                && prefs.getLong("test_no_sticky_session", 0L) == liveSessionStartMs) {
+            noStickyTest = true;
+        }
+
         if (ACTION_STOP.equals(action)) {
-            // A stop worker is already running; the flag branches below would
-            // release the wake lock and stopSelf mid-upload. Bail after the
-            // mandatory startForeground.
+            // A stop worker is already running; the branches below would
+            // release the wake lock and stopSelf mid-upload.
             if (stopInFlight) {
                 Log.i(TAG, "ACTION_STOP ignored — stop already in flight.");
                 return START_NOT_STICKY;
             }
-            // Stale-intent guard: if no session is active, this is a queued
-            // intent from a prior session that delivered after the user
-            // started a new one. Tear down the FGS but do not call
-            // stopSessionInternal (which would close the fresh GATT).
-            HrEngine engine = HrEngine.peek();
-            boolean sessionLive = engine != null && engine.isSessionActive();
-            setFgLossReason(this, sessionLive ? "user_stop_button" : "stale_action_stop");
-            if (sessionLive) {
-                // Holds the wake lock until the engine's upload worker ends; the generation guard spares a newer session.
-                final int gen = engine.getSessionGeneration();
-                final HrEngine p = engine;
-                stopInFlight = true;
-                Thread stopWorker = new Thread(() -> {
-                    boolean stopped = false;
-                    try {
-                        java.util.concurrent.CountDownLatch uploadDone = p.stopSessionInternalIfCurrent(gen);
-                        stopped = uploadDone != null;
-                        if (stopped && !uploadDone.await(STOP_WORKER_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                            Log.w(TAG, "stop upload worker still running after " + STOP_WORKER_WAIT_MS + " ms");
-                        }
-                    } catch (Throwable t) {
-                        Log.w(TAG, "deferred stopSessionInternal threw: " + t.getMessage());
-                    } finally {
-                        // A session started during the upload owns the alarm and wake lock.
-                        HrEngine cur = HrEngine.peek();
-                        boolean newerLive = cur != null && cur.isSessionActive();
-                        if (stopped && !newerLive) {
-                            HrServiceHeartbeatReceiver.cancel(NativeHrService.this);
-                            releaseWakeLock();
-                        }
-                        stopInFlight = false;
-                    }
-                }, "hrm-fgs-stop");
-                // Clear the flag if start() throws, else the Stop button stays dead.
-                try {
-                    stopWorker.start();
-                } catch (Throwable t) {
-                    stopInFlight = false;
-                    Log.w(TAG, "hrm-fgs-stop start failed: " + t.getMessage());
-                }
-                return START_NOT_STICKY;
-            }
-            // A stop's upload worker is still running; its tail owns service shutdown.
-            if (HrEngine.isStopTeardownInProgress()) {
+            final long intentStartMs = intent != null ? intent.getLongExtra(EXTRA_SESSION_START_MS, 0L) : 0L;
+            final HrEngine[] liveEngine = new HrEngine[1];
+            // Live or stale decided under START_LOCK: never between a resume's claim and its prefs commit.
+            SessionGate.StopPath path = HrEngine.GATE.stop(
+                () -> {
+                    HrEngine e = HrEngine.peek();
+                    liveEngine[0] = e;
+                    return e != null && e.isSessionActive();
+                },
+                HrEngine::isStopTeardownInProgress,
+                () -> startLiveStop(liveEngine[0], liveEngine[0].getSessionGeneration(), ServiceStartPolicy.REASON_USER_STOP),
+                () -> {
+                    setFgLossReason(this, "stale_action_stop");
+                    commitStaleStopIfCurrent(intentStartMs);
+                });
+            if (path == SessionGate.StopPath.TEARDOWN) {
                 Log.i(TAG, "ACTION_STOP ignored — stop upload worker in progress.");
-                return START_NOT_STICKY;
+            } else if (path == SessionGate.StopPath.STALE) {
+                Log.i(TAG, "ACTION_STOP with no live session (stale intent or pending recovery).");
+                // A mismatched Stop left prefs live: the resume alarm stays.
+                boolean liveAfter = ServiceStartPolicy.prefsLive(prefs.getBoolean("sessionActive", false),
+                    prefs.getBoolean("cleanlyStopped", true));
+                if (ServiceStartPolicy.staleStopCancelsAlarm(liveAfter)) HrServiceHeartbeatReceiver.cancel(this);
+                releaseWakeLock();
+                try { stopForeground(true); } catch (Throwable ignored) {}
+                stopSelf(startId);
             }
-            Log.i(TAG, "ACTION_STOP with no live session (stale intent or pending recovery).");
-            commitStaleStopIfCurrent(intent != null ? intent.getLongExtra(EXTRA_SESSION_START_MS, 0L) : 0L);
-            HrServiceHeartbeatReceiver.cancel(this);
-            releaseWakeLock();
-            stopForeground(true);
-            stopSelf();
             return START_NOT_STICKY;
         }
-        // ACTION_START path: acquire CPU keepalive + arm the periodic FGS
-        // resurrection alarm. Both are no-ops if already done — the heartbeat
-        // receiver re-fires this same path so we get re-armed across kills.
-        acquireWakeLock();
+
+        ServiceStartPolicy.Action decision = ServiceStartPolicy.decide(origin, prefsLive, active,
+            HrEngine.isStopTeardownInProgress());
+        switch (decision) {
+            case ATTACH:
+                attach(peeked, origin);
+                return ServiceStartPolicy.sticky(decision, noStickyTest) ? START_STICKY : START_NOT_STICKY;
+            case TEARDOWN:
+                logLifecycle(this, "service_teardown_wait origin=" + origin);
+                return START_NOT_STICKY;
+            case RESUME: {
+                // obtain, never the constructor: the constructor's mark-broken runs only on first construction.
+                HrEngine.Obtained o = HrEngine.obtain(this);
+                if (o.created) {
+                    logLifecycle(this, "engine_create by=service pid=" + android.os.Process.myPid()
+                        + " interrupted=" + o.engine.wasInterruptedAtCreate() + " markedBroken=" + o.engine.wasMarkedBrokenAtCreate());
+                }
+                JSONObject r = o.engine.resumeFromPrefs(origin);
+                if (r.optBoolean("resumed", false) || r.optBoolean("alreadyRunning", false)) {
+                    attach(o.engine, origin);
+                    return ServiceStartPolicy.sticky(decision, noStickyTest) ? START_STICKY : START_NOT_STICKY;
+                }
+                String reason = r.optString("reason", "");
+                // A resume that threw keeps the alarm for the next try; not_live and stopping drop it.
+                idleStop(startId, origin + " resume=" + reason, !"error".equals(reason));
+                return START_NOT_STICKY;
+            }
+            case IDLE_STOP:
+            default:
+                idleStop(startId, origin, true);
+                return START_NOT_STICKY;
+        }
+    }
+
+    // A live engine: wake lock per link state (through the hooks), the alarm, the current text, then the wake.
+    private void attach(HrEngine engine, String origin) {
+        engine.setServiceHooks(hooks);
         HrServiceHeartbeatReceiver.schedule(this);
-        return START_STICKY;
+        try {
+            String[] t = engine.notificationText();
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.notify(NOTIFICATION_ID, buildNotificationStatic(this, t[0], t[1], engine.getSessionStartMs()));
+        } catch (Throwable t) {
+            Log.w(TAG, "notification refresh failed: " + t.getMessage());
+        }
+        engine.onWake(origin);
+    }
+
+    // Nothing records: no wake lock, notification or (unless kept) alarm survives a stray start.
+    private void idleStop(int startId, String origin, boolean cancelAlarm) {
+        logLifecycle(this, "service_idle_stop origin=" + origin);
+        if (cancelAlarm) HrServiceHeartbeatReceiver.cancel(this);
+        releaseWakeLock();
+        releasePulse();
+        try { stopForeground(true); } catch (Throwable ignored) {}
+        stopSelf(startId);
+    }
+
+    // The live Stop, for the notification button and the auto-end: holds the wake lock until the engine's
+    // upload worker ends; the generation guard spares a newer session.
+    private void startLiveStop(final HrEngine engine, final int gen, final String reason) {
+        if (engine == null) return;
+        if (stopInFlight) {
+            Log.i(TAG, "live stop (" + reason + ") ignored — stop already in flight.");
+            return;
+        }
+        setFgLossReason(this, reason);
+        // NOT_FOUND released the lock; the A2 uploads need it in Doze.
+        acquireWakeLock();
+        stopInFlight = true;
+        final Context app = getApplicationContext();
+        Thread stopWorker = new Thread(() -> {
+            boolean stopped = false;
+            try {
+                java.util.concurrent.CountDownLatch uploadDone = engine.stopSessionInternalIfCurrent(gen);
+                stopped = uploadDone != null;
+                boolean announce = ServiceStartPolicy.announceAutoEnd(stopped, reason);
+                if (announce) {
+                    logLifecycle(app, "session_auto_end reason=strap_missing hours="
+                        + ServiceStartPolicy.hoursLabel(engine.autoEndUsedMs()));
+                }
+                if (stopped && !uploadDone.await(STOP_WORKER_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    Log.w(TAG, "stop upload worker still running after " + STOP_WORKER_WAIT_MS + " ms");
+                }
+                // After the worker's FGS stop, so the ongoing notification is gone first.
+                if (announce) postEndedNotification(app, engine.autoEndUsedMs());
+            } catch (Throwable t) {
+                Log.w(TAG, "deferred stopSessionInternal threw: " + t.getMessage());
+            } finally {
+                // A session started during the upload owns the alarm and wake lock.
+                HrEngine cur = HrEngine.peek();
+                boolean newerLive = cur != null && cur.isSessionActive();
+                if (ServiceStartPolicy.cancelAlarmAfterLiveStop(stopped, newerLive)) HrServiceHeartbeatReceiver.cancel(app);
+                stopInFlight = false;
+                if (ServiceStartPolicy.releaseAfterLiveStop(stopped, newerLive)) {
+                    releaseWakeLock();
+                    releasePulse();
+                }
+            }
+        }, "hrm-fgs-stop");
+        // Clear the flag if start() throws, else the Stop button stays dead.
+        try {
+            stopWorker.start();
+        } catch (Throwable t) {
+            stopInFlight = false;
+            Log.w(TAG, "hrm-fgs-stop start failed: " + t.getMessage());
+        }
+    }
+
+    // Plain and dismissible, on its own id, so it outlives the foreground notification.
+    static void postEndedNotification(Context ctx, long autoEndMs) {
+        try {
+            ensureChannelStatic(ctx);
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            String[] t = ServiceStartPolicy.endedText(autoEndMs);
+            Intent launch = new Intent(ctx, MainActivity.class);
+            launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+            PendingIntent content = PendingIntent.getActivity(ctx, 2, launch, piFlags);
+            Notification n = new NotificationCompat.Builder(ctx, CHANNEL_ID)
+                .setContentTitle(t[0])
+                .setContentText(t[1])
+                .setSmallIcon(ctx.getResources().getIdentifier("ic_stat_hr", "drawable", ctx.getPackageName()))
+                .setContentIntent(content)
+                .setAutoCancel(true)
+                .setOngoing(false)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build();
+            nm.notify(ENDED_NOTIFICATION_ID, n);
+            logLifecycle(ctx, "ended_notification_posted");
+        } catch (Throwable t) {
+            Log.w(TAG, "ENDED notification failed: " + t.getMessage());
+        }
     }
 
     // Ends a session awaiting recovery only when the intent names it; an older queued Stop leaves prefs alone.
@@ -168,7 +334,10 @@ public class NativeHrService extends Service {
                 SharedPreferences.Editor ed = prefs.edit()
                     .putBoolean("sessionActive", false)
                     .putBoolean("cleanlyStopped", true)
-                    .putString("activeCsvFilename", "");
+                    .putString("activeCsvFilename", "")
+                    .remove("test_no_sticky_session")
+                    .remove("test_auto_end_ms")
+                    .remove("test_auto_end_session");
                 if (activeCsv != null && !activeCsv.isEmpty()) ed.putString("lastSessionFilename", activeCsv);
                 ed.commit();
                 logLifecycle(this, "stale_stop_match start=" + intentStartMs);
@@ -181,19 +350,38 @@ public class NativeHrService extends Service {
         }
     }
 
-    private static long prefsSessionStartMs(Context ctx) {
-        try {
-            return ctx.getSharedPreferences("hr_monitor_session", 0).getLong("sessionStartMs", 0L);
-        } catch (Throwable t) {
-            return 0L;
-        }
-    }
-
     @Override
     public void onDestroy() {
         setFgLossReason(this, "service_on_destroy");
+        HrEngine e = HrEngine.peek();
+        if (e != null) e.clearServiceHooks(hooks);
+        // A deliberate stop clears the session before stopService, so it never reaches the restart.
+        boolean lostActive = e != null && e.isSessionActive() && !HrEngine.isStopTeardownInProgress();
         try { stopForeground(true); } catch (Throwable ignored) {}
         releaseWakeLock();
+        releasePulse();
+        if (lostActive) {
+            logLifecycle(this, "fgs_lost_active");
+            long now = System.currentTimeMillis();
+            if (now - lastFgsRestartMs >= FGS_RESTART_MIN_MS) {
+                lastFgsRestartMs = now;
+                try {
+                    Intent i = new Intent(getApplicationContext(), NativeHrService.class);
+                    i.setAction(ACTION_START);
+                    i.putExtra(EXTRA_ORIGIN, ServiceStartPolicy.ORIGIN_ENGINE);
+                    i.putExtra(EXTRA_SESSION_START_MS, e.getSessionStartMs());
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        getApplicationContext().startForegroundService(i);
+                    } else {
+                        getApplicationContext().startService(i);
+                    }
+                } catch (Throwable t) {
+                    // API 31+ background start ban: the alarm door restarts it.
+                    boolean denied = t.getClass().getName().endsWith("ForegroundServiceStartNotAllowedException");
+                    logLifecycle(this, denied ? "fgs_restart_denied" : "fgs_restart_failed " + t.getClass().getSimpleName());
+                }
+            }
+        }
         super.onDestroy();
     }
 

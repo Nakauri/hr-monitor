@@ -36,16 +36,21 @@ public class SessionResurrectionWorker extends Worker {
             boolean sessionActive = prefs.getBoolean("sessionActive", false);
             boolean cleanlyStopped = prefs.getBoolean("cleanlyStopped", true);
             if (sessionActive && !cleanlyStopped) {
-                Intent startIntent = new Intent(ctx, NativeHrService.class);
-                startIntent.setAction(NativeHrService.ACTION_START);
-                startIntent.putExtra(NativeHrService.EXTRA_TITLE, "HR Monitor");
-                startIntent.putExtra(NativeHrService.EXTRA_BODY, "Recording");
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    ctx.startForegroundService(startIntent);
+                if (Build.VERSION.SDK_INT < 31) {
+                    Intent startIntent = new Intent(ctx, NativeHrService.class);
+                    startIntent.setAction(NativeHrService.ACTION_START);
+                    startIntent.putExtra(NativeHrService.EXTRA_ORIGIN, ServiceStartPolicy.ORIGIN_WORKER);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        ctx.startForegroundService(startIntent);
+                    } else {
+                        ctx.startService(startIntent);
+                    }
+                    Log.i(TAG, "Resurrection job: requested FGS start.");
                 } else {
-                    ctx.startService(startIntent);
+                    // WorkManager is not exempt from the API 31 FGS-start ban; hand off to the alarm door.
+                    HrServiceHeartbeatReceiver.scheduleSoon(ctx, 5_000L);
+                    Log.i(TAG, "Resurrection job: alarm handoff.");
                 }
-                Log.i(TAG, "Resurrection job: requested FGS start.");
             }
             return Result.success();
         } catch (Throwable t) {

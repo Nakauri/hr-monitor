@@ -50,6 +50,10 @@ public class NativeHrSessionPlugin extends Plugin {
     // Live plugin instance, for MainActivity's trimMemory forward only; cleared on destroy.
     public static volatile NativeHrSessionPlugin instance;
 
+    // Between handleOnPause and handleOnResume: hr events forwarded, for the webview_resume line.
+    private volatile boolean webviewPaused = false;
+    private final java.util.concurrent.atomic.AtomicInteger pausedHrForwarded = new java.util.concurrent.atomic.AtomicInteger(0);
+
     // Engine events to JS; a payload that cannot convert drops that one event.
     private final HrEngine.Listener engineListener = (name, data) -> {
         JSObject js;
@@ -59,8 +63,36 @@ public class NativeHrSessionPlugin extends Plugin {
             Log.w(TAG, "event " + name + " dropped: " + e.getMessage());
             return;
         }
+        if (webviewPaused && "hr".equals(name)) pausedHrForwarded.incrementAndGet();
         notifyListeners(name, js);
     };
+
+    // Main thread callers: the lifecycle file write runs on its own short thread.
+    private void logLifecycleAsync(final String event) {
+        final android.content.Context ctx = getContext();
+        try {
+            new Thread(() -> NativeHrService.logLifecycle(ctx, event), "hrm-lifecycle-log").start();
+        } catch (Throwable t) {
+            Log.w(TAG, "lifecycle log not queued: " + t);
+        }
+    }
+
+    @Override
+    protected void handleOnPause() {
+        super.handleOnPause();
+        pausedHrForwarded.set(0);
+        webviewPaused = true;
+        logLifecycleAsync("webview_pause");
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        webviewPaused = false;
+        logLifecycleAsync("webview_resume paused_hr=" + pausedHrForwarded.getAndSet(0));
+        HrEngine e = engine;
+        if (e != null) e.onWake(ServiceStartPolicy.ORIGIN_APP);
+    }
 
     /** Forward Activity.onTrimMemory to JS so the page can free GPU buffers
      *  before LMK fires. Called from MainActivity. Safe to call before bridge
@@ -122,6 +154,8 @@ public class NativeHrSessionPlugin extends Plugin {
         }
         // Best effort; status() stays the snapshot JS reads at bootstrap.
         e.emitState();
+        // In NOT_FOUND, opening the app makes one strap attempt.
+        e.onWake(ServiceStartPolicy.ORIGIN_APP);
     }
 
     // Releases only this plugin's listener and executors; the engine and its session keep running.
@@ -219,13 +253,28 @@ public class NativeHrSessionPlugin extends Plugin {
                 call.getString("senderLabel", "HR Monitor Android"),
                 call.getBoolean("broadcast"),
                 call.getString("resumeFilename"),
-                call.getLong("resumeSessionStartMs", 0L));
+                call.getLong("resumeSessionStartMs", 0L),
+                ServiceStartPolicy.ORIGIN_START);
             call.resolve(JSObject.fromJSONObject(ret));
         } catch (HrEngine.AlreadyActiveException a) {
             call.reject("already_active");
         } catch (Throwable t) {
             Log.e(TAG, "startSession failed: " + t);
             call.reject("start_session_failed: " + t.getMessage());
+        }
+    }
+
+    // Adopts the session prefs say is live (the same resume the Service runs): {resumed, senderId,
+    // senderLabel, sessionStartMs, csvFile}, {alreadyRunning, ...} or {resumed:false, reason}.
+    @PluginMethod
+    public void resumeSession(PluginCall call) {
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) return;
+            call.resolve(JSObject.fromJSONObject(e.resumeFromPrefs(ServiceStartPolicy.ORIGIN_JS)));
+        } catch (Throwable t) {
+            Log.e(TAG, "resumeSession failed: " + t);
+            call.reject("resume_session_failed: " + t.getMessage());
         }
     }
 

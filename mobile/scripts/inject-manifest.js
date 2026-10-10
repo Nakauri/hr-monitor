@@ -97,6 +97,25 @@ if (!/AndroidForegroundService/.test(xml)) {
   }
 }
 
+// Resumes a live session after an app update (MY_PACKAGE_REPLACED is delivered only to this app).
+if (!/com\.nakauri\.hrmonitor\.SessionRestartReceiver/.test(xml)) {
+  const restartEntry = `        <receiver
+            android:name="com.nakauri.hrmonitor.SessionRestartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>\n`;
+  if (/<\/application>/.test(xml)) {
+    xml = xml.replace(/<\/application>/, restartEntry + '    </application>');
+    changed = true;
+    console.log('[inject-manifest] added SessionRestartReceiver');
+  } else {
+    console.error('[inject-manifest] FATAL: no </application> tag for SessionRestartReceiver');
+    process.exit(1);
+  }
+}
+
 if (changed) {
   fs.writeFileSync(manifestPath, xml);
   console.log('[inject-manifest] wrote', manifestPath);

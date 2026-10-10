@@ -161,6 +161,9 @@
     });
     plugin.addListener('publishingStarted', function (data) {
       recoveryContext = null;
+      // A native resume rotates the senderId; the late-live adopt reads it from here.
+      if (data && data.senderId) activeSenderId = data.senderId;
+      if (data && data.senderLabel) activeSenderLabel = data.senderLabel;
       setPublishing(true, data);
     });
     plugin.addListener('publishingStopped', function (data) {
@@ -206,6 +209,23 @@
           if (label) activeSenderLabel = label;
           if (r && r.sessionStartMs) sessionStartMs = r.sessionStartMs;
           else if (opts && opts.resumeSessionStartMs) sessionStartMs = opts.resumeSessionStartMs;
+          return r;
+        });
+      },
+      // Adopts the session native prefs say is live; never starts one. On resumed or alreadyRunning
+      // it records the identity and flips publishing, so a recovery wait resolves even when the
+      // Service resumed first and its publishingStarted fired before the page listened.
+      resumeSession: function (opts) {
+        if (typeof plugin.resumeSession !== 'function') return Promise.reject(new Error('unsupported'));
+        return plugin.resumeSession(opts || {}).then(function (r) {
+          if (r && (r.resumed || r.alreadyRunning)) {
+            if (r.senderId) activeSenderId = r.senderId;
+            if (r.senderLabel) activeSenderLabel = r.senderLabel;
+            if (r.sessionStartMs) sessionStartMs = r.sessionStartMs;
+            if (r.csvFile) csvFilename = r.csvFile;
+            recoveryContext = null;
+            setPublishing(true, r);
+          }
           return r;
         });
       },

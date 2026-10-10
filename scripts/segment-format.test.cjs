@@ -223,7 +223,10 @@ const nonTick = codeView(eng).replace(codeView(tick), '');
 check('no rollIfDue or checkOffset call outside the tick', !/\.(rollIfDue|checkOffset)\(/.test(nonTick));
 const hb = (eng.match(/heartbeatRunnable\s*=\s*new\s+Runnable\(\)\s*\{[\s\S]*?\n    \};/) || [''])[0];
 check('heartbeat queues a segment tick', /postSegmentTick\(\)/.test(hb));
-check('wake alarm queues a segment tick', /segmentTickFromAlarm\(\)/.test(read('HrServiceHeartbeatReceiver.java')));
+// Engine step 2 [S13]: the alarm starts the Service with origin=alarm and the engine's onWake ticks once.
+const wake = body(eng, 'public\\s+void\\s+onWake\\s*\\(') || '';
+check('wake alarm queues a segment tick (alarm origin -> onWake -> segmentTickFromAlarm)',
+  /ORIGIN_ALARM/.test(read('HrServiceHeartbeatReceiver.java')) && /ORIGIN_ALARM[\s\S]{0,40}segmentTickFromAlarm\(\)/.test(wake));
 
 // Close is final on both writers.
 check('SegmentWriter.close is final (ensureHour refuses after close)', /if\s*\(\s*closed\s*\)\s*return\s+false/.test(w)

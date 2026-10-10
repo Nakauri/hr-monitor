@@ -48,6 +48,8 @@ public class MainActivity extends BridgeActivity {
     private final Handler restoreSafetyHandler = new Handler(Looper.getMainLooper());
     // Above the JS restore worst case (10 + 25 + 15 = 50 s, lifecycle-state.js); trips only when JS never hides it.
     private static final long OVERLAY_SAFETY_MS = 60000L;
+    // First show since the last hide, for the overlay_hidden ms= lifecycle line.
+    private final java.util.concurrent.atomic.AtomicLong overlayShownAtMs = new java.util.concurrent.atomic.AtomicLong(0L);
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -266,6 +268,7 @@ public class MainActivity extends BridgeActivity {
     // Idempotent. No-ops when the overlay is already attached. Always
     // re-arms the safety timer so a stale onResume can't strand the user.
     public void showRestoreOverlay() {
+        overlayShownAtMs.compareAndSet(0L, System.currentTimeMillis());
         runOnUiThread(() -> {
             new Thread(() -> NativeHrService.logLifecycle(this, "overlay_shown"), "hrm-lifecycle-log").start();
             try {
@@ -293,6 +296,7 @@ public class MainActivity extends BridgeActivity {
     /** Idempotent. Called by RestoreOverlayPlugin.hide() from JS, by the
      *  safety timer, or by future native paths if needed. */
     public void hideRestoreOverlay() {
+        overlayShownAtMs.set(0L);
         runOnUiThread(() -> {
             try {
                 if (restoreOverlay != null && restoreOverlay.getParent() instanceof ViewGroup) {
@@ -306,6 +310,9 @@ public class MainActivity extends BridgeActivity {
             }
         });
     }
+
+    // When the overlay was first shown since the last hide; 0 when it is not up. Clears the stamp.
+    long takeRestoreOverlayShownAtMs() { return overlayShownAtMs.getAndSet(0L); }
 
     /** Safety-timer dismissal. Logs a diagnostic so logcat can distinguish
      *  "JS hide() never came" from a normal dismissal. */

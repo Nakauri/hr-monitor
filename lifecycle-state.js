@@ -168,7 +168,12 @@
       wait.catch(function () {});
       try {
         await withDeadline(performRecovery(ctx, token), recoveryTimeoutMs, 'perform_recovery');
-        await wait;
+        // Already publishing (a native resume that went live before the page listened): no event will come.
+        if (readPublishing()) {
+          if (pendingRecovery) { try { pendingRecovery.cancel(); } catch (err) {} }
+        } else {
+          await wait;
+        }
         await runRehydrate();
       } catch (e) {
         // If performRecovery threw, `wait` is still pending with a live timer

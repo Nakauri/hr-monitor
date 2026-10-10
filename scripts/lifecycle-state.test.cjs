@@ -170,7 +170,28 @@ async function testResumeDuringRecoveryIsIgnored() {
   eq(ctl.getState(), 'idle', 'state idle after recovery completes');
 }
 
+// Engine step 2: the native Service resumed first, so publishing is already true and no event will fire.
+async function testRecoveryAlreadyPublishing() {
+  console.log('test: recovery when native already publishes (no publishing event)');
+  let publishing = false;
+  const h = mockHarness({
+    performRecovery: function () { h.calls.recovery++; publishing = true; return Promise.resolve(); },
+    isPublishing: function () { return publishing; },
+    recoveryTimeoutMs: 500,
+  });
+  const ctl = ctlModule.create(h.config);
+  const t0 = Date.now();
+  await ctl.bootstrap({ publishing: false, recoveryContext: { mac: 'AA:BB' } });
+  eq(h.calls.failed.length, 0, 'no recovery failure reported');
+  eq(h.calls.rehydrate, 1, 'rehydrate ran');
+  eq(ctl.getState(), 'idle', 'state idle');
+  eq(Date.now() - t0 < 400, true, 'resolved without waiting for the ceiling');
+  await tick(600);
+  eq(h.calls.failed.length, 0, 'no late failure after the ceiling would have passed');
+}
+
 async function main() {
+  await testRecoveryAlreadyPublishing();
   await testColdNoSession();
   await testColdPublishingAlive();
   await testRecoverySuccess();

@@ -110,6 +110,8 @@ jobs:
               implementation 'com.squareup.okhttp3:okhttp:4.12.0'
           }
           EOF
+          # BuildConfig.TEST_HOOKS; the build step pins HRM_TEST_HOOKS to "0" so it is false here.
+          cat mobile/android-overlay/app/test-hooks.gradle >> mobile/android/app/build.gradle
 
       - name: Capacitor sync
         working-directory: mobile
@@ -125,6 +127,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          HRM_TEST_HOOKS: "0"
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Rename APK for release

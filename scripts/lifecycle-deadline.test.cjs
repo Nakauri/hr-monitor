@@ -200,7 +200,132 @@ async function shortHideNoOverlay() {
   check('61 s hide shows the overlay', shows === 1);
 }
 
+// ---- Engine step 2: recovery adopts the native resume, never starts ----
+
+// Source of a top-level function in hr_monitor.html, brace-matched past strings and comments.
+function pageFunction(name) {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'hr_monitor.html'), 'utf8');
+  const at = html.search(new RegExp('(async\\s+)?function\\s+' + name + '\\s*\\('));
+  if (at < 0) throw new Error('function ' + name + ' not found in hr_monitor.html');
+  let i = html.indexOf('{', at), depth = 0;
+  for (; i < html.length; i++) {
+    const c = html[i];
+    if (c === '/' && html[i + 1] === '/') { i = html.indexOf('\n', i); continue; }
+    if (c === '/' && html[i + 1] === '*') { i = html.indexOf('*/', i) + 1; continue; }
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < html.length && html[j] !== c) j += html[j] === '\\' ? 2 : 1;
+      i = j; continue;
+    }
+    if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return html.slice(at, i + 1);
+  }
+  throw new Error('unbalanced ' + name);
+}
+
+function recoverySandbox(resumeResult) {
+  const calls = [];
+  const store = new Map();
+  const sb = {
+    calls, store,
+    window: {
+      HRMNativeHrSession: {
+        resumeSession: (o) => { calls.push('resumeSession:' + (o && o.origin)); return Promise.resolve(resumeResult); },
+        startSession: () => { calls.push('startSession'); return Promise.resolve({}); },
+        connect: () => { calls.push('connect'); return Promise.resolve({}); },
+      },
+    },
+    sessionStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+    buildNativeDevice: (d) => ({ name: d.name, gatt: { connected: false } }),
+    setStatus: () => {}, resetLiveDataBuffers: () => calls.push('reset'), evictSelfFromBroadcasters: () => {},
+    adoptLateNativeSession: () => calls.push('adoptLate'),
+    nativeDeadline: (p) => p, NATIVE_START_MS: 40000, NATIVE_CONNECT_MS: 10000,
+    rotateSenderId: () => calls.push('rotate'), getDeviceIdentity: () => { calls.push('getDeviceIdentity'); return { id: 'zzzzzz', label: 'x' }; },
+    getOrCreateBroadcastKey: () => 'k', Promise, Error,
+  };
+  vm.createContext(sb);
+  vm.runInContext(pageFunction('recoverNativeSession'), sb);
+  return sb;
+}
+
+async function recoveryAdoptsNeverStarts() {
+  console.log('\nstep 2: recovery calls resumeSession and never startSession');
+  const body = pageFunction('recoverNativeSession');
+  check('recoverNativeSession names no startSession or connect', !/\.startSession\s*\(|\.connect\s*\(/.test(body));
+  const sb = recoverySandbox({ resumed: true, senderId: 'b0b0b0', senderLabel: 'Android Chrome', sessionStartMs: 123 });
+  const ok = await sb.recoverNativeSession({ mac: 'AA:BB', sessionStartMs: 123 }, { cancelled: false });
+  check('resumeSession called once with origin js', sb.calls.filter(c => c.startsWith('resumeSession')).join() === 'resumeSession:js');
+  check('no startSession, connect, rotate or fresh identity', !sb.calls.some(c => /^(startSession|connect|rotate|getDeviceIdentity)$/.test(c)));
+  check('stale buffers reset before the resume', sb.calls.indexOf('reset') >= 0 && sb.calls.indexOf('reset') < sb.calls.indexOf('resumeSession:js'));
+  check('resumed: returns true and adopts the rotated senderId', ok === true && sb.store.get('hr_monitor_device_id') === 'b0b0b0');
+
+  const sb2 = recoverySandbox({ resumed: false, alreadyRunning: true, senderId: 'c1c1c1', senderLabel: 'L' });
+  await sb2.recoverNativeSession({ mac: 'AA:BB' }, { cancelled: false });
+  check('alreadyRunning adopts its senderId', sb2.store.get('hr_monitor_device_id') === 'c1c1c1' && sb2.store.get('hr_monitor_device_label') === 'L');
+
+  const sb3 = recoverySandbox({ resumed: false, reason: 'not_live' });
+  let err = null;
+  try { await sb3.recoverNativeSession({ mac: 'AA:BB' }, { cancelled: false }); } catch (e) { err = e && e.message; }
+  check('not_live throws not_live (the controller failure path)', err === 'not_live');
+}
+
+// The real shim in a vm with a fake plugin that resolves resumeSession and fires NO event.
+function shimSandbox(pluginOverrides) {
+  const listeners = {};
+  const plugin = Object.assign({
+    status: () => Promise.resolve({ sessionActive: false, interruptedRecovery: true, recoveryContext: { mac: 'AA:BB' } }),
+    addListener: (n, cb) => { listeners[n] = cb; },
+    resumeSession: () => Promise.resolve({ resumed: true, senderId: 'd2d2d2', senderLabel: 'L', sessionStartMs: 99, csvFile: 'f.csv' }),
+  }, pluginOverrides || {});
+  const win = { Capacitor: { isNativePlatform: () => true, Plugins: { NativeHrSession: plugin } } };
+  const sb = { window: win, document: { readyState: 'complete', currentScript: null }, console, Promise, setTimeout, clearTimeout };
+  vm.createContext(sb);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'mobile', 'src', 'native-hr-session.js'), 'utf8'), sb);
+  return { ns: win.HRMNativeHrSession, listeners };
+}
+
+async function shimResumeFlipsPublishing() {
+  console.log('\n[S4] a shim resumeSession resolution flips publishing so the wait resolves with no event');
+  const { ns } = shimSandbox();
+  await ns.whenStatusReady();
+  let failed = 0, rehydrated = 0;
+  const ctl = create({
+    performRecovery: () => ns.resumeSession({ origin: 'js' }),
+    performRehydrate: () => { rehydrated++; return Promise.resolve(); },
+    onPublishingChanged: (cb) => ns.onPublishingChanged(cb),
+    isPublishing: () => ns.isPublishing(),
+    onRecoveryFailed: () => { failed++; },
+    recoveryTimeoutMs: 2000,
+  });
+  const t0 = Date.now();
+  await ctl.bootstrap({ recoveryContext: ns.getRecoveryContext() });
+  check('recovery completes without a failure, well inside the ceiling', failed === 0 && rehydrated === 1 && Date.now() - t0 < 1000);
+  check('publishing, senderId and start adopted from the result',
+    ns.isPublishing() && ns.getActiveSenderId() === 'd2d2d2' && ns.getSessionStartMs() === 99 && ns.getRecoveryContext() === null);
+
+  // The Service resumed first: publishingStarted fired before the page listened, the result is alreadyRunning.
+  const s2 = shimSandbox({ resumeSession: () => Promise.resolve({ alreadyRunning: true, senderId: 'e3e3e3' }) });
+  await s2.ns.whenStatusReady();
+  s2.listeners.publishingStarted({ sessionStartMs: 77, senderId: 'e3e3e3', senderLabel: 'L', origin: 'sticky' });
+  check('publishingStarted caches the rotated senderId', s2.ns.getActiveSenderId() === 'e3e3e3');
+  let failed2 = 0, rehydrated2 = 0;
+  const ctl2 = create({
+    performRecovery: () => s2.ns.resumeSession({ origin: 'js' }),
+    performRehydrate: () => { rehydrated2++; return Promise.resolve(); },
+    onPublishingChanged: (cb) => s2.ns.onPublishingChanged(cb),
+    isPublishing: () => s2.ns.isPublishing(),
+    onRecoveryFailed: () => { failed2++; },
+    recoveryTimeoutMs: 2000,
+  });
+  const t1 = Date.now();
+  await ctl2.bootstrap({ recoveryContext: { mac: 'AA:BB' } });
+  check('already publishing before the page listened: recovery resolves with no event and no failure',
+    failed2 === 0 && rehydrated2 === 1 && ctl2.getState() === 'idle' && Date.now() - t1 < 1000);
+}
+
 (async () => {
+  await recoveryAdoptsNeverStarts();
+  await shimResumeFlipsPublishing();
   await recoveryHangs();
   await rehydrateHangs();
   await resumeAfterFailure();

@@ -24,7 +24,12 @@ public class RestoreOverlayPlugin extends Plugin {
         try {
             Activity activity = getActivity();
             if (activity instanceof MainActivity) {
-                ((MainActivity) activity).hideRestoreOverlay();
+                MainActivity main = (MainActivity) activity;
+                long shownAt = main.takeRestoreOverlayShownAtMs();
+                main.hideRestoreOverlay();
+                if (shownAt > 0L) {
+                    NativeHrService.logLifecycle(getContext(), "overlay_hidden ms=" + (System.currentTimeMillis() - shownAt));
+                }
             }
             call.resolve();
         } catch (Throwable t) {

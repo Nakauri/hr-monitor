@@ -185,10 +185,26 @@ public class BleScanner {
     void rescanForMac(String mac, long timeoutMs) throws InterruptedException {
         if (scanner == null) return;
         ensureScanCallback();
+        // Filtered: with the screen off, Android 8.1+ returns nothing to an unfiltered scan.
+        java.util.List<android.bluetooth.le.ScanFilter> filters = null;
         try {
-            scanner.startScan(scanCallback);
+            filters = java.util.Collections.singletonList(
+                new android.bluetooth.le.ScanFilter.Builder().setDeviceAddress(mac.toUpperCase(java.util.Locale.US)).build());
+        } catch (Throwable t) {
+            Log.w(TAG, "rescanForMac: no MAC filter: " + t.getMessage());
+        }
+        try {
+            if (filters != null) {
+                scanner.startScan(filters, new android.bluetooth.le.ScanSettings.Builder().build(), scanCallback);
+            } else {
+                scanner.startScan(scanCallback);
+            }
         } catch (SecurityException e) {
             Log.w(TAG, "rescanForMac: scan permission denied");
+            return;
+        } catch (Throwable t) {
+            // startScan throws IllegalStateException with Bluetooth off.
+            Log.w(TAG, "rescanForMac: startScan failed: " + t.getMessage());
             return;
         }
         long deadline = System.currentTimeMillis() + timeoutMs;

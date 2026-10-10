@@ -13,10 +13,17 @@ public interface HrDevice {
         void onError(String reason, boolean staleBondCleared);
     }
 
+    // No bonded, cached or rescanned handle, and the PUBLIC fallback was not allowed.
+    final class ResolveFailedException extends Exception {
+        public ResolveFailedException(String mac) { super("resolve_fail " + mac); }
+    }
+
     void setCallback(Callback cb);
-    // Blocking handle resolution; returns true when the bonded handle was used.
-    boolean connect(String mac) throws Exception;
+    // Blocking handle resolution; returns true when the bonded handle was used. allowPublic=false
+    // never falls back to a PUBLIC-address handle (it connects but never notifies) and throws instead.
+    boolean connect(String mac, boolean allowPublic) throws Exception;
     void reconnect();
+    // Rebuilds the link from the live handle; never a PUBLIC-address handle.
     void fullReconnect();
     void disconnect();
     // Ends data streams; runs before every link teardown, disconnect() included.
