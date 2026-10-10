@@ -554,6 +554,16 @@
     align-self: flex-start;
   }
   .mode-inline-link:hover { border-bottom-color: var(--text); }
+  .link-chev { width: 11px; height: 11px; flex: none; vertical-align: -1px; margin-left: 2px; }
+  .btn-secondary { display: inline-flex; align-items: center; gap: 4px; }
+  .hero-android { display: none; }
+  body.android-device .hero-android { display: inline-flex; }
+  body.android-device .hero-cta .btn-google { order: 2; }
+  body.android-device .hero-cta .btn-google { background: transparent; color: var(--text); border: 1px solid var(--border-strong); box-shadow: none; }
+  body.android-device .hero-cta .btn-secondary { order: 3; }
+  .hero-android-line { font-size: 13px; color: var(--text-dim); margin-top: 12px; }
+  .hero-android-line a { color: var(--text); border-bottom: 1px solid var(--border-strong); }
+  body.android-device .hero-android-line, body.ios-device .hero-android-line { display: none; }
   .mode-disclaimer {
     margin: 28px 0 0;
     font-size: 12px;
@@ -1403,7 +1413,8 @@
     <h1 class="hero-title">Live heart rate <span class="accent">&amp; HRV</span> for streams and self.</h1>
     <p class="hero-sub">Pair a chest strap. Stream it to OBS, or track your heart data over weeks and months. Android for 24/7 background sessions, Chromium browsers on the desktop. Offline or signed in, free, no subscription.</p>
     <div class="hero-cta">
-      <a class="btn-primary" href="./hr_monitor.html?mode=online">
+      <a class="btn-primary hero-android" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">Get the Android app</a>
+      <a class="btn-primary btn-google" href="./hr_monitor.html?mode=online">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.75h3.57c2.08-1.92 3.28-4.74 3.28-8.07z" fill="#4285F4"/>
           <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.75c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -1412,8 +1423,9 @@
         </svg>
         Sign in with Google
       </a>
-      <a class="btn-secondary" href="./hr_monitor.html?mode=offline">Use without signing in →</a>
+      <a class="btn-secondary" href="./hr_monitor.html?mode=offline">Use without signing in <svg class="link-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></a>
     </div>
+    <p class="hero-android-line">On Android? <a href="#android-app">Get the app</a> for recording with the screen off.</p>
     <p class="hero-micro">Browsers may throttle background tabs depending on settings. See the FAQ if you hit disconnects.</p>
   </div>
 
@@ -1479,6 +1491,25 @@
   </div>
 </section>
 
+<section id="android-app">
+  <a class="android-card" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">
+    <svg class="android-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 3v12"/>
+      <path d="M7 10l5 5 5-5"/>
+      <path d="M5 21h14"/>
+    </svg>
+    <div class="android-card-body">
+      <h3 class="android-card-title">Android app</h3>
+      <p class="android-card-desc">Keeps streaming with the screen off, locked, or backgrounded. Native BLE, foreground service, Drive sync.</p>
+      <p class="android-card-note">Not on the Play Store yet. You'll need to allow install from unknown sources and open the APK manually. Release-signed, so Google Drive works.</p>
+      <div class="android-card-version" id="apk-version"></div>
+    </div>
+    <svg class="android-card-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 18l6-6-6-6"/>
+    </svg>
+  </a>
+</section>
+
 <section>
   <div class="story">
     <div class="story-text">
@@ -1512,12 +1543,12 @@
     <div class="mode-inline stream">
       <h3 class="mode-inline-title">Stream overlay</h3>
       <p class="mode-inline-desc">Drop the live widget into OBS two ways. Use a relay link as a browser source (nothing on your desktop), or capture a cropped window with chroma key if you'd rather keep everything local. Same visual either way.</p>
-      <a class="mode-inline-link" href="./hr_monitor.html?mode=online">Open monitor →</a>
+      <a class="mode-inline-link" href="./hr_monitor.html?mode=online">Open monitor <svg class="link-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></a>
     </div>
     <div class="mode-inline review">
       <h3 class="mode-inline-title">Session viewer</h3>
       <p class="mode-inline-desc">Review every past recording with autonomic interpretation, palpitation clusters, posture overlays, and month, week, or day timelines.</p>
-      <a class="mode-inline-link" href="./hrv_viewer.html">Open viewer →</a>
+      <a class="mode-inline-link" href="./hrv_viewer.html">Open viewer <svg class="link-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></a>
     </div>
   </div>
   <p class="mode-disclaimer">Not a medical tool. Interpretations are estimated.</p>
@@ -1562,7 +1593,7 @@
     <img src="./assets/screenshots/screen 6.jpg" alt="Full session view with HR trace, RMSSD overlay, palpitation clusters, and a sympathetic flush tooltip" loading="lazy">
     <div class="viewer-hero-caption">A full day of recording. Hover any spike for a tooltip, scrub the timeline, drill into any range.</div>
   </div>
-  <a class="btn-secondary" href="./hrv_viewer.html" style="margin-top:24px;">Open viewer →</a>
+  <a class="btn-secondary" href="./hrv_viewer.html" style="margin-top:24px;">Open viewer <svg class="link-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></a>
 </section>
 
 <section>
@@ -1679,24 +1710,7 @@
   </div>
 </section>
 
-<section>
-  <a class="android-card" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">
-    <svg class="android-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M12 3v12"/>
-      <path d="M7 10l5 5 5-5"/>
-      <path d="M5 21h14"/>
-    </svg>
-    <div class="android-card-body">
-      <h3 class="android-card-title">Android app</h3>
-      <p class="android-card-desc">Keeps streaming with the screen off, locked, or backgrounded. Native BLE, foreground service, Drive sync.</p>
-      <p class="android-card-note">Not on the Play Store yet. You'll need to allow install from unknown sources and open the APK manually. Release-signed, so Google Drive works.</p>
-      <div class="android-card-version" id="apk-version"></div>
-    </div>
-    <svg class="android-card-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M9 18l6-6-6-6"/>
-    </svg>
-  </a>
-</section>
+
 
 <section>
   <p class="section-eyebrow">FAQ</p>

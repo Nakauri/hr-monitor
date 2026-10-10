@@ -90,3 +90,6 @@ HTML HR Monitor Save State/
 
 # Local audit work, device logs and harnesses (personal health data)
 docs/audit-*/
+
+# UX audit kit output (screenshots, walks; local only)
+ux-audit/

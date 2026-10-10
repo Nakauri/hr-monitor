@@ -1,6 +1,31 @@
 {
   "items": [
     {
+      "date": "2026-10-10",
+      "title": "Recording comes back on its own",
+      "body": "If Android closes the app while you record, Aorti picks the session back up by itself, in the same file, usually within a few seconds."
+    },
+    {
+      "date": "2026-10-10",
+      "title": "Reconnects when you are back in range",
+      "body": "Walk away from your phone and the notification says the strap is reconnecting. Come back and recording picks up again by itself, with no need to open the app."
+    },
+    {
+      "date": "2026-10-10",
+      "title": "Hourly files on Drive",
+      "body": "Sessions now also save as small hourly files in a folder for each month on your Drive. Each finished hour uploads once, so syncing is faster."
+    },
+    {
+      "date": "2026-10-09",
+      "title": "Faster sync, no duplicate files",
+      "body": "Sync no longer reads every saved session again, and a resumed session no longer leaves a second copy on Drive."
+    },
+    {
+      "date": "2026-10-09",
+      "title": "No more stuck restore screen",
+      "body": "Coming back to the app no longer shows a spinner for up to a minute, and Stop responds right away, even on a weak connection. Long sessions ask before stopping."
+    },
+    {
       "date": "2026-04-26",
       "title": "Try the viewer with sample data",
       "body": "On the home page, click Try with sample data to see what the viewer looks like with two weeks of fake sessions. No sign-in needed."
