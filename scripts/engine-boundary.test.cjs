@@ -870,6 +870,72 @@ function symptomChecks() {
 }
 symptomChecks();
 
+// S15a: the report PDF runs beside a live session and must never reach into the recorder.
+function pdfChecks() {
+  const P = readSource('PdfPrinter.java');
+  check('[S15a] PdfPrinter.java exists', P != null);
+  if (P == null) return;
+  const pc = codeView(P);
+  const recorder = [...pc.matchAll(/\b(HrEngine|NativeHrService|FloatingOverlayService|SegmentWriter|SegmentUpload\w*|NativeCsvWriter|NativeDrive\w*|GattHrDevice|HrDevice|BleScanner|HrSink|TeeSink|SessionGate|ServiceStartPolicy|LinkStatePolicy|NativeHrSessionPlugin|start\w*Service|stopService)\b/g)].map(m => m[1]);
+  check('[S15a] PdfPrinter names no engine, service, BLE, segment or Drive class', recorder.length === 0, recorder.join(', '));
+  const makers = [...pc.matchAll(/\bExecutors\s*\.\s*(\w+)\s*\(/g)].map(m => m[1]);
+  check('[S15a] PdfPrinter makes exactly one executor, a single thread, held in static final EXEC',
+    makers.length === 1 && makers[0] === 'newSingleThreadExecutor'
+      && /private\s+static\s+final\s+ExecutorService\s+EXEC\s*=\s*Executors\s*\.\s*newSingleThreadExecutor\s*\(/.test(pc), makers.join(', '));
+  const submits = [...pc.matchAll(/(\w+)\s*\.\s*(execute|submit)\s*\(/g)].map(m => m[1] + '.' + m[2]);
+  check('[S15a] every PdfPrinter execute goes to EXEC', submits.length > 0 && submits.every(x => x === 'EXEC.execute'), submits.join(', '));
+  const run = methodSpans(pc, 'private\\s+static\\s+void\\s+run')[0];
+  const rb = run ? pc.slice(run[0], run[1]) : '';
+  const loop = rb.match(/for\s*\(\s*int\s+i\s*=\s*0\s*;[^)]*\)\s*\{[\s\S]*?\}\s*finally\s*\{[^}]*\}\s*\}/);
+  const lb = loop ? loop[0] : '';
+  check('[S15a] each page decodes inside a try whose finally recycles the bitmap',
+    /try\s*\{\s*bmp\s*=\s*BitmapFactory\s*\.\s*decodeByteArray\s*\(/.test(lb) && /finally\s*\{[^}]*bmp\s*\.\s*recycle\s*\(\s*\)\s*;\s*bmp\s*=\s*null/.test(lb));
+  check('[S15a] each page checks heap and system memory for the pages left before it decodes, and rejects pdf_low_memory',
+    /lowMemory\s*\(\s*app\s*,\s*n\s*-\s*i\s*\)/.test(lb) && lb.search(/lowMemory\s*\(/) < lb.search(/decodeByteArray/)
+      && /if\s*\(\s*lowMemory\s*\([^)]*\)\s*\)\s*\{\s*s\s*\.\s*fail\s*\(\s*"pdf_low_memory"\s*\)/.test(P));
+  const lm = methodSpans(pc, 'private\\s+static\\s+boolean\\s+lowMemory')[0];
+  check('[S15a] heap headroom reads maxMemory, totalMemory and freeMemory through Plan.heapLow',
+    !!lm && /Plan\s*\.\s*heapLow\s*\(\s*rt\s*\.\s*maxMemory\s*\(\s*\)\s*,\s*rt\s*\.\s*totalMemory\s*\(\s*\)\s*,\s*rt\s*\.\s*freeMemory\s*\(\s*\)\s*\)/.test(pc.slice(lm[0], lm[1])));
+  const rawRun = run ? P.slice(run[0], run[1]) : '';
+  check('[S15a] run catches OutOfMemoryError and Throwable, and fails the call in finally after the document is closed',
+    /catch\s*\(\s*OutOfMemoryError\s+\w+\s*\)\s*\{\s*failCode\s*=\s*"pdf_low_memory"/.test(rawRun)
+      && /catch\s*\(\s*Throwable\s+\w+\s*\)\s*\{[^}]*failCode\s*=\s*"pdf_failed"/.test(rawRun)
+      && /finally\s*\{[\s\S]*doc\s*\.\s*close\s*\([\s\S]*if\s*\(\s*failCode\s*!=\s*null\s*\)\s*s\s*\.\s*fail\s*\(\s*failCode\s*\)/.test(rawRun));
+  const pr = methodSpans(pc, 'static\\s+void\\s+print')[0];
+  const pb = pr ? pc.slice(pr[0], pr[1]) : '';
+  check('[S15a] print catches Throwable and frees BUSY in the job finally and when execute throws',
+    /catch\s*\(\s*Throwable\b/.test(pb) && /finally\s*\{\s*BUSY\s*\.\s*set\s*\(\s*false\s*\)/.test(pb)
+      && /catch\s*\(\s*Throwable\s+\w+\s*\)\s*\{\s*BUSY\s*\.\s*set\s*\(\s*false\s*\)/.test(pb));
+  check('[S15a] PdfPrinter settles only through Settle (no bare call.resolve or call.reject outside it)',
+    (() => {
+      const at = pc.search(/final\s+class\s+Settle\s*\{/);
+      const span = at >= 0 ? blockFrom(pc, at) : null;
+      const hits = [...pc.matchAll(/\bcall\s*\.\s*(resolve|reject)\s*\(/g)];
+      return !!span && hits.length === 2 && hits.every(h => h.index > span[0] && h.index < span[1]);
+    })());
+
+  const S = readSource('NativeHrSessionPlugin.java');
+  const m = S && methodSpans(codeView(S), 'public\\s+void\\s+printPdf')[0];
+  check('[S15a] NativeHrSessionPlugin.printPdf found', !!m);
+  if (m) {
+    const b = codeView(S).slice(m[0], m[1]);
+    const names = [...b.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)].map(x => x[1]).filter(x => !['try', 'catch'].includes(x));
+    check('[S15a] printPdf only hands the call to PdfPrinter.print and rejects on Throwable',
+      /PdfPrinter\s*\.\s*print\s*\(\s*getContext\s*\(\s*\)\s*,\s*getActivity\s*\(\s*\)\s*,\s*call\s*\)/.test(b)
+        && /catch\s*\(\s*Throwable\b[^)]*\)\s*\{\s*call\s*\.\s*reject\s*\(/.test(b)
+        && names.every(x => ['print', 'getContext', 'getActivity', 'reject'].includes(x)), names.join(', '));
+  }
+
+  const J = readRepo('mobile/src/native-pdf.js');
+  check('[S15a] mobile/src/native-pdf.js exists', J != null);
+  if (J != null) {
+    const body = J.replace(/^(\s*\/\/[^\n]*\n)*/, '').trim();
+    check('[S15a] native-pdf.js is one IIFE reading Capacitor.Plugins.NativeHrSession, never registerPlugin',
+      /^\(function\s*\(\)\s*\{/.test(body) && /\}\)\(\);$/.test(body) && /\.Plugins\.NativeHrSession\b/.test(J) && !/registerPlugin/.test(J));
+  }
+}
+pdfChecks();
+
 if (failures) {
   console.error('\n' + failures + ' engine boundary check(s) FAILED.');
   process.exit(1);

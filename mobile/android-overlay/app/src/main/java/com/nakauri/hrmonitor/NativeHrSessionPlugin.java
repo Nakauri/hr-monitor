@@ -681,6 +681,16 @@ public class NativeHrSessionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    @PluginMethod
+    public void printPdf(PluginCall call) {
+        // PdfPrinter owns its thread and settles the call; this only hands it over.
+        try {
+            PdfPrinter.print(getContext(), getActivity(), call);
+        } catch (Throwable t) {
+            call.reject("pdf_failed");
+        }
+    }
+
     // CSV export writes; engine work runs on the engine's own executor.
     private java.util.concurrent.ExecutorService exportExecutor;
     private synchronized java.util.concurrent.ExecutorService exportExecutor() {
