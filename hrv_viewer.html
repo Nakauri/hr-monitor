@@ -1504,15 +1504,43 @@
   }
   .marker-item {
     display: flex;
-    gap: 12px;
-    padding: 10px 12px;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 4px 0 12px;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--t14);
     transition: background 0.12s, transform 0.1s, padding 0.1s;
     border-left: 3px solid transparent;
     line-height: 1.4;
   }
+  /* Selected by a click: white ring plus the selected fill. */
+  .marker-item[aria-current="true"] { background: var(--selected-fill); box-shadow: inset 0 0 0 1px var(--action); }
+  .mk-go {
+    display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; min-height: 44px;
+    padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  }
+  .mk-go:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-ctl); }
+  .mk-dia { width: 14px; height: 14px; flex: 0 0 14px; color: var(--text); }
+  .mk-dia.detected { color: var(--text-dim); }
+  .mk-edit { flex: 0 0 auto; min-height: 44px; padding: 0 var(--s3); font-size: var(--t14); }
+  .markers-actions { display: flex; gap: var(--s2); margin: 0 0 var(--s3); }
+  .mark-editor {
+    display: flex; flex-direction: column; gap: var(--s3);
+    margin: var(--s1) 0 var(--s3); padding: var(--s3);
+    border: 1px solid var(--border-control); border-radius: var(--r-card);
+    background: var(--bg-input);
+  }
+  .mark-editor .field input { min-height: 44px; }
+  .mark-editor .segmented > button { flex: 1 1 auto; }
+  .mark-editor .row { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .mark-editor .row .grow { flex: 1 1 auto; }
+  .mark-editor .err { margin: 0; font-size: var(--t12); color: var(--warn-high); }
+  .markers-open { display: none; }
+  .markers-sheet .session-sidebar { background: none; border: 0; padding: 0; overflow: visible; }
+  .markers-sheet .sidebar-head { display: none; }
+  .markers-sheet .marker-list { max-height: none; min-height: 0; }
   .marker-item:hover,
   .marker-item.chart-hover {
     background: var(--bg-input);
@@ -1524,7 +1552,7 @@
   .marker-item.chart-hover {
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
   }
-  .marker-item.type-event { border-left-color: var(--hrv); }
+  .marker-item.type-event { border-left-color: var(--text); }
   .marker-item.type-warning { border-left-color: var(--warn-crash); }
   .marker-item.type-palp { border-left-color: var(--warn-palp); }
   .marker-item.type-delta { border-left-color: #B48CFF; }
@@ -1793,8 +1821,8 @@
        no benefit to capping the sidebar. Cap only the marker list internally
        so it doesn't run longer than the viewport if a session has hundreds
        of markers. */
-    .session-sidebar { max-height: none; }
-    .session-sidebar .marker-list { max-height: 65vh; min-height: 320px; }
+    .session-layout > .session-sidebar { display: none; }
+    .markers-open { display: inline-flex; }
     .sidebar-toggle { display: none; }
     .summary-bar { padding: 8px 56px 14px 14px; cursor: pointer; min-height: 60px; }
     .summary-grid { gap: 12px 16px; margin-top: 4px; }
@@ -2363,7 +2391,7 @@
       await driveSync({ onProgress: showSyncLoader });
       await loadSessions({ onProgress: showSyncLoader });
       route();
-      marksSyncPass().then((moved) => { if (moved) route(); });
+      marksSyncPass().then((moved) => { if (moved) routeUnlessEditing(); });
     } finally {
       _ensureRunning = false;
       hideLoader();
@@ -5019,6 +5047,7 @@
     // Cancel any active auto-poll from a previous explorer. renderSession
     // restarts it if the next view is also an explorer.
     if (view !== 'session' && view !== 'day' && typeof clearAutoPoll === 'function') clearAutoPoll();
+    if (view !== 'session' && view !== 'day' && markersSheet && !markersSheet.closed) markersSheet.close('route');
     switch (view) {
       case 'index': renderIndex(); showOnly('view-index'); break;
       case 'session': await renderSession(arg); showOnly('view-session'); break;
@@ -5579,6 +5608,7 @@
 
     const head = headHtml((s && s.recGaps) || []);
     if (!s) {
+      if (markersSheet && !markersSheet.closed) markersSheet.close('route');
       clearExplorer();
       el.innerHTML = head + `<div class="stub-panel">No recordings on this day</div>`;
       wireNav();
@@ -6310,9 +6340,11 @@
     // When the auto-poll pulls a longer version of the same session and the
     // route re-invokes renderSession, preserve the user's brush/zoom so the
     // live update doesn't jump the view back to the full range.
+    cancelEase();
     const sameSessionReload = currentFilename === filename;
     const priorBrushMin = sameSessionReload ? brushMin : null;
     const priorBrushMax = sameSessionReload ? brushMax : null;
+    const priorFilters = sameSessionReload ? { on: activeFilters, avail: filterAvailability } : null;
     currentSummary = s;
     currentFilename = filename;
     const data = await loadFullSession(filename);
@@ -6356,6 +6388,8 @@
     activeFilters = Object.assign({}, filterAvailability);
     activeFilters.disconnect = false;
     activeFilters.delta = false;
+    // A reload of the same view keeps the person's layer choices; a layer that just gained data starts on.
+    if (priorFilters) for (const k of Object.keys(activeFilters)) if (priorFilters.avail[k] && filterAvailability[k]) activeFilters[k] = !!priorFilters.on[k];
     brushMin = priorBrushMin;
     brushMax = priorBrushMax;
     const meta = parseSessionFilename(filename);
@@ -6478,6 +6512,7 @@
                 <button type="button" data-mode="duration">Duration</button>
               </div>
               <button class="btn reset-zoom hidden" id="reset-zoom" type="button">Reset zoom</button>
+              <button class="btn markers-open" id="markers-open" type="button" aria-haspopup="dialog">Markers</button>
             </div>
             <div class="chart-wrap">
               <canvas id="session-chart" role="img" aria-label="Heart rate and HRV"></canvas>
@@ -6507,6 +6542,9 @@
             <button type="button" class="chip filter-chip" data-type="posture">Posture</button>
             <button type="button" class="chip filter-chip" data-type="sleep">Sleep</button>
             <button type="button" class="chip filter-chip" data-type="disconnect">Gaps</button>
+          </div>
+          <div class="markers-actions" id="markers-actions" hidden>
+            <button class="btn" id="add-sleep" type="button">Add sleep</button>
           </div>
           <div class="marker-list" id="marker-list"></div>
           <div class="chills-tune">
@@ -6543,6 +6581,16 @@
       ${opts.foot || ''}
     `;
 
+    pinnedMarkT = null;
+    // An open phone markers sheet keeps showing the panel after a re-render.
+    if (markersSheet && !markersSheet.closed) {
+      const fresh = el.querySelector('#session-layout > .session-sidebar');
+      if (fresh) {
+        markersSheet.body.replaceChildren(fresh);
+        try { markersSheet.sheet.focus({ preventScroll: true }); } catch (e) {}
+      }
+    }
+
     // Apply persisted summary-bar collapse state (mobile-only behaviour but
     // the class is harmless on desktop where stats stay visible).
     try {
@@ -6566,6 +6614,7 @@
     wireQuadrantToggles();
     wireTags(filename);
     wireChillsSlider();
+    wireMarkersPanel();
     document.getElementById('reset-zoom').addEventListener('click', resetZoom);
     updateResetZoomVisibility();
     wireTimelineModeToggle();
@@ -6633,7 +6682,9 @@
       window.AortiMarksPage = marksPage;
       marksPage.store.onChange(marksChanged);
       marksChanged();
-      if (driveAccessToken && driveFolderId) marksSyncPass().then((moved) => { if (moved) route(); });
+      // An explorer drawn before the store opened lacks its viewer marks and edit controls.
+      if (currentSummary && document.getElementById('session-chart')) route();
+      if (driveAccessToken && driveFolderId) marksSyncPass().then((moved) => { if (moved) routeUnlessEditing(); });
     } catch (e) { console.warn('[marks] init failed', e && e.message); }
   }
   function marksChanged() {
@@ -6703,9 +6754,9 @@
       if (await phonePollUpdate()) reload = true;
       if (reload) {
         await loadSessions({ reusePhone: true });
-        route();
+        routeUnlessEditing();
       }
-      marksSyncPass().then((moved) => { if (moved) route(); });
+      marksSyncPass().then((moved) => { if (moved) routeUnlessEditing(); });
     } finally {
       autoPollBusy = false;
     }
@@ -7638,59 +7689,330 @@
 
   function renderMarkerList(s) {
     const items = [];
+    const editable = marksEditable();
     if (activeFilters.event) {
-      for (const e of viewMarks(s).events) items.push({ type: 'event', t: e.t, label: parseMark(e.label).label });
+      for (const e of viewMarks(s).events) {
+        items.push({ type: 'event', t: e.t, label: parseMark(e.label).label, user: true,
+          edit: editable && Number.isFinite(e.ep) ? { kind: 'tap', markId: e.markId || null, raw: e.label, ep: e.ep } : null });
+      }
     }
     if (activeFilters.warning) {
-      for (const w of s.warnSegs) items.push({ type: 'warning', t: w.start, label: warnLabel(w.type) + ' (' + formatDuration(w.end - w.start) + ')' });
+      for (const w of s.warnSegs) items.push({ type: 'warning', t: w.start, end: w.end, label: warnLabel(w.type) + ' (' + formatDuration(w.end - w.start) + ')' });
     }
     if (activeFilters.palp) {
-      for (const c of s.palpClusters) items.push({ type: 'palp', t: c.start, label: c.count === 1 ? 'Ectopic beat' : `${c.count} palpitations in ${formatDuration(c.end - c.start)}` });
+      for (const c of s.palpClusters) items.push({ type: 'palp', t: c.start, end: c.end, label: c.count === 1 ? 'Ectopic beat' : `${c.count} palpitations in ${formatDuration(c.end - c.start)}` });
     }
     if (activeFilters.disconnect) {
-      for (const g of s.connGaps) items.push({ type: 'disconnect', t: g.start, label: `Recording gap · ${formatDuration(g.end - g.start)}` });
+      for (const g of s.connGaps) items.push({ type: 'disconnect', t: g.start, end: g.end, label: `Recording gap · ${formatDuration(g.end - g.start)}` });
     }
     if (activeFilters.delta && s.hrDeltas) {
       for (const d of s.hrDeltas) {
         const word = d.direction === 'rise' ? 'Rise' : 'Drop';
-        items.push({ type: 'delta', t: d.start, label: `${word} ${Math.abs(d.delta)} bpm in ${formatDuration(d.end - d.start)}, ${d.startHR} to ${d.endHR}` });
+        items.push({ type: 'delta', t: d.start, end: d.end, label: `${word} ${Math.abs(d.delta)} bpm in ${formatDuration(d.end - d.start)}, ${d.startHR} to ${d.endHR}` });
       }
     }
     if (activeFilters.flush && s.flushes) {
       for (const f of s.flushes) items.push({ type: 'flush', t: f.t, label: `Sympathetic flush · HR +${f.hrDelta} bpm, HRV down ${f.rmssdDropPct}%` });
     }
     if (activeFilters.chills && s.chillsWindows) {
-      for (const c of s.chillsWindows) items.push({ type: 'chills', t: c.start, label: `Chills signature · ${formatDuration(c.end - c.start)} of high HR volatility` });
+      for (const c of s.chillsWindows) items.push({ type: 'chills', t: c.start, end: c.end, label: `Chills signature · ${formatDuration(c.end - c.start)} of high HR volatility` });
     }
     const postureSpansForList = getEffectivePostureSpans(s);
     if (activeFilters.posture && postureSpansForList) {
-      for (const p of postureSpansForList) items.push({ type: 'posture', t: p.start, label: `Posture · ${p.posture} (${formatDuration(p.end - p.start)})` });
+      for (const p of postureSpansForList) items.push({ type: 'posture', t: p.start, end: p.end, label: `Posture · ${p.posture} (${formatDuration(p.end - p.start)})` });
     }
     const sleepWindowsForList = getEffectiveSleepWindows(s);
     if (activeFilters.sleep && sleepWindowsForList) {
-      for (const w of sleepWindowsForList) items.push({ type: 'sleep', t: w.start, label: `Sleep window · ${formatDuration(w.end - w.start)}` });
+      for (const w of sleepWindowsForList) {
+        const mine = !!(w.fromMark && w.markId);
+        items.push({ type: 'sleep', t: w.start, end: w.end, user: mine,
+          label: `${mine ? 'Sleep' : 'Sleep window'} · ${formatDuration(w.end - w.start)}`,
+          edit: editable && mine ? { kind: 'sleep', markId: w.markId } : null });
+      }
     }
     items.sort((a, b) => a.t - b.t);
     const el = document.getElementById('marker-list');
-    if (!items.length) { el.innerHTML = '<div style="color: var(--text-dim); font-size: 12px; padding: 8px;">No markers to show.</div>'; return; }
-    el.innerHTML = items.map(i => `
-      <div class="marker-item type-${i.type}" data-t="${i.t}">
-        <span class="marker-time">${formatDuration(i.t)}</span>
-        <span class="marker-label">${escape(i.label)}</span>
-      </div>`).join('');
-    // Cache a sorted [{t, el}] array so the per-hover lookup in
-    // highlightMarkerItemByT becomes O(log N) instead of O(N) DOM scan.
     _markerListByT.length = 0;
+    if (!items.length) { el.innerHTML = '<div style="color: var(--text-dim); font-size: 12px; padding: 8px;">No markers to show.</div>'; return; }
+    el.innerHTML = items.map((i, n) => `
+      <div class="marker-item type-${i.type}${i.user ? ' mine' : ''}" data-t="${i.t}"${i.end != null ? ` data-end="${i.end}"` : ''} data-i="${n}">
+        <button class="mk-go" type="button">${markDiamond(i.user)}<span class="marker-time">${formatDuration(i.t)}</span><span class="marker-label">${escape(i.label)}</span></button>
+        ${i.edit ? `<button class="btn ghost mk-edit" type="button" aria-label="Edit ${escape(i.label)} at ${formatDuration(i.t)}">Edit</button>` : ''}
+      </div>`).join('');
+    // Sorted [{t, el}] for the O(log N) hover lookup in highlightMarkerItemByT.
     el.querySelectorAll('.marker-item').forEach(mi => {
-      const t = parseFloat(mi.dataset.t);
+      const item = items[Number(mi.dataset.i)];
+      const t = item.t;
       const labelText = mi.querySelector('.marker-label').textContent;
       const tLabel = mi.querySelector('.marker-time').textContent;
       _markerListByT.push({ t, el: mi });
-      mi.addEventListener('click', () => zoomTo(t));
+      mi.addEventListener('click', (ev) => {
+        if (ev.target.closest('.mk-edit')) return;
+        focusMarker(item, mi);
+      });
+      const editBtn = mi.querySelector('.mk-edit');
+      if (editBtn) editBtn.addEventListener('click', () => openMarkEditor(item, mi));
+      if (pinnedMarkT != null && t === pinnedMarkT) mi.setAttribute('aria-current', 'true');
       mi.addEventListener('mouseenter', (e) => highlightMarker(t, labelText, tLabel, e));
       mi.addEventListener('mouseleave', unhighlightMarker);
     });
   }
+  // User marks solid in the text colour; detected markers dim and dashed.
+  function markDiamond(user) {
+    return user
+      ? '<svg class="mk-dia" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1 13 7 7 13 1 7Z" fill="currentColor"/></svg>'
+      : '<svg class="mk-dia detected" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.6 12.4 7 7 12.4 1.6 7Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-dasharray="2.2 1.6"/></svg>';
+  }
+
+  // ---- Markers panel (S10b): select, ease, edit, delete with Undo, sleep marks ----
+  let pinnedMarkT = null;
+  let markersSheet = null;
+  let _easeRaf = 0;
+  function marksEditable() {
+    return !!(marksPage && !isDemoMode() && !marksPage.drive.status().blocked);
+  }
+  // The chart window a marker eases to: 4 min around a point; a span plus 15% each side.
+  function markWindow(item, dur) {
+    let lo, hi;
+    if (item.end != null && item.end - item.t > 0.01) {
+      const pad = Math.max(0.5, (item.end - item.t) * 0.15);
+      lo = item.t - pad; hi = item.end + pad;
+    } else { lo = item.t - 2; hi = item.t + 2; }
+    if (hi - lo < 4) { const c = (lo + hi) / 2; lo = c - 2; hi = c + 2; }
+    if (hi - lo >= dur) return [0, dur];
+    if (lo < 0) { hi -= lo; lo = 0; }
+    if (hi > dur) { lo -= hi - dur; hi = dur; }
+    return [lo, hi];
+  }
+  function cancelEase() {
+    if (_easeRaf) cancelAnimationFrame(_easeRaf);
+    _easeRaf = 0;
+  }
+  function easeBrushTo(lo, hi, done) {
+    cancelEase();
+    const a0 = brushMin == null ? 0 : brushMin, b0 = brushMax == null ? currentSummary.duration : brushMax;
+    const t0 = performance.now(), MS = 240;
+    const step = (now) => {
+      _easeRaf = 0;
+      if (!currentSummary) return;
+      const k = Math.min(1, (now - t0) / MS);
+      const e = 1 - Math.pow(1 - k, 3);
+      brushMin = k < 1 ? a0 + (lo - a0) * e : lo;
+      brushMax = k < 1 ? b0 + (hi - b0) * e : hi;
+      _paintBrushNow();
+      if (k < 1) { _easeRaf = requestAnimationFrame(step); return; }
+      if (done) done();
+    };
+    _easeRaf = requestAnimationFrame(step);
+  }
+  function focusMarker(item, row) {
+    if (!currentSummary) return;
+    document.querySelectorAll('#marker-list .marker-item[aria-current]').forEach(n => n.removeAttribute('aria-current'));
+    if (row) row.setAttribute('aria-current', 'true');
+    const fromSheet = markersSheet && !markersSheet.closed;
+    if (fromSheet) markersSheet.close('select');
+    const [lo, hi] = markWindow(item, currentSummary.duration);
+    pinnedMarkT = item.t;
+    if (fromSheet) {
+      const chart = document.querySelector('.chart-wrap');
+      if (chart) chart.scrollIntoView({ block: 'start' });
+    }
+    easeBrushTo(lo, hi, () => { if (pinnedMarkT === item.t) highlightAtTime(item.t); });
+  }
+  function clearPinnedMark() {
+    pinnedMarkT = null;
+    document.querySelectorAll('#marker-list .marker-item[aria-current]').forEach(n => n.removeAttribute('aria-current'));
+  }
+
+  function wireMarkersPanel() {
+    const open = document.getElementById('markers-open');
+    if (open) open.addEventListener('click', openMarkersSheet);
+    const acts = document.getElementById('markers-actions');
+    if (acts) acts.hidden = !marksEditable();
+    const add = document.getElementById('add-sleep');
+    if (add) add.addEventListener('click', () => openSleepEditor(null));
+  }
+  // Phone: the markers panel moves into a sheet and back.
+  function openMarkersSheet() {
+    const sb = document.querySelector('#session-layout > .session-sidebar');
+    if (!sb || (markersSheet && !markersSheet.closed)) return;
+    const sheet = UI.sheet({
+      title: 'Markers', className: 'markers-sheet', body: sb,
+      onClose: () => {
+        const back = sheet.body.querySelector('.session-sidebar');
+        const layout = document.getElementById('session-layout');
+        if (back && layout) layout.appendChild(back);
+        if (markersSheet === sheet) markersSheet = null;
+      },
+    });
+    markersSheet = sheet;
+  }
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+  function toLocalInput(ep) {
+    const d = new Date(ep);
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+  function fromLocalInput(v) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() : NaN;
+  }
+  function closeMarkEditors() { document.querySelectorAll('.mark-editor').forEach(n => n.remove()); }
+  // Poll and sync re-renders wait while an editor is open, so typing is never wiped.
+  let routePending = false;
+  function routeUnlessEditing() {
+    if (document.querySelector('.mark-editor')) { routePending = true; return; }
+    routePending = false;
+    route();
+  }
+  function closeEditor(box) {
+    box.remove();
+    if (routePending) routeUnlessEditing();
+  }
+  // An input left as shown keeps the exact time it was filled from (seconds and the repeated DST hour).
+  function inputEpoch(input, original) {
+    return input.value === input.defaultValue ? original : fromLocalInput(input.value);
+  }
+  function liveRecord(id) {
+    const r = id ? marksPage.store.get(id) : null;
+    if (r && r.deleted) {
+      UI.notice({ kind: 'info', text: 'This mark was deleted.' });
+      route();
+      return undefined;
+    }
+    return r;
+  }
+  function editorShell(after) {
+    closeMarkEditors();
+    const box = document.createElement('div');
+    box.className = 'mark-editor ui';
+    box.addEventListener('click', (e) => e.stopPropagation());
+    if (after) after.insertAdjacentElement('afterend', box);
+    else document.getElementById('marker-list').prepend(box);
+    return box;
+  }
+  function editorButtons(withDelete) {
+    return `<p class="err" role="alert" hidden></p>
+      <div class="row">
+        ${withDelete ? '<button class="btn ghost" type="button" data-act="delete">Delete</button>' : ''}
+        <span class="grow"></span>
+        <button class="btn" type="button" data-act="cancel">Cancel</button>
+        <button class="btn primary" type="button" data-act="save">Save</button>
+      </div>`;
+  }
+  function editorError(box, text) {
+    const p = box.querySelector('.err');
+    p.textContent = text;
+    p.hidden = !text;
+  }
+  // Writes through the store, then re-renders. Returns false when the write failed.
+  async function marksWrite(fn, box) {
+    if (box) {
+      if (box.dataset.busy) return false;
+      box.dataset.busy = '1';
+      box.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    }
+    try { await fn(); }
+    catch (e) {
+      console.warn('[marks] write failed', e && e.message);
+      if (box && box.isConnected) {
+        delete box.dataset.busy;
+        box.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        editorError(box, 'Could not save. Try again.');
+      } else UI.notice({ kind: 'error', text: 'Could not save the mark.' });
+      return false;
+    }
+    routePending = false;
+    await route();
+    return true;
+  }
+
+  const MARK_CLASSES = [['sym', 'Symptom'], ['ctx', 'Context'], ['note', 'Note']];
+  function openMarkEditor(item, row) {
+    if (item.edit.kind === 'sleep') return openSleepEditor(item, row);
+    const store = marksPage.store;
+    const rec = liveRecord(item.edit.markId);
+    if (rec === undefined) return;
+    const raw = String(item.edit.raw == null ? '' : item.edit.raw);
+    const pm = parseMark(raw);
+    let cls = rec ? rec.cls : (pm.kind === 'symptom' ? 'sym' : pm.kind === 'context' ? 'ctx' : 'note');
+    const label = rec ? rec.label : (pm.kind === 'note' ? raw : pm.label);
+    const box = editorShell(row);
+    box.innerHTML = `
+      <div class="segmented" role="group" aria-label="Kind">${MARK_CLASSES.map(([c, w]) => `<button type="button" data-cls="${c}" aria-pressed="${c === cls}">${w}</button>`).join('')}</div>
+      <div class="field"><label for="mk-label">Label</label><input id="mk-label" type="text" maxlength="80" autocomplete="off" value="${escape(label || '')}"></div>
+      <div class="field"><label for="mk-time">Time</label><input id="mk-time" type="datetime-local" step="60" value="${toLocalInput(rec ? rec.at : item.edit.ep)}"></div>
+      ${editorButtons(true)}`;
+    box.querySelectorAll('[data-cls]').forEach(b => b.addEventListener('click', () => {
+      cls = b.dataset.cls;
+      box.querySelectorAll('[data-cls]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
+    const cls0 = cls;
+    box.querySelector('[data-act="cancel"]').addEventListener('click', () => closeEditor(box));
+    box.querySelector('[data-act="save"]').addEventListener('click', () => {
+      const timeInput = box.querySelector('#mk-time');
+      const at = inputEpoch(timeInput, rec ? rec.at : item.edit.ep);
+      if (!Number.isFinite(at)) { editorError(box, 'Pick a time.'); return; }
+      let text = box.querySelector('#mk-label').value.trim();
+      if (!text && cls === 'note') text = 'Note';
+      if (cls === cls0 && text === (label || '').trim() && timeInput.value === timeInput.defaultValue) { closeEditor(box); return; }
+      const patch = { at, cls, label: text };
+      marksWrite(() => rec ? store.edit(rec.id, patch) : store.editRecorded({ ep: item.edit.ep, label: raw }, patch), box);
+    });
+    box.querySelector('[data-act="delete"]').addEventListener('click', () => deleteMark(item, box));
+    try { box.querySelector('#mk-label').focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  function openSleepEditor(item, row) {
+    if (!currentSummary || !marksPage) return;
+    const store = marksPage.store;
+    const rec = liveRecord(item && item.edit && item.edit.markId);
+    if (rec === undefined) return;
+    const origin = marksScope(currentSummary).originEp;
+    let from, to;
+    if (rec) { from = rec.from; to = rec.to; }
+    else {
+      const r = getDataRange();
+      const zoomed = brushMin != null && brushMax != null && (Math.abs(brushMin - r.start) > 0.001 || Math.abs(brushMax - r.end) > 0.001);
+      const det = (currentSummary.sleepWindows || [])[0];
+      if (zoomed) { from = origin + brushMin * 60000; to = origin + brushMax * 60000; }
+      else if (det) { from = origin + det.start * 60000; to = origin + det.end * 60000; }
+      else if (currentSummary.__virtualDay) { from = origin - 3600000; to = origin + 7 * 3600000; }
+      else { from = origin; to = origin + currentSummary.duration * 60000; }
+    }
+    const box = editorShell(row || null);
+    box.innerHTML = `
+      <div class="field"><label for="sl-from">Start</label><input id="sl-from" type="datetime-local" step="60" value="${toLocalInput(from)}"></div>
+      <div class="field"><label for="sl-to">End</label><input id="sl-to" type="datetime-local" step="60" value="${toLocalInput(to)}"></div>
+      ${editorButtons(!!rec)}`;
+    box.querySelector('[data-act="cancel"]').addEventListener('click', () => closeEditor(box));
+    box.querySelector('[data-act="save"]').addEventListener('click', () => {
+      const a = inputEpoch(box.querySelector('#sl-from'), from);
+      const b = inputEpoch(box.querySelector('#sl-to'), to);
+      if (rec && a === rec.from && b === rec.to) { closeEditor(box); return; }
+      if (!Number.isFinite(a) || !Number.isFinite(b)) { editorError(box, 'Pick a start and an end.'); return; }
+      if (b <= a) { editorError(box, 'End is before start.'); return; }
+      marksWrite(() => rec ? store.edit(rec.id, { from: a, to: b }) : store.createSleep({ from: a, to: b }), box);
+    });
+    if (rec) box.querySelector('[data-act="delete"]').addEventListener('click', () => deleteMark(item, box));
+    try { box.querySelector('#sl-from').focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  // Inline confirm, then a 10 s Undo. A viewer mark is tombstoned; a recorded mark gets a reversal.
+  async function deleteMark(item, box) {
+    const store = marksPage.store;
+    const sleep = item.edit.kind === 'sleep';
+    const ok = await UI.confirm({ host: box, key: 'delete-mark', danger: true, title: sleep ? 'Delete sleep' : 'Delete mark', confirmLabel: 'Delete' });
+    if (!ok) return;
+    const id = item.edit.markId;
+    const row = id ? null : { ep: item.edit.ep, label: String(item.edit.raw == null ? '' : item.edit.raw) };
+    const done = await marksWrite(() => id ? store.remove(id) : store.reverse(row), box);
+    if (!done) return;
+    UI.toast(sleep ? 'Sleep deleted' : 'Mark deleted', {
+      undo: () => marksWrite(() => id ? store.restore(id) : store.unreverse(row)),
+    });
+  }
+
   // Module scope: rebuilt by renderMarkerList. Sorted by t (the marker-list
   // builder already sorts items before render).
   const _markerListByT = [];
@@ -7716,6 +8038,7 @@
   }
   function unhighlightAtTime() {
     if (!currentChart) return;
+    if (pinnedMarkT != null) { highlightAtTime(pinnedMarkT); return; }
     const ds = currentChart.data.datasets;
     for (let i = 0; i < ds.length; i++) {
       if (ds[i].label === '_HL_LINE' || ds[i].label === '_HL_POINT') ds[i].data = [];
@@ -8394,6 +8717,34 @@
     },
   };
 
+  // Mark labels left to right: a label that would run into the one before drops a row; past three rows it hides.
+  function markLabelRows(marks) {
+    let key = '', rows = [];
+    return (chart) => {
+      const x = chart.scales.x, a = chart.chartArea;
+      const k = x.min + '|' + x.max + '|' + a.left + '|' + a.right;
+      if (k === key) return rows;
+      key = k;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.font = '600 12px ' + Chart.defaults.font.family;
+      const ends = [-Infinity, -Infinity, -Infinity];
+      const order = marks.map((m, i) => i).sort((i, j) => marks[i].t - marks[j].t);
+      rows = new Array(marks.length).fill(0);
+      for (const i of order) {
+        const px = x.getPixelForValue(marks[i].t);
+        const half = (ctx.measureText(marks[i].text).width + 8) / 2;
+        if (px + half < a.left || px - half > a.right) continue;
+        let r = ends.findIndex((end) => px - half > end + 4);
+        if (r < 0) r = 3;
+        else ends[r] = px + half;
+        rows[i] = r;
+      }
+      ctx.restore();
+      return rows;
+    };
+  }
+
   function drawSessionChart(s, data) {
     const ctx = document.getElementById('session-chart').getContext('2d');
     if (currentChart) currentChart.destroy();
@@ -8504,27 +8855,45 @@
       }
     }
     if (activeFilters.event) {
-      const tickColour = getComputedStyle(document.documentElement).getPropertyValue('--text-dim').trim() || 'grey';
-      for (const e of viewMarks(s).events) {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const tickColour = rootStyle.getPropertyValue('--text-dim').trim() || 'grey';
+      const markColour = rootStyle.getPropertyValue('--text').trim() || 'white';
+      const bgColour = rootStyle.getPropertyValue('--bg').trim() || 'black';
+      const labelRows = markLabelRows(viewMarks(s).events.map((e) => ({ t: e.t, text: parseMark(e.label).label })));
+      viewMarks(s).events.forEach((e, li) => {
         const mark = parseMark(e.label);
         const eLabel = mark.label;
         const eTime = formatDuration(e.t);
         const tick = mark.kind === 'context';
+        const row = (c) => labelRows(c.chart)[li];
         annotations['ev_' + idCounter++] = {
           type: 'line',
           xScaleID: 'x',
           xMin: e.t, xMax: e.t,
           markKind: mark.kind,
-          borderColor: tick ? tickColour : '#F7E26B',
-          borderWidth: tick ? 1 : 2,
+          borderColor: tick ? tickColour : markColour,
+          borderWidth: tick ? 1 : 1.25,
           borderDash: tick ? [4, 4] : undefined,
           label: tick
-            ? { display: true, content: eLabel, position: 'end', backgroundColor: 'transparent', color: tickColour, font: { size: 12, weight: '500' }, padding: 2 }
-            : { display: true, content: eLabel, position: 'start', backgroundColor: 'rgba(247,226,107,0.18)', color: '#F7E26B', font: { size: 12, weight: '600' }, padding: 4 },
+            ? { display: (c) => row(c) < 3, content: eLabel, position: 'end', yAdjust: (c) => 18 + 20 * row(c), backgroundColor: bgColour, color: tickColour, font: { size: 12, weight: '500' }, padding: 4 }
+            : { display: (c) => row(c) < 3, content: eLabel, position: 'end', yAdjust: (c) => 18 + 20 * row(c), backgroundColor: bgColour, color: markColour, font: { size: 12, weight: '600' }, padding: 4 },
           enter: (ctx, evt) => annoEnter(e.t, `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`, evt),
           leave: annoLeave,
         };
-      }
+        // Diamond handle at the top of a user mark.
+        if (!tick) annotations['mk_' + idCounter++] = {
+          type: 'point',
+          xScaleID: 'x', yScaleID: 'y',
+          xValue: e.t,
+          yValue: (c) => c.chart.scales.y.max,
+          yAdjust: 7,
+          pointStyle: 'rectRot',
+          radius: 6,
+          backgroundColor: markColour,
+          borderColor: bgColour,
+          borderWidth: 1.5,
+        };
+      });
     }
     if (activeFilters.flush && s.flushes) {
       for (const f of s.flushes) {
@@ -8893,6 +9262,7 @@
     // meant the brush slider was unusable on phones. touch-action: none on the
     // overlay (CSS) suppresses browser scrolling so drags don't pan the page.
     overlay.addEventListener('pointerdown', (e) => {
+      cancelEase();
       const rect = overlay.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const w = rect.width;
@@ -8946,6 +9316,7 @@
     overlay.addEventListener('pointercancel', endDrag);
     // Double-click overlay to reset
     overlay.addEventListener('dblclick', () => {
+      cancelEase();
       brushMin = 0; brushMax = duration;
       renderBrush();
     });
@@ -8997,6 +9368,7 @@
 
   function zoomTo(t, span) {
     if (!currentSummary) return;
+    cancelEase();
     const s = currentSummary;
     // Clamp t to the chart's range so a marker that snuck through with a
     // negative or out-of-range time can't collapse the brush to zero width.
@@ -9015,6 +9387,9 @@
   // "Reset zoom" = back to the data range (skips leading/trailing empty time).
   function resetZoom() {
     if (!currentSummary) return;
+    cancelEase();
+    clearPinnedMark();
+    unhighlightAtTime();
     const r = getDataRange();
     brushMin = r.start;
     brushMax = r.end;
