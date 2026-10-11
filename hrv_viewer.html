@@ -78,17 +78,20 @@
   .vbar .btn.icon .ico { width: 20px; height: 20px; }
   .vbar .share-btn { margin-left: var(--s2); white-space: nowrap; }
   .vbar .share-btn .lbl-short { display: none; }
-  /* Drive cloud: synced, syncing (arrows spin, 2 px bar fills), off. Transform only. */
+  /* Drive cloud: synced, syncing (sync icon spins, 3 px bar fills under the bar), off. Transform only. */
   .vbar .sync .when-syncing, .vbar .sync .when-off { display: none; }
   .vbar.syncing .sync .when-synced, .vbar.drive-off .sync .when-synced { display: none; }
   .vbar.syncing .sync .when-syncing { display: block; }
   .vbar.drive-off:not(.syncing) .sync .when-off { display: block; }
-  .vbar .sync .spin { transform-box: view-box; transform-origin: 12px 14.8px; animation: drive-sync-spin 1s linear infinite; }
-  .syncbar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--selected-fill); opacity: 0; transition: opacity .2s ease-out; pointer-events: none; }
+  .vbar .sync svg.when-syncing { animation: drive-sync-spin 1s linear infinite; }
+  .vbar .sync .sync-lbl { display: none; }
+  .vbar.syncing .sync { width: auto; padding: 0 var(--s3); }
+  .vbar.syncing .sync .sync-lbl { display: inline; }
+  .syncbar { position: absolute; left: 0; right: 0; top: calc(100% + 1px); height: 3px; background: var(--selected-fill); opacity: 0; transition: opacity .2s ease-out; pointer-events: none; }
   .syncbar span { display: block; height: 100%; background: var(--action); transform: scaleX(0); transform-origin: left center; transition: transform .3s ease-out; }
   .vbar.syncing .syncbar { opacity: 1; }
   @media (prefers-reduced-motion: reduce) {
-    .vbar .sync .spin { animation: none; }
+    .vbar .sync svg.when-syncing { animation: none; }
     .syncbar span { transition: none; }
   }
   .drive-pop { top: calc(100% + var(--s1)); right: var(--s4); width: 320px; max-width: calc(100vw - 2 * var(--s4)); display: flex; flex-direction: column; gap: var(--s3); }
@@ -141,20 +144,6 @@
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
   }
-  /* Autonomic analysis toggle, in the viewer settings popover. Drives whether interpretive overlays (sympathetic flush, chills
-     signature, HR×HRV quadrants) appear. Raw descriptive stats always show. */
-  .autonomic-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    user-select: none;
-    font-size: 11px;
-    letter-spacing: 0.05em;
-    color: var(--text-dim);
-  }
-  .autonomic-toggle input { cursor: pointer; accent-color: var(--hrv); }
-  .autonomic-toggle:hover { color: var(--text); }
 
   /* Main content area */
   main {
@@ -1256,74 +1245,35 @@
     border-radius: 10px;
     padding: 14px 16px;
     width: 320px;
-    max-width: 90vw;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     box-shadow: 0 8px 24px rgba(0,0,0,0.6);
     display: none;
   }
-  #viewer-settings-popover .thresh-blurb { max-width: 100%; }
-  #viewer-settings-popover h4 {
-    margin: 0 0 6px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-  #viewer-settings-popover .thresh-blurb {
-    font-size: 11.5px;
-    color: var(--text-dim);
-    line-height: 1.45;
-    margin-bottom: 12px;
-  }
-  #viewer-settings-popover .thresh-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-  }
-  #viewer-settings-popover label {
-    flex: 1;
-    font-size: 13px;
-    color: var(--text);
-  }
-  #viewer-settings-popover label .thresh-hint {
-    display: block;
-    font-size: 11px;
-    color: var(--text-dim);
-    font-weight: 400;
-    margin-top: 2px;
-  }
+  #viewer-settings-popover h4 { margin: 0 0 6px; font-size: var(--t14); font-weight: 600; color: var(--text); }
+  #viewer-settings-popover .thresh-blurb { font-size: var(--t12); color: var(--text-dim); line-height: 1.45; margin-bottom: 12px; }
+  #viewer-settings-popover .thresh-default-hint { font-size: var(--t12); color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+  #viewer-settings-popover .thresh-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  #viewer-settings-popover label { flex: 1; font-size: var(--t14); color: var(--text); }
+  #viewer-settings-popover label .thresh-hint { display: block; font-size: var(--t12); color: var(--text-dim); font-weight: 400; margin-top: 2px; }
   #viewer-settings-popover input[type="number"] {
-    width: 70px;
-    padding: 6px 8px;
+    width: 76px;
+    min-height: var(--target);
+    padding: 0 8px;
     background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    border: 1px solid var(--border-control);
+    border-radius: var(--r-ctl);
     color: var(--text);
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 14px;
+    font: 500 var(--t16)/1.2 var(--ui-face);
+    font-variant-numeric: tabular-nums;
     text-align: center;
   }
-  #viewer-settings-popover .thresh-default-hint {
-    font-size: 11px;
-    color: var(--text-dim);
-    font-style: italic;
-    margin-top: 6px;
-    line-height: 1.4;
-  }
-  #viewer-settings-popover .thresh-actions {
-    display: flex;
-    gap: 6px;
-    margin-top: 12px;
-    justify-content: flex-end;
-  }
-  #viewer-settings-popover button { padding: 6px 12px; font-size: 12px; }
-  #viewer-settings-popover .thresh-reset {
-    color: var(--text-dim);
-    background: transparent;
-    border-color: transparent;
-    margin-right: auto;
-  }
+  #viewer-settings-popover .toggle { margin-bottom: 12px; }
+  #viewer-settings-popover .thresh-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: 12px; justify-content: flex-end; }
+  /* Reset takes its own row so Cancel and Save stay together at 320 px. */
+  #viewer-settings-popover .thresh-reset { flex: 1 0 100%; justify-content: flex-start; padding: 0; }
   #quadrant-thresh-popover { width: 320px; max-width: calc(100vw - 16px); }
   #quadrant-thresh-popover h4 { margin: 0 0 6px; font-size: var(--t14); font-weight: 600; color: var(--text); }
   #quadrant-thresh-popover .thresh-blurb { font-size: var(--t12); color: var(--text-dim); line-height: 1.45; margin-bottom: 12px; }
@@ -1796,9 +1746,9 @@
     .datenav .btn, .interp-edit, .interp-kebab { display: none !important; }
   }
 
-  /* Large text: fitBar() drops the Share word, then the wordmark text, so every control stays 44 px. */
-  .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark { display: none; }
-  .vbar.tight-1 .share-btn { width: 44px; padding: 0; }
+  /* Large text: fitBar() drops the Syncing word, the Share word, then the wordmark text, so every control stays 44 px. */
+  .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark, .vbar.tight-0 .sync .sync-lbl { display: none; }
+  .vbar.tight-1 .share-btn, .vbar.tight-0.syncing .sync { width: 44px; padding: 0; }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -1820,7 +1770,10 @@
     .vbar .brand { margin-right: 0; }
     .vbar .wordmark { font-size: 15px; }
     .vbar .monitor-link, .view-tabs { display: none; }
-    .vsel { display: inline-flex; }
+    .vsel { display: inline-flex; margin-left: var(--s3); }
+    .vsel select { min-height: var(--target); }
+    .vbar.syncing .sync { width: 44px; padding: 0; }
+    .vbar.syncing .sync .sync-lbl { display: none; }
     .vbar .share-btn { order: 1; margin-left: 0; padding: 0 var(--s2); border-color: transparent; background: transparent; color: var(--text); gap: 6px; }
     .vbar .share-btn .lbl-long { display: none; }
     .vbar .share-btn .lbl-short { display: inline; }
@@ -1984,8 +1937,9 @@
   <span class="bar-spacer"></span>
   <button class="btn icon sync" id="drive-cloud" type="button" aria-label="Drive: off" aria-haspopup="dialog" aria-expanded="false" aria-controls="drive-pop">
     <svg class="ico when-synced" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 14.5 11.2 16.5 15 12.5"/></svg>
-    <svg class="ico when-syncing" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin"><path d="M9.2 13.6a3 3 0 0 1 5.1-1.5"/><polyline points="14.6 10.4 14.6 12.4 12.6 12.4"/><path d="M14.8 16a3 3 0 0 1-5.1 1.5"/><polyline points="9.4 19.2 9.4 17.2 11.4 17.2"/></g></svg>
+    <svg class="ico when-syncing" viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
     <svg class="ico when-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+    <span class="sync-lbl" aria-hidden="true">Syncing</span>
   </button>
   <div class="popover drive-pop" id="drive-pop" role="dialog" aria-label="Drive" hidden>
     <div class="dp-row">
@@ -2296,11 +2250,13 @@
     const btn = document.getElementById('drive-cloud');
     if (!bar || !btn) return;
     const syncing = cloud.conn === 'syncing' || cloud.sync || (cloud.loader && cloud.conn !== 'off');
+    const changed = bar.classList.contains('syncing') !== syncing;
     bar.classList.toggle('syncing', syncing);
     bar.classList.toggle('drive-off', cloud.conn === 'off');
     btn.setAttribute('aria-label', 'Drive: ' + (syncing ? 'syncing' : cloud.label));
     const fill = document.getElementById('syncbar-fill');
     if (fill) fill.style.transform = 'scaleX(' + (syncing ? Math.max(0.04, Math.min(1, cloud.frac)) : 0) + ')';
+    if (changed) fitBar();
   }
   function setMobileDriveDot(state, title) {
     cloud.conn = state === 'synced' ? 'synced' : state === 'syncing' ? 'syncing' : 'off';
@@ -5090,13 +5046,14 @@
     if (sel) sel.value = cur;
     fitBar();
   }
-  // Large text: drop the Share word, then the wordmark text, until the bar fits.
+  // Large text: drop the Syncing word, the Share word, then the wordmark text, until the bar fits.
   function fitBar() {
     const bar = document.getElementById('app-bar');
     if (!bar) return;
-    bar.classList.remove('tight-1', 'tight-2');
-    for (const c of ['tight-1', 'tight-2']) {
+    bar.classList.remove('tight-0', 'tight-1', 'tight-2');
+    for (const c of ['tight-0', 'tight-1', 'tight-2']) {
       if (bar.scrollWidth <= bar.clientWidth + 1) break;
+      if (c === 'tight-0' && !bar.classList.contains('syncing')) continue;
       bar.classList.add(c);
     }
   }
@@ -6138,7 +6095,7 @@
   function applyAutonomicClass() {
     document.body.classList.toggle('no-autonomic', !isAutonomicOn());
     const cb = document.getElementById('autonomic-toggle');
-    if (cb) cb.checked = isAutonomicOn();
+    if (cb) cb.setAttribute('aria-checked', String(isAutonomicOn()));
   }
 
   // HR shift detector settings — user-configurable. Default matches the POTS
@@ -6166,13 +6123,13 @@
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'viewer-settings-popover';
+      pop.className = 'ui';
       pop.innerHTML = `
         <h4>Autonomic analysis</h4>
         <div class="thresh-blurb">When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you track dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.</div>
-        <label class="autonomic-toggle" style="margin: 2px 0 14px;">
-          <input type="checkbox" id="autonomic-toggle" />
-          <span>Show autonomic pattern callouts</span>
-        </label>
+        <button class="toggle" type="button" role="switch" id="autonomic-toggle" aria-checked="false">
+          <span class="txt"><span class="t">Show autonomic pattern callouts</span></span><span class="track" aria-hidden="true"></span>
+        </button>
         <h4>HR shift detector</h4>
         <div class="thresh-blurb">A shift is flagged when HR rises or drops by at least this many bpm within the window. POTS clinical criterion is 30 bpm within 10 min of standing; a smaller threshold surfaces more everyday jumps.</div>
         <div class="thresh-row">
@@ -6185,9 +6142,9 @@
         </div>
         <div class="thresh-default-hint">Default: 30 bpm / 10 min (POTS clinical criterion).</div>
         <div class="thresh-actions">
-          <button class="thresh-reset" id="hrshift-reset">Reset to default</button>
-          <button id="hrshift-cancel">Cancel</button>
-          <button class="primary" id="hrshift-save" style="background: var(--hrv); color: #0a1a14; border-color: var(--hrv);">Save</button>
+          <button class="btn ghost thresh-reset" id="hrshift-reset" type="button">Reset to default</button>
+          <button class="btn" id="hrshift-cancel" type="button">Cancel</button>
+          <button class="btn primary" id="hrshift-save" type="button">Save</button>
         </div>
       `;
       document.body.appendChild(pop);
@@ -6195,9 +6152,9 @@
       // affects rendering immediately on change, so no save button needed.
       const autTog = pop.querySelector('#autonomic-toggle');
       if (autTog) {
-        autTog.checked = isAutonomicOn();
-        autTog.addEventListener('change', () => {
-          setAutonomicOn(autTog.checked);
+        autTog.setAttribute('aria-checked', String(isAutonomicOn()));
+        autTog.addEventListener('click', () => {
+          setAutonomicOn(autTog.getAttribute('aria-checked') !== 'true');
           applyAutonomicClass();
           applyQuadrantThresh();
           invalidateQuadrantCache();
@@ -6216,7 +6173,7 @@
     // Ensure the autonomic toggle reflects current state each time the popover
     // opens (in case it was changed from another tab via localStorage).
     const aut = pop.querySelector('#autonomic-toggle');
-    if (aut) aut.checked = isAutonomicOn();
+    if (aut) aut.setAttribute('aria-checked', String(isAutonomicOn()));
     const s = getHrShiftSettings();
     const thrEl = pop.querySelector('#hrshift-thresh');
     const winEl = pop.querySelector('#hrshift-win');
