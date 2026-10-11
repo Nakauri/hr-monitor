@@ -37,6 +37,13 @@ import java.util.Deque;
 public class FloatingOverlayService extends Service {
     private static final String TAG = "FloatingOverlay";
     private static final String PREFS_MODE_KEY = "floating_overlay_mode";
+    // Mirrors tokens.css; scripts/bubble-tokens.test.cjs keeps them equal.
+    static final String TOKEN_BG = "#0a0a0a";
+    static final String TOKEN_BORDER_CONTROL = "#666666";
+    static final String TOKEN_TEXT = "#d8d8d8";
+    static final String TOKEN_TEXT_DIM = "#8a8a8a";
+    static final String TOKEN_HRV = "#5DCAA5";
+    static final int BG_ALPHA = 220;
 
     private WindowManager windowManager;
     private View overlayView;
@@ -100,9 +107,10 @@ public class FloatingOverlayService extends Service {
         pill.setPadding(dp(10), dp(6), dp(8), dp(6));
 
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.argb(220, 10, 10, 12));
+        int bgRgb = Color.parseColor(TOKEN_BG);
+        bg.setColor(Color.argb(BG_ALPHA, Color.red(bgRgb), Color.green(bgRgb), Color.blue(bgRgb)));
         bg.setCornerRadius(dp(20));
-        bg.setStroke(dp(1), Color.argb(255, 60, 60, 64));
+        bg.setStroke(dp(1), Color.parseColor(TOKEN_BORDER_CONTROL));
         pill.setBackground(bg);
 
         // Aorti logo (vector drawable from drawable/aorti_foreground.xml).
@@ -116,7 +124,7 @@ public class FloatingOverlayService extends Service {
 
         bpmText = new TextView(this);
         bpmText.setText("—");
-        bpmText.setTextColor(Color.WHITE);
+        bpmText.setTextColor(Color.parseColor(TOKEN_TEXT));
         bpmText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         bpmText.setTypeface(bpmText.getTypeface(), android.graphics.Typeface.BOLD);
         pill.addView(bpmText);
@@ -130,7 +138,7 @@ public class FloatingOverlayService extends Service {
         // RMSSD value + label, hidden in compact mode.
         rmssdText = new TextView(this);
         rmssdText.setText("—");
-        rmssdText.setTextColor(Color.parseColor("#9ADFC8"));
+        rmssdText.setTextColor(Color.parseColor(TOKEN_HRV));
         rmssdText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         rmssdText.setTypeface(rmssdText.getTypeface(), android.graphics.Typeface.BOLD);
         LinearLayout.LayoutParams rmssdLp = new LinearLayout.LayoutParams(
@@ -140,7 +148,7 @@ public class FloatingOverlayService extends Service {
 
         rmssdLabel = new TextView(this);
         rmssdLabel.setText("ms");
-        rmssdLabel.setTextColor(Color.parseColor("#6A6A6A"));
+        rmssdLabel.setTextColor(Color.parseColor(TOKEN_TEXT_DIM));
         rmssdLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
         LinearLayout.LayoutParams rmssdLabelLp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -149,7 +157,7 @@ public class FloatingOverlayService extends Service {
 
         TextView closeX = new TextView(this);
         closeX.setText("×");
-        closeX.setTextColor(Color.parseColor("#8A8A8A"));
+        closeX.setTextColor(Color.parseColor(TOKEN_TEXT_DIM));
         closeX.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         closeX.setPadding(dp(10), 0, dp(2), 0);
         closeX.setOnClickListener(v -> stopSelf());
@@ -274,7 +282,7 @@ public class FloatingOverlayService extends Service {
         }
 
         private void init() {
-            linePaint.setColor(Color.parseColor("#9ADFC8"));
+            linePaint.setColor(Color.parseColor(TOKEN_TEXT));
             linePaint.setStyle(Paint.Style.STROKE);
             linePaint.setStrokeWidth(getResources().getDisplayMetrics().density * 1.6f);
             linePaint.setStrokeJoin(Paint.Join.ROUND);
