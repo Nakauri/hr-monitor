@@ -6,8 +6,9 @@
 //   P1  Purge with 3 marks not on Drive: the confirm names 3; Cancel keeps aorti_marks.
 //   L1  no navigator.locks: diagnostics says marks sync is unavailable.
 //   IDB the IndexedDB backend applies two updates to one key in one write, in order.
+//   X1  a sleep mark made with Add sleep on a 1440 profile shows on a 360 profile's Day view after a fake-Drive sync.
 //   Page loads: viewer, monitor, index and app home load with 0 page errors.
-// Usage: node scripts/marks-pages.mjs [--ux <ux-audit dir>]
+// Usage: node scripts/marks-pages.mjs [--ux <ux-audit dir>] [--checks | --mutants] (default: both)
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +62,8 @@ let browser;
 try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
 
 async function context(opts) {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'America/Edmonton' });
+  const w = (opts && opts.width) || 1440;
+  const ctx = await browser.newContext({ viewport: { width: w, height: w < 600 ? 740 : 900 }, isMobile: w < 600, hasTouch: w < 600, timezoneId: 'America/Edmonton' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith(base) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -109,8 +111,8 @@ const rec = (o) => Object.assign({ v: 1, m: '2026-10', by: 'zzzzzz', createdAt: 
 function fnv8(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return ('0000000' + h.toString(16)).slice(-8); }
 const revRec = (ep, k, label) => rec({ id: 'rev:' + k + ':' + ep + ':' + fnv8(label), kind: 'rev', row: { ep, k, label } });
 
-async function seed(page, files, records) {
-  await page.evaluate(async ({ files, records }) => {
+async function seed(page, files, records, dev = 'zzzzzz') {
+  await page.evaluate(async ({ files, records, dev }) => {
     const openDb = (name, v, stores) => new Promise((res, rej) => { const q = indexedDB.open(name, v);
       q.onupgradeneeded = () => { for (const s of stores) if (!q.result.objectStoreNames.contains(s)) q.result.createObjectStore(s); };
       q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
@@ -120,9 +122,9 @@ async function seed(page, files, records) {
     await put(kv, 'drive-cache', Object.entries(files)); kv.close();
     const mk = await openDb('aorti_marks', 1, ['records', 'mine', 'files', 'meta']);
     await put(mk, 'mine', records.map((r) => [r.id, r]));
-    await put(mk, 'meta', [['deviceId', 'zzzzzz']]); mk.close();
+    await put(mk, 'meta', [['deviceId', dev]]); mk.close();
     localStorage.removeItem('hrv_viewer_index');
-  }, { files, records });
+  }, { files, records, dev });
 }
 async function dayView(page, day) {
   const got = await page.evaluate(() => {
@@ -221,6 +223,58 @@ async function checkM10() {
   return rows;
 }
 
+// ---------------------------------------------------------------- X1
+// A sleep mark made with Add sleep on the laptop (1440, one profile) reaches the phone viewer (360, another
+// profile) through the fake Drive: laptop pushes, phone pulls, the Day view shows it as the person's sleep.
+async function checkX1() {
+  fake = new FakeDrive();
+  fake.folder('HR Monitor Sessions', null, '2025-01-01T00:00:00.000Z', 'root1');
+  const driveFor = (page, read) => page.evaluate((read) => {
+    window.__drive = window.AortiMarksDrive.create({
+      store: window.AortiMarksPage.store, locks: navigator.locks, read,
+      driveFetch: (p, init) => fetch('/__fakedrive?u=' + encodeURIComponent(p.startsWith('http') ? p : 'https://www.googleapis.com/drive/v3/' + p),
+        { method: (init && init.method) || 'GET', headers: (init && init.headers) || {}, body: init && init.body, signal: init && init.signal }),
+      rootId: () => 'root1', rootIds: () => ['root1'], canSync: () => true,
+    });
+  }, read);
+  const sleepRows = (page) => page.evaluate(() => [...document.querySelectorAll('#marker-list .marker-item.type-sleep.mine')].map((e) => e.querySelector('.marker-time').textContent.trim()));
+  const rows = [];
+  const lap = await context({ width: 1440 });
+  const a = await open(lap, '/hrv_viewer.html#/month');
+  await seed(a.page, { 'hrm_20261005T15Z_abc123.csv': segment() }, [], 'lap001');
+  await gotoDay(a.page, '2026-10-05');
+  await a.page.waitForSelector('#markers-actions:not([hidden])', { state: 'attached', timeout: 15000 }).catch(() => {});
+  // 2026-10-05 15:00Z is 09:00 in Edmonton; the sleep runs 09:05 to 09:15.
+  await a.page.click('#add-sleep', { timeout: 4000 }).catch(() => {});
+  await a.page.fill('#sl-from', '2026-10-05T09:05', { timeout: 4000 }).catch(() => {});
+  await a.page.fill('#sl-to', '2026-10-05T09:15', { timeout: 4000 }).catch(() => {});
+  await a.page.click('.mark-editor [data-act="save"]', { timeout: 4000 }).catch(() => {});
+  await a.page.waitForTimeout(1200);
+  const made = await sleepRows(a.page);
+  await driveFor(a.page, false);
+  await a.page.evaluate(() => window.__drive.sync('push')).catch(() => {});
+  const devA = await a.page.evaluate(() => window.AortiMarksPage.store.deviceId);
+  const onDrive = fake.byName('marks_2026-10_' + devA + '.json');
+  const body = onDrive.length ? JSON.parse(onDrive[0].content).records.filter((r) => r.kind === 'sleep') : [];
+  rows.push(['X1 laptop: Add sleep makes a sleep mark and it is on Drive after a push', made.length === 1 && body.length === 1 && body[0].from === BASE + 5 * 60000 && body[0].to === BASE + 15 * 60000, JSON.stringify({ made, body: body.length })]);
+
+  const ph = await context({ width: 360 });
+  const b = await open(ph, '/hrv_viewer.html#/month');
+  await seed(b.page, { 'hrm_20261005T15Z_abc123.csv': segment() }, [], 'phn001');
+  await gotoDay(b.page, '2026-10-05');
+  const before = await sleepRows(b.page);
+  await driveFor(b.page, true);
+  await b.page.evaluate(() => window.__drive.sync()).catch(() => {});
+  await rerouteDay(b.page, '2026-10-05');
+  const after = await sleepRows(b.page);
+  const drawn = await b.page.evaluate(() => (Chart.getChart(document.getElementById('session-chart')).options.plugins.hrOverlays.overlays || []).filter((o) => o.borderDash).map((o) => [Math.round(o.xMin), Math.round(o.xMax)]));
+  // Day origin is local midnight (06:00Z); 15:05Z to 15:15Z is minute 545 to 555.
+  rows.push(['X1 phone: the laptop sleep mark shows after a sync, in the list and on the chart', before.length === 0 && after.length === 1 && drawn.some(([x, y]) => x === 545 && y === 555), JSON.stringify({ before, after, drawn })]);
+  rows.push(['X1: no page errors', !a.errs.length && !b.errs.length, a.errs.concat(b.errs).join(' | ')]);
+  await lap.close(); await ph.close();
+  return rows;
+}
+
 // ---------------------------------------------------------------- P1, L1
 async function checkP1() {
   const ctx = await context();
@@ -283,25 +337,31 @@ async function pageLoads() {
 
 // ---------------------------------------------------------------- main
 let bad = 0;
+const RUN_CHECKS = !args.includes('--mutants'), RUN_MUTANTS = !args.includes('--checks');
 const report = (rows) => { for (const [l, ok, d] of rows) { console.log((ok ? 'PASS ' : 'FAIL ') + l + (!ok && d ? '  [' + d + ']' : '')); if (!ok) bad++; } return rows; };
+if (RUN_CHECKS) {
 report(await pageLoads());
 report(await checkM7());
 report(await checkM10());
+report(await checkX1());
 report(await checkP1());
 report(await checkIdb());
 const l1 = await checkL1(true), l1c = await checkL1(false);
 report([['L1 page: without navigator.locks diagnostics says marks sync is unavailable', l1.line && !l1.errs.length, l1.errs.join(' | ')],
   ['L1 page control: with navigator.locks the line is absent', !l1c.line]]);
+}
 
 console.log('\nNegative controls (each must FAIL):');
 const MUTANTS = [
   ['M7', 'summarizeCSV drops ep', { '/hrv_viewer.html': ['events.push({ t, label: r[idx.event], ep });', 'events.push({ t, label: r[idx.event] });'] }, checkM7],
-  ['M7', 'markers list ignores marks', { '/hrv_viewer.html': ['for (const e of viewMarks(s).events) items.push(', 'for (const e of s.events) items.push('] }, checkM7],
+  ['M7', 'markers list ignores marks', { '/hrv_viewer.html': ["      for (const e of viewMarks(s).events) {\n        items.push({ type: 'event'", "      for (const e of s.events) {\n        items.push({ type: 'event'"] }, checkM7],
   ['M10', 'no month lock', { '/marks-drive.js': ["      return locks.request('aorti-marks:' + m, lockOpts || {}, (lock) => (lock ? fn() : 'busy'));", '      return fn();'] }, checkM10],
+  ['X1', 'the Day view ignores sleep marks', { '/hrv_viewer.html': ['    const marked = viewMarks(s).sleep;', '    const marked = [];'] }, checkX1],
+  ['X1', 'Add sleep writes nothing', { '/hrv_viewer.html': [': store.createSleep({ from: a, to: b }), box);', ': Promise.resolve(), box);'] }, checkX1],
   ['IDB', 'same-key ops not grouped', { '/marks-store.js': ["const key = op.store + '\\u0000' + op.key;", 'const key = String(i);'] }, checkIdb],
   ['P1', 'Purge without the marks step', { '/diagnostics.js': ["      if (mp && typeof mp.beforePurge === 'function') {", '      if (false) {'] }, checkP1],
 ];
-for (const [id, name, mut, fn] of MUTANTS) {
+for (const [id, name, mut, fn] of (RUN_MUTANTS ? MUTANTS : [])) {
   MUTATE = mut;
   const rows = await fn();
   MUTATE = {};
