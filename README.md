@@ -9,7 +9,7 @@ Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recordin
 ## What you get
 
 - **Live monitor** (`hr_monitor.html`). Real-time HR and RMSSD, a live trace, audio alerts, posture logging, OBS-ready widget. Auto-saves every session as a CSV.
-- **Session viewer** (`hrv_viewer.html`). Month, week, day, and single-session views over every recording. Autonomic interpretation, palpitation clusters, sympathetic flushes, posture and sleep windows. Multiple sessions on the same day stitch into a single day timeline.
+- **Session viewer** (`hrv_viewer.html`). Month, week, day, and single-session views over every recording. HR and HRV traces, the moments they moved together, posture and sleep windows. Multiple sessions on the same day stitch into a single day timeline.
 - **OBS overlay** (`overlay.html`). Browser-source companion to the monitor. Chroma-key ready. Uses a broadcast key so one phone or laptop can publish and any OBS instance can subscribe.
 - **Android APK**. Native BLE plus a foreground service, so recording survives the screen going off, the phone locking, and the app being backgrounded. Drive sync in the background. Release-signed.
 
@@ -25,7 +25,7 @@ Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recordin
 - Google sign-in is optional. When on, session CSVs sync to your Drive and the viewer reads them across devices.
 - Broadcasting to OBS is opt-in. When on, live ticks pass through a PartyKit relay to subscribers holding the broadcast key. The relay does not persist messages.
 - Turn off broadcast and sign out of Google, and nothing leaves the device.
-- Not a medical device. Interpretations are estimates. Talk to a clinician if numbers concern you.
+- Not a medical device.
 
 ## Running it locally
 
