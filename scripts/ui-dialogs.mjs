@@ -1,3 +1,4 @@
+// The monitor's inline Stop confirm (#stop-confirm) stays in the page hidden, so it is left out of every .confirm match.
 // S3 dialog checks on the shared components (ui.css, ui.js): destructive confirms are spied
 // (Cancel, Escape, backdrop and close-then-reopen make 0 calls; only the danger button makes 1),
 // the clear-cache count matches the fake phone, Copy OBS URL falls back to the read-only field,
@@ -125,7 +126,7 @@ async function shot(page, name) {
   await page.screenshot({ path: path.join(SHOTS, name + '.png') });
 }
 const spy = (page) => page.evaluate(() => Object.assign({}, window.__spy));
-const confirmOpen = (page) => page.locator('.confirm').count();
+const confirmOpen = (page) => page.locator('.confirm:not(#stop-confirm)').count();
 
 // ---------- Diagnostics confirms on the phone monitor ----------
 async function diagOpen(page) {
@@ -142,11 +143,11 @@ async function diagCase(page, btn, key, label) {
   };
   const counts = {};
   await trigger();
-  const info = await page.evaluate(() => ({ text: document.querySelector('.confirm').innerText.replace(/\s+/g, ' '), focus: document.activeElement && document.activeElement.textContent.trim(),
-    danger: getComputedStyle(document.querySelector('.confirm .btn.danger')).backgroundColor,
+  const info = await page.evaluate(() => ({ text: document.querySelector('.confirm:not(#stop-confirm)').innerText.replace(/\s+/g, ' '), focus: document.activeElement && document.activeElement.textContent.trim(),
+    danger: getComputedStyle(document.querySelector('.confirm:not(#stop-confirm) .btn.danger')).backgroundColor,
     warn: getComputedStyle(document.documentElement).getPropertyValue('--warn-high').trim() }));
   if (info.focus !== 'Cancel') fail(`${label}: focus on open is "${info.focus}", not Cancel`);
-  await page.locator('.confirm .btn', { hasText: 'Cancel' }).click();
+  await page.locator('.confirm:not(#stop-confirm) .btn', { hasText: 'Cancel' }).click();
   counts.cancel = (await spy(page))[key];
   await trigger();
   await page.keyboard.press('Escape');
@@ -165,7 +166,7 @@ async function diagCase(page, btn, key, label) {
   const stale = await confirmOpen(page);
   counts.reopen = (await spy(page))[key];
   await trigger();
-  await page.locator('.confirm .btn.danger').click();
+  await page.locator('.confirm:not(#stop-confirm) .btn.danger').click();
   await page.waitForTimeout(80);
   counts.danger = (await spy(page))[key];
   const want = { cancel: 0, escape: 0, backdrop: 0, reopen: 0, danger: 1 };
@@ -215,7 +216,7 @@ try {
     await trigger();
     const focus = await page.evaluate(() => document.activeElement.textContent.trim());
     const text = await page.locator('.session-card .confirm').innerText();
-    await page.locator('.confirm .btn', { hasText: 'Cancel' }).click();
+    await page.locator('.confirm:not(#stop-confirm) .btn', { hasText: 'Cancel' }).click();
     counts.cancel = (await spy(page)).idbDelete;
     const hashAfterCancel = await page.evaluate(() => location.hash);
     await trigger();
@@ -228,7 +229,7 @@ try {
     const leftOpen = await confirmOpen(page);
     await trigger();
     counts.reopen = (await spy(page)).idbDelete;
-    await page.locator('.confirm .btn.danger').click();
+    await page.locator('.confirm:not(#stop-confirm) .btn.danger').click();
     await page.waitForTimeout(800);
     counts.danger = (await spy(page)).idbDelete;
     const after = await page.locator('.session-card').count();
@@ -301,16 +302,16 @@ try {
         await shot(page, 'diagnostics-' + tag(w, t));
         await page.locator('#hrm-diag-overlay #hrm-cache-clear').scrollIntoViewIfNeeded();
         await page.locator('#hrm-diag-overlay #hrm-cache-clear').click();
-        await page.waitForSelector('.confirm');
+        await page.waitForSelector('.confirm:not(#stop-confirm)');
         if (t === 2) await textScale(page, 2);
-        await page.locator('.confirm').scrollIntoViewIfNeeded();
+        await page.locator('.confirm:not(#stop-confirm)').scrollIntoViewIfNeeded();
         await shot(page, 'confirm-clear-cache-' + tag(w, t));
         await page.keyboard.press('Escape');
         await page.locator('#hrm-diag-overlay #hrm-diag-purge').scrollIntoViewIfNeeded();
         await page.locator('#hrm-diag-overlay #hrm-diag-purge').click();
-        await page.waitForSelector('.confirm');
+        await page.waitForSelector('.confirm:not(#stop-confirm)');
         if (t === 2) await textScale(page, 2);
-        await page.locator('.confirm').scrollIntoViewIfNeeded();
+        await page.locator('.confirm:not(#stop-confirm)').scrollIntoViewIfNeeded();
         await shot(page, 'confirm-purge-' + tag(w, t));
         await ctx.close();
       }

@@ -63,29 +63,32 @@
   .app-nav {
     display: flex;
     align-items: center;
-    gap: 24px;
-    padding: 12px 24px;
-    background: #101010;
+    gap: var(--s2);
+    padding: 0 var(--s4);
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
-    height: 52px;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 600;
+    height: 56px;
+    font: 500 var(--t14)/1.2 var(--ui-face);
     position: relative;
     z-index: 100;
+    container-type: inline-size;
   }
+  /* At large text sizes the bar keeps the mark and drops the word and the link icon. */
+  @container (max-width: 23em) { .app-nav .aorti-nav-word, .app-nav .nav-ext-icon { display: none; } }
+  @media (min-width: 769px) { #control-panel > :not(.sr-only) { width: 100%; max-width: 720px; } }
   .app-nav-title {
     color: var(--text);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    gap: var(--s2);
+    min-height: 44px;
+    min-width: 44px;
+    margin-right: var(--s3);
+    font-family: 'Space Grotesk', var(--ui-face);
     font-weight: 600;
-    font-size: 18px;
-    letter-spacing: -0.02em;
-    text-transform: none;
+    font-size: var(--t16);
+    letter-spacing: -0.01em;
   }
   .aorti-nav-mark {
     width: 24px;
@@ -132,28 +135,27 @@
     letter-spacing: 0.02em;
   }
   .app-nav-link {
-    color: var(--text-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    color: var(--text);
     text-decoration: none;
-    padding: 6px 14px;
-    border-radius: 6px;
-    transition: color 0.15s, background 0.15s;
+    padding: 0 var(--s3);
+    border: 1px solid transparent;
+    border-radius: var(--r-ctl);
+    white-space: nowrap;
   }
-  .app-nav-link:hover { color: var(--text); background: #141414; }
-  .app-nav-link.active { color: var(--text); background: #141414; }
+  .app-nav-link:hover { background: var(--selected-fill); }
+  .app-nav-link.active { background: var(--selected-fill); }
   /* Nav link label swap: desktop shows the full label, mobile media
      query below flips to the short one. */
   .nav-label-short { display: none; }
-  .nav-preview { color: var(--text-dim); }
-  .nav-preview:hover { color: var(--text); background: #141414; }
-  .nav-copy { color: var(--hrv); border: 1px solid var(--hrv); }
-  .nav-copy:hover { color: #0a1a14; background: var(--hrv); }
+  .nav-copy { border-color: var(--border-control); }
   .nav-ext-icon {
-    width: 10px;
-    height: 10px;
-    display: inline-block;
-    vertical-align: baseline;
-    margin-left: 2px;
-    opacity: 0.7;
+    width: var(--icon);
+    height: var(--icon);
+    flex: 0 0 auto;
   }
   /* Web reliability tips pill — only mounted on desktop Chromium where
      Web Bluetooth has known stability quirks. Hidden on Capacitor / mobile
@@ -161,22 +163,20 @@
   .hrm-tips-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    margin-right: 8px;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 var(--s3);
+    margin-right: var(--s2);
     background: transparent;
-    color: var(--text-dim);
+    color: var(--text);
     text-decoration: none;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 600;
+    border: 1px solid transparent;
+    border-radius: var(--r-ctl);
+    font: 500 var(--t14)/1.2 var(--ui-face);
     cursor: pointer;
   }
-  .hrm-tips-pill:hover { color: var(--text); border-color: var(--border-control); background: #141414; }
-  .hrm-tips-pill svg { width: 12px; height: 12px; }
+  .hrm-tips-pill:hover { background: var(--selected-fill); }
+  .hrm-tips-pill svg { width: var(--icon); height: var(--icon); }
 
   .tips-sheet .tip { padding: var(--s3) 0; border-top: 1px solid var(--border); }
   .tips-sheet .tip-title { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s1); font-weight: 600; }
@@ -258,7 +258,7 @@
   body.watch-mode [data-section="settings"] .tabs,
   body.watch-mode [data-section="settings"] .tab-panel { display: none; }
   .section-watch-empty { display: none; }
-  .nav-copy.copied { background: var(--hrv); color: #0a1a14; }
+  .nav-copy.copied { background: var(--selected-fill); }
   .obs-size-hint {
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 11px;
@@ -388,13 +388,20 @@
   }
 
   #control-panel {
+    --cp-pad: var(--s5);
     background: var(--bg);
-    padding: 20px 24px;
+    padding: 0 0 var(--s5);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 16px;
   }
+  #control-panel > .status-line { padding: var(--s3) var(--cp-pad) 0; container-type: inline-size; }
+  .status-line :is(.state, .sub) > span:not(.sep) { display: inline-block; }
+  /* At large text sizes each part of the state takes its own line. */
+  @container (max-width: 22em) { .status-line .sep { display: block; height: 0; overflow: hidden; } }
+  .session-ctl { padding: var(--s3) var(--cp-pad) 0; }
+  .session-ctl .confirm { margin: 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .battery-display {
     font-size: 11px;
     color: #8a8a8a;
@@ -610,35 +617,43 @@
     background: rgba(226,75,74,0.14);
   }
   .section {
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
+    border-top: 1px solid var(--border);
   }
-  .section-header {
+  .section:last-child { border-bottom: 1px solid var(--border); }
+  #control-panel .section > .section-header {
+    position: relative;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    user-select: none;
-    margin: 0 0 10px;
-  }
-  .section-header:hover .section-title { color: var(--text); }
-  .section-title {
-    font-size: 11px;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    column-gap: var(--s2);
+    width: 100%;
+    min-height: 48px;
     margin: 0;
-    font-weight: 500;
-    transition: color 0.15s;
+    padding: var(--s2) calc(var(--cp-pad) + 28px) var(--s2) var(--cp-pad);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    color: var(--text);
+    font: 600 var(--t14)/1.3 var(--ui-face);
+    text-align: left;
+    justify-content: flex-start;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
+  #control-panel .section > .section-header:hover { background: var(--selected-fill); }
+  #control-panel .section > .section-header:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--action); }
+  .section-title { margin: 0; }
+  .section-meta { margin-left: auto; color: var(--text-dim); font-weight: 400; font-size: var(--t12); }
+  .section-meta:empty { display: none; }
   .section-caret {
+    position: absolute;
+    right: var(--cp-pad);
+    top: 50%;
+    margin-top: -8px;
     color: var(--text-dim);
-    width: 18px;
-    height: 18px;
-    transition: transform 0.2s, color 0.15s;
-    flex-shrink: 0;
+    width: var(--icon);
+    height: var(--icon);
+    transition: transform 0.2s;
   }
   .section-caret svg {
     width: 100%;
@@ -649,22 +664,20 @@
     stroke-linejoin: round;
     fill: none;
   }
-  .section-header:hover .section-caret { color: var(--text); }
-  .section.collapsed .section-caret {
-    transform: rotate(-90deg);
-  }
-  .section.collapsed .section-header {
-    margin: 0;
-  }
+  .section:not(.collapsed) .section-caret { transform: rotate(180deg); }
   .section-body {
     overflow: hidden;
+    padding: 0 var(--cp-pad) var(--s4);
     transition: max-height 0.25s ease, opacity 0.2s;
     max-height: 2000px;
     opacity: 1;
   }
   .section.collapsed .section-body {
     max-height: 0;
+    padding-bottom: 0;
     opacity: 0;
+    visibility: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s, visibility 0s linear 0.25s;
   }
   .controls {
     display: flex;
@@ -697,30 +710,45 @@
      (green) and Stop (red). Replaces the old Connect / Disconnect / Reset /
      Export row. Export CSV lives with the autosave/storage cluster now. */
   .btn-session-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s2);
     width: 100%;
-    font-size: 14px;
-    padding: 10px 16px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    min-height: 42px;
+    min-height: 48px;
+    margin: 0;
+    padding: var(--s2) var(--s4);
+    border: 1px solid var(--border-control);
+    border-radius: var(--r-ctl);
+    font: 600 var(--t16)/1.25 var(--ui-face);
+    cursor: pointer;
+  }
+  .btn-session-toggle[data-state="recording"]::before,
+  .btn-session-toggle[data-state="reconnecting"]::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    border: 1.75px solid currentColor;
+    border-radius: 2px;
   }
   .btn-session-toggle[data-state="idle"] {
-    background: var(--hrv);
-    color: #0a1a14;
-    border-color: var(--hrv);
+    background: var(--action);
+    color: var(--on-fill);
+    border-color: var(--action);
   }
   /* Re-assert bg + border on hover so the generic `button:hover` rule can't
      paint the button dark grey between the state colour and the brightness
      filter taking effect. */
   .btn-session-toggle[data-state="idle"]:hover:not(:disabled) {
-    background: var(--hrv);
-    border-color: var(--hrv);
-    filter: brightness(1.1);
+    background: var(--action);
+    border-color: var(--action);
+    filter: brightness(1.08);
   }
   .btn-session-toggle[data-state="recording"],
   .btn-session-toggle[data-state="reconnecting"] {
     background: var(--warn-high);
-    color: #0a0a0a;
+    color: var(--on-fill);
     border-color: var(--warn-high);
   }
   .btn-session-toggle[data-state="recording"]:hover:not(:disabled),
@@ -738,15 +766,8 @@
     background: transparent;
     border-color: var(--border-control);
   }
-  /* Stop confirmation for long sessions; replaces the toggle in place. */
-  .stop-confirm[hidden] { display: none; }
-  .stop-confirm-text {
-    font-size: 13px;
-    color: var(--text);
-    margin-bottom: 8px;
-  }
-  .stop-confirm-actions { display: flex; gap: 8px; }
-  .stop-confirm-actions button { flex: 1; min-height: 42px; font-weight: 600; }
+  .btn-session-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .btn-session-toggle:disabled { opacity: .4; cursor: not-allowed; }
 
   /* Toggle-switch row: inline label + switch for session-level on/off
      choices (currently: Broadcast to relay). Shared across any future
@@ -889,46 +910,11 @@
     height: 180px;
   }
 
-  /* Restore overlay — shown while the WebView reattaches to a native
-     session and the CSV snapshot is parsed back into the chart. The chart
-     canvas underneath is empty during this window; the overlay tells the
-     user "we're working" instead of looking frozen. Scoped to the chart
-     wrap so the rest of the UI (header, controls) stays interactive. */
-  .restore-overlay {
-    position: fixed;
-    inset: 0;
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    background: rgba(10, 10, 10, 0.92);
-    color: #d8d8d8;
-    font-size: 14px;
-    z-index: 9000;
-    pointer-events: none;
-  }
-  /* Two ways to surface it: html.restoring is set by the early <head> script
-     when ?mode=online is in the URL, so the overlay paints on the first
-     frame before any JS runs. .shown is added later by JS once the native
-     plugin confirms an active session. Either path keeps it visible. */
-  html.restoring .restore-overlay,
-  .restore-overlay.shown { display: flex; }
-  .restore-overlay .spinner {
-    width: 28px;
-    height: 28px;
-    border: 2.5px solid rgba(93, 202, 165, 0.18);
-    border-top-color: #5DCAA5;
-    border-radius: 50%;
-    animation: restore-spin 0.9s linear infinite;
-  }
-  @keyframes restore-spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) {
-    .restore-overlay .spinner {
-      animation: none;
-      border-top-color: rgba(93, 202, 165, 0.18);
-    }
-  }
+  /* Resuming and strap-not-found show the last values dimmed (html.restoring is set before first paint). */
+  html.restoring #overlay-zone #hr-widget,
+  body.status-dim #overlay-zone #hr-widget { opacity: .5; }
+  html.restoring #overlay-zone #hr-widget :is(.big-number, .compact-hrv-value),
+  body.status-dim #overlay-zone #hr-widget :is(.big-number, .compact-hrv-value) { color: var(--text-dim); }
 
   .thresh-grid {
     display: grid;
@@ -1206,62 +1192,18 @@
   .posture-sticky {
     position: sticky;
     top: 0;
-    z-index: 20;
+    z-index: var(--z-sticky);
     background: var(--bg);
-    padding: 10px 2px 12px;
-    margin: -6px 0 6px;
-    border-bottom: 1px solid var(--border);
+    padding: var(--s4) var(--cp-pad) var(--s3);
+    container-type: inline-size;
   }
-  .posture-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .posture-label {
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 700;
-    margin-right: 4px;
-  }
-  .posture-btn {
-    flex: 1 1 0;
-    min-width: 0;
-    padding: 10px 14px;
-    font-size: 13px;
-    letter-spacing: 0.03em;
-    font-weight: 600;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.12s, border-color 0.12s, color 0.12s;
-  }
-  .posture-btn:hover { border-color: var(--border-control); color: var(--text); }
-  .posture-btn.active[data-posture="lying"] { background: rgba(125,184,232,0.15); border-color: #7DB8E8; color: #7DB8E8; }
-  .posture-btn.active[data-posture="sitting"] { background: rgba(184,217,126,0.15); border-color: #B8D97E; color: #B8D97E; }
-  .posture-btn.active[data-posture="standing"] { background: rgba(232,152,88,0.15); border-color: #E89858; color: #E89858; }
+  .row-label { margin: 0 0 var(--s2); font-size: var(--t12); font-weight: 500; color: var(--text-dim); }
+  .posture-row.segmented > button { flex: 1 1 0; min-width: 0; }
+  @container (max-width: 22em) { .posture-row.segmented { flex-direction: column; } }
   .posture-row[data-mode="download"] {
     display: block;
   }
-  .download-csv-btn {
-    width: 100%;
-    padding: 12px 16px;
-    font-size: 13px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 600;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.12s, border-color 0.12s, color 0.12s;
-  }
-  .download-csv-btn:hover { border-color: var(--border-control); color: var(--text); }
+  .posture-row.segmented > .download-csv-btn { flex: 1 1 100%; }
 
   .hrm-toast {
     position: fixed;
@@ -1332,19 +1274,11 @@
       min-height: 100vh;
       overflow: auto;
     }
-    .app-nav {
-      height: auto;
-      flex-wrap: nowrap;
-      gap: 10px;
-      padding: 10px 14px;
-      overflow: hidden;
-    }
-    /* Drop the wordmark on mobile so brand + nav + version chip fit in
-       one row. The mark alone is enough branding here; visiting
-       aorti.ca is the place for the wordmark. */
-    .app-nav-title .aorti-nav-word { display: none; }
-    .aorti-nav-mark { width: 22px; height: 20px; }
-    .app-nav-link { padding: 6px 10px; font-size: 11px; white-space: nowrap; }
+    .app-nav { padding: 0 var(--s2) 0 var(--s4); gap: var(--s1); }
+    .app-nav-title { margin-right: 0; }
+    .app-nav-link.active { display: none; }
+    #nav-viewer-link { margin-left: auto; }
+    #hrm-tips-slot { margin-left: 0 !important; }
     .nav-label-full { display: none; }
     .nav-label-short { display: inline; }
     /* Preview popup + Copy OBS URL are desktop-only concerns (Window Capture,
@@ -1352,6 +1286,7 @@
     .app-nav .nav-preview, .app-nav .nav-copy { display: none; }
     #app {
       grid-template-columns: 1fr;
+      align-content: start;
       height: auto;
       min-height: 100vh;
     }
@@ -1363,18 +1298,11 @@
     #overlay-zone {
       flex-direction: column;
       border-right: none;
-      border-bottom: 1px solid var(--border);
-      padding: 12px;
+      padding: var(--s4) var(--s4) 0;
       max-height: none;
-      position: sticky;
-      top: 0;
-      z-index: 5;
       background: var(--bg);
     }
-    #control-panel {
-      padding: 12px 14px;
-      gap: 12px;
-    }
+    #control-panel { --cp-pad: var(--s4); }
     .widget {
       padding: 14px 16px;
     }
@@ -1388,8 +1316,6 @@
        the folder toggle); enlarging it turns a compact affordance into a
        big empty square. */
     button:not(.icon-btn):where(:not(.ui *)) { min-height: 44px; padding: 10px 16px; }
-    /* Primary action buttons get a bit more breathing room + stronger text. */
-    .btn-session-toggle { min-height: 52px; font-size: 15px; }
     /* Export CSV is a key end-of-session action — full-width on mobile so
        it's easy to hit after Stop, no aiming at a right-aligned button. */
     #btn-export {
@@ -1404,21 +1330,6 @@
        gets a fixed min-width so "Log" isn't a 30px target next to a long
        input. */
     .marker-input button { min-width: 88px; padding: 10px 18px; font-weight: 600; }
-    /* Posture selector rebuilt for mobile: drop the redundant "Posture:"
-       label, stretch the three pills across the row with equal shares. */
-    .posture-label { display: none; }
-    .posture-row {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-    }
-    .posture-btn {
-      padding: 12px 0;
-      font-size: 13px;
-      min-height: 44px;
-    }
-    /* Nav links tapped more often on mobile — bump their vertical bounds. */
-    .app-nav-link { min-height: 36px; display: inline-flex; align-items: center; }
 
     /* Control-panel rows: label stacks above its control on narrow
        viewports so inputs get full width and taps land reliably. */
@@ -1460,13 +1371,9 @@
   }
 
   @media (max-width: 480px) {
-    #overlay-zone { padding: 10px; }
-    #control-panel { padding: 10px; }
     .widget { padding: 12px 14px; }
     .big-number { font-size: 64px; }
     .big-number.medium { font-size: 48px; }
-    .section { padding: 12px; }
-    .section-header { padding: 8px 0; }
     .pots-quick-grid { grid-template-columns: repeat(2, 1fr); }
     .autosave-row, .controls { flex-wrap: wrap; }
     .controls button { flex: 1 1 auto; }
@@ -1474,10 +1381,6 @@
 </style>
 </head>
 <body>
-<div class="restore-overlay" id="restore-overlay" role="status" aria-live="polite">
-  <div class="spinner" aria-hidden="true"></div>
-  <div>Restoring session…</div>
-</div>
 <script>
   // Mode: "online" (Drive sync + relay broadcast + multi-device) or "offline"
   // (local recording only, no sign-in, no broadcast). Chosen at the index
@@ -1509,7 +1412,7 @@
     <span class="aorti-nav-word">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span></span>
   </a>
   <a class="app-nav-link active" href="./hr_monitor.html"><span class="nav-label-full">Live monitor</span><span class="nav-label-short">Monitor</span></a>
-  <a class="app-nav-link" id="nav-viewer-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer <svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+  <a class="app-nav-link" id="nav-viewer-link" href="./hrv_viewer.html" target="_blank" rel="noopener" title="Open in a new tab — leaving this one keeps your strap connected">Viewer<svg class="nav-ext-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6 10M3 6v7h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
   <span id="hrm-tips-slot" style="margin-left: auto;"></span>
@@ -1596,9 +1499,8 @@
     </div>
     </div><!-- /.widget-row -->
 
-    <div class="overlay-status" id="overlay-status">• Not connected</div>
+    <div class="overlay-status" id="overlay-status" hidden></div>
     <div class="overlay-spacer"></div>
-    <div class="crop-label" style="font-size: 9px; color: #3a3a3a; text-align: center; letter-spacing: 0.1em;">LONG-PRESS WIDGET TO POP OUT</div>
     <!-- Sibling iframe shown in watch-mode only (body.watch-mode). Subscribes
          to the shared relay key so Firefox / Safari / iOS see the stream from
          whichever device holds the strap. Rest of the widget DOM stays in the
@@ -1609,36 +1511,92 @@
   <!-- RIGHT: Controls and details -->
   <div id="control-panel">
 
-    <!-- Sticky posture bar. Big tap targets, always visible while scrolling.
-         Used to live buried inside the Event markers section; pulled up here
-         so changing posture during a flush is a one-tap operation rather
-         than scroll-find-tap. -->
-    <div class="posture-sticky">
-      <div class="posture-row">
-        <span class="posture-label">Posture</span>
-        <button class="posture-btn" data-posture="lying">Lying</button>
-        <button class="posture-btn active" data-posture="sitting">Sitting</button>
-        <button class="posture-btn" data-posture="standing">Standing</button>
+    <div class="ui status-line" id="status-line" hidden>
+      <div class="state"></div>
+      <div class="sub" hidden></div>
+    </div>
+    <span class="sr-only" id="status-announce" aria-live="polite"></span>
+
+    <div class="ui session-ctl">
+      <button class="btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
+      <div class="confirm danger" id="stop-confirm" role="group" aria-labelledby="stop-confirm-text" hidden>
+        <p class="text" id="stop-confirm-text">Stop this session?</p>
+        <div class="actions">
+          <button type="button" class="btn" id="stop-confirm-keep">Keep recording</button>
+          <button type="button" class="btn danger" id="stop-confirm-stop">Stop session</button>
+        </div>
       </div>
     </div>
 
-    <div class="section" data-section="connection">
-      <div class="section-header">
-        <div class="section-title">Connection</div>
-        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
+    <div class="ui posture-sticky">
+      <p class="row-label" id="posture-label">Posture</p>
+      <div class="posture-row segmented" role="group" aria-labelledby="posture-label">
+        <button class="posture-btn" data-posture="lying" aria-pressed="false">Lying</button>
+        <button class="posture-btn" data-posture="sitting" aria-pressed="false">Sitting</button>
+        <button class="posture-btn" data-posture="standing" aria-pressed="false">Standing</button>
       </div>
-      <div class="section-body">
-        <div class="status" id="status">Tap Start session to pair your strap and begin recording.</div>
-        <div style="height: 10px;"></div>
-        <button class="btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
-        <div class="stop-confirm" id="stop-confirm" role="group" aria-labelledby="stop-confirm-text" hidden>
-          <div class="stop-confirm-text" id="stop-confirm-text">Stop this session?</div>
-          <div class="stop-confirm-actions">
-            <button type="button" id="stop-confirm-keep">Keep recording</button>
-            <button type="button" class="btn-session-toggle" data-state="recording" id="stop-confirm-stop">Stop session</button>
-          </div>
+    </div>
+
+    <div class="section" data-section="stats">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-stats-body">
+        <span class="section-title">Session stats</span><span class="section-meta" id="stats-meta"></span>
+        <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="section-body" id="sec-stats-body">
+        <div class="section-watch-empty">Only available on the broadcasting device.</div>
+        <div class="stats-grid">
+          <div class="stat"><div class="stat-label">Avg HR</div><div class="stat-value" id="avg-hr">—</div></div>
+          <div class="stat"><div class="stat-label">Avg RMSSD</div><div class="stat-value" id="avg-rmssd">—</div></div>
+          <div class="stat"><div class="stat-label">Max HR</div><div class="stat-value" id="max-hr">—</div></div>
+          <div class="stat"><div class="stat-label">Min HR</div><div class="stat-value" id="min-hr">—</div></div>
+          <div class="stat"><div class="stat-label">Palp / min</div><div class="stat-value" id="palp-rate">0</div></div>
+          <div class="stat"><div class="stat-label">Palp total</div><div class="stat-value" id="palp-total">0</div></div>
+          <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="warn-count">0</div></div>
+          <div class="stat" title="Fraction of the session where the strap was connected. Drops whenever the strap disconnects and auto-reconnect is in flight."><div class="stat-label">Uptime</div><div class="stat-value" id="uptime-pct">—</div></div>
         </div>
-        <div class="battery-display" id="battery-display">Battery: —</div>
+        <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+          <button id="btn-export" title="Download the current session as CSV">Export CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-section="chart">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-chart-body">
+        <span class="section-title">Trend</span>
+        <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="section-body" id="sec-chart-body">
+        <div class="section-watch-empty">Only available on the broadcasting device.</div>
+        <div class="main-chart-wrap">
+          <canvas id="main-chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-section="events">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-events-body">
+        <span class="section-title">Marks</span><span class="section-meta" id="marks-meta"></span>
+        <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="section-body" id="sec-events-body">
+        <div class="section-watch-empty">Only available on the broadcasting device.</div>
+        <div class="marker-input">
+          <input type="text" id="marker-label" placeholder="drank miso, took walk, stood up" />
+          <button id="add-marker">Log</button>
+        </div>
+        <div style="height: 8px;"></div>
+        <div class="events" id="events"><div class="empty">No events logged yet.</div></div>
+      </div>
+    </div>
+
+
+    <div class="section" data-section="connection">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-connection-body">
+        <span class="section-title">Connection</span>
+        <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="section-body" id="sec-connection-body">
+        <div class="battery-display" id="battery-display" hidden>Battery: —</div>
         <!-- Broadcast toggle lives here now (was buried in Settings → Widgets)
              — session-level choice belongs next to the Active broadcasts
              panel so users see publishing + listening state in one place. -->
@@ -1697,11 +1655,11 @@
     </div>
 
     <div class="section" data-section="settings">
-      <div class="section-header">
-        <div class="section-title">Settings</div>
-        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
-      </div>
-      <div class="section-body">
+      <button type="button" class="section-header" aria-expanded="true" aria-controls="sec-settings-body">
+        <span class="section-title">Settings</span>
+        <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="section-body" id="sec-settings-body">
         <div class="section-watch-empty">Only available on the broadcasting device.</div>
         <div class="tabs">
           <button class="tab active" data-tab="widgets">Widgets</button>
@@ -1825,59 +1783,6 @@
       </div>
     </div>
 
-    <div class="section" data-section="stats">
-      <div class="section-header">
-        <div class="section-title">Session stats</div>
-        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
-      </div>
-      <div class="section-body">
-        <div class="section-watch-empty">Only available on the broadcasting device.</div>
-        <div class="stats-grid">
-          <div class="stat"><div class="stat-label">Time</div><div class="stat-value" id="session-time">0:00</div></div>
-          <div class="stat"><div class="stat-label">Avg HR</div><div class="stat-value" id="avg-hr">—</div></div>
-          <div class="stat"><div class="stat-label">Avg RMSSD</div><div class="stat-value" id="avg-rmssd">—</div></div>
-          <div class="stat"><div class="stat-label">Max HR</div><div class="stat-value" id="max-hr">—</div></div>
-          <div class="stat"><div class="stat-label">Min HR</div><div class="stat-value" id="min-hr">—</div></div>
-          <div class="stat"><div class="stat-label">Palp / min</div><div class="stat-value" id="palp-rate">0</div></div>
-          <div class="stat"><div class="stat-label">Palp total</div><div class="stat-value" id="palp-total">0</div></div>
-          <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="warn-count">0</div></div>
-          <div class="stat" title="Fraction of the session where the strap was connected. Drops whenever the strap disconnects and auto-reconnect is in flight."><div class="stat-label">Uptime</div><div class="stat-value" id="uptime-pct">—</div></div>
-        </div>
-        <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
-          <button id="btn-export" title="Download the current session as CSV">Export CSV</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="section" data-section="chart">
-      <div class="section-header">
-        <div class="section-title">Full session trend</div>
-        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
-      </div>
-      <div class="section-body">
-        <div class="section-watch-empty">Only available on the broadcasting device.</div>
-        <div class="main-chart-wrap">
-          <canvas id="main-chart"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <div class="section" data-section="events">
-      <div class="section-header">
-        <div class="section-title">Event markers</div>
-        <div class="section-caret"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></div>
-      </div>
-      <div class="section-body">
-        <div class="section-watch-empty">Only available on the broadcasting device.</div>
-        <div class="marker-input">
-          <input type="text" id="marker-label" placeholder="drank miso, took walk, stood up" />
-          <button id="add-marker">Log</button>
-        </div>
-        <div style="height: 8px;"></div>
-        <div class="events" id="events"><div class="empty">No events logged yet.</div></div>
-      </div>
-    </div>
-
   </div>
 </div>
 
@@ -1941,9 +1846,225 @@
 
   const $ = id => document.getElementById(id);
   const setStatus = (msg, cls = '') => {
-    $('status').textContent = msg;
-    $('status').className = 'status ' + cls;
+    statusNote = msg ? { msg: String(msg), cls: cls, at: Date.now() } : null;
+    renderStatusLine(NATIVE ? engineSnapshot() : null);
   };
+
+  // Status line under the widget. Native reads the engine snapshot's linkState for display only;
+  // the web reads connState. It never throws, so a bad snapshot cannot break syncFromEngine.
+  const STATUS_GAP_MS = 30000;
+  const STATUS_LEDGER_KEY = 'hr_monitor_status_ledger';
+  let statusNote = null;
+  let statusSnapLast = null;
+  let statusKind = '';
+  let statusKey = '';
+  let statusLedger = null;
+  let statusLedgerSaved = 0;
+  let lastReadingAt = 0;
+  let lastBatteryPct = null;
+  let postureChosen = false;
+  function statusClock(ms) {
+    const d = new Date(ms);
+    return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function statusElapsed(ms) {
+    const t = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
+  }
+  function statusMinutes(ms) {
+    const m = Math.max(1, Math.round(ms / 60000));
+    return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+  }
+  // "808S 0025153" reads as "808S": a trailing serial is dropped.
+  function strapShortName(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length > 1 && /^[0-9A-F]{6,}$/i.test(parts[parts.length - 1])) parts.pop();
+    return parts.join(' ');
+  }
+  function statusKindFor(snap) {
+    if (!NATIVE) return state.connState === 'live' ? 'live' : (state.connState === 'reconnecting' ? 'reconnecting' : 'idle');
+    if (!snap || typeof snap.linkState !== 'string') return null;
+    if (!snap.sessionActive) return 'idle';
+    switch (snap.linkState) {
+      case 'recording': return 'live';
+      case 'reconnecting': return 'reconnecting';
+      case 'not_found': return 'not_found';
+      case 'resuming': case 'pre_resume': return 'resuming';
+      case 'stopping': return 'saving';
+      default: return null;
+    }
+  }
+  // Gaps are counted only when this page has watched the session since its start; otherwise none are shown.
+  function statusLedgerFor(startMs) {
+    if (statusLedger && statusLedger.start === startMs) return statusLedger;
+    let kept = null;
+    try {
+      const s = JSON.parse(localStorage.getItem(STATUS_LEDGER_KEY) || 'null');
+      if (s && s.start === startMs && Date.now() - s.seen < STATUS_GAP_MS) kept = s;
+    } catch (e) {}
+    statusLedger = kept || { start: startMs, gaps: 0, missingMs: 0, open: null, seen: Date.now(), complete: Date.now() - startMs < STATUS_GAP_MS };
+    return statusLedger;
+  }
+  function statusObserve(L, live, lastReading) {
+    const now = Date.now();
+    let changed = false;
+    // A stretch this page did not watch could hide a gap.
+    if (L.complete && now - L.seen > STATUS_GAP_MS) { L.complete = false; changed = true; }
+    if (!live && L.open == null) { L.open = lastReading || now; changed = true; }
+    else if (live && L.open != null) {
+      const d = now - L.open;
+      if (d > STATUS_GAP_MS) { L.gaps++; L.missingMs += d; }
+      L.open = null;
+      changed = true;
+    }
+    L.seen = now;
+    if (changed || now - statusLedgerSaved > 5000) {
+      statusLedgerSaved = now;
+      try { localStorage.setItem(STATUS_LEDGER_KEY, JSON.stringify(L)); } catch (e) {}
+    }
+  }
+  function statusGapText(L, live) {
+    if (!L || !L.complete) return '';
+    const openMs = L.open != null ? Date.now() - L.open : 0;
+    const openGap = openMs > STATUS_GAP_MS;
+    const n = L.gaps + (openGap ? 1 : 0);
+    if (!n) return live ? 'no gaps' : '';
+    return n + (n === 1 ? ' gap · ' : ' gaps · ') + statusMinutes(L.missingMs + (openGap ? openMs : 0)) + ' missing';
+  }
+  function renderStatusLine(snap) {
+    try {
+      const el = document.getElementById('status-line');
+      if (!el) return;
+      const restoring = document.documentElement.classList.contains('restoring');
+      let kind;
+      if (NATIVE) {
+        if (snap && typeof snap.linkState === 'string') { if (engineReady) statusSnapLast = snap; }
+        else if (snap) return;
+        snap = statusSnapLast;
+        kind = statusKindFor(snap);
+      } else {
+        snap = null;
+        kind = statusKindFor(null);
+      }
+      if (restoring && (kind == null || kind === 'idle')) kind = 'resuming';
+      if (kind == null) return;
+      const now = Date.now();
+      const active = kind !== 'idle';
+      const ms = (v) => (typeof v === 'number' && isFinite(v) && v > 0 ? v : 0);
+      const startMs = ms(snap && snap.sessionStartMs) || ms(state.startTime);
+      const latest = Math.max(lastReadingAt, ms(snap && snap.lastHrAtMs));
+      const lastReading = latest >= startMs ? latest : 0;
+      let L = null;
+      if (active && startMs && kind !== 'saving' && !restoring) {
+        L = statusLedgerFor(startMs);
+        statusObserve(L, kind === 'live', lastReading);
+      } else if (!active && statusLedger) {
+        statusLedger = null;
+        try { localStorage.removeItem(STATUS_LEDGER_KEY); } catch (e) {}
+      }
+      const strapRaw = NATIVE ? (snap && snap.strapName) : (device && device.name);
+      const strap = typeof strapRaw === 'string' ? strapShortName(strapRaw) : '';
+      const since = (L && L.open) || lastReading;
+      const head = [], sub = [];
+      if (kind === 'live') {
+        head.push(['Live', strap].filter(Boolean).join(' · '));
+        const tail = [];
+        if (startMs) tail.push(statusElapsed(now - startMs));
+        const g = statusGapText(L, true);
+        if (g === 'no gaps') tail.push(g); else if (g) sub.push(g);
+        if (tail.length) head.push(tail.join(' · '));
+      } else if (kind === 'reconnecting') {
+        head.push('Reconnecting' + (since ? ' ' + statusElapsed(now - since) : ''));
+        if (strap) head.push(strap);
+        const g = statusGapText(L, false);
+        if (g) sub.push(g);
+      } else if (kind === 'not_found') {
+        head.push('Strap not found' + (since ? ' since ' + statusClock(since) : ''));
+        const g = statusGapText(L, false);
+        if (g) sub.push(g);
+        sub.push('trying every 10 min');
+      } else if (kind === 'resuming') {
+        head.push('Resuming');
+        if (lastReading) head.push('last reading ' + statusClock(lastReading));
+      } else if (kind === 'saving') {
+        head.push('Saving');
+      } else if (statusNote && statusNote.cls !== 'connected' && statusNote.cls !== 'pending') {
+        // Session progress notes belong to a running session; after it ends only plain, warn and error notes show.
+        head.push(statusNote.msg);
+      }
+      if (active && !NATIVE && lastBatteryPct != null && lastBatteryPct < 20) sub.push('Strap battery ' + lastBatteryPct + '%');
+      if (active && statusNote && (statusNote.cls === 'error' || statusNote.cls === 'warn') && now - statusNote.at < 60000) sub.push(statusNote.msg);
+      document.body.classList.toggle('status-dim', kind === 'not_found' || kind === 'resuming');
+      const legacy = document.getElementById('overlay-status');
+      if (legacy && legacy.textContent) legacy.textContent = '';
+      if (kind !== statusKind) {
+        statusKind = kind;
+        const live = document.getElementById('status-announce');
+        if (live) live.textContent = head[0] || '';
+      }
+      const key = kind + '|' + head.join('|') + '|' + sub.join('|');
+      if (key === statusKey) return;
+      statusKey = key;
+      el.dataset.kind = kind;
+      const stateEl = el.querySelector('.state');
+      const subEl = el.querySelector('.sub');
+      const fill = function (box, parts) {
+        box.textContent = '';
+        parts.forEach(function (t, i) {
+          if (i) {
+            const sep = document.createElement('span');
+            sep.className = 'sep';
+            sep.textContent = ' · ';
+            box.appendChild(sep);
+          }
+          const part = document.createElement('span');
+          part.textContent = t;
+          box.appendChild(part);
+        });
+      };
+      fill(stateEl, head);
+      fill(subEl, sub);
+      subEl.hidden = !sub.length;
+      el.hidden = !head.length;
+    } catch (e) {
+      try { if (window.HRMLog) window.HRMLog.event('status line failed', (e && e.message) || String(e)); } catch (e2) {}
+    }
+  }
+  function updateSectionMeta() {
+    try {
+      const sm = document.getElementById('stats-meta');
+      if (sm) {
+        const hr = ($('avg-hr') || {}).textContent || '';
+        const rm = ($('avg-rmssd') || {}).textContent || '';
+        const parts = [];
+        if (/\d/.test(hr)) parts.push('avg ' + hr);
+        if (/\d/.test(rm)) parts.push('HRV ' + rm);
+        const t = parts.join(' · ');
+        if (sm.textContent !== t) sm.textContent = t;
+      }
+      const mm = document.getElementById('marks-meta');
+      if (mm) {
+        const n = document.querySelectorAll('#events .event').length;
+        const t = n ? String(n) : '';
+        if (mm.textContent !== t) mm.textContent = t;
+      }
+    } catch (e) {}
+  }
+  function syncSectionA11y(section) {
+    const open = !section.classList.contains('collapsed');
+    const header = section.querySelector('.section-header');
+    const body = section.querySelector('.section-body');
+    if (header) header.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (body) { if (open) body.removeAttribute('inert'); else body.setAttribute('inert', ''); }
+  }
+  function markPosture(p) {
+    document.querySelectorAll('.posture-btn').forEach(function (b) {
+      const on = !!p && b.dataset.posture === p;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
 
   function parseHR(value) {
     const flags = value.getUint8(0);
@@ -2348,13 +2469,6 @@
     el.textContent = pct.toFixed(pct >= 99.95 ? 0 : 1) + '%';
   }
 
-  function updateSessionTime() {
-    if (!state.startTime) return;
-    const elapsed = (Date.now() - state.startTime) / 1000;
-    const m = Math.floor(elapsed / 60);
-    const s = Math.floor(elapsed % 60);
-    $('session-time').textContent = m + ':' + String(s).padStart(2, '0');
-  }
 
   // Audio alerts - customizable per warning type
   let audioCtx = null;
@@ -2793,6 +2907,7 @@
     }
     state.currentHR = hr;
     state.lastDataTime = Date.now();
+    lastReadingAt = state.lastDataTime;
     // Each confirmed HR notification is proof the link is healthy; clear
     // the reconnect backoff so the next disconnect starts fresh at 1 s.
     if (typeof resetReconnectBackoff === 'function') resetReconnectBackoff();
@@ -2883,7 +2998,6 @@
       if (rrs.length > 0) updateBreathing();
       updateCharts();
       updateStats();
-      updateSessionTime();
       checkWarnings();
       broadcastTick();
     } catch (err) {
@@ -4013,7 +4127,8 @@
     const row = document.querySelector('.posture-row');
     if (row && row.getAttribute('data-mode') === 'download') return;
     state.currentPosture = p;
-    document.querySelectorAll('.posture-btn').forEach(b => b.classList.toggle('active', b.dataset.posture === p));
+    postureChosen = true;
+    markPosture(p);
   }
   function syncFromEngine(snap, reason) {
     if (!NATIVE || !snap) return;
@@ -4064,6 +4179,7 @@
         + ' conn=' + state.connState + ' id=' + (snap.senderId || '-'));
     }
     _lastSyncKey = key;
+    renderStatusLine(snap);
   }
   // Re-pull the engine (retried until settled), then sync under this reason.
   function refreshFromEngine(reason) {
@@ -4484,13 +4600,12 @@
         return Promise.resolve();
       },
       onShow: function () {
-        const overlay = $('restore-overlay');
-        if (overlay) overlay.classList.add('shown');
+        document.documentElement.classList.add('restoring');
+        renderStatusLine(engineSnapshot());
       },
       onHide: function () {
-        const overlay = $('restore-overlay');
-        if (overlay) overlay.classList.remove('shown');
         document.documentElement.classList.remove('restoring');
+        renderStatusLine(engineSnapshot());
         try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
         // The native overlay is shown on every resume while recording; JS owns dismissing it.
         if (window.HRMRestoreOverlay) { try { window.HRMRestoreOverlay.hide(); } catch (e) {} }
@@ -4633,9 +4748,9 @@
     await char.startNotifications();
     char.addEventListener('characteristicvaluechanged', onHRNotification);
     setStatus('Connected to ' + (device.name || 'device') + '. Streaming live.', 'connected');
-    $('overlay-status').textContent = '• LIVE · ' + (device.name || 'strap').toUpperCase();
     setConnState('live');
     logConnectionEvent('connect');
+    renderStatusLine(null);
     // Start the audio keep-alive (no-op on Capacitor, no-op if user opted
     // out). Inside the user-gesture chain that started the session, so the
     // AudioContext is allowed to start.
@@ -4687,6 +4802,7 @@
   }
 
   function updateBatteryDisplay(pct) {
+    lastBatteryPct = pct;
     const el = $('battery-display');
     el.textContent = 'Battery: ' + pct + '%';
     el.classList.remove('low', 'critical');
@@ -4767,14 +4883,14 @@
     logConnectionEvent('disconnect');
     if (state.autoReconnect) {
       setStatus('Disconnected. Reconnecting when strap is back in range...');
-      $('overlay-status').textContent = '• RECONNECTING...';
       setConnState('reconnecting');
+      renderStatusLine(null);
       tryReconnect();
     } else {
       setStatus('Device disconnected. Tap Start session to reconnect.');
-      $('overlay-status').textContent = '• DISCONNECTED';
       setConnState('idle');
       updateSessionToggle();
+      renderStatusLine(null);
     }
   }
 
@@ -4867,20 +4983,23 @@
     if (!row || row.getAttribute('data-mode') !== 'download') return;
     row.removeAttribute('data-mode');
     row.innerHTML = `
-      <span class="posture-label">Posture</span>
-      <button class="posture-btn" data-posture="lying">Lying</button>
-      <button class="posture-btn active" data-posture="sitting">Sitting</button>
-      <button class="posture-btn" data-posture="standing">Standing</button>`;
+      <button class="posture-btn" data-posture="lying" aria-pressed="false">Lying</button>
+      <button class="posture-btn" data-posture="sitting" aria-pressed="false">Sitting</button>
+      <button class="posture-btn" data-posture="standing" aria-pressed="false">Standing</button>`;
     state.currentPosture = 'sitting';
+    postureChosen = false;
     wirePostureButtons();
   }
   function wirePostureButtons() {
     document.querySelectorAll('.posture-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const p = btn.dataset.posture;
-        if (p === state.currentPosture) return;
+        const same = p === state.currentPosture;
+        if (same && postureChosen) return;
+        postureChosen = true;
         state.currentPosture = p;
-        document.querySelectorAll('.posture-btn').forEach(b => b.classList.toggle('active', b.dataset.posture === p));
+        markPosture(p);
+        if (same) return;
         logNativeFact('posture', { tsMs: Date.now(), text: p });
         if (state.startTime) {
           const t = (Date.now() - state.startTime) / 60000;
@@ -4974,10 +5093,9 @@
   function resetSession() {
     resetLiveDataBuffers();
     state.currentPosture = 'sitting';
-    // Reset posture button UI
-    document.querySelectorAll('.posture-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.posture === 'sitting');
-    });
+    postureChosen = false;
+    markPosture(null);
+    lastReadingAt = 0;
     state.currentHR = null;
     state.currentRMSSD = null;
     state.currentWarn = null;
@@ -4988,7 +5106,6 @@
     $('hr-big').textContent = '—';
     $('rmssd-big').textContent = '—';
     $('breath-rate').textContent = '—';
-    $('session-time').textContent = '0:00';
     if (rsaChart) { rsaChart.data.datasets[0].data = []; rsaChart.update('none'); }
     if (hrLiveTraceChart) { hrLiveTraceChart.data.datasets[0].data = []; hrLiveTraceChart.update('none'); }
     if (hrInlineChart) { hrInlineChart.data.datasets[0].data = []; hrInlineChart.update('none'); }
@@ -6261,10 +6378,13 @@
       header.addEventListener('click', () => {
         const section = header.closest('.section');
         section.classList.toggle('collapsed');
+        syncSectionA11y(section);
         saveSectionStates();
       });
     });
-    setInterval(updateSessionTime, 1000);
+    document.querySelectorAll('.section[data-section]').forEach(syncSectionA11y);
+    setInterval(function () { renderStatusLine(NATIVE ? engineSnapshot() : null); updateSectionMeta(); }, 1000);
+    renderStatusLine(NATIVE ? engineSnapshot() : null);
     setInterval(updateBreathing, 1000);
     // Tab handlers
     document.querySelectorAll('.tab').forEach(tab => {
@@ -6346,12 +6466,8 @@
         });
         return;
       }
-      // Fresh install — default to Connection open, everything else closed.
-      // Cuts the initial wall-of-accordions look (especially on mobile) and
-      // focuses the user on the one action they need first: Start session.
-      document.querySelectorAll('.section[data-section]').forEach(s => {
-        if (s.dataset.section !== 'connection') s.classList.add('collapsed');
-      });
+      // Fresh install: every section starts collapsed.
+      document.querySelectorAll('.section[data-section]').forEach(s => s.classList.add('collapsed'));
     } catch(e) {}
   }
 
@@ -6444,7 +6560,7 @@
     pill.href = '#';
     pill.className = 'hrm-tips-pill';
     pill.title = 'Web reliability tips';
-    pill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>tips`;
+    pill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Tips`;
     pill.addEventListener('click', (e) => { e.preventDefault(); buildTipsModal(); });
     slot.appendChild(pill);
   }
