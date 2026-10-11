@@ -44,25 +44,9 @@
 <script>HRWidget.watchPhoneLayout();</script>
 <script src="./lifecycle-state.js"></script>
 <link rel="stylesheet" href="./widget.css">
+<link rel="stylesheet" href="./ui.css">
+<script src="./ui.js"></script>
 <style>
-  :root {
-    --bg: #0f0f11;
-    --bg-panel: #1a1a1d;
-    --bg-input: #242428;
-    --text: #ebebeb;
-    --text-dim: #9a9a9f;
-    --text-faint: #5a5a60;
-    --border: #2a2a2e;
-    --border-strong: #3a3a40;
-    --accent-hr: #E88464;
-    --accent-rmssd: #5DCAA5;
-    /* --accent-blue paints UI chrome (checkboxes, tabs, focus, primary
-       button, input border). Tuned to the HRV teal so chrome stays
-       readable and settings don't feel aggressive. Red stays reserved
-       for brand + warning states. Name kept for legacy compatibility. */
-    --accent-blue: #5DCAA5;
-    --overlay-bg: rgba(15,15,17,0.85);
-  }
   * { box-sizing: border-box; }
   html, body {
     margin: 0;
@@ -161,8 +145,8 @@
   .nav-label-short { display: none; }
   .nav-preview { color: var(--text-dim); }
   .nav-preview:hover { color: var(--text); background: #141414; }
-  .nav-copy { color: var(--accent-rmssd); border: 1px solid var(--accent-rmssd); }
-  .nav-copy:hover { color: #0a1a14; background: var(--accent-rmssd); }
+  .nav-copy { color: var(--hrv); border: 1px solid var(--hrv); }
+  .nav-copy:hover { color: #0a1a14; background: var(--hrv); }
   .nav-ext-icon {
     width: 10px;
     height: 10px;
@@ -191,142 +175,13 @@
     font-weight: 600;
     cursor: pointer;
   }
-  .hrm-tips-pill:hover { color: var(--text); border-color: var(--border-strong); background: #141414; }
+  .hrm-tips-pill:hover { color: var(--text); border-color: var(--border-control); background: #141414; }
   .hrm-tips-pill svg { width: 12px; height: 12px; }
 
-  #hrm-web-banner {
-    background: rgba(93,202,165,0.08);
-    border-bottom: 1px solid rgba(93,202,165,0.25);
-    color: var(--text);
-    padding: 10px 24px;
-    font-size: 13px;
-    line-height: 1.55;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  #hrm-web-banner .hrm-web-banner-msg { flex: 1 1 auto; }
-  #hrm-web-banner button {
-    background: transparent;
-    border: 1px solid var(--border-strong);
-    color: var(--text-dim);
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 11px;
-    cursor: pointer;
-    flex: 0 0 auto;
-  }
-  #hrm-web-banner button:hover { color: var(--text); border-color: var(--text-dim); }
-  #hrm-web-banner a {
-    color: var(--accent-rmssd);
-    text-decoration: underline;
-    cursor: pointer;
-  }
-
-  #hrm-tips-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.7);
-    z-index: 19000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-  }
-  #hrm-tips-overlay .hrm-tips-modal {
-    background: #131313;
-    border: 1px solid #2a2a2a;
-    border-radius: 14px;
-    color: #d8d8d8;
-    width: 100%;
-    max-width: 560px;
-    max-height: 85vh;
-    overflow-y: auto;
-    padding: 22px 26px 22px;
-    position: relative;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-  #hrm-tips-overlay h2 {
-    margin: 0 0 6px;
-    font-size: 16px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-  #hrm-tips-overlay .hrm-tips-sub {
-    color: #8a8a8a;
-    font-size: 12px;
-    margin-bottom: 16px;
-    line-height: 1.55;
-  }
-  #hrm-tips-overlay .hrm-tip-item {
-    padding: 12px 0;
-    border-top: 1px solid #2a2a2a;
-  }
-  #hrm-tips-overlay .hrm-tip-item:first-of-type { border-top: none; padding-top: 4px; }
-  #hrm-tips-overlay .hrm-tip-title {
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  #hrm-tips-overlay .hrm-tip-status {
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    padding: 2px 8px;
-    border-radius: 999px;
-  }
-  #hrm-tips-overlay .hrm-tip-status.on { background: rgba(93,202,165,0.18); color: var(--accent-rmssd); }
-  #hrm-tips-overlay .hrm-tip-status.manual { background: rgba(255,255,255,0.06); color: #8a8a8a; }
-  #hrm-tips-overlay .hrm-tip-body {
-    font-size: 12px;
-    color: #b0b0b0;
-    line-height: 1.55;
-    margin-bottom: 8px;
-  }
-  #hrm-tips-overlay .hrm-tip-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  #hrm-tips-overlay .hrm-tip-actions button {
-    background: transparent;
-    color: #d8d8d8;
-    border: 1px solid #2a2a2a;
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  #hrm-tips-overlay .hrm-tip-actions button:hover { background: #1a1a1a; border-color: #3a3a3a; }
-  #hrm-tips-overlay .hrm-tip-actions button.copied { color: var(--accent-rmssd); border-color: rgba(93,202,165,0.4); }
-  #hrm-tips-overlay .hrm-tip-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  #hrm-tips-overlay .hrm-tips-close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 40px;
-    height: 40px;
-    background: transparent;
-    border: none;
-    color: #8a8a8a;
-    cursor: pointer;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-  }
-  #hrm-tips-overlay .hrm-tips-close:hover { color: #d8d8d8; background: #1a1a1a; }
-  #hrm-tips-overlay .hrm-tips-close svg { width: 22px; height: 22px; }
+  .tips-sheet .tip { padding: var(--s3) 0; border-top: 1px solid var(--border); }
+  .tips-sheet .tip-title { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s1); font-weight: 600; }
+  .tips-sheet .tip p { margin: 0 0 var(--s2); color: var(--text-dim); font-size: var(--t12); line-height: 1.55; }
+  .tips-sheet .tip .toggle { padding: 0; }
 
   /* Shown when Web Bluetooth is unavailable (Firefox, Safari). Gives the
      user a clear path to the Viewer instead of the "Connect strap" button
@@ -341,7 +196,7 @@
     letter-spacing: 0.02em;
   }
   #browser-compat-banner a {
-    color: var(--accent-rmssd);
+    color: var(--hrv);
     text-decoration: underline;
   }
   /* Watch mode: activates on ANY browser when someone else is broadcasting
@@ -403,13 +258,13 @@
   body.watch-mode [data-section="settings"] .tabs,
   body.watch-mode [data-section="settings"] .tab-panel { display: none; }
   .section-watch-empty { display: none; }
-  .nav-copy.copied { background: var(--accent-rmssd); color: #0a1a14; }
+  .nav-copy.copied { background: var(--hrv); color: #0a1a14; }
   .obs-size-hint {
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     padding: 4px 8px;
-    border: 1px dashed var(--border-strong);
+    border: 1px dashed var(--border-control);
     border-radius: 6px;
     cursor: help;
     letter-spacing: 0.04em;
@@ -419,7 +274,7 @@
   .obs-size-hint:hover { color: var(--text-dim); border-color: var(--text-dim); }
   .nav-feedback {
     margin-left: auto;
-    color: var(--text-faint) !important;
+    color: var(--text-dim) !important;
     font-size: 11px;
     letter-spacing: 0.08em;
   }
@@ -584,7 +439,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--accent-rmssd);
+    background: var(--hrv);
     box-shadow: 0 0 6px rgba(93,202,165,0.55);
     flex-shrink: 0;
     animation: conn-pulse 1.5s ease-in-out infinite;
@@ -607,12 +462,12 @@
   .broadcaster-takeover:hover { background: rgba(232,152,88,0.1); }
   .broadcasters-hint {
     font-size: 10px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     line-height: 1.4;
     margin-top: 8px;
   }
   .broadcasters-hint a {
-    color: var(--accent-rmssd);
+    color: var(--hrv);
     text-decoration: underline;
   }
   .broadcasters-hint a:hover { filter: brightness(1.15); }
@@ -639,7 +494,7 @@
     padding: 14px 18px;
     margin-top: 10px;
     background: var(--bg-input);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     border-radius: 10px;
     color: var(--text);
     cursor: pointer;
@@ -669,7 +524,7 @@
   }
   .big-toggle-btn[data-state="set"] .big-toggle-title::before {
     content: '✓  ';
-    color: var(--accent-rmssd);
+    color: var(--hrv);
     font-weight: 700;
   }
   .big-toggle-sub {
@@ -680,14 +535,14 @@
   }
   .big-toggle-meta {
     font-size: 11px;
-    color: var(--accent-rmssd);
+    color: var(--hrv);
     letter-spacing: 0.04em;
     margin-top: 2px;
   }
   .big-toggle-meta:empty { display: none; }
   .big-toggle-email {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-family: 'Consolas', 'Monaco', monospace;
     margin-top: 3px;
     word-break: break-all;
@@ -734,15 +589,15 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-faint);
+    color: var(--text-dim);
     padding: 2px 8px;
     border-radius: 999px;
   }
-  .autosave-status.writing { color: var(--accent-rmssd); background: rgba(93,202,165,0.1); }
+  .autosave-status.writing { color: var(--hrv); background: rgba(93,202,165,0.1); }
   .autosave-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
   .autosave-status.denied { color: var(--reconnecting); background: rgba(186,117,23,0.14); }
   .autosave-folder.drive-syncing {
-    color: var(--accent-rmssd);
+    color: var(--hrv);
     background: rgba(93,202,165,0.1);
     border: 1px solid rgba(93,202,165,0.3);
   }
@@ -755,7 +610,7 @@
     background: rgba(226,75,74,0.14);
   }
   .section {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 14px 16px;
@@ -779,7 +634,7 @@
     transition: color 0.15s;
   }
   .section-caret {
-    color: var(--text-faint);
+    color: var(--text-dim);
     width: 18px;
     height: 18px;
     transition: transform 0.2s, color 0.15s;
@@ -816,10 +671,10 @@
     gap: 8px;
     flex-wrap: wrap;
   }
-  button {
+  button:where(:not(.ui *)) {
     background: var(--bg-input);
     color: var(--text);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     padding: 7px 14px;
     border-radius: 6px;
     font-size: 13px;
@@ -827,16 +682,16 @@
     font-family: inherit;
     transition: background 0.15s, border-color 0.15s;
   }
-  button:hover:not(:disabled) { background: #2e2e32; border-color: var(--border-strong); }
-  button:active:not(:disabled) { transform: scale(0.98); }
-  button:disabled { opacity: 0.35; cursor: not-allowed; }
-  button.primary {
-    background: var(--accent-blue);
+  button:where(:not(.ui *)):hover:not(:disabled) { background: #2e2e32; border-color: var(--border-control); }
+  button:where(:not(.ui *)):active:not(:disabled) { transform: scale(0.98); }
+  button:where(:not(.ui *)):disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary:where(:not(.ui *)) {
+    background: var(--action);
     color: #0a1a2a;
-    border-color: var(--accent-blue);
+    border-color: var(--action);
     font-weight: 500;
   }
-  button.primary:hover:not(:disabled) { background: #7FDAB8; border-color: #7FDAB8; }
+  button.primary:where(:not(.ui *)):hover:not(:disabled) { background: var(--action); border-color: var(--action); filter: brightness(1.08); }
 
   /* Session toggle: one full-width primary button that flips between Start
      (green) and Stop (red). Replaces the old Connect / Disconnect / Reset /
@@ -850,16 +705,16 @@
     min-height: 42px;
   }
   .btn-session-toggle[data-state="idle"] {
-    background: var(--accent-rmssd);
+    background: var(--hrv);
     color: #0a1a14;
-    border-color: var(--accent-rmssd);
+    border-color: var(--hrv);
   }
   /* Re-assert bg + border on hover so the generic `button:hover` rule can't
      paint the button dark grey between the state colour and the brightness
      filter taking effect. */
   .btn-session-toggle[data-state="idle"]:hover:not(:disabled) {
-    background: var(--accent-rmssd);
-    border-color: var(--accent-rmssd);
+    background: var(--hrv);
+    border-color: var(--hrv);
     filter: brightness(1.1);
   }
   .btn-session-toggle[data-state="recording"],
@@ -877,11 +732,11 @@
   .btn-session-toggle[data-state="connecting"] {
     background: transparent;
     color: var(--text-dim);
-    border: 1px dashed var(--border-strong);
+    border: 1px dashed var(--border-control);
   }
   .btn-session-toggle[data-state="connecting"]:hover:not(:disabled) {
     background: transparent;
-    border-color: var(--border-strong);
+    border-color: var(--border-control);
   }
   /* Stop confirmation for long sessions; replaces the toggle in place. */
   .stop-confirm[hidden] { display: none; }
@@ -912,7 +767,7 @@
   }
   .toggle-desc {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     margin-top: 2px;
     line-height: 1.4;
   }
@@ -931,7 +786,7 @@
     position: absolute;
     inset: 0;
     background: #2a2a2a;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     border-radius: 999px;
     transition: background 0.15s, border-color 0.15s;
     cursor: pointer;
@@ -947,11 +802,11 @@
   }
   .toggle-switch input:checked + .toggle-slider {
     background: rgba(93,202,165,0.25);
-    border-color: var(--accent-rmssd);
+    border-color: var(--hrv);
   }
   .toggle-switch input:checked + .toggle-slider::before {
     transform: translateX(18px);
-    background: var(--accent-rmssd);
+    background: var(--hrv);
   }
   .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
 
@@ -1003,7 +858,7 @@
     background: var(--bg-input);
     border-radius: 6px;
   }
-  .status.connected { color: var(--accent-rmssd); }
+  .status.connected { color: var(--hrv); }
   .status.error { color: var(--warn-high); }
 
   .stats-grid {
@@ -1085,24 +940,24 @@
   .thresh-grid label {
     color: var(--text-dim);
   }
-  input[type="number"], input[type="text"], input[type="password"] {
+  input:is([type="number"], [type="text"], [type="password"]):where(:not(.ui *)) {
     background: var(--bg-input);
     color: var(--text);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     padding: 6px 10px;
     border-radius: 6px;
     font-size: 12px;
     font-family: inherit;
     width: 100%;
   }
-  input[type="number"]:focus, input[type="text"]:focus, input[type="password"]:focus {
+  input:is([type="number"], [type="text"], [type="password"]):where(:not(.ui *)):focus {
     outline: none;
-    border-color: var(--accent-blue);
+    border-color: var(--action);
   }
-  input[type="checkbox"] { accent-color: var(--accent-blue); }
+  input[type="checkbox"] { accent-color: var(--action); }
 
   .thresh-grid input[type="number"] { width: 70px; text-align: center; }
-  .thresh-grid .unit { color: var(--text-faint); font-size: 11px; }
+  .thresh-grid .unit { color: var(--text-dim); font-size: 11px; }
 
   .audio-grid {
     display: grid;
@@ -1116,12 +971,12 @@
     font-size: 10px;
     border-radius: 6px;
     background: transparent;
-    border: 1px dashed var(--border-strong);
+    border: 1px dashed var(--border-control);
     color: var(--text-dim);
     cursor: pointer;
   }
   .audio-grid .audio-upload:hover { color: var(--text); border-color: var(--text-dim); border-style: solid; }
-  .audio-grid .audio-upload.has-file { border-style: solid; border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
+  .audio-grid .audio-upload.has-file { border-style: solid; border-color: var(--hrv); color: var(--hrv); }
   /* Custom audio upload pair: "Custom" button + small × remove button. The
      remove button only appears when a custom file is loaded (toggled in JS). */
   .audio-upload-pair { display: inline-flex; gap: 4px; align-items: stretch; }
@@ -1130,7 +985,7 @@
     background: transparent;
     border: 1px dashed var(--border);
     border-radius: 4px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-size: 16px;
     line-height: 1;
     cursor: pointer;
@@ -1143,7 +998,7 @@
   .audio-grid select {
     background: var(--bg-input);
     color: var(--text);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     padding: 6px 8px;
     border-radius: 6px;
     font-size: 12px;
@@ -1152,14 +1007,14 @@
   }
   .audio-grid select:focus {
     outline: none;
-    border-color: var(--accent-blue);
+    border-color: var(--action);
   }
   .audio-grid .audio-test {
     padding: 5px 10px;
     font-size: 11px;
   }
   .audio-grid input[type="range"] {
-    accent-color: var(--accent-blue);
+    accent-color: var(--action);
     width: 100%;
   }
 
@@ -1187,11 +1042,11 @@
     font-family: inherit;
     cursor: pointer;
   }
-  .widget-toggles select:hover { border-color: var(--border-strong); }
-  .widget-toggles select:focus { outline: 1px solid var(--accent-rmssd); }
+  .widget-toggles select:hover { border-color: var(--border-control); }
+  .widget-toggles select:focus { outline: 1px solid var(--hrv); }
   .widget-toggles input[type="checkbox"] {
     width: auto;
-    accent-color: var(--accent-blue);
+    accent-color: var(--action);
   }
   .streaming-row {
     display: flex;
@@ -1250,7 +1105,7 @@
     flex: 1;
     min-width: 0;
   }
-  .obs-size-value:focus { outline: 1px solid var(--accent-rmssd); }
+  .obs-size-value:focus { outline: 1px solid var(--hrv); }
   /* Size fields are always computed from the live widget; dim to read-only. */
   .obs-size-value.obs-size-locked {
     color: var(--text-dim);
@@ -1275,8 +1130,8 @@
     cursor: pointer;
     transition: color 0.12s, border-color 0.12s, background 0.12s;
   }
-  .obs-size-copy:hover { color: var(--text); border-color: var(--border-strong); }
-  .obs-size-copy.copied { color: var(--accent-rmssd); border-color: var(--accent-rmssd); }
+  .obs-size-copy:hover { color: var(--text); border-color: var(--border-control); }
+  .obs-size-copy.copied { color: var(--hrv); border-color: var(--hrv); }
   .streaming-key {
     font-family: 'Consolas', 'Monaco', monospace;
     background: var(--bg-input);
@@ -1295,11 +1150,11 @@
     text-transform: uppercase;
     padding: 2px 10px;
     border-radius: 999px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     background: var(--bg-input);
   }
   .streaming-status.connecting { color: var(--reconnecting); background: rgba(186,117,23,0.14); }
-  .streaming-status.live { color: var(--accent-rmssd); background: rgba(93,202,165,0.12); }
+  .streaming-status.live { color: var(--hrv); background: rgba(93,202,165,0.12); }
   .streaming-status.ready { color: var(--text-dim); background: rgba(255,255,255,0.04); }
   .streaming-status.listening { color: var(--text-dim); background: rgba(255,255,255,0.04); }
   .streaming-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
@@ -1327,11 +1182,11 @@
     color: var(--text);
     background: transparent;
     border-color: transparent;
-    border-bottom-color: var(--border-strong);
+    border-bottom-color: var(--border-control);
   }
   .tab.active {
-    color: var(--accent-blue);
-    border-bottom-color: var(--accent-blue);
+    color: var(--action);
+    border-bottom-color: var(--action);
   }
   .tab-panel {
     display: none;
@@ -1385,7 +1240,7 @@
     cursor: pointer;
     transition: background 0.12s, border-color 0.12s, color 0.12s;
   }
-  .posture-btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .posture-btn:hover { border-color: var(--border-control); color: var(--text); }
   .posture-btn.active[data-posture="lying"] { background: rgba(125,184,232,0.15); border-color: #7DB8E8; color: #7DB8E8; }
   .posture-btn.active[data-posture="sitting"] { background: rgba(184,217,126,0.15); border-color: #B8D97E; color: #B8D97E; }
   .posture-btn.active[data-posture="standing"] { background: rgba(232,152,88,0.15); border-color: #E89858; color: #E89858; }
@@ -1406,7 +1261,7 @@
     cursor: pointer;
     transition: background 0.12s, border-color 0.12s, color 0.12s;
   }
-  .download-csv-btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .download-csv-btn:hover { border-color: var(--border-control); color: var(--text); }
 
   .hrm-toast {
     position: fixed;
@@ -1451,11 +1306,11 @@
   .event:last-child { border-bottom: none; }
   .event-label { font-weight: 500; }
   .event-time { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .empty { color: var(--text-faint); padding: 8px 0; font-size: 12px; font-style: italic; }
+  .empty { color: var(--text-dim); padding: 8px 0; font-size: 12px; font-style: italic; }
 
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: var(--border-control); border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: #4a4a50; }
 
   .crop-hint {
@@ -1463,7 +1318,7 @@
     bottom: 12px;
     left: 12px;
     font-size: 10px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     pointer-events: none;
   }
 
@@ -1532,7 +1387,7 @@
        .icon-btn is exempt because it's already sized for its glyph (e.g.
        the folder toggle); enlarging it turns a compact affordance into a
        big empty square. */
-    button:not(.icon-btn) { min-height: 44px; padding: 10px 16px; }
+    button:not(.icon-btn):where(:not(.ui *)) { min-height: 44px; padding: 10px 16px; }
     /* Primary action buttons get a bit more breathing room + stronger text. */
     .btn-session-toggle { min-height: 52px; font-size: 15px; }
     /* Export CSV is a key end-of-session action — full-width on mobile so
@@ -1873,7 +1728,7 @@
           <div data-obs-only>
             <div style="height: 18px;"></div>
             <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
-            <div style="font-size: 11px; color: var(--text-faint); margin-bottom: 10px; line-height: 1.4;">
+            <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.4;">
               The URL already embeds your broadcast key. Switch to online mode on the landing page to use OBS streaming.
             </div>
             <div class="streaming-row" style="margin-top: 8px;">
@@ -1897,7 +1752,7 @@
                 </div>
               </div>
             </div>
-            <div style="font-size: 11px; color: var(--text-faint); margin-top: 8px; line-height: 1.4;">
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.4;">
               Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
               Paste the <b>Width</b> and <b>Height</b> numbers into OBS's matching fields to avoid empty space.
               Dimensions auto-update as you change widget toggles.
@@ -1919,13 +1774,13 @@
             <input type="range" id="ectopic-sensitivity" min="1" max="5" step="1" value="3" />
             <span class="unit" id="ectopic-sensitivity-label">3</span>
           </div>
-          <div style="font-size: 11px; color: var(--text-faint); line-height: 1.4; margin-top: 6px;">
+          <div style="font-size: 11px; color: var(--text-dim); line-height: 1.4; margin-top: 6px;">
             Higher flags more subtle RR swings. Lower suppresses respiratory-sinus-arrhythmia false alarms during rest / exhale.
             Detection also requires a compensatory pause and skips when HR is trending down.
           </div>
           <div style="height: 14px;"></div>
           <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Text colour stages</div>
-          <div style="font-size: 11px; color: var(--text-faint); margin-bottom: 8px;">
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 8px;">
             The red (critical) stage matches your High HR alert above.
           </div>
           <div class="thresh-grid">
@@ -2530,7 +2385,7 @@
   }
   function saveCustomAudio(obj) {
     try { localStorage.setItem(CUSTOM_AUDIO_LS_KEY, JSON.stringify(obj)); } catch (e) {
-      alert('Could not save custom audio — file is too large for browser storage. Try a smaller clip (<500 KB).');
+      UI.notice({ kind: 'error', text: 'Clip too large to save. Limit 500 KB.' });
     }
   }
   function getCustomAudioFor(type) { return loadCustomAudio()[type] || null; }
@@ -3581,7 +3436,7 @@
   }
 
   function showOemWhitelistModal() {
-    if (document.getElementById('hrm-oem-prompt-overlay')) return;
+    if (document.getElementById('hrm-oem-prompt-sheet')) return;
     const vendor = (window.HRMOem && window.HRMOem.vendor) || 'other';
     const mfrName = (window.HRMOem && window.HRMOem.manufacturer) || 'Your phone';
     let listLabel = 'background allow list';
@@ -3603,49 +3458,32 @@
       bodyText = 'Vivo paused Aorti overnight. We restored your session, but to record reliably you should allow Aorti in Background app starts.';
     }
 
-    const overlay = document.createElement('div');
-    overlay.id = 'hrm-oem-prompt-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:19500;display:flex;align-items:center;justify-content:center;padding:24px;';
-    const card = document.createElement('div');
-    card.style.cssText = 'background:#131313;border:1px solid #2a2a2a;border-radius:14px;color:#d8d8d8;width:100%;max-width:440px;padding:22px 24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
-    const h = document.createElement('div');
-    h.textContent = 'Aorti was paused overnight';
-    h.style.cssText = 'font-size:15px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;margin-bottom:10px;';
-    const body = document.createElement('div');
-    body.textContent = bodyText;
-    body.style.cssText = 'font-size:13px;color:#b0b0b0;line-height:1.55;margin-bottom:16px;';
-    const note = document.createElement('div');
-    note.textContent = 'Tap Allow, then toggle Aorti on. You only need to do this once.';
-    note.style.cssText = 'font-size:12px;color:#8a8a8a;line-height:1.5;margin-bottom:18px;';
-    const actions = document.createElement('div');
-    actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;';
-    const allow = document.createElement('button');
-    allow.textContent = 'Add to ' + listLabel;
-    allow.style.cssText = 'flex:1;min-width:140px;background:#5DCAA5;color:#0a0a0a;border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;';
-    const later = document.createElement('button');
-    later.textContent = 'Not now';
-    later.style.cssText = 'background:transparent;color:#8a8a8a;border:1px solid #2a2a2a;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;';
-    actions.appendChild(allow);
-    actions.appendChild(later);
-    card.appendChild(h);
-    card.appendChild(body);
-    card.appendChild(note);
-    card.appendChild(actions);
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-
     function persist(state) {
       try { localStorage.setItem(OEM_PROMPT_LS_KEY, JSON.stringify({ state: state, ts: Date.now() })); } catch (e) {}
     }
-    function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-
+    let decided = false;
+    const allow = document.createElement('button');
+    allow.type = 'button';
+    allow.className = 'btn primary';
+    allow.textContent = 'Add to ' + listLabel;
+    const later = document.createElement('button');
+    later.type = 'button';
+    later.className = 'btn';
+    later.textContent = 'Not now';
+    const s = UI.sheet({
+      id: 'hrm-oem-prompt-sheet', title: 'Aorti was paused overnight',
+      body: '<p></p><p class="dim">Then turn Aorti on in that list.</p>',
+      foot: [later, allow],
+      onClose: () => { if (!decided) persist('dismissed'); },
+    });
+    s.body.querySelector('p').textContent = bodyText;
     allow.addEventListener('click', () => {
+      decided = true;
       persist('added');
       try { window.HRMOem.openBackgroundSettings().catch(() => {}); } catch (e) {}
-      close();
+      s.close();
     });
-    later.addEventListener('click', () => { persist('dismissed'); close(); });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) { persist('dismissed'); close(); } });
+    later.addEventListener('click', () => { s.close(); });
   }
 
   // Per-tab device identity. Generated once on first broadcast and kept for
@@ -5230,7 +5068,7 @@
 
   async function pickAutoSaveFolder() {
     if (!window.showDirectoryPicker) {
-      alert('Your browser does not support folder access (File System Access API). Use Chromium-based browser.');
+      UI.notice({ kind: 'warning', text: 'Folder saving needs Chrome or Edge.' });
       return;
     }
     try {
@@ -5464,7 +5302,7 @@
   }
 
   async function driveSignIn() {
-    if (!window.aortiAuth) { alert('Auth module still loading. Try again in a second.'); return; }
+    if (!window.aortiAuth) { UI.notice({ kind: 'info', text: 'Sign-in is still loading. Try again.' }); return; }
     if (window.HRMLog) window.HRMLog.event('driveSignIn() called', { native: !!window.aortiAuth.isNative });
     try {
       await window.aortiAuth.signIn();
@@ -5475,7 +5313,7 @@
       if (window.HRMLog) window.HRMLog.error('driveSignIn failed', msg);
       driveTokenError = msg;
       driveUpdateUI();
-      alert('Google sign-in failed: ' + msg);
+      UI.notice({ kind: 'error', text: 'Google sign-in failed: ' + msg });
     }
   }
 
@@ -5794,22 +5632,27 @@
           if (!input.files || !input.files[0]) return;
           const file = input.files[0];
           if (file.size > 800 * 1024) {
-            if (!confirm(`That file is ${Math.round(file.size/1024)} KB — localStorage caps at ~5 MB total across all custom sounds. Continue?`)) return;
+            const ok = await UI.confirm({ anchor: btn.closest('.audio-upload-pair') || btn, key: 'audio-' + type,
+              text: Math.round(file.size / 1024) + ' KB. All custom sounds share about 5 MB.', confirmLabel: 'Use clip' });
+            if (!ok) return;
           }
           try {
             await setCustomAudioFor(type, file);
             updateUploadButtonUI();
-          } catch (e) { console.error(e); alert('Failed to load audio: ' + e.message); }
+          } catch (e) { console.error(e); UI.notice({ kind: 'error', text: 'Could not load audio: ' + e.message }); }
         });
         input.click();
       });
       btn.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         const type = btn.dataset.type;
-        if (getCustomAudioFor(type) && confirm('Remove custom audio for ' + type + ' and revert to preset?')) {
+        if (!getCustomAudioFor(type)) return;
+        UI.confirm({ anchor: btn.closest('.audio-upload-pair') || btn, key: 'audio-' + type, danger: true,
+          text: 'Remove custom sound?', confirmLabel: 'Remove' }).then((ok) => {
+          if (!ok) return;
           clearCustomAudioFor(type);
           updateUploadButtonUI();
-        }
+        });
       });
     });
     updateUploadButtonUI();
@@ -6263,7 +6106,7 @@
           navCopy.textContent = '✓ Copied';
           setTimeout(() => { navCopy.classList.remove('copied'); navCopy.textContent = 'Copy OBS URL'; }, 2500);
         } catch (e) {
-          prompt('Copy this URL into OBS → Browser Source:', url);
+          UI.copySheet(url, { title: 'OBS URL', label: 'Browser source URL' });
         }
       });
     }
@@ -6276,7 +6119,7 @@
           copyObsBtn.textContent = '✓ Copied — paste into OBS';
           setTimeout(() => { copyObsBtn.textContent = 'Copy OBS Browser Source URL'; }, 2500);
         } catch (e) {
-          prompt('Copy this URL into OBS Browser Source:', url);
+          UI.copySheet(url, { title: 'OBS URL', label: 'Browser source URL' });
         }
       });
     }
@@ -6297,8 +6140,7 @@
           btn.textContent = '✓ ' + val;
           setTimeout(() => { btn.classList.remove('copied'); btn.textContent = original; }, 1500);
         } catch (e) {
-          target.select();
-          prompt('Copy this number into OBS:', val);
+          UI.copySheet(val, { title: btn.dataset.copy === 'obs-size-h' ? 'Height' : 'Width', label: 'Pixels' });
         }
       });
     });
@@ -6327,9 +6169,8 @@
     // Big toggle: unset = pick, set = confirm then clear.
     $('autosave-toggle').addEventListener('click', () => {
       if (autoSaveDirHandle) {
-        if (confirm('Stop saving sessions to this folder? Existing files stay where they are.')) {
-          clearAutoSaveFolder();
-        }
+        UI.confirm({ anchor: $('autosave-toggle'), key: 'autosave', text: 'Stop saving to this folder? Saved files stay.', confirmLabel: 'Stop saving' })
+          .then((ok) => { if (ok) clearAutoSaveFolder(); });
       } else {
         pickAutoSaveFolder();
       }
@@ -6544,75 +6385,53 @@
   }
 
   function buildTipsModal() {
-    if (document.getElementById('hrm-tips-overlay')) return;
-    const overlay = document.createElement('div');
-    overlay.id = 'hrm-tips-overlay';
-    overlay.innerHTML = `
-      <div class="hrm-tips-modal" role="dialog" aria-label="Web reliability tips">
-        <button class="hrm-tips-close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
-        <h2>Web reliability</h2>
-        <div class="hrm-tips-sub">A few settings that help Web Bluetooth stay connected on desktop. Some apply automatically. Others need a couple of clicks in your browser or system settings.</div>
-        <div class="hrm-tip-item">
-          <div class="hrm-tip-title">Audio keep-alive <span class="hrm-tip-status on" id="hrm-ka-status">on</span></div>
-          <div class="hrm-tip-body">Plays a silent loop so Chrome treats this tab as active. Reduces the chance the browser drops the strap when you're working in another tab.</div>
-          <label class="hrm-tip-toggle">
-            <input type="checkbox" id="hrm-ka-toggle"> Keep audio keep-alive enabled
-          </label>
-        </div>
-        <div class="hrm-tip-item">
-          <div class="hrm-tip-title">Persistent Bluetooth pairings <span class="hrm-tip-status manual">manual</span></div>
-          <div class="hrm-tip-body">Open this URL in Chrome or Edge, set the flag to Enabled, and relaunch the browser. Your strap stays paired across browser restarts and idle drops.</div>
-          <div class="hrm-tip-actions">
-            <button data-copy="chrome://flags/#enable-web-bluetooth-new-permissions-backend">Copy chrome flag URL</button>
-          </div>
-        </div>
-        <div class="hrm-tip-item">
-          <div class="hrm-tip-title">Disable Energy Saver in Chrome <span class="hrm-tip-status manual">manual</span></div>
-          <div class="hrm-tip-body">Laptop only. Energy Saver pauses background tabs and can break the connection. Open Chrome's performance settings, find the Energy Saver section, and turn it off. Desktops without a battery don't show this option, you can skip it.</div>
-          <div class="hrm-tip-actions">
-            <button data-copy="chrome://settings/performance">Copy Chrome performance URL</button>
-          </div>
-        </div>
-        <div class="hrm-tip-item">
-          <div class="hrm-tip-title">Bluetooth radio power management <span class="hrm-tip-status manual">manual</span></div>
-          <div class="hrm-tip-body">In Windows: Device Manager, then Bluetooth, then your radio's Properties, then Power Management. Uncheck "Allow the computer to turn off this device to save power." This is the single biggest fix on most Windows machines.</div>
-        </div>
-        <div class="hrm-tip-item">
-          <div class="hrm-tip-title">USB Selective Suspend <span class="hrm-tip-status manual">manual</span></div>
-          <div class="hrm-tip-body">Only relevant if your Bluetooth is a USB dongle. Open Power Options, Edit plan settings, Advanced, USB settings, and disable Selective Suspend on the active power plan.</div>
-        </div>
-        <div class="hrm-tip-item">
-          <div class="hrm-tip-title">For long sessions: use the Android app</div>
-          <div class="hrm-tip-body">The Android build keeps a steadier connection because it manages Bluetooth at the system level. Honest recommendation for sleep tracking and multi-hour sessions.</div>
-          <div class="hrm-tip-actions">
-            <a href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener"><button>Download Android APK</button></a>
-          </div>
-        </div>
+    if (document.getElementById('hrm-tips-sheet')) return;
+    const body = `
+      <p class="dim">A few settings that help Web Bluetooth stay connected on desktop. Some apply automatically. Others need a couple of clicks in your browser or system settings.</p>
+      <div class="tip">
+        <button type="button" class="toggle" role="switch" id="hrm-ka-toggle" aria-checked="false">
+          <span class="txt"><span class="t">Audio keep-alive</span><span class="d">Plays a silent loop so Chrome treats this tab as active. Reduces the chance the browser drops the strap when you're working in another tab.</span></span>
+          <span class="track" aria-hidden="true"></span>
+        </button>
       </div>
-    `;
-    document.body.appendChild(overlay);
-    const close = () => overlay.remove();
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    overlay.querySelector('.hrm-tips-close').addEventListener('click', close);
-
-    const kaToggle = overlay.querySelector('#hrm-ka-toggle');
-    const kaStatus = overlay.querySelector('#hrm-ka-status');
-    kaToggle.checked = audioKeepAliveEnabled();
-    kaStatus.textContent = kaToggle.checked ? 'on' : 'off';
-    kaStatus.className = 'hrm-tip-status ' + (kaToggle.checked ? 'on' : 'manual');
-    kaToggle.addEventListener('change', () => {
-      setAudioKeepAliveEnabled(kaToggle.checked);
-      kaStatus.textContent = kaToggle.checked ? 'on' : 'off';
-      kaStatus.className = 'hrm-tip-status ' + (kaToggle.checked ? 'on' : 'manual');
+      <div class="tip">
+        <div class="tip-title">Persistent Bluetooth pairings <span class="badge">Manual</span></div>
+        <p>Open this URL in Chrome or Edge, set the flag to Enabled, and relaunch the browser. Your strap stays paired across browser restarts and idle drops.</p>
+        <button type="button" class="btn" data-copy="chrome://flags/#enable-web-bluetooth-new-permissions-backend">${UI.icon('copy')}Copy chrome flag URL</button>
+      </div>
+      <div class="tip">
+        <div class="tip-title">Disable Energy Saver in Chrome <span class="badge">Manual</span></div>
+        <p>Laptop only. Energy Saver pauses background tabs and can break the connection. Open Chrome's performance settings, find the Energy Saver section, and turn it off. Desktops without a battery don't show this option, you can skip it.</p>
+        <button type="button" class="btn" data-copy="chrome://settings/performance">${UI.icon('copy')}Copy Chrome performance URL</button>
+      </div>
+      <div class="tip">
+        <div class="tip-title">Bluetooth radio power management <span class="badge">Manual</span></div>
+        <p>In Windows: Device Manager, then Bluetooth, then your radio's Properties, then Power Management. Uncheck "Allow the computer to turn off this device to save power." This is the single biggest fix on most Windows machines.</p>
+      </div>
+      <div class="tip">
+        <div class="tip-title">USB Selective Suspend <span class="badge">Manual</span></div>
+        <p>Only relevant if your Bluetooth is a USB dongle. Open Power Options, Edit plan settings, Advanced, USB settings, and disable Selective Suspend on the active power plan.</p>
+      </div>
+      <div class="tip">
+        <div class="tip-title">For long sessions: use the Android app</div>
+        <p>The Android build keeps a steadier connection because it manages Bluetooth at the system level. Honest recommendation for sleep tracking and multi-hour sessions.</p>
+        <a class="btn" href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">${UI.icon('external')}Download Android APK</a>
+      </div>`;
+    const s = UI.sheet({ id: 'hrm-tips-sheet', className: 'tips-sheet', title: 'Web reliability', body });
+    const kaToggle = s.body.querySelector('#hrm-ka-toggle');
+    kaToggle.setAttribute('aria-checked', String(audioKeepAliveEnabled()));
+    kaToggle.addEventListener('click', () => {
+      const on = kaToggle.getAttribute('aria-checked') !== 'true';
+      setAudioKeepAliveEnabled(on);
+      kaToggle.setAttribute('aria-checked', String(on));
     });
-
-    overlay.querySelectorAll('button[data-copy]').forEach(btn => {
+    s.body.querySelectorAll('button[data-copy]').forEach(btn => {
+      const label = btn.lastChild;
+      const orig = label.textContent;
       btn.addEventListener('click', () => {
         copyToClipboard(btn.dataset.copy);
-        const orig = btn.textContent;
-        btn.textContent = 'Copied. Paste into the address bar.';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 2200);
+        label.textContent = 'Copied';
+        setTimeout(() => { label.textContent = orig; }, 2200);
       });
     });
   }
@@ -6635,22 +6454,19 @@
     if (localStorage.getItem('hrm_web_reliability_banner_seen') === '1') return;
     const compatBanner = document.getElementById('browser-compat-banner');
     if (compatBanner && !compatBanner.hidden) return;
-    const banner = document.createElement('div');
-    banner.id = 'hrm-web-banner';
-    banner.innerHTML = `
-      <div class="hrm-web-banner-msg">For longer sessions on desktop, the Android app keeps a steadier connection. To stay on desktop, open <a id="hrm-web-banner-link">Web reliability tips</a> for a few quick settings that help.</div>
-      <button id="hrm-web-banner-dismiss">Got it</button>
-    `;
     const target = compatBanner || document.getElementById('app');
-    if (target && target.parentNode) target.parentNode.insertBefore(banner, target);
-    banner.querySelector('#hrm-web-banner-link').addEventListener('click', (e) => {
-      e.preventDefault();
-      buildTipsModal();
+    if (!target || !target.parentNode) return;
+    const link = document.createElement('a');
+    link.href = '#';
+    link.id = 'hrm-web-banner-link';
+    link.textContent = 'Web reliability tips';
+    link.addEventListener('click', (e) => { e.preventDefault(); buildTipsModal(); });
+    const banner = UI.notice({
+      kind: 'info', bar: true, before: target, dismissLabel: 'Got it',
+      content: [document.createTextNode('For longer sessions on desktop, the Android app keeps a steadier connection. To stay on desktop, open '), link, document.createTextNode(' for a few quick settings that help.')],
+      onDismiss: () => { try { localStorage.setItem('hrm_web_reliability_banner_seen', '1'); } catch (e) {} },
     });
-    banner.querySelector('#hrm-web-banner-dismiss').addEventListener('click', () => {
-      try { localStorage.setItem('hrm_web_reliability_banner_seen', '1'); } catch (e) {}
-      banner.remove();
-    });
+    banner.id = 'hrm-web-banner';
   }
 
   mountTipsPill();

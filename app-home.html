@@ -10,17 +10,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./ui.css">
+<script src="./ui.js"></script>
 <style>
-  :root {
-    --bg: #0a0a0a;
-    --panel: #101010;
-    --border: #1f1f1f;
-    --border-strong: #2a2a2a;
-    --text: #e8e8e8;
-    --text-dim: #9a9a9a;
-    --text-faint: #5a5a5a;
-    --ekg: #E84838;
-  }
   * { box-sizing: border-box; }
   html, body {
     margin: 0;
@@ -53,18 +46,6 @@
   .app-top {
     padding-top: 28px;
     text-align: center;
-  }
-  .app-top .beta {
-    display: inline-block;
-    padding: 3px 10px;
-    background: rgba(240,199,94,0.12);
-    color: #F0C75E;
-    border: 1px solid rgba(240,199,94,0.4);
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.14em;
-    font-family: 'Space Grotesk', 'Inter', sans-serif;
   }
   .app-hero {
     flex: 1;
@@ -109,7 +90,7 @@
     letter-spacing: -0.02em;
     margin: 0 0 10px;
   }
-  .app-wordmark .dot { color: var(--ekg); }
+  .app-wordmark .dot { color: var(--brand); }
   .app-wordmark .ca { color: var(--text-dim); font-weight: 500; }
   .app-sub {
     position: relative;
@@ -129,7 +110,7 @@
   .app-primary-btn {
     display: block;
     padding: 16px;
-    background: var(--ekg);
+    background: var(--brand);
     color: #fff;
     border-radius: 12px;
     text-align: center;
@@ -144,7 +125,7 @@
   .app-account-line {
     text-align: center;
     font-size: 12px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-family: 'Consolas', 'Monaco', monospace;
     margin-top: 2px;
     display: none;
@@ -176,83 +157,16 @@
   }
   .app-secondary:active { color: var(--text); }
 
-  /* Optional intro slider — hidden by default, flips on if showIntro() */
-  .intro-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 10;
-    background: var(--bg);
-    display: none;
-    flex-direction: column;
-    padding: env(safe-area-inset-top, 0) 20px env(safe-area-inset-bottom, 0);
-  }
-  .intro-overlay.visible { display: flex; }
-  .intro-skip {
-    padding: 16px 4px;
-    text-align: right;
-    font-size: 13px;
-    color: var(--text-dim);
-    background: none;
-    border: none;
-    cursor: pointer;
-  }
-  .intro-track {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .intro-slide {
-    display: none;
-    text-align: center;
-    padding: 0 12px;
-  }
-  .intro-slide.active { display: block; }
-  .intro-slide h2 {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 26px;
-    margin: 0 0 16px;
-  }
-  .intro-slide p {
-    color: var(--text-dim);
-    font-size: 14px;
-    line-height: 1.6;
-    max-width: 300px;
-    margin: 0 auto;
-  }
-  .intro-dots {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-    padding: 20px 0;
-  }
-  .intro-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #2a2a2a;
-    transition: background 0.2s, width 0.2s;
-  }
-  .intro-dot.active { background: var(--ekg); width: 22px; border-radius: 3px; }
-  .intro-next {
-    padding: 14px;
-    background: var(--ekg);
-    color: #fff;
-    border: none;
-    border-radius: 12px;
-    font-weight: 600;
-    font-size: 15px;
-    margin-bottom: 24px;
-    cursor: pointer;
-    font-family: inherit;
-  }
+  .intro-sheet .slide h3 { margin: 0 0 var(--s2); font-size: var(--t20); font-weight: 600; }
+  .intro-sheet .slide p { margin: 0; color: var(--text-dim); }
+  .intro-sheet .step { margin-top: var(--s4); font-size: var(--t12); color: var(--text-dim); }
 </style>
 </head>
 <body>
 
 <div class="app-shell">
   <div class="app-top">
-    <span class="beta">BETA · EARLY DAYS</span>
+    <span class="beta-pill">Beta</span>
   </div>
 
   <div class="app-hero">
@@ -286,32 +200,6 @@
       <a class="app-secondary" href="./hr_monitor.html?mode=offline">Offline mode</a>
     </div>
   </div>
-</div>
-
-<!-- Intro carousel (disabled by default). To enable: remove the 'hidden'
-     default and show the overlay on first launch via localStorage. -->
-<div class="intro-overlay" id="intro-overlay" aria-hidden="true">
-  <button class="intro-skip" id="intro-skip" type="button">Skip →</button>
-  <div class="intro-track">
-    <div class="intro-slide active" data-slide="0">
-      <h2>Live heart rate, right in your pocket.</h2>
-      <p>Pair a chest strap, see HR and HRV update in real time, broadcast to OBS or friends.</p>
-    </div>
-    <div class="intro-slide" data-slide="1">
-      <h2>Runs 24/7 in the background.</h2>
-      <p>Foreground service keeps recording with the screen off. Data syncs to Drive along the way.</p>
-    </div>
-    <div class="intro-slide" data-slide="2">
-      <h2>Look back at the whole history.</h2>
-      <p>Every session opens in the viewer with HR, HRV, palps, and posture. Patterns become obvious over time.</p>
-    </div>
-  </div>
-  <div class="intro-dots" id="intro-dots">
-    <span class="intro-dot active"></span>
-    <span class="intro-dot"></span>
-    <span class="intro-dot"></span>
-  </div>
-  <button class="intro-next" id="intro-next" type="button">Next</button>
 </div>
 
 <script>
@@ -434,39 +322,37 @@
     }
   })();
 
-  // First-run intro carousel. Off by default — flip
-  // localStorage.aorti_intro_enabled = '1' to test. Shipping this on every
-  // cold-start needs a design pass first.
+  // First-run intro. Off by default: localStorage.aorti_intro_enabled = '1' turns it on.
   (function () {
-    const overlay = document.getElementById('intro-overlay');
     const shouldShow = localStorage.getItem('aorti_intro_enabled') === '1'
       && !localStorage.getItem('aorti_intro_seen');
-    if (!shouldShow || !overlay) return;
-    overlay.classList.add('visible');
-    overlay.setAttribute('aria-hidden', 'false');
-    const slides = overlay.querySelectorAll('.intro-slide');
-    const dots = overlay.querySelectorAll('.intro-dot');
-    const next = document.getElementById('intro-next');
-    const skip = document.getElementById('intro-skip');
+    if (!shouldShow || !window.UI) return;
+    const SLIDES = [
+      ['Live heart rate, right in your pocket.', 'Pair a chest strap, see HR and HRV update in real time, broadcast to OBS or friends.'],
+      ['Runs 24/7 in the background.', 'Foreground service keeps recording with the screen off. Data syncs to Drive along the way.'],
+      ['Look back at the whole history.', 'Every session opens in the viewer with HR, HRV, palps, and posture. Patterns become obvious over time.'],
+    ];
+    const skip = document.createElement('button');
+    skip.type = 'button';
+    skip.className = 'btn ghost';
+    skip.textContent = 'Skip';
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'btn primary';
+    const s = UI.sheet({ id: 'intro-sheet', className: 'intro-sheet', title: 'aorti.ca',
+      body: '<div class="slide"><h3></h3><p></p></div><div class="step"></div>', foot: [skip, next],
+      onClose: () => { try { localStorage.setItem('aorti_intro_seen', '1'); } catch (e) {} } });
     let i = 0;
     function set(n) {
       i = n;
-      slides.forEach((s, idx) => s.classList.toggle('active', idx === n));
-      dots.forEach((d, idx) => d.classList.toggle('active', idx === n));
-      next.textContent = n === slides.length - 1 ? 'Get started' : 'Next';
+      s.body.querySelector('h3').textContent = SLIDES[n][0];
+      s.body.querySelector('p').textContent = SLIDES[n][1];
+      s.body.querySelector('.step').textContent = (n + 1) + ' of ' + SLIDES.length;
+      next.textContent = n === SLIDES.length - 1 ? 'Get started' : 'Next';
     }
-    next.addEventListener('click', function () {
-      if (i === slides.length - 1) {
-        localStorage.setItem('aorti_intro_seen', '1');
-        overlay.classList.remove('visible');
-      } else {
-        set(i + 1);
-      }
-    });
-    skip.addEventListener('click', function () {
-      localStorage.setItem('aorti_intro_seen', '1');
-      overlay.classList.remove('visible');
-    });
+    next.addEventListener('click', function () { if (i === SLIDES.length - 1) s.close(); else set(i + 1); });
+    skip.addEventListener('click', function () { s.close(); });
+    set(0);
   })();
 </script>
 </body>

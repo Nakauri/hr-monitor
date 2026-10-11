@@ -6,9 +6,12 @@
 // Exit: 0 = clean (or only the known false-positive on hr_monitor.html), 1 = real failure.
 
 const fs = require('fs');
+const { spawnSync } = require('child_process');
 const path = require('path');
 
-const TARGETS = ['hr_monitor.html', 'hrv_viewer.html', 'overlay.html', 'index.html', 'legal.html'];
+const TARGETS = ['hr_monitor.html', 'hrv_viewer.html', 'overlay.html', 'index.html', 'legal.html', 'app-home.html'];
+// Shared scripts loaded by those pages; checked with node --check.
+const JS_TARGETS = ['ui.js', 'diagnostics.js', 'widget.js'];
 // hr_monitor.html has a known false-positive: a CSS comment around line ~176
 // contains the literal text "<script>" which the regex treats as a script
 // open. The block it captures is CSS, not JS, so it fails to parse. That
@@ -39,6 +42,19 @@ for (const file of TARGETS) {
     console.log(`[FAIL] ${file}: ${bad} bad / ${idx} blocks (expected ${expected} false-positive)`);
   } else {
     console.log(`[ok]   ${file}: ${idx} blocks (bad=${bad}, allow-listed=${expected})`);
+  }
+}
+
+for (const file of JS_TARGETS) {
+  const full = path.join(ROOT, file);
+  if (!fs.existsSync(full)) { console.log(`[skip] ${file} not found`); continue; }
+  const r = spawnSync(process.execPath, ['--check', full], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    realFailures++;
+    console.log(`[FAIL] ${file}: node --check
+${(r.stderr || '').trim()}`);
+  } else {
+    console.log(`[ok]   ${file}: node --check`);
   }
 }
 

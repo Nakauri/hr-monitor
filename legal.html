@@ -13,17 +13,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./ui.css">
 <style>
-  :root {
-    --bg: #0a0a0a;
-    --panel: #101010;
-    --border: #1f1f1f;
-    --border-strong: #2a2a2a;
-    --text: #e8e8e8;
-    --text-dim: #9a9a9a;
-    --text-faint: #6a6a6a;
-    --ekg: #E84838;
-  }
   * { box-sizing: border-box; }
   html, body {
     margin: 0;
@@ -34,7 +26,7 @@
     line-height: 1.65;
   }
   a { color: inherit; }
-  a:hover { color: var(--ekg); }
+  a:hover { color: var(--brand); }
   .nav {
     position: sticky;
     top: 0;
@@ -67,7 +59,7 @@
     height: 26px;
     filter: drop-shadow(0 0 8px rgba(232,72,56,0.4));
   }
-  .brand-dot { color: var(--ekg); font-weight: 700; }
+  .brand-dot { color: var(--brand); font-weight: 700; }
   .brand-ca { color: var(--text-dim); font-weight: 500; }
   .nav-back {
     margin-left: auto;
@@ -134,23 +126,16 @@
     padding-top: 20px;
     border-top: 1px solid var(--border);
     font-size: 12px;
-    color: var(--text-faint);
+    color: var(--text-dim);
   }
 
-  .draft-banner {
-    background: rgba(240,199,94,0.08);
-    border-bottom: 1px solid rgba(240,199,94,0.25);
-    padding: 10px 24px;
-    text-align: center;
-    font-size: 12px;
-    color: #F0C75E;
-  }
 </style>
 </head>
 <body>
 
-<div class="draft-banner">
-  Draft document. Review with a lawyer before treating anything here as final.
+<div class="ui notice warning bar" role="note">
+  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+  <div class="msg">Draft document. Review with a lawyer before treating anything here as final.</div>
 </div>
 
 <nav class="nav">

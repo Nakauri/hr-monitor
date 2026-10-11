@@ -240,8 +240,8 @@
         flex-shrink: 0;
       }
       .hrm-user-chip:hover .hrm-user-avatar {
-        border-color: var(--accent-rmssd, #5DCAA5);
-        color: var(--accent-rmssd, #5DCAA5);
+        border-color: var(--hrv, #5DCAA5);
+        color: var(--hrv, #5DCAA5);
         background: #202020;
       }
       .hrm-user-avatar svg { width: 16px; height: 16px; }
@@ -249,115 +249,45 @@
       .hrm-version-label {
         font-size: 9px;
         letter-spacing: 0.06em;
-        color: var(--text-faint, #5a5a5a);
+        color: var(--text-dim, #5a5a5a);
         font-family: 'Consolas', 'Monaco', monospace;
         text-transform: none;
       }
       .hrm-user-chip:hover .hrm-version-label { color: var(--text-dim, #8a8a8a); }
 
-      .hrm-diag-overlay {
-        position: fixed; inset: 0;
-        background: rgba(0,0,0,0.7);
-        z-index: 10000;
-        display: flex; align-items: center; justify-content: center;
-        padding: 20px;
-      }
-      .hrm-diag-modal {
-        background: #0a0a0a;
-        border: 1px solid #2a2a2a;
-        border-radius: 12px;
-        max-width: 520px; width: 100%;
-        max-height: 90vh; overflow-y: auto;
-        padding: 22px 24px;
-        color: #d8d8d8;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        position: relative;
-      }
-      .hrm-diag-xclose {
-        position: absolute; top: 8px; right: 8px;
-        width: 40px; height: 40px;
-        background: transparent; border: none;
-        color: #8a8a8a;
-        cursor: pointer; border-radius: 8px;
-        display: flex; align-items: center; justify-content: center;
-      }
-      .hrm-diag-xclose:hover { color: #d8d8d8; background: #1a1a1a; }
-      .hrm-diag-xclose svg { width: 22px; height: 22px; }
-      @media (max-width: 768px) {
-        .hrm-diag-xclose { width: 44px; height: 44px; }
-        .hrm-diag-xclose svg { width: 24px; height: 24px; }
-      }
-      .hrm-diag-title { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 14px; }
-      .hrm-diag-legal-strip {
-        display: block;
-        text-align: center;
-        padding: 10px 0 24px;
-        margin: 0 0 18px;
-        border-bottom: 1px solid #1a1a1a;
-      }
-      .hrm-diag-legal-strip a {
-        color: #9a9a9a;
-        text-decoration: none;
-        font-size: 12px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        padding: 8px 16px;
-        border: 1px solid #2a2a2a;
-        border-radius: 6px;
-        transition: color 0.15s, border-color 0.15s, background 0.15s;
-      }
-      .hrm-diag-legal-strip a:hover { color: #d8d8d8; border-color: #3a3a3a; background: #1a1a1a; }
-      .hrm-diag-subtitle { font-size: 11px; color: #8a8a8a; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; margin: 14px 0 6px; }
-      /* Collapsible section. <details>/<summary> drives state — no JS. The
-         caret is drawn via CSS ::before so the browser's default ▶ doesn't
-         show, and the rotation gives a visual open/closed cue. */
-      .hrm-diag-section { margin: 0; }
+      .hrm-diag .sheet { max-width: 600px; }
+      .hrm-diag-legal-strip { margin: 0 0 var(--s3); }
+      .hrm-diag-legal-strip a { display: inline-flex; align-items: center; min-height: 44px; color: var(--text); font-size: var(--t12); }
+      .hrm-diag-section { margin: 0; border-top: 1px solid var(--border); }
       .hrm-diag-section > summary {
-        font-size: 11px; color: #8a8a8a; letter-spacing: 0.1em; text-transform: uppercase;
-        font-weight: 700; margin: 14px 0 6px; cursor: pointer; list-style: none;
-        display: flex; align-items: center; gap: 8px;
+        display: flex; align-items: center; gap: var(--s2); min-height: 44px;
+        font-size: var(--t14); font-weight: 600; color: var(--text); cursor: pointer; list-style: none;
         user-select: none; -webkit-user-select: none;
       }
       .hrm-diag-section > summary::-webkit-details-marker { display: none; }
-      .hrm-diag-section > summary::before {
-        content: ''; display: inline-block; width: 6px; height: 6px;
-        border-right: 1.5px solid #8a8a8a; border-bottom: 1.5px solid #8a8a8a;
-        transform: rotate(-45deg); transition: transform 0.15s;
-      }
-      .hrm-diag-section[open] > summary::before { transform: rotate(45deg); }
-      .hrm-diag-section > summary:hover { color: #d8d8d8; }
-      .hrm-diag-section > summary:hover::before { border-color: #d8d8d8; }
+      .hrm-diag-section > summary .ico { color: var(--text-dim); transform: rotate(-90deg); }
+      .hrm-diag-section[open] > summary .ico { transform: none; }
       .hrm-diag-row {
-        display: flex; justify-content: space-between; gap: 12px;
-        padding: 6px 0; border-bottom: 1px solid #1a1a1a;
-        font-size: 12px;
+        display: flex; justify-content: space-between; gap: var(--s3);
+        padding: 6px 0; border-bottom: 1px solid var(--border);
+        font-size: var(--t12);
       }
       .hrm-diag-row:last-child { border-bottom: none; }
-      .hrm-diag-row .k { color: #8a8a8a; }
-      .hrm-diag-row .v { color: #d8d8d8; font-family: 'Consolas', 'Monaco', monospace; text-align: right; max-width: 280px; word-break: break-word; }
-      .hrm-diag-row .v.ok { color: #5DCAA5; }
-      .hrm-diag-row .v.warn { color: #F0C75E; }
-      .hrm-diag-row .v.err { color: #E24B4A; }
+      .hrm-diag-row .k { color: var(--text-dim); }
+      .hrm-diag-row .v { color: var(--text); font-family: var(--mono); text-align: right; max-width: 280px; word-break: break-word; }
+      .hrm-diag-row .v.ok { color: var(--live); }
+      .hrm-diag-row .v.warn { color: var(--stage-3); }
+      .hrm-diag-row .v.err { color: var(--warn-high); }
       .hrm-diag-log {
-        background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 6px;
-        padding: 8px 10px; margin: 0;
-        font-family: 'Consolas', 'Monaco', monospace;
-        font-size: 11px; line-height: 1.45;
-        color: #b8b8b8; max-height: 260px; overflow: auto; white-space: pre-wrap;
-        word-break: break-word;
+        background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-ctl);
+        padding: var(--s2) var(--s3); margin: 0 0 var(--s3);
+        font-family: var(--mono); font-size: var(--t12); line-height: 1.45;
+        color: var(--text); max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word;
       }
-      .hrm-diag-log:empty::before { content: 'no events logged yet'; color: #5a5a5a; }
-      .hrm-diag-actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
-      .hrm-diag-actions button {
-        flex: 1; padding: 10px 12px; min-width: 100px; min-height: 44px;
-        background: #1a1a1a; color: #d8d8d8;
-        border: 1px solid #2a2a2a; border-radius: 6px;
-        font-size: 12px; cursor: pointer; letter-spacing: 0.03em;
-        font-family: inherit;
-      }
-      .hrm-diag-actions button.primary { background: #5DCAA5; color: #0a0a0a; border-color: #5DCAA5; font-weight: 700; }
-      .hrm-diag-actions button:hover { border-color: #3a3a3a; }
-      .hrm-diag-actions button.primary:hover { filter: brightness(1.1); }
+      .hrm-diag-log:empty::before { content: 'no events logged yet'; color: var(--text-dim); }
+      .hrm-diag-cache-actions, .hrm-diag-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); }
+      .hrm-diag-cache-actions .btn, .hrm-diag-actions .btn { flex: 1 1 140px; }
+      .hrm-diag-note { margin: var(--s2) 0 var(--s3); font-size: var(--t12); color: var(--text-dim); line-height: 1.45; }
       .hrm-diag-pill {
         display: inline-block;
         padding: 3px 8px;
@@ -421,38 +351,28 @@
     }
   }
 
+  let current = null;
+
   async function open() {
     injectStyles();
     const d = detect();
     const v = await fetchVersion();
-
-    const existing = document.getElementById('hrm-diag-overlay');
-    if (existing) existing.remove();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'hrm-diag-overlay';
-    overlay.className = 'hrm-diag-overlay';
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    close();
 
     const ok = (cond) => cond ? 'ok' : 'err';
-    const okwarn = (cond, warn) => cond ? 'ok' : (warn ? 'warn' : 'err');
     const yn = (cond) => cond ? 'yes' : 'no';
+    const chevron = window.UI.icon('chevron');
 
-    // openByDefault: a small allow-list of sections that almost always
-    // matter on first glance. Everything else starts collapsed so the
-    // modal isn't a wall of text. User can twist any caret open.
+    // openByDefault: sections that matter at first glance; the rest start collapsed.
     const openByDefault = new Set(['Build', 'Runtime', 'Google Drive shim (step-by-step)', 'Bluetooth shim (step-by-step)']);
     const rows = (title, items) => {
       const body = items.map(([k, v, cls]) => `<div class="hrm-diag-row"><span class="k">${esc(k)}</span><span class="v ${cls||''}">${esc(v)}</span></div>`).join('');
       const open = openByDefault.has(title) ? ' open' : '';
-      return `<details class="hrm-diag-section"${open}><summary>${esc(title)}</summary>${body}</details>`;
+      return `<details class="hrm-diag-section"${open}><summary>${chevron}${esc(title)}</summary>${body}</details>`;
     };
 
-    overlay.innerHTML = `
-      <div class="hrm-diag-modal">
-        <button class="hrm-diag-xclose" id="hrm-diag-xclose" aria-label="Close diagnostics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+    const content = `
         <div class="hrm-diag-legal-strip"><a href="./legal.html" target="_blank" rel="noopener">Legal &amp; disclaimers</a></div>
-        <h2 class="hrm-diag-title">App diagnostics</h2>
         ${rows('Build', [
           ['Version', v && v.shortSha ? 'v0.5 · ' + v.shortSha : 'v0.5 · offline'],
           ['Built', v && v.builtAt ? fmt(v.builtAt) : '—'],
@@ -527,70 +447,59 @@
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
         <details class="hrm-diag-section">
-          <summary>Local session cache</summary>
+          <summary>${chevron}Local session cache</summary>
           <div class="hrm-diag-row"><span class="k">Files</span><span class="v" id="hrm-cache-count">…</span></div>
           <div class="hrm-diag-row"><span class="k">Size</span><span class="v" id="hrm-cache-bytes">…</span></div>
           <div class="hrm-diag-row"><span class="k">Oldest</span><span class="v" id="hrm-cache-oldest">…</span></div>
-          <div style="margin-top: 10px; display: flex; gap: 8px;">
-            <button id="hrm-cache-refresh" style="flex: 1; padding: 8px 12px; background: #1a1a1a; color: #d8d8d8; border: 1px solid #2a2a2a; border-radius: 6px; cursor: pointer; min-height: 36px;">Refresh</button>
-            <button id="hrm-cache-clear" style="flex: 1; padding: 8px 12px; background: #2a1616; color: #E89898; border: 1px solid #5a2a2a; border-radius: 6px; cursor: pointer; min-height: 36px;">Clear cache</button>
+          <div class="hrm-diag-cache-actions" id="hrm-cache-actions">
+            <button type="button" class="btn" id="hrm-cache-refresh">Refresh</button>
+            <button type="button" class="btn" id="hrm-cache-clear">Clear cache</button>
           </div>
-          <div style="font-size: 11px; color: #6a6a6a; margin-top: 8px; line-height: 1.4;">
-            Auto-cleanup respects the user. Signed in to Drive: keeps 7 days local + 14-day fallback, capped at 200 MB. Not signed in: keeps the most recent 3 sessions only, capped at 50 MB. The 3-session floor always wins so the viewer is never empty. Tap Clear to wipe everything except the active session.
-          </div>
+          <p class="hrm-diag-note">
+            Auto-cleanup respects the user. Signed in to Drive: keeps 7 days local + 14-day fallback, capped at 200 MB. Not signed in: keeps the most recent 3 sessions only, capped at 50 MB. The 3-session floor always wins so the viewer is never empty.
+          </p>
         </details>
         <details class="hrm-diag-section" open>
-          <summary>Auth trace (newest last)</summary>
+          <summary>${chevron}Auth trace (newest last)</summary>
           <pre class="hrm-diag-log" id="hrm-auth-trace"></pre>
         </details>
         <details class="hrm-diag-section" open>
-          <summary>Recent events (newest last)</summary>
+          <summary>${chevron}Recent events (newest last)</summary>
           <pre class="hrm-diag-log" id="hrm-events-log">${esc(d.demoView ? 'hidden in demo mode' : formatLog(readLog()))}</pre>
         </details>
-        <div class="hrm-diag-actions">
-          <button class="primary" id="hrm-diag-copy">Copy to clipboard</button>
-          <button id="hrm-diag-clearlog">Clear events</button>
-          <button id="hrm-diag-clearauth">Clear auth state</button>
-          <button id="hrm-diag-purge" style="background: #2a1616; border-color: #5a2a2a; color: #E89898;">Purge app data</button>
-          <button id="hrm-diag-close">Close</button>
+        <div class="hrm-diag-actions" id="hrm-diag-actions">
+          <button type="button" class="btn primary" id="hrm-diag-copy">Copy to clipboard</button>
+          <button type="button" class="btn" id="hrm-diag-clearlog">Clear events</button>
+          <button type="button" class="btn" id="hrm-diag-clearauth">Clear auth state</button>
+          <button type="button" class="btn" id="hrm-diag-purge">Purge app data</button>
+          <button type="button" class="btn" id="hrm-diag-close">Close</button>
         </div>
-      </div>
     `;
-    document.body.appendChild(overlay);
+    const sheet = window.UI.sheet({ id: 'hrm-diag-overlay', className: 'hrm-diag', title: 'App diagnostics', closeLabel: 'Close diagnostics', body: content,
+      onClose: () => { if (current === sheet) current = null; } });
+    current = sheet;
+    const $ = (id) => sheet.root.querySelector('#' + id);
 
-    document.getElementById('hrm-diag-close').addEventListener('click', close);
-    document.getElementById('hrm-diag-xclose').addEventListener('click', close);
+    $('hrm-diag-close').addEventListener('click', close);
 
-    // Hydrate auth trace from localStorage. Set by drive-auth-native.js and
-    // auth.js. Survives navigation because it's localStorage-based.
-    // Demo mode hides it entirely — the trace can contain account hints.
+    // Auth trace from localStorage (drive-auth-native.js and auth.js). Demo mode hides it: it can hold account hints.
     try {
-      const tracePane = document.getElementById('hrm-auth-trace');
-      if (tracePane) {
-        if (d.demoView) {
-          tracePane.textContent = 'hidden in demo mode';
-        } else {
-          const raw = localStorage.getItem('hrm_auth_trace');
-          const arr = raw ? JSON.parse(raw) : [];
-          if (!arr.length) {
-            tracePane.textContent = 'no auth events yet';
-          } else {
-            tracePane.textContent = arr.map(e => {
-              const when = new Date(e.t).toISOString().slice(11, 23);
-              const payload = e.payload != null ? ' ' + JSON.stringify(e.payload) : '';
-              return when + '  ' + e.step + payload;
-            }).join('\n');
-          }
-        }
-      }
+      const tracePane = $('hrm-auth-trace');
       if (d.demoView) {
-        const eventsPane = document.getElementById('hrm-events-log');
-        if (eventsPane) eventsPane.textContent = 'hidden in demo mode';
+        tracePane.textContent = 'hidden in demo mode';
+        $('hrm-events-log').textContent = 'hidden in demo mode';
+      } else {
+        const raw = localStorage.getItem('hrm_auth_trace');
+        const arr = raw ? JSON.parse(raw) : [];
+        tracePane.textContent = !arr.length ? 'no auth events yet' : arr.map(e => {
+          const when = new Date(e.t).toISOString().slice(11, 23);
+          const payload = e.payload != null ? ' ' + JSON.stringify(e.payload) : '';
+          return when + '  ' + e.step + payload;
+        }).join('\n');
       }
     } catch (e) { /* ignore */ }
 
-    // Local CSV cache — visible byte usage + manual clear. Calls into the
-    // native plugin via the JS shim; no-op on web (plugin reports unsupported).
+    // Local CSV cache through the native shim; on web the plugin is absent.
     const fmtBytes = (b) => {
       if (!b || b < 0) return '0 B';
       if (b < 1024) return b + ' B';
@@ -598,143 +507,130 @@
       if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
       return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
     };
+    const shim = () => window.HRMNativeHrSession;
     async function refreshCacheStats() {
-      const countEl = document.getElementById('hrm-cache-count');
-      const bytesEl = document.getElementById('hrm-cache-bytes');
-      const oldestEl = document.getElementById('hrm-cache-oldest');
+      const countEl = $('hrm-cache-count');
+      const bytesEl = $('hrm-cache-bytes');
+      const oldestEl = $('hrm-cache-oldest');
       if (!countEl) return;
-      if (!window.HRMNativeHrSession || typeof window.HRMNativeHrSession.getCacheStats !== 'function') {
+      if (!shim() || typeof shim().getCacheStats !== 'function') {
         countEl.textContent = '—';
         bytesEl.textContent = 'native only';
         oldestEl.textContent = '—';
         return;
       }
       try {
-        const s = await window.HRMNativeHrSession.getCacheStats();
+        const s = await shim().getCacheStats();
         countEl.textContent = String(s.count || 0);
         bytesEl.textContent = fmtBytes(s.bytes || 0);
-        if (s.oldestMs && s.oldestMs > 0) {
-          const d = new Date(s.oldestMs);
-          oldestEl.textContent = d.toLocaleString();
-        } else {
-          oldestEl.textContent = 'no files';
-        }
+        oldestEl.textContent = s.oldestMs > 0 ? new Date(s.oldestMs).toLocaleString() : 'no files';
       } catch (e) {
         countEl.textContent = '?';
         bytesEl.textContent = 'error';
         oldestEl.textContent = '—';
       }
     }
-    refreshCacheStats();
-    const cacheRefreshBtn = document.getElementById('hrm-cache-refresh');
-    if (cacheRefreshBtn) cacheRefreshBtn.addEventListener('click', refreshCacheStats);
-    const cacheClearBtn = document.getElementById('hrm-cache-clear');
-    if (cacheClearBtn) {
-      cacheClearBtn.addEventListener('click', async () => {
-        if (!confirm('Delete all local session CSVs except the active one?\n\nThe sessions stay on Google Drive — this only frees up phone storage. You can re-pull them in the viewer if you sign in to Drive.')) return;
-        if (!window.HRMNativeHrSession || typeof window.HRMNativeHrSession.clearLocalCache !== 'function') return;
-        try {
-          const r = await window.HRMNativeHrSession.clearLocalCache();
-          cacheClearBtn.textContent = (r && r.deleted != null) ? `Cleared ${r.deleted}` : 'Cleared';
-          setTimeout(() => { cacheClearBtn.textContent = 'Clear cache'; refreshCacheStats(); }, 1200);
-        } catch (e) {
-          cacheClearBtn.textContent = 'Failed';
-        }
-      });
+    // clearLocalCache deletes every local CSV except the one the live session writes.
+    async function clearableCount() {
+      const s = await shim().getCacheStats();
+      const n = Number(s && s.count) || 0;
+      const live = typeof shim().isPublishing === 'function' && shim().isPublishing()
+        && typeof shim().getCsvFilename === 'function' && /\.csv$/.test(shim().getCsvFilename() || '');
+      return Math.max(0, n - (live ? 1 : 0));
     }
-
-    document.getElementById('hrm-diag-copy').addEventListener('click', async () => {
-      const text = buildCopyText(d, v);
+    refreshCacheStats();
+    $('hrm-cache-refresh').addEventListener('click', refreshCacheStats);
+    const cacheClearBtn = $('hrm-cache-clear');
+    cacheClearBtn.addEventListener('click', async () => {
+      if (!shim() || typeof shim().clearLocalCache !== 'function') return;
+      let n = null;
+      try { n = await clearableCount(); } catch (e) {}
+      if (n === 0) {
+        cacheClearBtn.textContent = 'Nothing to clear';
+        setTimeout(() => { cacheClearBtn.textContent = 'Clear cache'; }, 1500);
+        return;
+      }
+      const what = n == null ? 'every recording' : n + (n === 1 ? ' recording' : ' recordings');
+      const go = await window.UI.confirm({ anchor: $('hrm-cache-actions'), key: 'diag', danger: true, title: 'Clear cache',
+        text: 'Deletes ' + what + ' from this phone, including any not yet on Drive', confirmLabel: 'Delete' });
+      if (!go || !cacheClearBtn.isConnected) return;
       try {
-        await navigator.clipboard.writeText(text);
-        const btn = document.getElementById('hrm-diag-copy');
-        btn.textContent = 'Copied!';
-        setTimeout(() => { btn.textContent = 'Copy to clipboard'; }, 1500);
+        const r = await shim().clearLocalCache();
+        cacheClearBtn.textContent = (r && r.deleted != null) ? `Cleared ${r.deleted}` : 'Cleared';
+        setTimeout(() => { cacheClearBtn.textContent = 'Clear cache'; refreshCacheStats(); }, 1200);
       } catch (e) {
-        alert('Copy failed. Here is the text to paste:\n\n' + text);
+        cacheClearBtn.textContent = 'Failed';
       }
     });
-    const clearBtn = document.getElementById('hrm-diag-clearlog');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        // Clear BOTH event stores. The previous handler called writeLog([])
-        // (which only clears hrm_log_v1) plus document.querySelector('.hrm-diag-log')
-        // — which returns the FIRST .hrm-diag-log node (the auth pane), so the
-        // events pane stayed visually full while the auth pane went blank.
-        // hrm_auth_trace localStorage was never cleared by anything.
-        writeLog([]);
-        try { localStorage.removeItem('hrm_auth_trace'); } catch (e) {}
-        const eventsPane = document.getElementById('hrm-events-log');
-        if (eventsPane) eventsPane.textContent = '';
-        const tracePane = document.getElementById('hrm-auth-trace');
-        if (tracePane) tracePane.textContent = 'no auth events yet';
-      });
-    }
-    const clearAuthBtn = document.getElementById('hrm-diag-clearauth');
-    if (clearAuthBtn) {
-      clearAuthBtn.addEventListener('click', async () => {
-        if (!confirm('Clear all saved Google auth state? You will need to sign in again.')) return;
+
+    $('hrm-diag-copy').addEventListener('click', async () => {
+      const text = buildCopyText(d, v);
+      const btn = $('hrm-diag-copy');
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = 'Copy to clipboard'; }, 1500);
+      } catch (e) {
+        window.UI.copySheet(text, { title: 'Diagnostics', label: 'Diagnostics text', multiline: true });
+      }
+    });
+    $('hrm-diag-clearlog').addEventListener('click', () => {
+      writeLog([]);
+      try { localStorage.removeItem('hrm_auth_trace'); } catch (e) {}
+      $('hrm-events-log').textContent = '';
+      $('hrm-auth-trace').textContent = 'no auth events yet';
+    });
+    const actions = $('hrm-diag-actions');
+    const clearAuthBtn = $('hrm-diag-clearauth');
+    clearAuthBtn.addEventListener('click', async () => {
+      const go = await window.UI.confirm({ anchor: actions, key: 'diag', danger: true, title: 'Clear auth state',
+        text: 'Signs this device out of Google', confirmLabel: 'Clear' });
+      if (!go || !clearAuthBtn.isConnected) return;
+      try {
+        if (window.aortiAuth) await window.aortiAuth.signOut({ local: true, remote: false });
+      } catch (e) { /* ignore */ }
+      try { localStorage.removeItem('hr_monitor_drive_token'); } catch (e) {}
+      try { localStorage.removeItem('hrm_auth_trace'); } catch (e) {}
+      $('hrm-auth-trace').textContent = 'no auth events yet';
+      clearAuthBtn.textContent = 'Cleared, reload the page';
+      clearAuthBtn.disabled = true;
+    });
+    const purgeBtn = $('hrm-diag-purge');
+    purgeBtn.addEventListener('click', async () => {
+      const go = await window.UI.confirm({ anchor: actions, key: 'diag', danger: true, title: 'Purge app data',
+        text: 'Clears sign-in, settings, cached sessions and logs on this device, then reloads. Recording files stay.', confirmLabel: 'Purge' });
+      if (!go || !purgeBtn.isConnected) return;
+      purgeBtn.textContent = 'Purging';
+      purgeBtn.disabled = true;
+      try {
+        if (window.aortiAuth) { try { await window.aortiAuth.signOut({ local: true, remote: false }); } catch (e) {} }
         try {
-          if (window.aortiAuth) await window.aortiAuth.signOut({ local: true, remote: false });
-        } catch (e) { /* ignore */ }
-        try { localStorage.removeItem('hr_monitor_drive_token'); } catch (e) {}
-        // Also clear the auth trace — otherwise stale auth events from the
-        // pre-signout state stick around and confuse subsequent debugging.
-        try { localStorage.removeItem('hrm_auth_trace'); } catch (e) {}
-        const tracePane = document.getElementById('hrm-auth-trace');
-        if (tracePane) tracePane.textContent = 'no auth events yet';
-        clearAuthBtn.textContent = 'Cleared — reload page';
-        clearAuthBtn.disabled = true;
-      });
-    }
-    const purgeBtn = document.getElementById('hrm-diag-purge');
-    if (purgeBtn) {
-      purgeBtn.addEventListener('click', async () => {
-        if (!confirm(
-          'Purge all app data on this device?\n\n' +
-          'This clears:\n' +
-          '• Google sign-in (you will need to sign in again)\n' +
-          '• All session history cached on this device\n' +
-          '• All settings (thresholds, widget prefs, folder pick)\n' +
-          '• Event log + auth trace\n\n' +
-          'Sessions stored on Google Drive are NOT affected. Your recordings are safe there.\n\n' +
-          'Use this when the app is stuck in a weird state. Continue?'
-        )) return;
-        purgeBtn.textContent = 'Purging…';
-        purgeBtn.disabled = true;
+          const keys = Object.keys(localStorage);
+          for (const k of keys) try { localStorage.removeItem(k); } catch (e) {}
+        } catch (e) {}
+        try { sessionStorage.clear(); } catch (e) {}
         try {
-          if (window.aortiAuth) { try { await window.aortiAuth.signOut({ local: true, remote: false }); } catch (e) {} }
-          try {
-            const keys = Object.keys(localStorage);
-            for (const k of keys) try { localStorage.removeItem(k); } catch (e) {}
-          } catch (e) {}
-          try { sessionStorage.clear(); } catch (e) {}
-          // IndexedDB — drive-cache + any other app DBs. Queue in parallel.
-          try {
-            const dbs = (indexedDB.databases && (await indexedDB.databases())) || [{ name: 'hr_monitor_kv' }];
-            await Promise.all(dbs.filter(d => d && d.name).map(d => new Promise((resolve) => {
-              const req = indexedDB.deleteDatabase(d.name);
-              req.onsuccess = req.onerror = req.onblocked = () => resolve();
-            })));
-          } catch (e) {}
-          // Service worker, if any.
-          try {
-            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
-              const regs = await navigator.serviceWorker.getRegistrations();
-              await Promise.all(regs.map(r => r.unregister().catch(() => {})));
-            }
-          } catch (e) {}
-        } finally {
-          purgeBtn.textContent = 'Purged. Reloading…';
-          setTimeout(() => { try { location.reload(); } catch (e) {} }, 600);
-        }
-      });
-    }
+          const dbs = (indexedDB.databases && (await indexedDB.databases())) || [{ name: 'hr_monitor_kv' }];
+          await Promise.all(dbs.filter(d => d && d.name).map(d => new Promise((resolve) => {
+            const req = indexedDB.deleteDatabase(d.name);
+            req.onsuccess = req.onerror = req.onblocked = () => resolve();
+          })));
+        } catch (e) {}
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+          }
+        } catch (e) {}
+      } finally {
+        purgeBtn.textContent = 'Purged, reloading';
+        setTimeout(() => { try { location.reload(); } catch (e) {} }, 600);
+      }
+    });
   }
 
   function close() {
-    const overlay = document.getElementById('hrm-diag-overlay');
-    if (overlay) overlay.remove();
+    if (current) { const c = current; current = null; c.close(); }
   }
 
   function buildCopyText(d, v) {

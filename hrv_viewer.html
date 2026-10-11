@@ -18,27 +18,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./ui.css">
+<script src="./ui.js"></script>
 <style>
-  :root {
-    --bg: #0a0a0a;
-    --bg-panel: #101010;
-    --bg-input: #141414;
-    --border: #1f1f1f;
-    --border-strong: #2a2a2a;
-    --text: #d8d8d8;
-    --text-dim: #8a8a8a;
-    --text-faint: #5a5a5a;
-    --accent-hr: #E89858;
-    --accent-rmssd: #5DCAA5;
-    /* UI-chrome accent (primary button, active tab, focus). Teal keeps
-       settings readable and reserves red for brand + warnings. Name is
-       kept for legacy compatibility with existing selectors. */
-    --accent-blue: #5DCAA5;
-    --warn-high: #E24B4A;
-    --warn-low: #85B7EB;
-    --warn-crash: #BA7517;
-    --warn-palp: #D76CBA;
-  }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0;
@@ -49,7 +32,7 @@
     height: 100vh;
     overflow: hidden;
   }
-  button {
+  button:where(:not(.ui *)) {
     background: var(--bg-input);
     color: var(--text);
     border: 1px solid var(--border);
@@ -60,8 +43,8 @@
     font-family: inherit;
     transition: border-color 0.15s, background 0.15s;
   }
-  button:hover { border-color: var(--border-strong); background: #1a1a1a; }
-  button.primary { background: var(--accent-blue); color: #0a1a2a; border-color: var(--accent-blue); font-weight: 600; }
+  button:where(:not(.ui *)):hover { border-color: var(--border-control); background: #1a1a1a; }
+  button.primary:where(:not(.ui *)) { background: var(--action); color: #0a1a2a; border-color: var(--action); font-weight: 600; }
 
   /* Stage colors (shared with live app) */
   .stage-low { color: #7DB8E8; }
@@ -77,7 +60,7 @@
     gap: 24px;
     padding: 12px 24px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     height: 52px;
   }
   /* Mobile-only compact indicators (drive sync dot + monitor link).
@@ -94,7 +77,7 @@
     text-transform: none;
     color: var(--text);
   }
-  .app-title .accent { color: var(--text-faint); font-weight: 500; margin: 0 2px; }
+  .app-title .accent { color: var(--text-dim); font-weight: 500; margin: 0 2px; }
   .aorti-nav-mark {
     width: 24px;
     height: 22px;
@@ -152,14 +135,14 @@
     border-radius: 6px;
     transition: color 0.15s, background 0.15s;
   }
-  .app-nav-cross:hover { color: var(--accent-hr); background: rgba(232,152,88,0.08); }
+  .app-nav-cross:hover { color: var(--stage-4); background: rgba(232,152,88,0.08); }
   /* Compact Watch-live icon button — only shows when a broadcast key is known. */
   .watch-live-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    color: var(--accent-rmssd);
-    border: 1px solid var(--accent-rmssd);
+    color: var(--hrv);
+    border: 1px solid var(--hrv);
     padding: 5px 9px;
     border-radius: 6px;
     font-size: 10px;
@@ -184,7 +167,7 @@
     opacity: 0.7;
   }
   .nav-feedback {
-    color: var(--text-faint);
+    color: var(--text-dim);
     text-decoration: none;
     font-size: 11px;
     letter-spacing: 0.08em;
@@ -217,7 +200,7 @@
     min-width: 120px;
     justify-content: space-between;
   }
-  .view-switcher-btn:hover { border-color: var(--border-strong); }
+  .view-switcher-btn:hover { border-color: var(--border-control); }
   .view-switcher-chev {
     width: 10px;
     height: 10px;
@@ -233,7 +216,7 @@
     flex-direction: column;
     gap: 2px;
     padding: 6px;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.4);
@@ -288,12 +271,12 @@
     white-space: nowrap;
   }
   .folder-info .drive-sep {
-    color: var(--border-strong);
+    color: var(--border-control);
     padding: 0 2px;
   }
   .fi-drive-email {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-family: 'Consolas', 'Monaco', monospace;
     white-space: nowrap;
     overflow: hidden;
@@ -311,7 +294,7 @@
   }
   #drive-status.drive-idle { background: var(--bg-input); color: var(--text-dim); }
   #drive-status.drive-syncing {
-    color: var(--accent-rmssd);
+    color: var(--hrv);
     background: rgba(93,202,165,0.1);
     border: 1px solid rgba(93,202,165,0.3);
   }
@@ -339,7 +322,7 @@
     cursor: pointer;
     transition: color 0.12s, border-color 0.12s, background 0.12s, transform 0.3s;
   }
-  .folder-info .icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .folder-info .icon-btn:hover { color: var(--text); border-color: var(--border-control); }
   .folder-info .icon-btn svg { display: block; }
   .folder-info .icon-btn.spinning svg { animation: drive-sync-spin 1s linear infinite; }
   @keyframes drive-sync-spin {
@@ -366,7 +349,7 @@
     letter-spacing: 0.05em;
     color: var(--text-dim);
   }
-  .autonomic-toggle input { cursor: pointer; accent-color: var(--accent-rmssd); }
+  .autonomic-toggle input { cursor: pointer; accent-color: var(--hrv); }
   .autonomic-toggle:hover { color: var(--text); }
 
   /* Main content area */
@@ -407,12 +390,12 @@
   .viewer-loading-bar-fill {
     height: 100%;
     width: 0%;
-    background: var(--accent, #5DCAA5);
+    background: var(--hrv);
     transition: width 0.18s ease;
   }
   .viewer-loading-text {
     font-variant-numeric: tabular-nums;
-    color: var(--text-muted, #9a9a9a);
+    color: var(--text-dim);
   }
   @media (prefers-reduced-motion: reduce) {
     .viewer-loading-bar-fill { transition: none; }
@@ -427,7 +410,7 @@
     padding: 20px;
   }
   .empty-panel {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 40px 48px;
@@ -436,7 +419,7 @@
   }
   .empty-panel h2 { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
   .empty-panel p { margin: 0 0 24px; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
-  .empty-panel .hint { margin-top: 22px; font-size: 11px; color: var(--text-faint); line-height: 1.6; }
+  .empty-panel .hint { margin-top: 22px; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
   .empty-choices {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -459,8 +442,8 @@
     text-align: center;
   }
   .empty-choice:hover {
-    border-color: var(--border-strong);
-    background: var(--bg-panel);
+    border-color: var(--border-control);
+    background: var(--bg-raised);
     transform: translateY(-1px);
   }
   .empty-choice svg {
@@ -476,7 +459,7 @@
   }
   .empty-choice .empty-choice-sub {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     line-height: 1.45;
   }
   @media (max-width: 520px) {
@@ -513,7 +496,7 @@
     font-family: inherit;
     cursor: pointer;
   }
-  .index-controls select:hover { border-color: var(--border-strong); }
+  .index-controls select:hover { border-color: var(--border-control); }
   .index-pager {
     display: flex;
     align-items: center;
@@ -525,19 +508,19 @@
   }
   .index-pager-btn {
     padding: 6px 14px;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 6px;
     cursor: pointer;
     font-size: 12px;
   }
-  .index-pager-btn:hover:not(:disabled) { border-color: var(--border-strong); }
+  .index-pager-btn:hover:not(:disabled) { border-color: var(--border-control); }
   .index-pager-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .index-pager-info { font-variant-numeric: tabular-nums; }
   .session-card {
     position: relative;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 18px 20px;
@@ -545,7 +528,7 @@
     transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
   }
   .session-card:hover {
-    border-color: var(--border-strong);
+    border-color: var(--border-control);
     transform: translateY(-2px);
     box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   }
@@ -567,7 +550,7 @@
     justify-content: center;
     background: transparent;
     border: none;
-    color: var(--text-faint);
+    color: var(--text-dim);
     cursor: pointer;
     border-radius: 6px;
     opacity: 0;
@@ -591,7 +574,7 @@
     right: 8px;
     min-width: 180px;
     background: #0a0a0a;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     border-radius: 8px;
     padding: 4px;
     z-index: 50;
@@ -660,7 +643,7 @@
     min-width: 0;
   }
   .session-card-stat-label {
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     font-size: 10px;
@@ -706,7 +689,7 @@
   .metric-switch {
     display: flex;
     gap: 2px;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 3px;
@@ -725,7 +708,7 @@
     transition: background 0.15s, color 0.15s;
   }
   .metric-switch button:hover { color: var(--text); }
-  .metric-switch button.active { background: var(--accent-blue); color: #0a1a2a; }
+  .metric-switch button.active { background: var(--action); color: #0a1a2a; }
   .cal-legend-strip {
     display: flex;
     gap: 16px;
@@ -743,7 +726,7 @@
   }
   .cal-dow {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.12em;
     text-transform: uppercase;
     font-weight: 700;
@@ -789,7 +772,7 @@
     }
   }
   .cal-cell.has-sessions { cursor: pointer; }
-  .cal-cell.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+  .cal-cell.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-control); }
   .cal-cell.empty-month { opacity: 0.3; pointer-events: none; }
   .cal-cell.today { border-color: #ffffff44; }
   .cal-cell .cal-day-num {
@@ -808,7 +791,7 @@
   }
   .cal-cell .cal-hr-unit {
     font-size: 10px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     margin-top: 3px;
@@ -845,7 +828,7 @@
   .cal-badge.chills .cal-badge-dot { background: #85B7EB; }
   .cal-cell .cal-session-count {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.06em;
     text-transform: uppercase;
     font-weight: 600;
@@ -865,7 +848,7 @@
     letter-spacing: 0.02em;
   }
   .day-strip-panel {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 18px 22px;
@@ -880,7 +863,7 @@
   }
   .day-timeline-btn {
     padding: 7px 14px;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 8px;
@@ -892,7 +875,7 @@
     transition: border-color 0.15s, background 0.15s;
   }
   .day-timeline-btn:hover:not(:disabled) {
-    border-color: var(--border-strong);
+    border-color: var(--border-control);
     background: var(--bg-input);
   }
   .day-timeline-btn:disabled { opacity: 0.5; cursor: wait; }
@@ -929,7 +912,7 @@
   .day-strip-block.hovered {
     transform: translateY(-2px);
     box-shadow: 0 3px 10px rgba(0,0,0,0.5);
-    outline: 2px solid var(--accent-rmssd);
+    outline: 2px solid var(--hrv);
     outline-offset: 2px;
     z-index: 2;
   }
@@ -937,15 +920,15 @@
   .session-card.hovered {
     transform: translateY(-2px);
     box-shadow: 0 3px 10px rgba(0,0,0,0.5);
-    border-color: var(--accent-rmssd);
-    outline: 1px solid var(--accent-rmssd);
+    border-color: var(--hrv);
+    outline: 1px solid var(--hrv);
     outline-offset: -1px;
   }
   .day-hour-axis {
     position: relative;
     height: 18px;
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
   .day-hour-tick {
@@ -963,7 +946,7 @@
   .day-strip-empty {
     padding: 30px 0;
     text-align: center;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-size: 13px;
   }
 
@@ -978,7 +961,7 @@
     gap: 12px;
   }
   .week-col {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 16px 14px;
@@ -989,7 +972,7 @@
     transition: border-color 0.15s, transform 0.1s;
   }
   .week-col.has-sessions { cursor: pointer; }
-  .week-col.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+  .week-col.has-sessions:hover { transform: translateY(-2px); border-color: var(--border-control); }
   .week-col.empty { opacity: 0.45; }
   .week-col.today { border-color: #ffffff44; }
   .week-col-head {
@@ -997,7 +980,7 @@
     flex-direction: column;
     gap: 3px;
   }
-  .week-dow { font-size: 11px; color: var(--text-faint); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
+  .week-dow { font-size: 11px; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
   .week-date { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .week-col-hr {
     font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
@@ -1005,7 +988,7 @@
     line-height: 1;
     font-variant-numeric: tabular-nums;
   }
-  .week-col-hr-label { font-size: 10px; color: var(--text-faint); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
+  .week-col-hr-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
   .week-col-spark {
     height: 44px;
     position: relative;
@@ -1019,14 +1002,14 @@
   }
   .week-col-stats { display: flex; gap: 12px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .week-col-stat { display: flex; flex-direction: column; gap: 2px; }
-  .week-col-stat-label { font-size: 10px; color: var(--text-faint); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+  .week-col-stat-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
 
   /* ALL-TIME TRENDS */
   .all-granularity {
     display: flex;
     gap: 4px;
     margin-bottom: 16px;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 4px;
@@ -1046,14 +1029,14 @@
     transition: background 0.15s, color 0.15s;
   }
   .all-granularity button:hover { color: var(--text); }
-  .all-granularity button.active { background: var(--accent-blue); color: #0a1a2a; }
+  .all-granularity button.active { background: var(--action); color: #0a1a2a; }
   .all-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 18px;
   }
   .all-card {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 18px 22px;
@@ -1063,7 +1046,7 @@
   }
   .all-card.wide { grid-column: 1 / -1; }
   .all-card-title { font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
-  .all-card-sub { font-size: 12px; color: var(--text-faint); margin-top: -4px; }
+  .all-card-sub { font-size: 12px; color: var(--text-dim); margin-top: -4px; }
   .all-chart-wrap { height: 220px; position: relative; }
   .all-polar-wrap { height: 280px; position: relative; }
   .all-headline {
@@ -1103,8 +1086,8 @@
     width: 30px;
     height: 56px;
     border-radius: 6px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-strong);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-control);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -1143,7 +1126,7 @@
     min-width: 0;
   }
   .session-sidebar {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 18px;
@@ -1157,7 +1140,7 @@
   .summary-bar {
     display: flex;
     gap: 24px;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 18px 22px;
@@ -1169,7 +1152,7 @@
     align-items: center;
     min-height: 44px;
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.1em;
     text-transform: uppercase;
     font-weight: 600;
@@ -1185,7 +1168,7 @@
     background: transparent;
     border: none;
     border-radius: 8px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     cursor: pointer;
     align-items: center;
     justify-content: center;
@@ -1199,7 +1182,7 @@
     top: 44px;
     right: 8px;
     min-width: 220px;
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 10px 6px 8px;
@@ -1212,7 +1195,7 @@
   .summary-bar-menu[hidden] { display: none; }
   .summary-bar-menu-head {
     font-size: 10px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.1em;
     text-transform: uppercase;
     font-weight: 600;
@@ -1233,7 +1216,7 @@
   .summary-bar-menu label input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: var(--accent-hr, #B8D97E);
+    accent-color: var(--stage-4, #B8D97E);
     flex: 0 0 auto;
     margin: 0;
   }
@@ -1257,7 +1240,7 @@
   }
   .summary-stat-label {
     font-size: 10px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     font-weight: 600;
@@ -1273,7 +1256,7 @@
   }
   .summary-stat-unit {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     margin-top: 3px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -1286,7 +1269,7 @@
      or collapsing doesn't reflow the chart. Users on small monitors would
      otherwise see the chart shrink below a usable size when lower panels open. */
   .chart-panel {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 20px 22px;
@@ -1324,8 +1307,8 @@
     top: 0;
     height: 100%;
     background: transparent;
-    border-left: 2px solid var(--accent-rmssd);
-    border-right: 2px solid var(--accent-rmssd);
+    border-left: 2px solid var(--hrv);
+    border-right: 2px solid var(--hrv);
     pointer-events: none;
     box-sizing: border-box;
   }
@@ -1337,7 +1320,7 @@
     transform: translateY(-50%);
     width: 10px;
     height: 28px;
-    background: var(--accent-rmssd);
+    background: var(--hrv);
     opacity: 0.85;
     pointer-events: auto;
     cursor: ew-resize;
@@ -1384,7 +1367,7 @@
     cursor: pointer;
     transition: color 0.15s, border-color 0.15s, background 0.15s, opacity 0.15s;
   }
-  .legend-reset-zoom:hover { color: var(--text); border-color: var(--border-strong); background: var(--bg-input); }
+  .legend-reset-zoom:hover { color: var(--text); border-color: var(--border-control); background: var(--bg-input); }
   .legend-reset-zoom:disabled { opacity: 0; pointer-events: none; }
   .legend-reset-zoom.hidden { display: none; }
   .chart-legend-item {
@@ -1405,7 +1388,7 @@
   }
   .legend-swatch.line {
     height: 0;
-    border-top: 2px dashed var(--accent-rmssd);
+    border-top: 2px dashed var(--hrv);
     border-radius: 0;
   }
   /* Vertical solid line — for the Event marker so it's visually distinct from
@@ -1476,7 +1459,7 @@
 
   /* HR x HRV interpretation panel */
   .interp-panel {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 14px 18px;
@@ -1520,7 +1503,7 @@
   .interp-cell {
     padding: 11px 14px;
     border: 1px solid var(--border);
-    border-left: 4px solid var(--text-faint);
+    border-left: 4px solid var(--text-dim);
     background: rgba(255,255,255,0.015);
     border-radius: 8px;
     cursor: pointer;
@@ -1546,7 +1529,7 @@
   }
   .interp-empty-badge {
     font-size: 10px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-weight: 500;
     letter-spacing: 0.02em;
     text-transform: none;
@@ -1561,8 +1544,8 @@
   .interp-cell.warn.on .interp-title { color: #E89858; }
   .interp-cell.bad.on { border-color: #E24B4A; border-left-color: #E24B4A; background: rgba(226,75,74,0.12); }
   .interp-cell.bad.on .interp-title { color: #E24B4A; }
-  .interp-cell.ok.on { border-color: var(--accent-rmssd); border-left-color: var(--accent-rmssd); background: rgba(93,202,165,0.10); }
-  .interp-cell.ok.on .interp-title { color: var(--accent-rmssd); }
+  .interp-cell.ok.on { border-color: var(--hrv); border-left-color: var(--hrv); background: rgba(93,202,165,0.10); }
+  .interp-cell.ok.on .interp-title { color: var(--hrv); }
   /* Empty state: faded, not toggleable */
   .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
   /* Kebab (⋮) on each quadrant cell opens the shared threshold editor. All four
@@ -1576,7 +1559,7 @@
     padding: 0;
     border: 1px solid transparent;
     background: transparent;
-    color: var(--text-faint);
+    color: var(--text-dim);
     border-radius: 4px;
     cursor: pointer;
     font-size: 16px;
@@ -1587,13 +1570,13 @@
   .interp-kebab:hover {
     color: var(--text);
     background: rgba(255,255,255,0.08);
-    border-color: var(--border-strong);
+    border-color: var(--border-control);
   }
   #quadrant-thresh-popover {
     position: fixed;
     z-index: 1001;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-strong);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-control);
     border-radius: 10px;
     padding: 14px 16px;
     min-width: 260px;
@@ -1607,8 +1590,8 @@
   #viewer-settings-popover {
     position: fixed;
     z-index: 1001;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-strong);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-control);
     border-radius: 10px;
     padding: 14px 16px;
     width: 320px;
@@ -1645,7 +1628,7 @@
   #viewer-settings-popover label .thresh-hint {
     display: block;
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-weight: 400;
     margin-top: 2px;
   }
@@ -1662,7 +1645,7 @@
   }
   #viewer-settings-popover .thresh-default-hint {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-style: italic;
     margin-top: 6px;
     line-height: 1.4;
@@ -1696,7 +1679,7 @@
   }
   #quadrant-thresh-popover .thresh-default-hint {
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-style: italic;
     margin-top: 6px;
     line-height: 1.4;
@@ -1715,7 +1698,7 @@
   #quadrant-thresh-popover label .thresh-hint {
     display: block;
     font-size: 11px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     font-weight: 400;
     margin-top: 2px;
   }
@@ -1746,7 +1729,7 @@
     border-color: transparent;
     margin-right: auto;
   }
-  #quadrant-thresh-popover .thresh-reset:hover { color: var(--text); border-color: var(--border-strong); }
+  #quadrant-thresh-popover .thresh-reset:hover { color: var(--text); border-color: var(--border-control); }
 
   /* Aggregate report cards (Daily / Weekly / Monthly) reuse the same .insight-box
      styles as the session report but live inside view containers that have
@@ -1758,9 +1741,9 @@
      default so it stays small; expanding shows all sub-sections stacked as
      static labeled blocks (no per-section carets). */
   .insight-box {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-left: 3px solid var(--accent-rmssd);
+    border-left: 3px solid var(--hrv);
     border-radius: 10px;
     overflow: hidden;
   }
@@ -1829,7 +1812,7 @@
   .insight-section.collapsed .insight-child-chevron { transform: rotate(-90deg); }
   .insight-section-title .insight-count {
     font-size: 12px;
-    color: var(--accent-rmssd);
+    color: var(--hrv);
     background: rgba(93,202,165,0.12);
     padding: 2px 8px;
     border-radius: 10px;
@@ -1885,8 +1868,8 @@
      the sub-line. Clicking zooms the main chart to that moment. */
   .insight-section .insight-jump {
     background: transparent;
-    border: 1px dashed var(--border-strong);
-    color: var(--accent-rmssd);
+    border: 1px dashed var(--border-control);
+    color: var(--hrv);
     font-size: 11px;
     padding: 1px 8px;
     border-radius: 4px;
@@ -1894,7 +1877,7 @@
     letter-spacing: 0.04em;
     font-family: 'Consolas', 'Monaco', monospace;
   }
-  .insight-section .insight-jump:hover { color: var(--text); border-color: var(--accent-rmssd); }
+  .insight-section .insight-jump:hover { color: var(--text); border-color: var(--hrv); }
   .insight-empty {
     padding: 14px 18px;
     color: var(--text-dim);
@@ -1910,14 +1893,14 @@
     gap: 10px;
   }
   .pots-card {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 12px 14px;
   }
   .pots-card-label {
     font-size: 9px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     font-weight: 600;
@@ -1973,9 +1956,9 @@
   .filter-chip.active {
     color: var(--text);
     background: var(--bg-input);
-    border-color: var(--border-strong);
+    border-color: var(--border-control);
   }
-  .filter-chip.type-event.active { border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
+  .filter-chip.type-event.active { border-color: var(--hrv); color: var(--hrv); }
   .filter-chip.type-warning.active { border-color: var(--warn-crash); color: var(--warn-crash); }
   .filter-chip.type-palp.active { border-color: var(--warn-palp); color: var(--warn-palp); }
   .filter-chip.type-delta.active { border-color: #B48CFF; color: #B48CFF; }
@@ -2011,7 +1994,7 @@
   .marker-item.chart-hover {
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
   }
-  .marker-item.type-event { border-left-color: var(--accent-rmssd); }
+  .marker-item.type-event { border-left-color: var(--hrv); }
   .marker-item.type-warning { border-left-color: var(--warn-crash); }
   .marker-item.type-palp { border-left-color: var(--warn-palp); }
   .marker-item.type-delta { border-left-color: #B48CFF; }
@@ -2039,7 +2022,7 @@
 
   /* Stub view */
   .stub-panel {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 40px;
@@ -2075,7 +2058,7 @@
   }
   .tags-inline-label {
     font-size: 10px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.1em;
     text-transform: uppercase;
     font-weight: 700;
@@ -2084,19 +2067,19 @@
     padding: 2px 9px;
     font-size: 12px;
     background: rgba(93,202,165,0.1);
-    border: 1px solid var(--accent-rmssd);
-    color: var(--accent-rmssd);
+    border: 1px solid var(--hrv);
+    color: var(--hrv);
     border-radius: 999px;
     display: inline-flex;
     gap: 5px;
     align-items: center;
   }
-  .tags-inline .tag-chip .tag-x { color: var(--text-faint); font-weight: bold; cursor: pointer; }
+  .tags-inline .tag-chip .tag-x { color: var(--text-dim); font-weight: bold; cursor: pointer; }
   .tags-inline .tag-chip .tag-x:hover { color: var(--warn-high); }
   .tags-inline .tag-input {
     background: transparent;
     border: none;
-    border-bottom: 1px dashed var(--border-strong);
+    border-bottom: 1px dashed var(--border-control);
     border-radius: 0;
     padding: 2px 4px;
     color: var(--text);
@@ -2105,7 +2088,7 @@
     outline: none;
     width: 110px;
   }
-  .tags-inline .tag-input:focus { border-bottom-color: var(--accent-rmssd); border-bottom-style: solid; }
+  .tags-inline .tag-input:focus { border-bottom-color: var(--hrv); border-bottom-style: solid; }
 
   /* Auto-detected autonomic-event markers (chills-like volatility, sympathetic flush) */
   .marker-item.type-flush { border-left-color: #E8A858; }
@@ -2157,14 +2140,14 @@
     display: flex;
     justify-content: space-between;
     font-size: 9px;
-    color: var(--text-faint);
+    color: var(--text-dim);
     letter-spacing: 0.05em;
     text-transform: uppercase;
   }
 
   /* TAG UI (session view) */
   .tags-panel {
-    background: var(--bg-panel);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 14px 18px;
@@ -2181,18 +2164,18 @@
     padding: 4px 12px;
     border-radius: 999px;
     background: var(--bg-input);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     font-size: 12px;
     cursor: pointer;
     user-select: none;
     transition: background 0.12s, border-color 0.12s;
   }
-  .tag-chip.selected { background: rgba(93,202,165,0.1); border-color: var(--accent-rmssd); color: var(--accent-rmssd); }
-  .tag-chip .tag-x { color: var(--text-faint); font-weight: bold; }
+  .tag-chip.selected { background: rgba(93,202,165,0.1); border-color: var(--hrv); color: var(--hrv); }
+  .tag-chip .tag-x { color: var(--text-dim); font-weight: bold; }
   .tag-chip .tag-x:hover { color: var(--warn-high); }
   .tag-input {
     background: transparent;
-    border: 1px dashed var(--border-strong);
+    border: 1px dashed var(--border-control);
     border-radius: 999px;
     padding: 4px 12px;
     color: var(--text);
@@ -2201,7 +2184,7 @@
     outline: none;
     min-width: 120px;
   }
-  .tag-input:focus { border-color: var(--accent-rmssd); border-style: solid; }
+  .tag-input:focus { border-color: var(--hrv); border-style: solid; }
   .tag-preset {
     padding: 3px 10px;
     font-size: 11px;
@@ -2211,7 +2194,7 @@
     color: var(--text-dim);
     cursor: pointer;
   }
-  .tag-preset:hover { color: var(--text); border-color: var(--border-strong); }
+  .tag-preset:hover { color: var(--text); border-color: var(--border-control); }
 
   /* Export-to-print mode: activated by the Export report button (NOT Ctrl+P).
      The button applies body.printing, resizes charts, calls window.print(), and
@@ -2286,7 +2269,7 @@
     text-transform: uppercase;
     font-weight: 700;
     background: var(--bg-input);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     color: var(--text);
     border-radius: 999px;
     cursor: pointer;
@@ -2335,7 +2318,7 @@
       padding: 6px 10px;
       cursor: pointer;
     }
-    .mobile-menu-btn:hover { border-color: var(--border-strong); }
+    .mobile-menu-btn:hover { border-color: var(--border-control); }
     /* Hide everything but the logo + hamburger until the menu opens. */
     .app-nav-cross,
     .view-switcher,
@@ -2372,7 +2355,7 @@
       color: var(--text-dim);
       text-decoration: none;
     }
-    .mobile-monitor-link:hover { color: var(--text); border-color: var(--border-strong); }
+    .mobile-monitor-link:hover { color: var(--text); border-color: var(--border-control); }
     /* Menu open: reveal the items as a stacked column below the header. */
     body.menu-open .app-nav-cross,
     body.menu-open .view-switcher,
@@ -2419,7 +2402,7 @@
       align-items: center;
       gap: 8px;
       padding: 8px 10px;
-      background: var(--bg-panel);
+      background: var(--bg-raised);
       border-radius: 8px;
     }
     /* Drop the vertical "|" separators inside the menu — each row is its own card. */
@@ -2499,7 +2482,7 @@
        baseline). Same approach the monitor uses: bump every text button,
        size icon buttons explicitly, and add 8 px gap between adjacent
        targets. icon-btn is sized as a square so the SVG stays centered. */
-    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.mobile-menu-btn):not(.cal-today-btn):not(.day-timeline-btn):not(.filter-chip):not(.view-switcher-btn):not(.index-pager-btn) {
+    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.mobile-menu-btn):not(.cal-today-btn):not(.day-timeline-btn):not(.filter-chip):not(.view-switcher-btn):not(.index-pager-btn):where(:not(.ui *)) {
       min-height: 44px;
       padding: 10px 16px;
     }
@@ -2776,7 +2759,7 @@
 
   async function pickFolder() {
     if (!window.showDirectoryPicker) {
-      alert('This viewer needs the File System Access API (Chrome / Edge / Comet).');
+      UI.notice({ kind: 'warning', text: 'Folder access needs Chrome or Edge.' });
       return;
     }
     try {
@@ -2989,7 +2972,7 @@
     if (window.HRMDiagnostics && typeof window.HRMDiagnostics.open === 'function') {
       window.HRMDiagnostics.open();
     } else {
-      alert('Diagnostics module not loaded yet. Refresh the page and try again.');
+      UI.notice({ kind: 'error', text: 'Diagnostics did not load. Reload the page.' });
     }
   }
 
@@ -3046,7 +3029,7 @@
   }
 
   async function driveSignIn() {
-    if (!window.aortiAuth) { alert('Auth module still loading. Try again in a second.'); return; }
+    if (!window.aortiAuth) { UI.notice({ kind: 'info', text: 'Sign-in is still loading. Try again.' }); return; }
     try {
       await window.aortiAuth.signIn();
       // onAuthChange handler kicks off driveEnsureFolder + driveSync.
@@ -3486,16 +3469,21 @@
         menu.querySelector('[data-action="delete"]').addEventListener('click', async () => {
           closeAllSessionCardMenus();
           if (isDemoMode()) {
-            alert('Delete is disabled in the demo.');
+            UI.notice({ kind: 'info', text: 'Delete is off in the demo.' });
             return;
           }
-          const pretty = prettyFilename(fn);
-          if (!confirm('Delete this session?\n\n' + pretty + '\n\nRemoved from this device' + (driveAccessToken ? ' and Google Drive' : '') + '. This cannot be undone.')) return;
+          const places = [];
+          if (dirHandle) places.push('your sessions folder');
+          if (driveAccessToken && driveFolderId) places.push('Google Drive');
+          if (!places.length) places.push('this viewer');
+          const ok = await UI.confirm({ host: card, key: 'delete-session', danger: true, title: 'Delete session',
+            text: 'Deletes it from ' + places.join(' and ') + '. No undo.', confirmLabel: 'Delete' });
+          if (!ok) return;
           try {
             await deleteSession(fn);
             onDeleted(fn);
           } catch (e) {
-            alert('Delete failed: ' + (e && e.message ? e.message : 'unknown error'));
+            UI.notice({ kind: 'error', text: 'Delete failed: ' + (e && e.message ? e.message : 'unknown error') });
           }
         });
         card.appendChild(menu);
@@ -3509,19 +3497,6 @@
     document.querySelectorAll('.session-card-kebab[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
   }
   document.addEventListener('click', closeAllSessionCardMenus);
-
-  // Human-readable form for confirm dialogs — "2026-04-19 · 12:40 · 5 min"
-  // beats the raw hrv_session_...csv filename by a mile.
-  function prettyFilename(fn) {
-    try {
-      const meta = parseSessionFilename(fn);
-      if (!meta) return fn;
-      const s = sessionsIndex[fn];
-      const dur = s ? formatDuration(s.duration) : '';
-      const dateKey = sessionLocalDateKey(s, meta) || meta.isoDate;
-      return dateKey + ' · ' + meta.isoTime + (dur ? ' · ' + dur : '');
-    } catch (e) { return fn; }
-  }
 
   // Remove a session from every store it might live in: local folder (via
   // the File System Access dirHandle), Drive (if signed in and we have a
@@ -5769,15 +5744,15 @@
             </div>
             <div class="session-card-stat">
               <span class="session-card-stat-label">Avg HRV</span>
-              <span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span>
+              <span class="session-card-stat-value" style="color: var(--hrv);">${s.rmssdAvg ?? '—'}</span>
             </div>
             <div class="session-card-stat">
               <span class="session-card-stat-label">Palps</span>
-              <span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-faint)'};">${s.palpCount}</span>
+              <span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-dim)'};">${s.palpCount}</span>
             </div>
             <div class="session-card-stat">
               <span class="session-card-stat-label">Warn</span>
-              <span class="session-card-stat-value" style="color: ${s.warnCount ? 'var(--warn-crash)' : 'var(--text-faint)'};">${s.warnCount}</span>
+              <span class="session-card-stat-value" style="color: ${s.warnCount ? 'var(--warn-crash)' : 'var(--text-dim)'};">${s.warnCount}</span>
             </div>
             <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable.">
               <span class="session-card-stat-label">Uptime</span>
@@ -5870,7 +5845,7 @@
     return Math.min(100, Math.round(100 * up / s.duration));
   }
   function uptimeColor(pct) {
-    if (pct == null) return 'var(--text-faint)';
+    if (pct == null) return 'var(--text-dim)';
     if (pct >= 95) return '#B8D97E';
     if (pct >= 80) return 'var(--text)';
     return 'var(--warn-crash)';
@@ -6191,8 +6166,8 @@
       // Flush + Chills are interpretive autonomic metrics — hide those columns
       // when the autonomic toggle is OFF so the card stays descriptive-only.
       const autonomicCols = autonomicOn ? `
-            <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-faint)'};">${(s.flushes || []).length}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-faint)'};">${(s.chillsWindows || []).length}</span></div>` : '';
+            <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-dim)'};">${(s.flushes || []).length}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-dim)'};">${(s.chillsWindows || []).length}</span></div>` : '';
       // Day-portion: clip the session's times to the current day's
       // boundaries so a session that started yesterday shows its
       // continuation range (e.g. 00:00 – 09:05 AM) and a note pointing
@@ -6211,9 +6186,9 @@
           <div class="session-card-date">${meta && meta.date ? formatClockRange(cardStart, cardDurMin) : (meta ? meta.isoTime : fn)}</div>
           <div class="session-card-stats">
             <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Palps</span><span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-faint)'};">${s.palpCount}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#B48CFF' : 'var(--text-faint)'};">${(s.hrDeltas || []).length}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--hrv);">${s.rmssdAvg ?? '—'}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Palps</span><span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-dim)'};">${s.palpCount}</span></div>
+            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#B48CFF' : 'var(--text-dim)'};">${(s.hrDeltas || []).length}</span></div>
             <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable."><span class="session-card-stat-label">Uptime</span><span class="session-card-stat-value" style="color: ${uptimeColor(computeUptimePct(s))};">${computeUptimePct(s) != null ? computeUptimePct(s) + '%' : '—'}</span></div>${autonomicCols}
           </div>
         </div>`;
@@ -6422,7 +6397,7 @@
                   <div class="week-col-stat"><span class="week-col-stat-label">Flush</span><span style="color: ${c.totalFlush ? '#E8A858' : 'var(--text-dim)'};">${c.totalFlush}</span></div>
                   <div class="week-col-stat"><span class="week-col-stat-label">Chill</span><span style="color: ${c.totalChills ? '#85B7EB' : 'var(--text-dim)'};">${c.totalChills}</span></div>
                 </div>
-              ` : `<div style="font-size: 11px; color: var(--text-faint); font-style: italic; margin-top: 12px;">no sessions</div>`}
+              ` : `<div style="font-size: 11px; color: var(--text-dim); font-style: italic; margin-top: 12px;">no sessions</div>`}
             </div>`;
         }).join('')}
       </div>
@@ -6818,7 +6793,7 @@
         <div class="thresh-actions">
           <button class="thresh-reset" id="hrshift-reset">Reset to default</button>
           <button id="hrshift-cancel">Cancel</button>
-          <button class="primary" id="hrshift-save" style="background: var(--accent-rmssd); color: #0a1a14; border-color: var(--accent-rmssd);">Save</button>
+          <button class="primary" id="hrshift-save" style="background: var(--hrv); color: #0a1a14; border-color: var(--hrv);">Save</button>
         </div>
       `;
       document.body.appendChild(pop);
@@ -7106,22 +7081,22 @@
         </div>
         <div class="summary-stat" data-stat="rmssdAvg">
           <span class="summary-stat-label">Avg HRV</span>
-          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.rmssdAvg ?? '—'}</span>
+          <span class="summary-stat-value" style="color: var(--hrv);">${s.rmssdAvg ?? '—'}</span>
           <span class="summary-stat-unit">ms rmssd</span>
         </div>
         <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD. Comparable side-by-side with RMSSD on the same time scale.">
           <span class="summary-stat-label">Avg SDNN</span>
-          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnnMatchAvg ?? '—'}</span>
+          <span class="summary-stat-value" style="color: var(--hrv);">${s.sdnnMatchAvg ?? '—'}</span>
           <span class="summary-stat-unit">ms · 30 s</span>
         </div>
         <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5-minute rolling window. Standard short-term HRV window.">
           <span class="summary-stat-label">Avg SDNN</span>
-          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnn5minAvg ?? '—'}</span>
+          <span class="summary-stat-value" style="color: var(--hrv);">${s.sdnn5minAvg ?? '—'}</span>
           <span class="summary-stat-unit">ms · 5 min</span>
         </div>
         ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across all in-range RR intervals from the entire session.">
           <span class="summary-stat-label">SDNN</span>
-          <span class="summary-stat-value" style="color: var(--accent-rmssd);">${s.sdnnFull ?? '—'}</span>
+          <span class="summary-stat-value" style="color: var(--hrv);">${s.sdnnFull ?? '—'}</span>
           <span class="summary-stat-unit">ms · session</span>
         </div>`}
         <div class="summary-stat" data-stat="palpCount">
@@ -7542,7 +7517,7 @@
     const mine = all[filename] || [];
     const container = document.getElementById('tags-current');
     container.innerHTML = mine.length === 0
-      ? '<span style="color: var(--text-faint); font-size: 12px; font-style: italic;">none yet</span>'
+      ? '<span style="color: var(--text-dim); font-size: 12px; font-style: italic;">none yet</span>'
       : mine.map(t => `<span class="tag-chip selected" data-tag="${escape(t)}">${escape(t)} <span class="tag-x" data-remove="${escape(t)}">×</span></span>`).join(' ');
     container.querySelectorAll('.tag-x').forEach(x => {
       x.addEventListener('click', (e) => {
@@ -8295,7 +8270,7 @@
     }
     items.sort((a, b) => a.t - b.t);
     const el = document.getElementById('marker-list');
-    if (!items.length) { el.innerHTML = '<div style="color: var(--text-faint); font-size: 12px; padding: 8px;">No markers to show.</div>'; return; }
+    if (!items.length) { el.innerHTML = '<div style="color: var(--text-dim); font-size: 12px; padding: 8px;">No markers to show.</div>'; return; }
     el.innerHTML = items.map(i => `
       <div class="marker-item type-${i.type}" data-t="${i.t}">
         <span class="marker-time">${formatDuration(i.t)}</span>
@@ -8643,7 +8618,7 @@
         <div class="thresh-actions">
           <button class="thresh-reset" id="thresh-reset">Reset to default</button>
           <button id="thresh-cancel">Cancel</button>
-          <button class="primary" id="thresh-save" style="background: var(--accent-rmssd); color: #0a1a14; border-color: var(--accent-rmssd);">Save</button>
+          <button class="primary" id="thresh-save" style="background: var(--hrv); color: #0a1a14; border-color: var(--hrv);">Save</button>
         </div>
       `;
       document.body.appendChild(pop);
@@ -9777,12 +9752,12 @@
   }
   function showDemoBanner() {
     if (document.getElementById('demo-banner')) return;
-    const bar = document.createElement('div');
+    const exit = document.createElement('a');
+    exit.className = 'btn ghost';
+    exit.href = './hrv_viewer.html';
+    exit.textContent = 'Exit demo';
+    const bar = UI.notice({ kind: 'info', bar: true, dismiss: false, text: 'Demo data', actions: [exit], before: document.body.firstChild });
     bar.id = 'demo-banner';
-    bar.style.cssText = 'position:sticky;top:0;z-index:9000;display:flex;gap:12px;align-items:center;padding:8px 16px;background:#1a1410;border-bottom:1px solid #3a2818;color:#e8c068;font-size:13px;font-weight:500;';
-    bar.innerHTML = '<span style="flex:1">Demo data. This is what the viewer looks like with real sessions.</span>'
-      + '<a href="./hrv_viewer.html" style="color:inherit;text-decoration:underline;">Exit demo</a>';
-    document.body.insertBefore(bar, document.body.firstChild);
   }
   // Demo index: every session onto each viewer day it touches.
   function rebuildSessionsByDate() {
