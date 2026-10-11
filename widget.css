@@ -90,6 +90,7 @@ body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-z
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 .widget-label {
   font-size: 12px;
@@ -327,10 +328,9 @@ body.conn-reconnecting .conn-text { display: inline; }
   border: 1px solid transparent;
   border-radius: var(--r-pill);
   background: transparent;
-  /* Widened from 150 so full strings render without the "Heart rate hi..."
-     truncation. nowrap + ellipsis stay as a safety net for longer labels. */
-  min-width: 190px;
-  width: auto;
+  /* Prefers 190 px so the card stays stable; shrinks beside the palp chip at OBS widths. */
+  flex: 0 1 190px;
+  min-width: 0;
   max-width: 240px;
   white-space: nowrap;
   overflow: hidden;
