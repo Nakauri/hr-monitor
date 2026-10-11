@@ -3439,6 +3439,27 @@
     return loadQueued;
   }
 
+  let staleUpgrade = null;
+  async function upgradeStaleSummaries(list) {
+    try {
+      if (loadInFlight) await loadInFlight.catch(() => {});
+      let done = 0;
+      for (const fn of list) {
+        const c = sessionsIndex[fn];
+        if (!c || c.__schemaV === SUMMARY_SCHEMA_V) continue;
+        const summary = await parseSessionFile(fn);
+        if (summary) { sessionsIndex[fn] = summary; done++; }
+        if (done > 0 && done % 25 === 0) persistIndex();
+        await new Promise(r => setTimeout(r, 0));
+      }
+      if (done > 0) { persistIndex(); await loadSessions(); routeUnlessEditing(); }
+    } catch (e) {
+      console.warn('[upgradeStaleSummaries]', e);
+    } finally {
+      staleUpgrade = null;
+    }
+  }
+
   async function loadSessionsRun(opts) {
     const onProgress = opts && opts.onProgress;
     loadCachedIndex();
@@ -3467,7 +3488,14 @@
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
         || !('quadPct' in c) || !('restingHR' in c);
     }
-    const todo = filenames.filter(needsReparse);
+    // One schema version behind with every field present: shown now, upgraded in the background.
+    function staleOnly(fn) {
+      const c = sessionsIndex[fn];
+      return !!c && !c.__incomplete && c.__schemaV === SUMMARY_SCHEMA_V - 1
+        && ('flushes' in c) && ('chillsWindows' in c) && ('hrDeltas' in c) && ('quadPct' in c) && ('restingHR' in c);
+    }
+    const deferred = filenames.filter(staleOnly);
+    const todo = filenames.filter(fn => needsReparse(fn) && !staleOnly(fn));
     if (onProgress) onProgress(0, todo.length);
 
     let newParsed = 0;
@@ -3487,11 +3515,13 @@
         evicted++;
       }
       processed++;
+      if (newParsed > 0 && newParsed % 25 === 0) persistIndex();
       // Yield after every parse so the loader bar paints and taps get through.
       if (onProgress) onProgress(processed, todo.length);
       await new Promise(r => setTimeout(r, 0));
     }
     if (newParsed > 0 || evicted > 0) persistIndex();
+    if (deferred.length && !staleUpgrade) staleUpgrade = setTimeout(() => upgradeStaleSummaries(deferred), 1500);
 
     // v2 segments become sessions; v2 then wins over native legacy rows it covers, before any figure is computed.
     if (!isDemoMode()) {
