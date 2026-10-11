@@ -46,7 +46,7 @@
     transition: border-color 0.15s, background 0.15s;
   }
   button:where(:not(.ui *)):hover { border-color: var(--border-control); background: #1a1a1a; }
-  button.primary:where(:not(.ui *)) { background: var(--action); color: #0a1a2a; border-color: var(--action); font-weight: 600; }
+  button.primary:where(:not(.ui *)) { background: var(--action); color: var(--on-fill); border-color: var(--action); font-weight: 600; }
 
   /* Stage colors (shared with live app) */
   .stage-low { color: #7DB8E8; }
@@ -71,12 +71,11 @@
   .view-tabs a { display: inline-flex; align-items: center; padding: 0 var(--s3); color: var(--text-dim); text-decoration: none; font-weight: 500; border-bottom: 2px solid transparent; white-space: nowrap; }
   .view-tabs a:hover { color: var(--text); }
   .view-tabs a[aria-current="page"] { color: var(--text); border-bottom-color: var(--action); font-weight: 600; }
-  .vsel { display: none; position: relative; align-items: center; margin-left: var(--s2); }
-  .vsel select { appearance: none; -webkit-appearance: none; min-height: 44px; padding: 0 32px 0 var(--s3); border: 1px solid var(--border-control); border-radius: var(--r-ctl); background: transparent; color: var(--text); font: 600 var(--t14)/1.2 var(--ui-face); cursor: pointer; field-sizing: content; min-width: 72px; }
-  .vsel select option { background: var(--bg-raised); color: var(--text); }
-  .vsel .ico { position: absolute; right: var(--s2); pointer-events: none; }
+  /* The view select keeps its widest option's width on every view, so the bar never reflows. */
+  .vsel { display: none; margin-left: var(--s2); }
+  .vsel select { cursor: pointer; }
   .vbar .bar-spacer { flex: 1; }
-  .vbar > :not(.bar-spacer):not(.syncbar):not(.drive-pop), .vsel select { flex: 0 0 auto; }
+  .vbar > :not(.bar-spacer):not(.syncbar):not(.drive-pop) { flex: 0 0 auto; }
   .vbar .btn.icon .ico { width: 20px; height: 20px; }
   .vbar .share-btn { margin-left: var(--s2); white-space: nowrap; }
   .vbar .share-btn .lbl-short { display: none; }
@@ -204,55 +203,8 @@
     height: calc(100vh - 56px);
     padding: 20px;
   }
-  .empty-panel {
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 40px 48px;
-    max-width: 520px;
-    text-align: center;
-  }
-  .empty-panel h2 { margin: 0 0 var(--s4); font-size: var(--t20); font-weight: 600; }
-  .empty-choices {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 10px;
-    margin-bottom: 4px;
-  }
-  .empty-choice {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    padding: 20px 16px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: border-color 0.15s, background 0.15s, transform 0.12s;
-    color: inherit;
-    font: inherit;
-    text-align: center;
-  }
-  .empty-choice:hover {
-    border-color: var(--border-control);
-    background: var(--bg-raised);
-    transform: translateY(-1px);
-  }
-  .empty-choice svg {
-    width: 22px;
-    height: 22px;
-    color: var(--text-dim);
-    flex-shrink: 0;
-  }
-  .empty-choice .empty-choice-title {
-    font-size: var(--t14);
-    font-weight: 600;
-    color: var(--text);
-  }
-  @media (max-width: 520px) {
-    .empty-choices { grid-template-columns: 1fr; }
-  }
+  .empty-choices { display: grid; gap: var(--s2); }
+  .empty-choices .brand-g { width: 20px; height: 20px; flex: 0 0 auto; }
 
   /* Sessions list view (landing page until month view is built) */
   .sessions-grid {
@@ -271,20 +223,10 @@
   }
   .index-controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: var(--s2);
   }
-  .index-controls select {
-    padding: 5px 10px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-  }
-  .index-controls select:hover { border-color: var(--border-control); }
   .index-pager {
     display: flex;
     align-items: center;
@@ -294,17 +236,6 @@
     font-size: 12px;
     color: var(--text-dim);
   }
-  .index-pager-btn {
-    padding: 6px 14px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  .index-pager-btn:hover:not(:disabled) { border-color: var(--border-control); }
-  .index-pager-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .index-pager-info { font-variant-numeric: tabular-nums; }
   .session-card {
     position: relative;
@@ -321,71 +252,16 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   }
 
-  /* Kebab "more actions" button in each session card. Fades in on hover on
-     desktop (keeps cards clean at rest), always visible on mobile / touch
-     devices where there's no hover to reveal it. Opens the .session-card-menu
-     dropdown below. Clicking the kebab OR the menu must not navigate into
-     the session — handlers use stopPropagation. */
-  .session-card-kebab {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    border-radius: 6px;
-    opacity: 0;
-    transition: opacity 0.15s, background 0.12s, color 0.12s;
-  }
+  /* Session card actions: a .btn.icon kebab and a .menu, inside their own .ui box. The kebab fades in on
+     hover where there is hover; handlers stop the click so the card does not open. */
+  .session-card .card-actions { position: absolute; top: var(--s1); right: var(--s1); z-index: 2; }
+  .session-card-kebab { color: var(--text-dim); opacity: 0; transition: opacity 0.15s; }
   .session-card:hover .session-card-kebab,
   .session-card-kebab:focus-visible,
   .session-card-kebab[aria-expanded="true"] { opacity: 1; }
-  .session-card-kebab:hover {
-    background: rgba(255,255,255,0.06);
-    color: var(--text);
-  }
-  .session-card-kebab svg {
-    width: 16px;
-    height: 16px;
-    fill: currentColor;
-  }
-  .session-card-menu {
-    position: absolute;
-    top: 40px;
-    right: 8px;
-    min-width: 180px;
-    background: #0a0a0a;
-    border: 1px solid var(--border-control);
-    border-radius: 8px;
-    padding: 4px;
-    z-index: 50;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  }
-  .session-card-menu button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 10px 12px;
-    background: transparent;
-    border: none;
-    color: var(--text);
-    font-size: 13px;
-    font-family: inherit;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .session-card-menu button:hover { background: rgba(255,255,255,0.06); }
-  .session-card-menu button.danger { color: var(--warn-high); }
-  .session-card-menu button.danger:hover { background: rgba(226,75,74,0.12); }
+  .session-card-kebab:hover { color: var(--text); }
+  .session-card-menu { position: absolute; top: calc(100% + var(--s1)); right: 0; }
   @media (hover: none), (max-width: 768px) {
-    /* Phones + tablets have no hover, so keep the kebab always visible. */
     .session-card-kebab { opacity: 1; }
   }
   .session-card-time {
@@ -446,41 +322,8 @@
   }
   .cal-nav {
     display: flex;
-    gap: 6px;
+    gap: var(--s1);
   }
-  .cal-nav button {
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .cal-today-btn { padding: 6px 14px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
-  .metric-switch {
-    display: flex;
-    gap: 2px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 3px;
-  }
-  .metric-switch button {
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    padding: 5px 12px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-  }
-  .metric-switch button:hover { color: var(--text); }
-  .metric-switch button.active { background: var(--action); color: #0a1a2a; }
   .cal-legend-strip {
     display: flex;
     gap: 16px;
@@ -695,31 +538,7 @@
   .week-col-stat-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
 
   /* ALL-TIME TRENDS */
-  .all-granularity {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 16px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 4px;
-    width: fit-content;
-  }
-  .all-granularity button {
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    padding: 6px 16px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-  }
-  .all-granularity button:hover { color: var(--text); }
-  .all-granularity button.active { background: var(--action); color: #0a1a2a; }
+  .all-granularity { width: fit-content; max-width: 100%; margin-bottom: 16px; }
   .all-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -771,42 +590,19 @@
   .sidebar-toggle {
     position: absolute;
     top: 14px;
-    right: 340px;
+    right: calc(340px + 11px); /* centred in the 22 px gap so the 44 px button clears the sidebar text */
     transform: translateX(50%);
-    width: 30px;
-    height: 56px;
-    border-radius: 6px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border-control);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #b0b0b0;
     z-index: 15;
-    padding: 0;
-    transition: color 0.15s, border-color 0.15s, background 0.15s, right 0.22s ease;
+    background: var(--bg-raised);
+    transition: right 0.22s ease;
   }
-  .sidebar-toggle:hover {
-    color: var(--text);
-    border-color: #3a3a3a;
-    background: #141414;
-  }
-  .sidebar-toggle svg {
-    width: 14px;
-    height: 14px;
-    stroke: currentColor;
-    stroke-width: 1.8;
-    stroke-linecap: round;
-    fill: none;
-    transition: transform 0.2s;
-  }
+  .sidebar-toggle .ico { transition: transform 0.2s; }
   /* Rotate icon to signal direction the sidebar will move */
   .session-layout.sidebar-collapsed .sidebar-toggle {
     right: 0;
     transform: translateX(0);
   }
-  .session-layout.sidebar-collapsed .sidebar-toggle svg {
+  .session-layout.sidebar-collapsed .sidebar-toggle .ico {
     transform: rotate(180deg);
   }
   .session-main {
@@ -849,24 +645,7 @@
     font-weight: 600;
     color: var(--text);
   }
-  .summary-bar-kebab {
-    display: inline-flex;
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 44px;
-    height: 44px;
-    background: transparent;
-    border: none;
-    border-radius: var(--r-ctl);
-    color: var(--text-dim);
-    cursor: pointer;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    z-index: 2;
-  }
-  .summary-bar-kebab .ico { width: 20px; height: 20px; }
+  .summary-bar-kebab { position: absolute; top: 8px; right: 8px; z-index: 2; color: var(--text-dim); }
   .summary-bar-kebab:hover, .summary-bar-kebab[aria-expanded="true"] { color: var(--text); background: var(--selected-fill); }
   .summary-bar-menu {
     position: absolute;
@@ -876,72 +655,16 @@
     max-width: calc(100vw - 32px);
     max-height: min(70vh, 560px);
     overflow-y: auto;
-    background: var(--bg-raised);
-    border: 1px solid var(--border-control);
-    border-radius: var(--r-menu);
-    padding: var(--s2) var(--s1);
-    box-shadow: var(--shadow-2);
-    z-index: var(--z-menu);
-    display: flex;
-    flex-direction: column;
   }
-  .summary-bar-menu[hidden] { display: none; }
   .summary-bar-menu-head {
     font-size: var(--t12);
     font-weight: 600;
     color: var(--text-dim);
     padding: var(--s2) var(--s3) var(--s1);
   }
-  .summary-bar-menu label {
-    display: flex;
-    align-items: center;
-    gap: var(--s3);
-    min-height: var(--target);
-    padding: 0 var(--s3);
-    border-radius: var(--r-ctl);
-    cursor: pointer;
-    font-size: var(--t14);
-    color: var(--text);
-    user-select: none;
-  }
-  .summary-bar-menu label:hover { background: var(--selected-fill); }
-  .summary-bar-menu label input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--action);
-    flex: 0 0 auto;
-    margin: 0;
-  }
-  .summary-bar-menu-reset {
-    display: flex;
-    align-items: center;
-    min-height: var(--target);
-    margin: var(--s1) 0;
-    padding: 0 var(--s3);
-    background: transparent;
-    border: 0;
-    border-top: 1px solid var(--border);
-    border-radius: 0;
-    color: var(--text);
-    font: 500 var(--t14)/1.2 var(--ui-face);
-    text-align: left;
-    cursor: pointer;
-  }
-  .summary-bar-menu-reset:hover { background: var(--selected-fill); }
   .menu-tags { display: flex; flex-wrap: wrap; gap: var(--s2); padding: var(--s1) var(--s3) var(--s2); }
   .menu-tags #tags-current { display: contents; }
-  .menu-tags .tag-input {
-    flex: 1 1 100%;
-    min-height: var(--target);
-    padding: 0 var(--s3);
-    background: var(--bg-input);
-    border: 1px solid var(--border-control);
-    border-radius: var(--r-ctl);
-    color: var(--text);
-    font: 400 var(--t14)/1.2 var(--ui-face);
-    outline: none;
-  }
-  .menu-tags .tag-input:focus-visible { box-shadow: var(--focus-ring); }
+  .menu-tags .field { flex: 1 1 100%; }
   .summary-stat {
     display: flex;
     flex-direction: column;
@@ -1129,22 +852,7 @@
     font-size: 13px;
     line-height: 1.55;
   }
-  .interp-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
-    min-height: 44px;
-    padding: 0;
-    margin: 0;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    font: 600 var(--t14)/1.3 var(--ui-face);
-    color: var(--text);
-    text-align: left;
-  }
-  .interp-head:hover { color: var(--text); }
+  .interp-head { justify-content: space-between; font: 600 var(--t14)/1.3 var(--ui-face); color: var(--text); }
   .interp-body { margin-top: 8px; }
   .interp-panel.collapsed .interp-body { display: none; }
   .interp-caret { width: 16px; height: 16px; transition: transform 0.2s; }
@@ -1206,97 +914,29 @@
   .interp-cell.bad.on { border-left-color: #E24B4A; }
   .interp-cell.ok.on { border-left-color: var(--hrv); }
   .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
-  .interp-kebab {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    background: transparent;
-    color: var(--text-dim);
-    border-radius: var(--r-ctl);
-    cursor: pointer;
-  }
-  .interp-kebab .ico { width: 18px; height: 18px; }
-  .interp-kebab:hover { color: var(--text); background: var(--selected-fill); }
-  #quadrant-thresh-popover {
+  .interp-kebab { position: absolute; top: 0; right: 0; color: var(--text-dim); }
+  .interp-kebab:hover { color: var(--text); }
+  /* Both threshold popovers: the shared .popover, placed fixed under their anchor. */
+  .thresh-pop {
     position: fixed;
     z-index: 1001;
-    background: var(--bg-raised);
-    border: 1px solid var(--border-control);
-    border-radius: 10px;
-    padding: 14px 16px;
-    min-width: 260px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
-    display: none;
-  }
-  #quadrant-thresh-popover.open,
-  #viewer-settings-popover.open { display: block; }
-  /* Viewer settings popover shares the threshold-popover styles so everything
-     looks consistent (HR shift detector settings currently live here). */
-  #viewer-settings-popover {
-    position: fixed;
-    z-index: 1001;
-    background: var(--bg-raised);
-    border: 1px solid var(--border-control);
-    border-radius: 10px;
-    padding: 14px 16px;
     width: 320px;
     max-width: calc(100vw - 16px);
     max-height: calc(100vh - 16px);
     overflow-y: auto;
     overscroll-behavior: contain;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
     display: none;
   }
-  #viewer-settings-popover h4 { margin: 0 0 6px; font-size: var(--t14); font-weight: 600; color: var(--text); }
-  #viewer-settings-popover .thresh-blurb { font-size: var(--t12); color: var(--text-dim); line-height: 1.45; margin-bottom: 12px; }
-  #viewer-settings-popover .thresh-default-hint { font-size: var(--t12); color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
-  #viewer-settings-popover .thresh-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  #viewer-settings-popover label { flex: 1; font-size: var(--t14); color: var(--text); }
-  #viewer-settings-popover label .thresh-hint { display: block; font-size: var(--t12); color: var(--text-dim); font-weight: 400; margin-top: 2px; }
-  #viewer-settings-popover input[type="number"] {
-    width: 76px;
-    min-height: var(--target);
-    padding: 0 8px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-control);
-    border-radius: var(--r-ctl);
-    color: var(--text);
-    font: 500 var(--t16)/1.2 var(--ui-face);
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-  }
-  #viewer-settings-popover .toggle { margin-bottom: 12px; }
-  #viewer-settings-popover .thresh-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: 12px; justify-content: flex-end; }
-  /* Reset takes its own row so Cancel and Save stay together at 320 px. */
-  #viewer-settings-popover .thresh-reset { flex: 1 0 100%; justify-content: flex-start; padding: 0; }
-  #quadrant-thresh-popover { width: 320px; max-width: calc(100vw - 16px); }
-  #quadrant-thresh-popover h4 { margin: 0 0 6px; font-size: var(--t14); font-weight: 600; color: var(--text); }
-  #quadrant-thresh-popover .thresh-blurb { font-size: var(--t12); color: var(--text-dim); line-height: 1.45; margin-bottom: 12px; }
-  #quadrant-thresh-popover .thresh-default-hint { font-size: var(--t12); color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
-  #quadrant-thresh-popover .thresh-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  #quadrant-thresh-popover label { flex: 1; font-size: var(--t14); color: var(--text); }
-  #quadrant-thresh-popover label .thresh-hint { display: block; font-size: var(--t12); color: var(--text-dim); font-weight: 400; margin-top: 2px; }
-  #quadrant-thresh-popover input[type="number"] {
-    width: 76px;
-    min-height: var(--target);
-    padding: 0 8px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-control);
-    border-radius: var(--r-ctl);
-    color: var(--text);
-    font: 500 var(--t16)/1.2 var(--ui-face);
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-  }
-  #quadrant-thresh-popover .thresh-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: 12px; justify-content: flex-end; }
-  #quadrant-thresh-popover .thresh-reset { margin-right: auto; }
+  .thresh-pop.open { display: block; }
+  .thresh-pop h4 { margin: 0 0 6px; font-size: var(--t14); font-weight: 600; color: var(--text); }
+  .thresh-pop .thresh-blurb { font-size: var(--t12); color: var(--text-dim); line-height: 1.45; margin-bottom: 12px; }
+  .thresh-pop .thresh-default-hint { font-size: var(--t12); color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+  .thresh-pop .thresh-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .thresh-pop .thresh-row > label { flex: 1; font-size: var(--t14); color: var(--text); }
+  .thresh-pop label .thresh-hint { display: block; font-size: var(--t12); color: var(--text-dim); font-weight: 400; margin-top: 2px; }
+  .thresh-pop .thresh-row .field input { width: 76px; text-align: center; }
+  .thresh-pop .toggle { margin-bottom: 12px; }
+  .thresh-pop .action-row { margin-top: 12px; }
 
   /* Aggregate report cards (Daily / Weekly / Monthly) reuse the same .insight-box
      styles as the session report but live inside view containers that have
@@ -1433,18 +1073,6 @@
   }
   /* Inline "jump to this time" button — shows as a subtle link-like control in
      the sub-line. Clicking zooms the main chart to that moment. */
-  .insight-section .insight-jump {
-    background: transparent;
-    border: 1px dashed var(--border-control);
-    color: var(--hrv);
-    font-size: 11px;
-    padding: 1px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    letter-spacing: 0.04em;
-    font-family: 'Consolas', 'Monaco', monospace;
-  }
-  .insight-section .insight-jump:hover { color: var(--text); border-color: var(--hrv); }
   .insight-empty {
     padding: 14px 18px;
     color: var(--text-dim);
@@ -1489,8 +1117,8 @@
 
   /* Sidebar */
   .sidebar-head { margin: 0 0 12px; font-size: var(--t14); font-weight: 600; color: var(--text); }
-  .filter-chips { grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr)); font-size: var(--t12); margin-bottom: 14px; }
-  .filter-chips .chip { min-width: 0; padding: 0 var(--s2); font-size: var(--t12); }
+  .filter-chips { grid-template-columns: repeat(auto-fill, minmax(6.5em, 1fr)); margin-bottom: 14px; }
+  .filter-chips .chip { min-width: 0; padding: 0 var(--s2); }
   .filter-chips .chip[aria-pressed="false"] { color: var(--text-dim); border-color: var(--border); }
   .filter-chips .chip:disabled { opacity: .4; cursor: not-allowed; }
   .marker-list {
@@ -1517,11 +1145,8 @@
   }
   /* Selected by a click: white ring plus the selected fill. */
   .marker-item[aria-current="true"] { background: var(--selected-fill); box-shadow: inset 0 0 0 1px var(--action); }
-  .mk-go {
-    display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; min-height: 44px;
-    padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
-  }
-  .mk-go:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-ctl); }
+  .mk-go { gap: 10px; flex: 1 1 auto; min-width: 0; }
+  .mk-go:focus-visible { border-radius: var(--r-ctl); }
   .mk-dia { width: 14px; height: 14px; flex: 0 0 14px; color: var(--text); }
   .mk-dia.detected { color: var(--text-dim); }
   .mk-edit { flex: 0 0 auto; min-height: 44px; padding: 0 var(--s3); font-size: var(--t14); }
@@ -1534,8 +1159,6 @@
   }
   .mark-editor .field input { min-height: 44px; }
   .mark-editor .segmented > button { flex: 1 1 auto; }
-  .mark-editor .row { display: flex; flex-wrap: wrap; gap: var(--s2); }
-  .mark-editor .row .grow { flex: 1 1 auto; }
   .mark-editor .err { margin: 0; font-size: var(--t12); color: var(--warn-high); }
   .markers-open { display: none; }
   .markers-sheet .session-sidebar { background: none; border: 0; padding: 0; overflow: visible; }
@@ -1627,29 +1250,6 @@
     align-items: baseline;
   }
   .chills-tune-value { color: var(--text); font-variant-numeric: tabular-nums; font-size: var(--t14); font-weight: 600; }
-  .chills-tune input[type="range"] {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    height: 44px;
-    margin: 0;
-    background: transparent;
-    outline: none;
-    cursor: pointer;
-  }
-  .chills-tune input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: var(--border-control); border-radius: 3px; }
-  .chills-tune input[type="range"]::-moz-range-track { height: 4px; background: var(--border-control); border-radius: 3px; }
-  .chills-tune input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 20px;
-    height: 20px;
-    margin-top: -8px;
-    border-radius: 50%;
-    background: var(--action);
-    border: 2px solid var(--bg);
-  }
-  .chills-tune input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--action); border: 2px solid var(--bg); }
-  .chills-tune input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--focus-ring); }
   .chills-tune-hints {
     display: flex;
     justify-content: space-between;
@@ -1657,56 +1257,6 @@
     color: var(--text-dim);
   }
 
-  /* TAG UI (session view) */
-  .tags-panel {
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px 18px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-  .tags-label { font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
-  .tag-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-radius: 999px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-control);
-    font-size: 12px;
-    cursor: pointer;
-    user-select: none;
-    transition: background 0.12s, border-color 0.12s;
-  }
-  .tag-chip.selected { background: rgba(93,202,165,0.1); border-color: var(--hrv); color: var(--hrv); }
-  .tag-chip .tag-x { color: var(--text-dim); font-weight: bold; }
-  .tag-chip .tag-x:hover { color: var(--warn-high); }
-  .tag-input {
-    background: transparent;
-    border: 1px dashed var(--border-control);
-    border-radius: 999px;
-    padding: 4px 12px;
-    color: var(--text);
-    font-size: 12px;
-    font-family: inherit;
-    outline: none;
-    min-width: 120px;
-  }
-  .tag-input:focus { border-color: var(--hrv); border-style: solid; }
-  .tag-preset {
-    padding: 3px 10px;
-    font-size: 11px;
-    border-radius: 999px;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .tag-preset:hover { color: var(--text); border-color: var(--border-control); }
 
   /* Export-to-print mode: activated by the Export report button (NOT Ctrl+P).
      The button applies body.printing, resizes charts, calls window.print(), and
@@ -1776,8 +1326,9 @@
     .datenav .btn, .interp-edit, .interp-kebab { display: none !important; }
   }
 
-  /* Large text: fitBar() drops the Syncing word, the Share word, then the wordmark text, so every control stays 44 px. */
-  .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark, .vbar.tight-0 .sync .sync-lbl { display: none; }
+  /* Large text: fitBar() drops the Syncing word, the Share word, the wordmark text, then the logo, so every control stays 44 px. */
+  .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark, .vbar.tight-0 .sync .sync-lbl, .vbar.tight-3 .brand { display: none; }
+  .vbar.tight-3 .vsel { margin-left: 0; }
   .vbar.tight-1 .share-btn, .vbar.tight-0.syncing .sync { width: 44px; padding: 0; }
 
   /* Scrollbar */
@@ -1800,11 +1351,10 @@
     .vbar .brand { margin-right: 0; }
     .vbar .wordmark { font-size: 15px; }
     .vbar .monitor-link, .view-tabs { display: none; }
-    .vsel { display: inline-flex; margin-left: var(--s3); }
-    .vsel select { min-height: var(--target); }
+    .vsel { display: flex; margin-left: var(--s3); }
     .vbar.syncing .sync { width: 44px; padding: 0; }
     .vbar.syncing .sync .sync-lbl { display: none; }
-    .vbar .share-btn { order: 1; margin-left: 0; padding: 0 var(--s2); border-color: transparent; background: transparent; color: var(--text); gap: 6px; }
+    .vbar .share-btn { order: 1; margin-left: 0; padding: 0 var(--s2); gap: 6px; }
     .vbar .share-btn .lbl-long { display: none; }
     .vbar .share-btn .lbl-short { display: inline; }
     .vbar #viewer-settings-btn { order: 2; }
@@ -1855,9 +1405,7 @@
     }
     .day-header .datenav { flex: 1 1 100%; justify-content: space-between; }
     .datenav .day-title { flex: 1 1 auto; font-size: var(--t20); white-space: normal; text-align: center; text-wrap: balance; }
-    .cal-nav { flex: 0 0 auto; gap: 8px; }
-    .cal-nav button { width: 44px; height: 44px; font-size: 13px; }
-    .cal-today-btn { flex: 0 0 auto; padding: 10px 16px; font-size: 12px; min-height: 44px; }
+    .cal-nav { flex: 0 0 auto; }
     /* Force metric switch + legend + any extra action onto their own row. */
     .cal-header .metric-switch,
     .cal-header .chart-legend,
@@ -1877,19 +1425,13 @@
     .cal-dow { font-size: 9px; padding: 4px 0; letter-spacing: 0.08em; }
     .week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .chart-legend { font-size: 10px; gap: 10px; }
-    input, select, textarea { font-size: 16px !important; }
+    input:where(:not(.ui *)), select:where(:not(.ui *)), textarea:where(:not(.ui *)) { font-size: 16px !important; }
 
-    /* Mobile tap targets — 44 px floor (WCAG 2.5.5 / Apple HIG / monitor's
-       baseline). Same approach the monitor uses: bump every text button,
-       size icon buttons explicitly, and add 8 px gap between adjacent
-       targets. icon-btn is sized as a square so the SVG stays centered. */
-    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.cal-today-btn):not(.index-pager-btn):where(:not(.ui *)) {
+    /* Legacy buttons outside .ui keep the 44 px phone floor. */
+    button:where(:not(.ui *)) {
       min-height: 44px;
       padding: 10px 16px;
     }
-    .session-card-kebab { width: 44px; height: 44px; top: 6px; right: 6px; }
-    .interp-kebab { width: 44px; height: 44px; }
-    .index-pager-btn { min-height: 44px; padding: 10px 16px; }
   }
 
   @media (max-width: 480px) {
@@ -1953,7 +1495,7 @@
     <a data-view="index" href="#/index">Sessions</a>
     <a data-view="all" href="#/all">Trends</a>
   </nav>
-  <span class="vsel">
+  <span class="vsel field"><span class="select">
     <select id="view-select" aria-label="View">
       <option value="month">Month</option>
       <option value="week">Week</option>
@@ -1962,8 +1504,7 @@
       <option value="all">Trends</option>
       <option value="monitor" id="view-select-monitor">Monitor</option>
     </select>
-    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-  </span>
+  </span></span>
   <span class="bar-spacer"></span>
   <button class="btn icon sync" id="drive-cloud" type="button" aria-label="Drive: off" aria-haspopup="dialog" aria-expanded="false" aria-controls="drive-pop">
     <svg class="ico when-synced" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 14.5 11.2 16.5 15 12.5"/></svg>
@@ -2003,24 +1544,24 @@
     <div class="viewer-loading-bar"><div class="viewer-loading-bar-fill" id="viewer-loading-fill"></div></div>
     <div class="viewer-loading-text" id="viewer-loading-text">Loading sessions…</div>
   </div>
-  <div id="empty-state">
+  <div id="empty-state" class="ui">
     <div class="empty-panel">
       <h2>No sessions yet</h2>
       <div class="empty-choices">
-        <button id="empty-pick" type="button" class="empty-choice fsa-only">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <button id="empty-pick" type="button" class="btn block fsa-only">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
           </svg>
-          <span class="empty-choice-title">Open a local folder</span>
+          <span>Open a local folder</span>
         </button>
-        <button id="empty-drive" type="button" class="empty-choice">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <button id="empty-drive" type="button" class="btn block">
+          <svg class="brand-g" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M7.71 3.52L1.15 14.48h6.44l2.63-4.6L7.71 3.52z" fill="#4285F4"/>
             <path d="M8.63 14.48h13.22L15.3 3.52H10l-1.37 2.4 5.05 8.56z" fill="#34A853"/>
             <path d="M8.63 14.48l-2.2 3.78L9.14 22h6.15l2.69-4.65-9.35-2.87z" fill="#FBBC05"/>
             <path d="M22.85 14.48H15.3l-2.72 4.65H20.14l2.71-4.65z" fill="#EA4335"/>
           </svg>
-          <span class="empty-choice-title">Sign in with Google</span>
+          <span>Sign in with Google</span>
         </button>
       </div>
     </div>
@@ -2272,14 +1813,24 @@
     driveTokenExpiresAt = cached ? cached.expires_at : 0;
   }
 
-  // Drive cloud in the bar: synced, syncing or off. Syncing is the OR of the
-  // connection state, a running driveSync (setDriveProgress) and the sync loader.
-  const cloud = { conn: 'off', label: 'off', sync: false, loader: false, marks: false, frac: 0, watch: null };
+  // Drive cloud in the bar: synced, syncing or off. Work is the OR of the connection state, a running
+  // driveSync (setDriveProgress), the sync loader and waiting marks. The syncing look waits until work has
+  // run for SYNC_SHOW_MS, so a quick freshness check on open never spins; it leaves as soon as work ends.
+  const cloud = { conn: 'off', label: 'off', sync: false, loader: false, marks: false, frac: 0, watch: null, shown: false, timer: null };
+  const SYNC_SHOW_MS = 1000;
   function paintCloud() {
     const bar = document.getElementById('app-bar');
     const btn = document.getElementById('drive-cloud');
     if (!bar || !btn) return;
-    const syncing = cloud.conn === 'syncing' || cloud.sync || ((cloud.loader || cloud.marks) && cloud.conn !== 'off');
+    const busy = cloud.conn === 'syncing' || cloud.sync || ((cloud.loader || cloud.marks) && cloud.conn !== 'off');
+    if (!busy) {
+      clearTimeout(cloud.timer);
+      cloud.timer = null;
+      cloud.shown = false;
+    } else if (!cloud.shown && !cloud.timer) {
+      cloud.timer = setTimeout(() => { cloud.timer = null; cloud.shown = true; paintCloud(); }, SYNC_SHOW_MS);
+    }
+    const syncing = busy && cloud.shown;
     const changed = bar.classList.contains('syncing') !== syncing;
     bar.classList.toggle('syncing', syncing);
     bar.classList.toggle('drive-off', cloud.conn === 'off');
@@ -2345,7 +1896,7 @@
     if (cloud.sync && !cloud.watch) cloud.watch = setInterval(() => {
       if (driveSyncInFlight) return;
       clearInterval(cloud.watch); cloud.watch = null; cloud.sync = false; paintCloud();
-    }, 1000);
+    }, 250);
     paintCloud();
   }
   function setDriveError(text) {
@@ -2832,11 +2383,7 @@
   function sessionCardActions(filenameEncoded) {
     // A v2 session shares its hour files with other sessions; no per-session delete yet.
     if (isV2SessionKey(decodeURIComponent(filenameEncoded))) return '';
-    return `
-      <button class="session-card-kebab" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Session actions" data-kebab="${filenameEncoded}">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="8" cy="13" r="1.6"/></svg>
-      </button>
-    `;
+    return `<span class="ui card-actions"><button class="btn icon session-card-kebab" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Session actions" data-kebab="${filenameEncoded}">${UI.icon('kebab')}</button></span>`;
   }
 
   // Wire up the kebab buttons inside a freshly rendered card grid. Each
@@ -2860,7 +2407,7 @@
         const fn = decodeURIComponent(kebab.dataset.kebab || card.dataset.filename || '');
         if (!fn) return;
         const menu = document.createElement('div');
-        menu.className = 'session-card-menu';
+        menu.className = 'menu session-card-menu';
         menu.setAttribute('role', 'menu');
         menu.innerHTML = `
           <button type="button" role="menuitem" class="danger" data-action="delete">Delete session</button>
@@ -2886,7 +2433,7 @@
             UI.notice({ kind: 'error', text: 'Delete failed: ' + (e && e.message ? e.message : 'unknown error') });
           }
         });
-        card.appendChild(menu);
+        kebab.parentNode.appendChild(menu);
         kebab.setAttribute('aria-expanded', 'true');
       });
     });
@@ -5080,12 +4627,19 @@
     if (sel) sel.value = cur;
     fitBar();
   }
-  // Large text: drop the Syncing word, the Share word, then the wordmark text, until the bar fits.
+  // Large text: drop the Syncing word, the Share word, the wordmark text, then the logo, until the bar fits.
   function fitBar() {
     const bar = document.getElementById('app-bar');
     if (!bar) return;
-    bar.classList.remove('tight-0', 'tight-1', 'tight-2');
-    for (const c of ['tight-0', 'tight-1', 'tight-2']) {
+    // Share is the primary button on the laptop bar and a ghost button among the phone bar's icons.
+    const share = document.getElementById('export-report');
+    if (share) {
+      const phone = window.matchMedia('(max-width: 768px)').matches;
+      share.classList.toggle('primary', !phone);
+      share.classList.toggle('ghost', phone);
+    }
+    bar.classList.remove('tight-0', 'tight-1', 'tight-2', 'tight-3');
+    for (const c of ['tight-0', 'tight-1', 'tight-2', 'tight-3']) {
       if (bar.scrollWidth <= bar.clientWidth + 1) break;
       if (c === 'tight-0' && !bar.classList.contains('syncing')) continue;
       bar.classList.add(c);
@@ -5237,18 +4791,18 @@
       : `${total} of ${totalAll}`;
 
     const pager = pageCount > 1 ? `
-      <div class="index-pager">
-        <button class="index-pager-btn" data-page="prev"${indexState.page === 0 ? ' disabled' : ''}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="vertical-align:middle"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Prev</button>
+      <div class="index-pager ui">
+        <button class="btn index-pager-btn" type="button" data-page="prev"${indexState.page === 0 ? ' disabled' : ''}>${UI.icon('prev')}Prev</button>
         <span class="index-pager-info">Page ${indexState.page + 1} of ${pageCount} · showing ${showing}</span>
-        <button class="index-pager-btn" data-page="next"${indexState.page >= pageCount - 1 ? ' disabled' : ''}>Next <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="vertical-align:middle"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="btn index-pager-btn" type="button" data-page="next"${indexState.page >= pageCount - 1 ? ' disabled' : ''}>Next${UI.icon('next')}</button>
       </div>` : '';
 
     el.innerHTML = `
-      <div class="index-head">
+      <div class="index-head ui">
         <div class="section-head" style="margin: 0;">All sessions · ${countLabel}</div>
         <div class="index-controls">
-          <select id="index-range" title="Date range">${rangeOptionsHtml}</select>
-          <select id="index-sort" title="Sort order">${sortOptions}</select>
+          <span class="field"><span class="select"><select id="index-range" aria-label="Date range">${rangeOptionsHtml}</select></span></span>
+          <span class="field"><span class="select"><select id="index-sort" aria-label="Sort order">${sortOptions}</select></span></span>
         </div>
       </div>
       <div class="sessions-grid">${cards || '<div class="stub-panel">No sessions in this range.</div>'}</div>
@@ -5382,8 +4936,8 @@
       ['tachy', 'Tachy %'],
       ['range', 'Range'],
     ];
-    return `<div class="metric-switch">${metrics.map(([k, lbl]) =>
-      `<button data-metric="${k}" class="${headlineMetric === k ? 'active' : ''}">${lbl}</button>`
+    return `<div class="segmented metric-switch" role="group" aria-label="Headline">${metrics.map(([k, lbl]) =>
+      `<button type="button" data-metric="${k}" aria-pressed="${headlineMetric === k}">${lbl}</button>`
     ).join('')}</div>`;
   }
 
@@ -5509,13 +5063,13 @@
     }
 
     el.innerHTML = `
-      <div class="cal-header">
+      <div class="cal-header ui">
         <div class="cal-title">${monthName}</div>
         <div class="cal-nav">
-          <button id="cal-prev" title="Previous month" aria-label="Previous month"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-          <button id="cal-next" title="Next month" aria-label="Next month"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="btn icon" id="cal-prev" type="button" aria-label="Previous month">${UI.icon('prev')}</button>
+          <button class="btn icon" id="cal-next" type="button" aria-label="Next month">${UI.icon('next')}</button>
         </div>
-        <button class="cal-today-btn" id="cal-today">Today</button>
+        <button class="btn cal-today-btn" id="cal-today" type="button">Today</button>
         ${metricSwitchHTML()}
         ${legend}
       </div>
@@ -5743,13 +5297,13 @@
     const weekFiles = cols.reduce((acc, c) => acc.concat(c.files), []);
 
     el.innerHTML = `
-      <div class="cal-header">
+      <div class="cal-header ui">
         <div class="cal-title">${weekTitle}</div>
         <div class="cal-nav">
-          <button id="week-prev" title="Previous week" aria-label="Previous week"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-          <button id="week-next" title="Next week" aria-label="Next week"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="btn icon" id="week-prev" type="button" aria-label="Previous week">${UI.icon('prev')}</button>
+          <button class="btn icon" id="week-next" type="button" aria-label="Next week">${UI.icon('next')}</button>
         </div>
-        <button class="cal-today-btn" id="week-today">This week</button>
+        <button class="btn cal-today-btn" id="week-today" type="button">This week</button>
         ${metricSwitchHTML()}
         <div class="cal-legend-strip">
           <div class="chart-legend-item"><span class="legend-swatch" style="background: #7DB8E8;"></span>Low</div>
@@ -5945,11 +5499,8 @@
     const granLabel = { session: 'Session', day: 'Day', week: 'Week', month: 'Month' }[gran];
     el.innerHTML = `
       <div class="section-head">All-time trends · ${allFilenames.length} sessions</div>
-      <div class="all-granularity" role="tablist">
-        <button data-gran="session" class="${gran === 'session' ? 'active' : ''}">Session</button>
-        <button data-gran="day" class="${gran === 'day' ? 'active' : ''}">Day</button>
-        <button data-gran="week" class="${gran === 'week' ? 'active' : ''}">Week</button>
-        <button data-gran="month" class="${gran === 'month' ? 'active' : ''}">Month</button>
+      <div class="ui segmented all-granularity" role="group" aria-label="Group by">
+        ${[['session', 'Session'], ['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(([g, l]) => `<button type="button" data-gran="${g}" aria-pressed="${gran === g}">${l}</button>`).join('')}
       </div>
       <div class="all-grid">
         <div class="all-card">
@@ -6158,7 +5709,7 @@
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'viewer-settings-popover';
-      pop.className = 'ui';
+      pop.className = 'ui popover thresh-pop';
       pop.innerHTML = `
         <h4>Autonomic analysis</h4>
         <div class="thresh-blurb">When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you track dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.</div>
@@ -6168,18 +5719,17 @@
         <h4>HR shift detector</h4>
         <div class="thresh-blurb">A shift is flagged when HR rises or drops by at least this many bpm within the window. POTS clinical criterion is 30 bpm within 10 min of standing; a smaller threshold surfaces more everyday jumps.</div>
         <div class="thresh-row">
-          <label>Threshold<span class="thresh-hint">bpm change</span></label>
-          <input type="number" id="hrshift-thresh" min="10" max="80" step="1" />
+          <label for="hrshift-thresh">Threshold<span class="thresh-hint">bpm change</span></label>
+          <span class="field"><input type="number" id="hrshift-thresh" min="10" max="80" step="1" /></span>
         </div>
         <div class="thresh-row">
-          <label>Window<span class="thresh-hint">minutes</span></label>
-          <input type="number" id="hrshift-win" min="2" max="30" step="1" />
+          <label for="hrshift-win">Window<span class="thresh-hint">minutes</span></label>
+          <span class="field"><input type="number" id="hrshift-win" min="2" max="30" step="1" /></span>
         </div>
         <div class="thresh-default-hint">Default: 30 bpm / 10 min (POTS clinical criterion).</div>
-        <div class="thresh-actions">
-          <button class="btn ghost thresh-reset" id="hrshift-reset" type="button">Reset to default</button>
-          <button class="btn" id="hrshift-cancel" type="button">Cancel</button>
-          <button class="btn primary" id="hrshift-save" type="button">Save</button>
+        <div class="action-row">
+          <button class="btn ghost thresh-reset" id="hrshift-reset" type="button">Reset</button>
+          <span class="pair"><button class="btn" id="hrshift-cancel" type="button">Cancel</button><button class="btn primary" id="hrshift-save" type="button">Save</button></span>
         </div>
       `;
       document.body.appendChild(pop);
@@ -6413,8 +5963,8 @@
       ${opts.head || `<div class="session-top-row ui"><a class="back-link" href="#/index">${UI.icon('prev')}All sessions</a></div>`}
       <div class="summary-bar ui" id="summary-bar">
         <span class="summary-bar-title">Summary</span>
-        <button class="summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Stats and tags" aria-haspopup="true" aria-expanded="false">${UI.icon('kebab')}</button>
-        <div class="summary-bar-menu ui" id="summary-bar-menu" hidden>
+        <button class="btn icon summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Stats and tags" aria-haspopup="true" aria-expanded="false">${UI.icon('kebab')}</button>
+        <div class="menu summary-bar-menu" id="summary-bar-menu" hidden>
           <div class="summary-bar-menu-head">Show stats</div>
           ${isVirtualDay ? '' : '<label><input type="checkbox" data-stat="date" /> Date</label>'}
           <label><input type="checkbox" data-stat="duration" /> Duration</label>
@@ -6429,11 +5979,13 @@
           <label><input type="checkbox" data-stat="warnCount" /> Warnings</label>
           <label><input type="checkbox" data-stat="uptime" /> Uptime</label>
           <label><input type="checkbox" data-stat="tachyPct" /> Tachy %</label>
+          <div role="separator"></div>
           <button class="summary-bar-menu-reset" id="summary-bar-menu-reset" type="button">Reset to defaults</button>
+          <div role="separator"></div>
           <div class="summary-bar-menu-head">Tags</div>
           <div class="menu-tags">
             <span id="tags-current"></span>
-            <input class="tag-input" id="tag-input" placeholder="Add a tag" aria-label="Add a tag" enterkeyhint="done" />
+            <span class="field"><input id="tag-input" placeholder="Add a tag" aria-label="Add a tag" enterkeyhint="done" /></span>
           </div>
         </div>
         <div class="summary-grid">
@@ -6527,8 +6079,8 @@
             <div class="chip-row layer-toggles ui" id="layer-chips" role="group" aria-label="Layers">${layerChipsHTML()}</div>
           </div>
         </div>
-        <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Markers panel">
-          <svg viewBox="0 0 18 18" aria-hidden="true"><line x1="3" y1="4" x2="15" y2="4"/><line x1="3" y1="9" x2="15" y2="9"/><line x1="3" y1="14" x2="15" y2="14"/></svg>
+        <button class="ui btn icon sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Markers panel">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
         </button>
         <div class="session-sidebar ui">
           <h2 class="sidebar-head">Markers</h2>
@@ -6547,7 +6099,7 @@
             <button class="btn" id="add-sleep" type="button">Add sleep</button>
           </div>
           <div class="marker-list" id="marker-list"></div>
-          <div class="chills-tune">
+          <div class="chills-tune field">
             <div class="chills-tune-label">
               <label for="chills-tune-slider">Chills sensitivity</label>
               <span class="chills-tune-value" id="chills-tune-value">2.5×</span>
@@ -6562,17 +6114,17 @@
       </div>
 
       <div class="interp-panel ui" id="interp-panel">
-        <button class="interp-head" id="interp-head" type="button" aria-expanded="true">
+        <button class="row-btn interp-head" id="interp-head" type="button" aria-expanded="true">
           <span>Autonomic interpretation · HR × HRV</span>
           ${UI.icon('chevron').replace('class="ico"', 'class="ico interp-caret"')}
         </button>
         <div class="interp-body">
           <div class="interp-current" id="interp-current"></div>
           <div class="interp-grid">
-            <div class="interp-cell good" data-quad="low-high"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
-            <div class="interp-cell ok" data-quad="high-high"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
-            <div class="interp-cell warn" data-quad="low-low"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · Low HRV</div>Commonly seen with fatigue, under-recovery, overtraining, or when you're feeling run down. Worth noticing if it lingers for days.</div>
-            <div class="interp-cell bad" data-quad="high-low"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · Low HRV</div>Commonly seen with stress, pain, dehydration, strong emotion, or after standing up quickly. A pattern, not a diagnosis.</div>
+            <div class="interp-cell good" data-quad="low-high"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
+            <div class="interp-cell ok" data-quad="high-high"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
+            <div class="interp-cell warn" data-quad="low-low"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · Low HRV</div>Commonly seen with fatigue, under-recovery, overtraining, or when you're feeling run down. Worth noticing if it lingers for days.</div>
+            <div class="interp-cell bad" data-quad="high-low"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · Low HRV</div>Commonly seen with stress, pain, dehydration, strong emotion, or after standing up quickly. A pattern, not a diagnosis.</div>
           </div>
         </div>
       </div>
@@ -6675,7 +6227,7 @@
         driveFetch,
         rootId: () => driveFolderId,
         rootIds: () => driveRootIds.slice(),
-        canSync: () => !!(driveAccessToken && driveFolderId),
+        canSync: marksCanSync,
         locks: navigator.locks || null,
         read: true,
       });
@@ -6687,10 +6239,16 @@
       if (driveAccessToken && driveFolderId) marksSyncPass().then((moved) => { if (moved) routeUnlessEditing(); });
     } catch (e) { console.warn('[marks] init failed', e && e.message); }
   }
+  // The monitor's Drive sync setting holds for marks on the web too (driveSyncOn there); the app always syncs.
+  function marksCanSync() {
+    if (!(driveAccessToken && driveFolderId)) return false;
+    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) return true;
+    try { return localStorage.getItem('hr_monitor_drive_sync') !== '0'; } catch (e) { return true; }
+  }
   function marksChanged() {
     marksVersion++;
     const st = marksPage ? marksPage.drive.status() : null;
-    cloud.marks = !!(st && st.dirty && st.locks && !st.blocked);
+    cloud.marks = !!(st && st.dirty && st.locks && !st.blocked && marksCanSync());
     paintCloud();
   }
   // After driveSync resolves, never inside it; a failure here never reaches the sync result.
@@ -6718,11 +6276,13 @@
   // The events and sleep windows a view shows: reversed rows hidden, viewer marks added.
   function viewMarks(s) {
     const raw = (s && s.events) || [];
-    if (!marksPage || !s || marksPage.drive.status().blocked) return { events: raw, sleep: [], hidden: 0 };
+    if (!marksPage || !s) return { events: raw, sleep: [], hidden: 0 };
+    // Another account signed in: records() is empty, so none of the stored marks apply.
+    const blocked = marksPage.drive.status().blocked;
     const hit = marksMemo.get(s);
-    if (hit && hit.v === marksVersion && hit.raw === raw) return hit.out;
-    const out = AortiMarks.applyMarks(raw, marksPage.store.all(), marksScope(s));
-    marksMemo.set(s, { v: marksVersion, raw, out });
+    if (hit && hit.v === marksVersion && hit.raw === raw && hit.blocked === blocked) return hit.out;
+    const out = AortiMarks.applyMarks(raw, marksPage.drive.records(), marksScope(s));
+    marksMemo.set(s, { v: marksVersion, raw, blocked, out });
     return out;
   }
 
@@ -7276,7 +6836,7 @@
       const listHtml = sec.lines.map(l => {
         const subParts = [];
         if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
-        if (l.open) subParts.push(`<button class="insight-jump" data-open="${encodeURIComponent(l.open)}" title="Open this session">open session</button>`);
+        if (l.open) subParts.push(`<button class="ui btn ghost insight-jump" type="button" data-open="${encodeURIComponent(l.open)}">Open session</button>`);
         const subHtml = subParts.length ? `<div class="insight-sub">${subParts.join(' · ')}</div>` : '';
         const whatHtml = (autonomicOn && l.what) ? `<div class="insight-what">${escape(l.what)}</div>` : '';
         return `<li><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
@@ -7599,7 +7159,7 @@
           const descHtml = sec.desc ? `<div class="insight-desc">${escape(sec.desc)}</div>` : '';
           const listHtml = sec.lines.map(l => {
             const atHtml = (l.at && isFinite(l.at.t))
-              ? `<button class="insight-jump" data-t="${l.at.t}" title="Zoom chart to this moment">${escape(l.at.label)}</button>`
+              ? `<button class="ui btn ghost insight-jump" type="button" data-t="${l.at.t}" aria-label="Zoom to ${escape(l.at.label)}">${escape(l.at.label)}</button>`
               : '';
             const subParts = [];
             if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
@@ -7736,7 +7296,7 @@
     if (!items.length) { el.innerHTML = '<div style="color: var(--text-dim); font-size: 12px; padding: 8px;">No markers to show.</div>'; return; }
     el.innerHTML = items.map((i, n) => `
       <div class="marker-item type-${i.type}${i.user ? ' mine' : ''}" data-t="${i.t}"${i.end != null ? ` data-end="${i.end}"` : ''} data-i="${n}">
-        <button class="mk-go" type="button">${markDiamond(i.user)}<span class="marker-time">${formatDuration(i.t)}</span><span class="marker-label">${escape(i.label)}</span></button>
+        <button class="row-btn mk-go" type="button">${markDiamond(i.user)}<span class="marker-time">${formatDuration(i.t)}</span><span class="marker-label">${escape(i.label)}</span></button>
         ${i.edit ? `<button class="btn ghost mk-edit" type="button" aria-label="Edit ${escape(i.label)} at ${formatDuration(i.t)}">Edit</button>` : ''}
       </div>`).join('');
     // Sorted [{t, el}] for the O(log N) hover lookup in highlightMarkerItemByT.
@@ -7893,11 +7453,9 @@
   }
   function editorButtons(withDelete) {
     return `<p class="err" role="alert" hidden></p>
-      <div class="row">
+      <div class="action-row">
         ${withDelete ? '<button class="btn ghost" type="button" data-act="delete">Delete</button>' : ''}
-        <span class="grow"></span>
-        <button class="btn" type="button" data-act="cancel">Cancel</button>
-        <button class="btn primary" type="button" data-act="save">Save</button>
+        <span class="pair"><button class="btn" type="button" data-act="cancel">Cancel</button><button class="btn primary" type="button" data-act="save">Save</button></span>
       </div>`;
   }
   function editorError(box, text) {
@@ -8316,7 +7874,7 @@
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'quadrant-thresh-popover';
-      pop.className = 'ui';
+      pop.className = 'ui popover thresh-pop';
       pop.setAttribute('role', 'dialog');
       pop.setAttribute('aria-labelledby', 'thresh-title');
       pop.innerHTML = `
@@ -8324,17 +7882,16 @@
         <div class="thresh-blurb" id="thresh-blurb"></div>
         <div class="thresh-row">
           <label id="thresh-hr-label" for="thresh-hr"></label>
-          <input type="number" id="thresh-hr" min="40" max="200" step="1" />
+          <span class="field"><input type="number" id="thresh-hr" min="40" max="200" step="1" /></span>
         </div>
         <div class="thresh-row">
           <label id="thresh-hrv-label" for="thresh-hrv"></label>
-          <input type="number" id="thresh-hrv" min="5" max="200" step="1" />
+          <span class="field"><input type="number" id="thresh-hrv" min="5" max="200" step="1" /></span>
         </div>
         <div class="thresh-default-hint" id="thresh-default-hint"></div>
-        <div class="thresh-actions">
-          <button class="btn ghost thresh-reset" id="thresh-reset" type="button">Reset to default</button>
-          <button class="btn" id="thresh-cancel" type="button">Cancel</button>
-          <button class="btn primary" id="thresh-save" type="button">Save</button>
+        <div class="action-row">
+          <button class="btn ghost thresh-reset" id="thresh-reset" type="button">Reset</button>
+          <span class="pair"><button class="btn" id="thresh-cancel" type="button">Cancel</button><button class="btn primary" id="thresh-save" type="button">Save</button></span>
         </div>
       `;
       document.body.appendChild(pop);

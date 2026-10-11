@@ -428,7 +428,8 @@ CHECKS.M6 = async (src) => {
   await A.drive.sync();
   const f = w.fileOf(A, '2026-10');
   out.push(['M6 Drive back: 0 not on Drive and the file holds all 5', A.store.dirtyCount() === 0 && f.length === 1 && w.bodyOf(f[0]).records.length === 5]);
-  // The viewer's Drive cloud reads syncing while marks wait, signed in; off stays off.
+  // The viewer's Drive cloud reads syncing while marks wait, signed in; off stays off. shown: the 1 s delay has
+  // passed (viewer-nav S23 checks the delay itself).
   const el = () => { const c = new Set(); return { classList: { contains: (k) => c.has(k), toggle: (k, on) => { if (on) c.add(k); else c.delete(k); } }, setAttribute() {}, style: {}, has: (k) => c.has(k) }; };
   const els = { 'app-bar': el(), 'drive-cloud': el(), 'syncbar-fill': el() };
   const paint = (cloud) => {
@@ -436,9 +437,9 @@ CHECKS.M6 = async (src) => {
     return els['app-bar'].has('syncing');
   };
   out.push(['M6 cloud reads syncing while marks are not on Drive (signed in), off when signed out',
-    paint({ conn: 'synced', label: 'synced', sync: false, loader: false, marks: true, frac: 0 }) === true
-    && paint({ conn: 'off', label: 'off', sync: false, loader: false, marks: true, frac: 0 }) === false
-    && paint({ conn: 'synced', label: 'synced', sync: false, loader: false, marks: false, frac: 0 }) === false]);
+    paint({ conn: 'synced', label: 'synced', sync: false, loader: false, marks: true, frac: 0, shown: true }) === true
+    && paint({ conn: 'off', label: 'off', sync: false, loader: false, marks: true, frac: 0, shown: true }) === false
+    && paint({ conn: 'synced', label: 'synced', sync: false, loader: false, marks: false, frac: 0, shown: true }) === false]);
   return out;
 };
 
@@ -692,6 +693,82 @@ CHECKS.A1 = async (src) => {
   return [['A1 signed in to another account: no marks are read or written there', r.skipped === 'account' && before === after && A.store.dirtyCount() === 1 && A.drive.status().blocked, JSON.stringify(r)]];
 };
 
+// Security L1 (S23): viewer marks sync honours the web Drive sync setting, as the monitor's driveSyncOn; the app always syncs.
+CHECKS.SL1 = async (src) => {
+  const can = (stored, native, signedIn = true) => loadPage(src.viewer, ['marksCanSync'], {
+    driveAccessToken: signedIn ? 'tok' : null, driveFolderId: 'root1',
+    localStorage: { getItem: (k) => (k === 'hr_monitor_drive_sync' ? stored : null) },
+    window: native ? { Capacitor: { isNativePlatform: () => true } } : {},
+    Capacitor: native ? { isNativePlatform: () => true } : undefined,
+  }).marksCanSync();
+  const waiting = (stored) => {
+    const cloud = { marks: false };
+    loadPage(src.viewer, ['marksChanged', 'marksCanSync'], {
+      driveAccessToken: 'tok', driveFolderId: 'root1', marksVersion: 0, cloud, paintCloud() {},
+      localStorage: { getItem: (k) => (k === 'hr_monitor_drive_sync' ? stored : null) }, window: {},
+      marksPage: { drive: { status: () => ({ dirty: 1, locks: true, blocked: false }) } },
+    }, function () { marksChanged(); });
+    return cloud.marks;
+  };
+  return [
+    ['SL1 web, Drive sync off: no marks sync', can('0', false) === false],
+    ['SL1 web, Drive sync on or never set: marks sync', can('1', false) === true && can(null, false) === true],
+    ['SL1 app, the setting is ignored: marks sync', can('0', true) === true],
+    ['SL1 signed out: no marks sync', can('1', false, false) === false],
+    ['SL1 web, Drive sync off, a mark waiting: the cloud does not count it as sync work', waiting('0') === false && waiting('1') === true],
+  ];
+};
+
+// Security L2 (S23): another account signed in, the page applies none of the stored marks.
+CHECKS.SL2 = async (src) => {
+  const w = world(src);
+  const A = await w.device('aaaaaa');
+  const tap = await A.store.createTap({ at: T + H, cls: 'sym', label: 'dizzy' });
+  await A.drive.sync();
+  const shown = () => {
+    const ctx = loadPage(src.viewer, ['viewMarks'], {
+      marksPage: { store: A.store, drive: A.drive }, AortiMarks: w.M, marksMemo: new WeakMap(), marksVersion: 1,
+      marksScope: () => ({ originEp: T, fromEp: T - H, toEp: T + 10 * H }),
+    });
+    return ctx.viewMarks({ events: [] }).events.filter(e => e.markId === tap.id).length;
+  };
+  const before = shown(), recsBefore = A.drive.records().length;
+  w.fake.permissionId = 'perm-2';
+  await A.drive.sync();
+  const after = shown();
+  return [
+    ['SL2 own account: the stored tap shows', before === 1 && recsBefore === 1, before + ' / ' + recsBefore],
+    ['SL2 another account: records() is empty and the tap does not show; the store still holds it', A.drive.status().blocked && A.drive.records().length === 0 && after === 0 && !!A.store.get(tap.id), JSON.stringify({ after, recs: A.drive.records().length })],
+  ];
+};
+
+// Security L4 (S23): a marks file over 2 MB is never downloaded; a label longer than FACT_FIELD_MAX is rejected on read.
+CHECKS.SL4 = async (src) => {
+  const w = world(src);
+  const A = await w.device('aaaaaa');
+  await A.store.createSleep({ from: T, to: T + H });
+  await A.drive.sync();
+  const folder = w.marksFolders()[0].id;
+  const base = { v: 1, m: '2026-10', createdAt: T, updatedAt: T, base: 0, deleted: false };
+  const tapRec = (by, n, label) => Object.assign({ id: by + '-' + n + '-tap', kind: 'tap', by, at: T + n * 60000, cls: 'note', label }, base);
+  const big = w.fake.add({ name: 'marks_2026-10_cccccc.json', parents: [folder], content: JSON.stringify({ v: 1, by: 'cccccc', m: '2026-10', records: [tapRec('cccccc', 1, 'big file')] }) });
+  big.size = String(w.D.MAX_FILE_BYTES + 1);
+  const small = w.fake.add({ name: 'marks_2026-10_dddddd.json', parents: [folder], content: JSON.stringify({ v: 1, by: 'dddddd', m: '2026-10', records: [tapRec('dddddd', 2, 'small file'), tapRec('dddddd', 3, 'x'.repeat(w.M.FACT_FIELD_MAX + 1))] }) });
+  small.size = String(small.content.length);
+  const calls0 = w.fake.calls.length;
+  await A.drive.sync();
+  const fetched = w.fake.calls.slice(calls0).map(c => c.path);
+  const M = w.M;
+  const rev = (label) => Object.assign({ id: M.revId({ ep: T, k: 'e', label }), kind: 'rev', by: 'dddddd', row: { ep: T, k: 'e', label } }, base);
+  return [
+    ['SL4 a marks file over 2 MB is not downloaded and adds nothing', !fetched.some(p => p.endsWith('/' + big.id)) && !A.store.get('cccccc-1-tap'), fetched.join(' ')],
+    ['SL4 a small file beside it still reads', !!A.store.get('dddddd-2-tap')],
+    ['SL4 a tap label one past the limit is rejected on read; at the limit it is kept', !A.store.get('dddddd-3-tap')
+      && M.invalidReason(tapRec('dddddd', 4, 'x'.repeat(M.FACT_FIELD_MAX))) === '' && M.invalidReason(tapRec('dddddd', 4, 'x'.repeat(M.FACT_FIELD_MAX + 1))) === 'tap_fields'],
+    ['SL4 a rev row label one past the limit is rejected; at the limit it is kept', M.invalidReason(rev('y'.repeat(M.FACT_FIELD_MAX))) === '' && M.invalidReason(rev('y'.repeat(M.FACT_FIELD_MAX + 1))) === 'row'],
+  ];
+};
+
 // Section 16 M1: no Undo slot past 14 min (the native clamp is 15), so no rev is written that cannot match.
 CHECKS.U1 = async (src) => {
   const { M } = loadMarks(src);
@@ -739,6 +816,14 @@ const MUTANTS = [
   ['L1', 'sync without the lock', 'drive', "      if (!locks) { st.lastError = 'nolocks'; return { changed: false, skipped: 'nolocks' }; }", "      if (!locks) st.lastError = 'nolocks';"],
   ['A1', 'any account syncs', 'drive', '      st.blocked = bound !== key;', '      st.blocked = false;'],
   ['U1', 'no time limit on Undo', 'monitor', ' && Date.now() - m.at <= window.AortiMarks.UNDO_LIMIT_MS);', ');'],
+  ['SL1', 'viewer marks ignore the Drive sync setting', 'viewer', "    try { return localStorage.getItem('hr_monitor_drive_sync') !== '0'; } catch (e) { return true; }", '    return true;'],
+  ['SL1', 'the app obeys the web setting', 'viewer', '    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) return true;\n', ''],
+  ['SL1', 'waiting marks count as sync work with sync off', 'viewer', ' && !st.blocked && marksCanSync());', ' && !st.blocked);'],
+  ['SL2', 'records() ignores the account guard', 'drive', '      records() { return st.blocked ? [] : store.all(); },', '      records() { return store.all(); },'],
+  ['SL2', 'the viewer applies the raw store', 'viewer', 'AortiMarks.applyMarks(raw, marksPage.drive.records(), marksScope(s))', 'AortiMarks.applyMarks(raw, marksPage.store.all(), marksScope(s))'],
+  ['SL4', 'no size cap', 'drive', '        if (Number(f.size) > MAX_FILE_BYTES) continue;\n', ''],
+  ['SL4', 'tap label length unchecked', 'store', ' && isStr(r.label) && r.label.length <= FACT_FIELD_MAX)) return', ' && isStr(r.label))) return'],
+  ['SL4', 'rev label length unchecked', 'store', " || !isStr(w.label) || w.label.length > FACT_FIELD_MAX) return 'row';", " || !isStr(w.label)) return 'row';"],
   ['S16', 'marks pass not caught', 'viewer', "    try {\n      const r = await marksPage.drive.sync();\n      return !!(r && r.changed);\n    } catch (e) {\n      console.warn('[marks] sync failed', e && e.message);\n      return false;\n    }",
     '    const r = await marksPage.drive.sync();\n    return !!(r && r.changed);'],
 ];
