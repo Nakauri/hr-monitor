@@ -18,11 +18,11 @@
   html, body {
     margin: 0;
     padding: 0;
-    height: 100dvh;
+    min-height: 100dvh;
     background: var(--bg);
     color: var(--text);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    overflow: hidden;
+    overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
   }
   body::before {
@@ -38,15 +38,42 @@
   .app-shell {
     position: relative;
     z-index: 1;
-    height: 100dvh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     padding: env(safe-area-inset-top, 0) 20px env(safe-area-inset-bottom, 0);
   }
   .app-top {
+    position: relative;
     padding-top: 28px;
     text-align: center;
   }
+  .app-gear {
+    position: absolute;
+    top: 16px;
+    right: -10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    color: var(--text-dim);
+    border-radius: var(--r-ctl);
+  }
+  .app-gear:active { color: var(--text); }
+  .app-gear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .app-gear .ico { width: 22px; height: 22px; }
+  .app-last { text-align: center; font-size: 13px; color: var(--text-dim); }
+  .app-last a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 8px;
+    color: var(--text-dim);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .app-last a:active { color: var(--text); }
   .app-hero {
     flex: 1;
     display: flex;
@@ -102,7 +129,7 @@
     line-height: 1.5;
   }
   .app-bottom {
-    padding: 0 0 24px;
+    padding: 16px 0 24px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -150,10 +177,13 @@
     margin-top: 4px;
   }
   .app-secondary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
     color: var(--text-dim);
     text-decoration: none;
     font-size: 13px;
-    padding: 10px 8px;
+    padding: 0 8px;
   }
   .app-secondary:active { color: var(--text); }
 
@@ -167,6 +197,7 @@
 <div class="app-shell">
   <div class="app-top">
     <span class="beta-pill">Beta</span>
+    <a class="app-gear" href="./hr_monitor.html#settings" aria-label="Settings"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
   </div>
 
   <div class="app-hero">
@@ -190,6 +221,7 @@
   </div>
 
   <div class="app-bottom">
+    <div class="app-last" id="app-last" hidden></div>
     <a class="app-primary-btn" href="./hr_monitor.html?mode=online">Start session</a>
     <div class="app-account-line" id="app-account-line">
       <span id="app-account-email"></span>
@@ -197,7 +229,6 @@
     </div>
     <div class="app-secondary-row">
       <a class="app-secondary" href="./hrv_viewer.html">Viewer</a>
-      <a class="app-secondary" href="./hr_monitor.html?mode=offline">Offline mode</a>
     </div>
   </div>
 </div>
@@ -320,6 +351,60 @@
         window.location.href = MONITOR_URL;
       });
     }
+  })();
+
+  // "Last recording ended": the monitor records each session it saw end; the phone's newest closed
+  // segment covers a session that ended while the monitor was closed. Opens that day in the viewer.
+  (function () {
+    const box = document.getElementById('app-last');
+    if (!box) return;
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const pad = (n) => String(n).padStart(2, '0');
+    const iso = (ms) => { const d = new Date(ms); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+    function when(ms) {
+      const d = new Date(ms);
+      const day = Date.now() - ms < 6 * 864e5 ? DAYS[d.getDay()] : MONTHS[d.getMonth()] + ' ' + d.getDate();
+      return day + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+    function long(ms) {
+      const m = Math.max(1, Math.round(ms / 60000));
+      return (m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm') + ' long';
+    }
+    function show(rec) {
+      box.textContent = '';
+      if (!rec) box.textContent = 'No recordings yet';
+      else {
+        const a = document.createElement('a');
+        a.href = './hrv_viewer.html#/day/' + iso(rec.start || rec.end);
+        a.textContent = 'Last recording ended ' + when(rec.end) + (rec.start ? ' · ' + long(rec.end - rec.start) : '');
+        box.appendChild(a);
+      }
+      box.hidden = false;
+    }
+    let rec = null;
+    try {
+      const r = JSON.parse(localStorage.getItem('hr_monitor_last_recording') || 'null');
+      if (r && r.end > 0 && r.end <= Date.now() + 60000) rec = { start: r.start > 0 && r.start <= r.end ? r.start : 0, end: r.end };
+    } catch (e) {}
+    if (rec) show(rec);
+    let plugin = null;
+    try {
+      const cap = window.Capacitor;
+      if (cap && cap.isNativePlatform && cap.isNativePlatform()) plugin = cap.Plugins && cap.Plugins.NativeHrSession;
+    } catch (e) {}
+    if (!plugin || typeof plugin.listSegments !== 'function') return;
+    let t = null;
+    const ceiling = new Promise((_, no) => { t = setTimeout(() => no(new Error('timeout')), 4000); });
+    Promise.race([Promise.resolve(plugin.listSegments({})), ceiling]).then(function (r) {
+      clearTimeout(t);
+      const segs = r && Array.isArray(r.segments) ? r.segments : null;
+      if (!segs) return;
+      let end = 0;
+      segs.forEach(function (s) { const m = Number(s && s.mtime); if (s && !s.open && m > end) end = m; });
+      if (!end) { if (!rec && !segs.length) show(null); return; }
+      if (!rec || end > rec.end + 5 * 60000) show({ start: 0, end });
+    }, function () { clearTimeout(t); });
   })();
 
   // First-run intro. Off by default: localStorage.aorti_intro_enabled = '1' turns it on.

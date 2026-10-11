@@ -204,17 +204,6 @@
      body-class toggle, so the normal widget DOM stays intact (early
      iterations replaced overlay-zone.innerHTML and that broke initCharts on
      Firefox reloads). */
-  /* Offline mode hides everything that only matters when syncing or
-     broadcasting: the broadcast toggle, Drive backup row, Active
-     broadcasters panel, OBS-specific nav links. Mode is set inline in a
-     <script> at the top of <body> from ?mode= or localStorage. */
-  body.mode-offline #broadcast-toggle-row,
-  body.mode-offline .broadcasters-panel,
-  body.mode-offline .drive-backup-row,
-  body.mode-offline .nav-preview,
-  body.mode-offline .nav-copy { display: none !important; }
-  body.mode-offline [data-obs-only] { display: none !important; }
-
   body.watch-mode #overlay-zone {
     padding: 0;
     background: #0a0a0a;
@@ -400,6 +389,12 @@
   @container (max-width: 22em) { .status-line .sep { display: block; height: 0; overflow: hidden; } }
   .session-ctl { padding: var(--s3) var(--cp-pad) 0; }
   .session-ctl .confirm { margin: 0; }
+  .after-stop { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-top: var(--s3); }
+  .after-stop .lines { flex: 1 1 12em; min-width: 0; }
+  .after-stop p { margin: 0; }
+  .after-stop .drive { color: var(--text-dim); }
+  .after-stop .drive[data-kind="error"] { color: var(--text); }
+  .session-ctl .notice { margin-top: var(--s3); }
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .battery-display {
     font-size: 11px;
@@ -1193,10 +1188,6 @@
   .row-label { margin: 0 0 var(--s2); font-size: var(--t12); font-weight: 500; color: var(--text-dim); }
   .posture-row.segmented > button { flex: 1 1 0; min-width: 0; }
   @container (max-width: 22em) { .posture-row.segmented { flex-direction: column; } }
-  .posture-row[data-mode="download"] {
-    display: block;
-  }
-  .posture-row.segmented > .download-csv-btn { flex: 1 1 100%; }
   .log-block { padding: 0 var(--cp-pad) var(--s3); container-type: inline-size; }
   .log-row { display: flex; gap: var(--s2); }
   .log-row > .btn-log { flex: 1 1 0; min-width: 0; }
@@ -1382,25 +1373,19 @@
 </head>
 <body>
 <script>
-  // Mode: "online" (Drive sync + relay broadcast + multi-device) or "offline"
-  // (local recording only, no sign-in, no broadcast). Chosen at the index
-  // page ("Record online" / "Record locally") and passed via ?mode=. Stored
-  // in localStorage so subsequent loads keep the choice. Applied as a body
-  // class so CSS can hide irrelevant rows without wrapping everything in JS
-  // conditionals. Default is "online" to preserve the existing behaviour
-  // for bookmarked URLs and deep links from the old index.
+  // The old offline mode is the web Drive sync setting now: an old ?mode=offline link or a stored
+  // offline mode turns sync off. The mode parameter leaves the address so a reload cannot reapply it.
   (function () {
     try {
-      var p = new URLSearchParams(location.search).get('mode');
-      var stored = localStorage.getItem('hr_monitor_mode');
-      var mode = (p === 'online' || p === 'offline') ? p : (stored || 'online');
-      if (p && p !== stored) localStorage.setItem('hr_monitor_mode', mode);
-      document.body.classList.add('mode-' + mode);
-      window.__hrMonitorMode = mode;
-    } catch (e) {
-      document.body.classList.add('mode-online');
-      window.__hrMonitorMode = 'online';
-    }
+      var u = new URL(location.href);
+      var p = u.searchParams.get('mode');
+      if (p === 'offline' || localStorage.getItem('hr_monitor_mode') === 'offline') localStorage.setItem('hr_monitor_drive_sync', '0');
+      localStorage.removeItem('hr_monitor_mode');
+      if (p != null) {
+        u.searchParams.delete('mode');
+        history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+      }
+    } catch (e) {}
   })();
 </script>
 <nav class="app-nav">
@@ -1526,6 +1511,14 @@
           <button type="button" class="btn danger" id="stop-confirm-stop">Stop session</button>
         </div>
       </div>
+      <div class="after-stop" id="after-stop" hidden>
+        <div class="lines" role="status">
+          <p id="after-stop-saved"></p>
+          <p class="drive" id="after-stop-drive" hidden></p>
+        </div>
+        <a class="btn" id="after-stop-view" href="./hrv_viewer.html">View session</a>
+        <button type="button" class="btn" id="after-stop-export" hidden>Export CSV</button>
+      </div>
     </div>
 
     <div class="ui posture-sticky">
@@ -1626,6 +1619,12 @@
           <span class="big-toggle-sub" id="autosave-folder-name">Tap to pick a folder</span>
           <span class="big-toggle-meta" id="autosave-status"></span>
         </button>
+        <div class="ui drive-sync-wrap" id="drive-sync-wrap" hidden>
+          <button type="button" class="toggle" role="switch" id="drive-sync-toggle" aria-checked="true">
+            <span class="txt"><span class="t">Drive sync</span></span>
+            <span class="track" aria-hidden="true"></span>
+          </button>
+        </div>
         <div class="drive-backup-row">
           <button type="button" id="drive-signin" class="big-toggle-btn" data-state="unset">
             <span class="big-toggle-title">Save to Google Drive</span>
@@ -1690,7 +1689,7 @@
             <div style="height: 18px;"></div>
             <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
             <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.4;">
-              The URL already embeds your broadcast key. Switch to online mode on the landing page to use OBS streaming.
+              The URL already embeds your broadcast key.
             </div>
             <div class="streaming-row" style="margin-top: 8px;">
               <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
@@ -1963,6 +1962,7 @@
         L = statusLedgerFor(startMs);
         statusObserve(L, kind === 'live', lastReading);
       } else if (!active && statusLedger) {
+        noteRecordingEnded(statusLedger.start, statusLedger.seen);
         statusLedger = null;
         try { localStorage.removeItem(STATUS_LEDGER_KEY); } catch (e) {}
       }
@@ -3798,6 +3798,8 @@
     const sessionOn = state.connState === 'live' || state.connState === 'reconnecting';
     const logBlock = document.getElementById('log-block');
     if (logBlock && logBlock.hidden === sessionOn) logBlock.hidden = !sessionOn;
+    if (sessionOn) hideAfterStop();
+    updateUnsavedNotice();
     if (!sessionOn) hideStopConfirm();
     if (btn.disabled) {
       btn.setAttribute('data-state', 'idle');
@@ -3865,18 +3867,148 @@
   }
 
   const STOP_CONFIRM_AFTER_MS = 10 * 60 * 1000;
+  let stopInFlight = false;
   async function stopSessionNow() {
-    hideStopConfirm();
-    flushHeldMarks();
-    try { await disconnect(); } catch (e) {}
-    // Finalize session state so the next Start is a fresh recording.
-    // Autosave has already been flushing via the tick loop; we just seal
-    // the in-memory session. resetSession also clears the charts.
-    resetSession();
-    updateSessionToggle();
-    setStatus('Session stopped.');
-    try { $('session-toggle').focus(); } catch (e) {}
+    if (stopInFlight) return;
+    stopInFlight = true;
+    try {
+      hideStopConfirm();
+      flushHeldMarks();
+      // Web: an upload still running would make the final one skip (single flight).
+      let driveLate = false;
+      if (!NATIVE && driveUploadInFlight) {
+        const btn = $('session-toggle');
+        if (btn) { btn.textContent = 'Saving'; btn.setAttribute('aria-busy', 'true'); }
+        driveLate = await Promise.race([driveUploadInFlight.then(() => false), new Promise((r) => setTimeout(() => r(true), 15000))]);
+        if (btn) btn.removeAttribute('aria-busy');
+      }
+      const ended = afterStopFacts();
+      ended.driveLate = driveLate;
+      if (ended.start) noteRecordingEnded(ended.start, ended.end);
+      try { await disconnect(); } catch (e) {}
+      // Finalize session state so the next Start is a fresh recording.
+      resetSession();
+      updateSessionToggle();
+      setStatus('Session stopped.');
+      showAfterStop(ended);
+      try { $('session-toggle').focus(); } catch (e) {}
+    } finally {
+      stopInFlight = false;
+    }
   }
+
+  // After Stop: where the recording went, the Drive result when sync is on, and View session.
+  const LAST_RECORDING_KEY = 'hr_monitor_last_recording';
+  let afterStopCsv = null;
+  let afterStopSeq = 0;
+  function noteRecordingEnded(start, end) {
+    try {
+      if (!(start > 0) || !(end >= start)) return;
+      const prev = JSON.parse(localStorage.getItem(LAST_RECORDING_KEY) || 'null');
+      if (prev && prev.start === start) return;
+      localStorage.setItem(LAST_RECORDING_KEY, JSON.stringify({ start, end }));
+    } catch (e) {}
+  }
+  function localDayIso(ms) {
+    const d = new Date(ms);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function afterStopFacts() {
+    const start = state.startTime || 0;
+    const f = { start, end: Date.now(), native: NATIVE, folder: null, drive: false, csv: null };
+    if (NATIVE) {
+      f.drive = !!(window.aortiAuth && window.aortiAuth.isSignedIn && window.aortiAuth.isSignedIn());
+    } else {
+      f.folder = autoSaveFileHandle && autoSaveDirHandle ? (autoSaveDirHandle.name || 'folder') : null;
+      f.drive = driveSyncOn() && !!driveAccessToken && !!driveFolderId;
+      if (!f.folder && !f.drive && start && state.hrSeries.length) f.csv = buildSessionCSV();
+    }
+    f.since = Date.now();
+    return f;
+  }
+  function showAfterStop(f) {
+    const box = $('after-stop');
+    if (!box) return;
+    const seq = ++afterStopSeq;
+    afterStopCsv = f && f.csv ? f.csv : null;
+    if (!f || !f.start) { box.hidden = true; return; }
+    const dur = ' · ' + statusElapsed(f.end - f.start);
+    const saved = $('after-stop-saved'), drive = $('after-stop-drive'), view = $('after-stop-view'), exp = $('after-stop-export');
+    let driveEl = drive;
+    if (f.native) saved.textContent = 'Saved on this phone' + dur;
+    else if (f.folder) saved.textContent = 'Saved to ' + f.folder + dur;
+    else if (f.drive) driveEl = saved;
+    else saved.textContent = 'Not saved' + dur;
+    drive.hidden = !(f.drive && driveEl === drive);
+    saved.removeAttribute('data-kind');
+    drive.removeAttribute('data-kind');
+    if (f.drive) {
+      const set = (t, kind) => {
+        driveEl.textContent = t + (driveEl === saved ? dur : '');
+        if (kind) driveEl.dataset.kind = kind; else driveEl.removeAttribute('data-kind');
+      };
+      // The phone's engine uploads after Stop and reports no result to the page.
+      if (f.native) set('Queued for Drive');
+      else if (f.driveLate) set('Drive upload incomplete', 'error');
+      else {
+        set('Uploading to Drive');
+        const t0 = Date.now();
+        const poll = () => {
+          if (seq !== afterStopSeq) return;
+          if (autoSaveStatusAt >= f.since && autoSaveStatusCls === 'ok') return set('Saved to Drive');
+          if (autoSaveStatusAt >= f.since && autoSaveStatusCls === 'error' && /^drive/i.test(autoSaveStatusText)) return set('Drive upload failed', 'error');
+          if (Date.now() - t0 < 60000) setTimeout(poll, 250);
+          else set('Drive upload not confirmed', 'error');
+        };
+        poll();
+      }
+    }
+    view.href = './hrv_viewer.html#/day/' + localDayIso(f.start);
+    view.hidden = !(f.native || f.folder || f.drive);
+    exp.hidden = !afterStopCsv;
+    box.hidden = false;
+  }
+  function hideAfterStop() {
+    const box = $('after-stop');
+    if (!box || (box.hidden && !afterStopCsv)) return;
+    box.hidden = true;
+    afterStopCsv = null;
+    afterStopSeq++;
+  }
+
+  // Web: a running session that nothing saves gets a notice, and leaving the page asks first.
+  let unsavedNotice = null;
+  function sessionUnsaved() {
+    if (NATIVE) return false;
+    if (state.connState !== 'live' && state.connState !== 'reconnecting') return false;
+    if (!state.startTime || Date.now() - state.startTime < 3000) return false;
+    return !autoSaveFileHandle && !(driveSyncOn() && driveAccessToken && driveFolderId);
+  }
+  // Called from updateSessionToggle, so it must never throw.
+  function updateUnsavedNotice() {
+    try {
+      const want = sessionUnsaved() && !document.body.classList.contains('watch-mode');
+      if (want && !unsavedNotice) {
+        const host = document.querySelector('.session-ctl');
+        if (!host || !window.UI) return;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn';
+        b.textContent = 'Export CSV';
+        b.addEventListener('click', exportCSV);
+        unsavedNotice = UI.notice({ kind: 'warning', host, dismiss: false, text: 'Not saved to a folder or Drive', actions: [b] });
+        unsavedNotice.id = 'unsaved-notice';
+      } else if (!want && unsavedNotice) {
+        unsavedNotice.close();
+        unsavedNotice = null;
+      }
+    } catch (e) {}
+  }
+  window.addEventListener('beforeunload', function (e) {
+    if (!sessionUnsaved() && !afterStopCsv) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
   function showStopConfirm(ranMs) {
     const box = $('stop-confirm');
     const btn = $('session-toggle');
@@ -3917,9 +4049,6 @@
 
   async function connect() {
     if (window.HRMLog) window.HRMLog.event('connect() called');
-    // Safety net: if the last session's "Download CSV" button is still up
-    // because the user skipped it, restore posture buttons on new Start.
-    if (typeof restorePostureRow === 'function') restorePostureRow();
     // Capacitor / Android: skip Web Bluetooth entirely. The native plugin
     // owns the BLE connection; JS is a pure consumer of 'hr' events. This
     // eliminates dual-GATT (the Capacitor BLE plugin and the native plugin
@@ -4141,8 +4270,6 @@
   }
   function applyPostureFromEngine(p) {
     if (!p || p === state.currentPosture || !/^(lying|sitting|standing)$/.test(p)) return;
-    const row = document.querySelector('.posture-row');
-    if (row && row.getAttribute('data-mode') === 'download') return;
     state.currentPosture = p;
     postureChosen = true;
     markPosture(p);
@@ -4979,33 +5106,11 @@
     }, dur);
   }
 
-  // Mobile-only: swap the posture row contents to a single "Download CSV"
-  // button when a session just ended, so the user can grab the file without
-  // having to dig into Drive. Restored to the default posture buttons when
-  // the user taps Download (or starts a new session).
+  // disconnect() calls this on the phone right after its Drive toast; the after-Stop block carries that line.
   function showDownloadCsvInsteadOfPosture() {
-    const row = document.querySelector('.posture-row');
-    if (!row) return;
-    row.setAttribute('data-mode', 'download');
-    row.innerHTML = '<button class="download-csv-btn" id="download-csv-inline">Download session CSV</button>';
-    const btn = document.getElementById('download-csv-inline');
-    if (btn) btn.addEventListener('click', () => {
-      try { exportCSV(); } catch (e) { console.warn('exportCSV failed:', e); }
-      showToast('Saving CSV…', 2200);
-      restorePostureRow();
-    });
-  }
-  function restorePostureRow() {
-    const row = document.querySelector('.posture-row');
-    if (!row || row.getAttribute('data-mode') !== 'download') return;
-    row.removeAttribute('data-mode');
-    row.innerHTML = `
-      <button class="posture-btn" data-posture="lying" aria-pressed="false">Lying</button>
-      <button class="posture-btn" data-posture="sitting" aria-pressed="false">Sitting</button>
-      <button class="posture-btn" data-posture="standing" aria-pressed="false">Standing</button>`;
-    state.currentPosture = 'sitting';
-    postureChosen = false;
-    wirePostureButtons();
+    const t = document.getElementById('hrm-toast');
+    if (t) t.classList.remove('visible');
+    if (hrmToastTimer) { clearTimeout(hrmToastTimer); hrmToastTimer = null; }
   }
   function wirePostureButtons() {
     document.querySelectorAll('.posture-btn').forEach(btn => {
@@ -5373,7 +5478,11 @@
     }
   }
 
+  let autoSaveStatusAt = 0, autoSaveStatusCls = '', autoSaveStatusText = '';
   function setAutoSaveStatus(text, cls) {
+    autoSaveStatusAt = Date.now();
+    autoSaveStatusCls = cls || '';
+    autoSaveStatusText = text || '';
     const el = $('autosave-status');
     if (!el) return;
     el.textContent = text || '';
@@ -5469,6 +5578,24 @@
   // separate copies. Auth vars below are a synchronous mirror of aortiAuth
   // state, written by syncAuthStateLocal() whenever it changes.
   const DRIVE_FOLDER_NAME = 'HR Monitor Sessions';
+  // Web only: the phone keeps its native Drive path, so sync is always on there.
+  const DRIVE_SYNC_KEY = 'hr_monitor_drive_sync';
+  function driveSyncOn() {
+    if (NATIVE || isMobileShell()) return true;
+    try { return localStorage.getItem(DRIVE_SYNC_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function setDriveSync(on) {
+    try { localStorage.setItem(DRIVE_SYNC_KEY, on ? '1' : '0'); } catch (e) {}
+    renderDriveSyncToggle();
+    driveUpdateUI();
+    updateUnsavedNotice();
+  }
+  function renderDriveSyncToggle() {
+    const wrap = $('drive-sync-wrap'), t = $('drive-sync-toggle');
+    if (!wrap || !t) return;
+    wrap.hidden = NATIVE || isMobileShell();
+    t.setAttribute('aria-checked', driveSyncOn() ? 'true' : 'false');
+  }
 
   let driveAccessToken = null;
   let driveTokenExpiresAt = 0;
@@ -5503,7 +5630,10 @@
     const effectiveError = driveTokenError && !driveRefreshing;
     const email = window.aortiAuth ? window.aortiAuth.getEmail() : null;
     if (driveAccessToken && !tokenExpired && !effectiveError) {
-      if (driveFolderId) {
+      if (!driveSyncOn()) {
+        statusEl.textContent = 'Sync off';
+        statusEl.classList.add('drive-signedin');
+      } else if (driveFolderId) {
         statusEl.textContent = driveRefreshing ? 'refreshing…' : 'Syncing to Drive (tap to sync now)';
         statusEl.classList.add('drive-syncing');
       } else {
@@ -5698,6 +5828,7 @@
   // auto-save. Reuses the same Drive file for the whole session (updates in place)
   // so Drive doesn't fill up with 600 partial files per session.
   async function driveUploadSession(filename, csvText) {
+    if (!driveSyncOn()) return;
     if (!driveAccessToken || !driveFolderId) return;
     if (driveUploadInFlight) return; // skip if one is already running
     driveUploadInFlight = (async () => {
@@ -6131,14 +6262,7 @@
   function loadWidgetPrefs() {
     try {
       const saved = JSON.parse(localStorage.getItem('hr_monitor_widget_prefs') || 'null');
-      if (saved) {
-        Object.assign(widgetPrefs, saved);
-      } else if (window.__hrMonitorMode === 'online') {
-        // Fresh install on the online mode landing — default broadcast ON
-        // so the user doesn't have to dig through Settings to start sharing
-        // their stream. Offline mode keeps broadcast off (its raison d'être).
-        widgetPrefs.broadcast = true;
-      }
+      if (saved) Object.assign(widgetPrefs, saved);
     } catch(e) {}
     applyWidgetPrefs();
   }
@@ -6437,6 +6561,14 @@
       }
     });
     restoreAutoSaveFolder();
+    renderDriveSyncToggle();
+    $('drive-sync-toggle').addEventListener('click', () => setDriveSync(!driveSyncOn()));
+    $('after-stop-export').addEventListener('click', () => {
+      if (!afterStopCsv) return;
+      downloadCSV({ csv: afterStopCsv.csv, filename: afterStopCsv.filename });
+      afterStopCsv = null;
+      $('after-stop-export').hidden = true;
+    });
     // Google Drive big toggle: click signs in when signed out. When signed in,
     // the toggle is informational (email shown below); a separate Sign-out
     // link handles the sign-out action without a confirm dialog.
@@ -6527,7 +6659,17 @@
       });
     });
     document.querySelectorAll('.section[data-section]').forEach(syncSectionA11y);
-    setInterval(function () { renderStatusLine(NATIVE ? engineSnapshot() : null); updateSectionMeta(); }, 1000);
+    // App home's gear opens here.
+    if (location.hash === '#settings') {
+      const sec = document.querySelector('.section[data-section="settings"]');
+      if (sec) {
+        sec.classList.remove('collapsed');
+        syncSectionA11y(sec);
+        const h = sec.querySelector('.section-header');
+        try { h.scrollIntoView({ block: 'start' }); h.focus({ preventScroll: true }); } catch (e) {}
+      }
+    }
+    setInterval(function () { renderStatusLine(NATIVE ? engineSnapshot() : null); updateSectionMeta(); updateUnsavedNotice(); }, 1000);
     renderStatusLine(NATIVE ? engineSnapshot() : null);
     setInterval(updateBreathing, 1000);
     // Tab handlers
