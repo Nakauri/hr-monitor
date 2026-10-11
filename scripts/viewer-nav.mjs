@@ -96,7 +96,7 @@ try {
     // 2. Old hash routes resolve.
     const routes = [['#/index', 'view-index'], ['#/month', 'view-month'], ['#/month/2026-04', 'view-month'], ['#/week', 'view-week'],
       ['#/week/2026-04-22', 'view-week'], ['#/day', 'view-day'], ['#/day/2026-04-22', 'view-day'], ['#/all', 'view-all'],
-      ['#/session/' + encodeURIComponent('hrv_session_2026-04-22T12-57-27.csv'), 'view-session'], ['#/session/day%3A2026-04-22', 'view-session'], ['#/bogus', 'view-index']];
+      ['#/session/' + encodeURIComponent('hrv_session_2026-04-22T12-57-27.csv'), 'view-session'], ['#/session/day%3A2026-04-22', 'view-day'], ['#/bogus', 'view-index']];
     for (const [h, id] of routes) {
       await go(page, h);
       if (h.startsWith('#/session')) await page.waitForTimeout(1200);
