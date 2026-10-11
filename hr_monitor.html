@@ -639,7 +639,7 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  #control-panel .section > .section-header:hover { background: var(--selected-fill); }
+  @media (hover: hover) { #control-panel .section > .section-header:hover { background: var(--selected-fill); } }
   #control-panel .section > .section-header:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--action); }
   .section-title { margin: 0; }
   .section-meta { margin-left: auto; color: var(--text-dim); font-weight: 400; font-size: var(--t12); }
@@ -666,13 +666,14 @@
   .section:not(.collapsed) .section-caret { transform: rotate(180deg); }
   .section-body {
     overflow: hidden;
-    padding: 0 var(--cp-pad) var(--s4);
+    padding: var(--s3) var(--cp-pad) var(--s4);
     transition: max-height 0.25s ease, opacity 0.2s;
     max-height: 2000px;
     opacity: 1;
   }
   .section.collapsed .section-body {
     max-height: 0;
+    padding-top: 0;
     padding-bottom: 0;
     opacity: 0;
     visibility: hidden;
@@ -892,10 +893,8 @@
     padding: 10px;
   }
   .stat-label {
-    font-size: 10px;
+    font-size: var(--t12);
     color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     margin-bottom: 4px;
   }
   .stat-value {
@@ -1589,7 +1588,7 @@
       </button>
       <div class="section-body" id="sec-events-body">
         <div class="section-watch-empty">Only available on the broadcasting device.</div>
-        <div class="events" id="events"><div class="empty">No events logged yet.</div></div>
+        <div class="events" id="events"><div class="empty">No marks yet.</div></div>
       </div>
     </div>
 
@@ -2782,7 +2781,7 @@
   function renderEvents() {
     const el = $('events');
     if (state.events.length === 0) {
-      el.innerHTML = '<div class="empty">No events logged yet.</div>';
+      el.innerHTML = '<div class="empty">No marks yet.</div>';
       return;
     }
     el.innerHTML = state.events.slice().reverse().map(ev => {
