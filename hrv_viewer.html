@@ -53,40 +53,53 @@
   .stage-high { color: #E89858; }
   .stage-critical { color: #E24B4A; }
 
-  /* Top app bar */
-  .app-bar {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-    padding: 12px 24px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-raised);
-    height: 52px;
-  }
-  /* Mobile-only compact indicators (drive sync dot + monitor link).
-     Desktop has the full status pills inline so these would be redundant. */
-  .mobile-compact-indicators { display: none; }
-  .app-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    font-family: 'Space Grotesk', 'Inter', sans-serif;
-    font-weight: 600;
-    font-size: 18px;
-    letter-spacing: -0.02em;
-    text-transform: none;
-    color: var(--text);
-  }
-  .app-title .accent { color: var(--text-dim); font-weight: 500; margin: 0 2px; }
-  .aorti-nav-mark {
-    width: 24px;
-    height: 22px;
-    display: inline-block;
-    flex-shrink: 0;
-    filter: drop-shadow(0 0 6px rgba(232,72,56,0.4));
-  }
-  .aorti-nav-dot { color: #E84838; font-weight: 700; }
+  /* App bar: wordmark, Monitor, view tabs (view select under 768 px), Drive cloud, gear, Share. */
+  .vbar { position: relative; z-index: 1000; display: flex; align-items: center; height: 56px; box-sizing: border-box; gap: var(--s1); padding: 0 var(--s4) 0 var(--s5); background: var(--bg); border-bottom: 1px solid var(--border); }
+  .vbar .brand { display: inline-flex; align-items: center; gap: var(--s2); min-height: 44px; min-width: 44px; margin-right: var(--s3); color: var(--text); text-decoration: none; }
+  .vbar .wordmark { font-family: 'Space Grotesk', var(--ui-face); font-weight: 600; font-size: var(--t16); letter-spacing: -.01em; }
+  .aorti-nav-mark { width: 26px; height: 24px; display: inline-block; flex-shrink: 0; }
+  .aorti-nav-dot { color: var(--brand); font-weight: 700; }
   .aorti-nav-ca { color: var(--text-dim); font-weight: 500; }
+  .vbar .bar-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 var(--s2); color: var(--text); text-decoration: none; font-weight: 500; white-space: nowrap; }
+  .vbar .bar-link:hover { background: var(--selected-fill); border-radius: var(--r-ctl); }
+  .vbar .live-dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--live); }
+  .vbar .monitor-link.is-live .live-dot { display: inline-block; }
+  .vbar .monitor-link.is-live .ico { display: none; }
+  .view-tabs { display: flex; align-items: stretch; align-self: stretch; gap: var(--s1); margin-left: var(--s4); }
+  .view-tabs a { display: inline-flex; align-items: center; padding: 0 var(--s3); color: var(--text-dim); text-decoration: none; font-weight: 500; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .view-tabs a:hover { color: var(--text); }
+  .view-tabs a[aria-current="page"] { color: var(--text); border-bottom-color: var(--action); font-weight: 600; }
+  .vsel { display: none; position: relative; align-items: center; margin-left: var(--s2); }
+  .vsel select { appearance: none; -webkit-appearance: none; min-height: 44px; padding: 0 32px 0 var(--s3); border: 1px solid var(--border-control); border-radius: var(--r-ctl); background: transparent; color: var(--text); font: 600 var(--t14)/1.2 var(--ui-face); cursor: pointer; field-sizing: content; min-width: 72px; }
+  .vsel select option { background: var(--bg-raised); color: var(--text); }
+  .vsel .ico { position: absolute; right: var(--s2); pointer-events: none; }
+  .vbar .bar-spacer { flex: 1; }
+  .vbar > :not(.bar-spacer):not(.syncbar):not(.drive-pop), .vsel select { flex: 0 0 auto; }
+  .vbar .btn.icon .ico { width: 20px; height: 20px; }
+  .vbar .share-btn { margin-left: var(--s2); white-space: nowrap; }
+  .vbar .share-btn .lbl-short { display: none; }
+  /* Drive cloud: synced, syncing (arrows spin, 2 px bar fills), off. Transform only. */
+  .vbar .sync .when-syncing, .vbar .sync .when-off { display: none; }
+  .vbar.syncing .sync .when-synced, .vbar.drive-off .sync .when-synced { display: none; }
+  .vbar.syncing .sync .when-syncing { display: block; }
+  .vbar.drive-off:not(.syncing) .sync .when-off { display: block; }
+  .vbar .sync .spin { transform-box: view-box; transform-origin: 12px 14.8px; animation: drive-sync-spin 1s linear infinite; }
+  .syncbar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--selected-fill); opacity: 0; transition: opacity .2s ease-out; pointer-events: none; }
+  .syncbar span { display: block; height: 100%; background: var(--action); transform: scaleX(0); transform-origin: left center; transition: transform .3s ease-out; }
+  .vbar.syncing .syncbar { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .vbar .sync .spin { animation: none; }
+    .syncbar span { transition: none; }
+  }
+  .drive-pop { top: calc(100% + var(--s1)); right: var(--s4); width: 320px; max-width: calc(100vw - 2 * var(--s4)); display: flex; flex-direction: column; gap: var(--s3); }
+  .drive-pop .dp-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--s1) var(--s2); }
+  .drive-pop .dp-k { width: 56px; flex: 0 0 auto; color: var(--text-dim); font-size: var(--t12); }
+  .drive-pop #drive-status { font-weight: 600; }
+  .drive-pop #drive-status.drive-error { color: var(--warn-high); cursor: pointer; text-decoration: underline; }
+  .drive-pop .dp-email, .drive-pop #folder-name { color: var(--text-dim); overflow-wrap: anywhere; min-width: 0; }
+  .drive-pop .dp-email:empty { display: none; }
+  .drive-pop .dp-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
+  .drive-pop .dp-chip:empty { display: none; }
   /* Beta banner — matches hr_monitor.html and index2.html. Sits above
      the .app-bar so every aorti surface shares the same "you are in
      beta" strip. */
@@ -124,220 +137,11 @@
     font-weight: 500;
     letter-spacing: 0.02em;
   }
-  .app-nav-cross {
-    padding: 5px 11px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    text-decoration: none;
-    border-radius: 6px;
-    transition: color 0.15s, background 0.15s;
-  }
-  .app-nav-cross:hover { color: var(--stage-4); background: rgba(232,152,88,0.08); }
-  /* Compact Watch-live icon button — only shows when a broadcast key is known. */
-  .watch-live-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--hrv);
-    border: 1px solid var(--hrv);
-    padding: 5px 9px;
-    border-radius: 6px;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 700;
-    text-decoration: none;
-  }
-  .watch-live-btn[hidden] { display: none; }
-  .watch-live-btn:hover { background: rgba(93,202,165,0.08); }
-  .watch-live-btn svg { animation: pulse-live 1.8s ease-in-out infinite; }
-  @keyframes pulse-live {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.45; }
-  }
-  .nav-ext-icon {
-    width: 10px;
-    height: 10px;
-    display: inline-block;
-    vertical-align: baseline;
-    margin-left: 2px;
-    opacity: 0.7;
-  }
-  .nav-feedback {
-    color: var(--text-dim);
-    text-decoration: none;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 600;
-    padding: 6px 10px;
-    border-radius: 6px;
-    transition: color 0.15s, background 0.15s;
-  }
-  .nav-feedback:hover { color: var(--text-dim); background: var(--bg-input); }
-  /* Compact view dropdown: button shows current view, menu lists the rest.
-     Replaces the five-tab nav that was taking too much horizontal space. */
-  .view-switcher {
-    position: relative;
-  }
-  .view-switcher-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 6px;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 600;
-    cursor: pointer;
-    min-width: 120px;
-    justify-content: space-between;
-  }
-  .view-switcher-btn:hover { border-color: var(--border-control); }
-  .view-switcher-chev {
-    width: 10px;
-    height: 10px;
-    stroke: currentColor;
-    transition: transform 0.15s;
-  }
-  .view-switcher.open .view-switcher-chev { transform: rotate(-180deg); }
-  .view-nav {
-    display: none;
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    flex-direction: column;
-    gap: 2px;
-    padding: 6px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-    min-width: 160px;
-    z-index: 50;
-  }
-  .view-switcher.open .view-nav { display: flex; }
-  .view-nav a {
-    padding: 8px 14px;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 600;
-    color: var(--text-dim);
-    border-radius: 6px;
-    cursor: pointer;
-    text-decoration: none;
-    transition: color 0.15s, background 0.15s;
-  }
-  .view-nav a:hover { color: var(--text); background: var(--bg-input); }
-  .view-nav a.active { color: var(--text); background: var(--bg-input); }
-  .folder-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.05em;
-    /* Right-align the folder/drive/cog cluster on desktop so the nav
-       controls (view switcher, Live monitor, Watch live) stay left and the
-       settings-ish controls stay right. margin-left: auto on the first
-       right-side element pushes itself + everything after to the end. */
-    margin-left: auto;
-  }
-  /* fi-group wraps Folder / Drive / Autonomic into atomic units. Flows inline
-     on desktop; stacks as separate row-cards when the mobile menu is open
-     (see body.menu-open rules). */
-  .fi-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  #folder-name {
-    font-family: 'Consolas', 'Monaco', monospace;
-    background: var(--bg-input);
-    padding: 3px 8px;
-    border-radius: 4px;
-    color: var(--text);
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .folder-info .drive-sep {
-    color: var(--border-control);
-    padding: 0 2px;
-  }
-  .fi-drive-email {
-    font-size: 11px;
-    color: var(--text-dim);
-    font-family: 'Consolas', 'Monaco', monospace;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 180px;
-  }
-  .fi-drive-email:empty { display: none; }
-  #drive-status {
-    font-family: 'Consolas', 'Monaco', monospace;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 10px;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  #drive-status.drive-idle { background: var(--bg-input); color: var(--text-dim); }
-  #drive-status.drive-syncing {
-    color: var(--hrv);
-    background: rgba(93,202,165,0.1);
-    border: 1px solid rgba(93,202,165,0.3);
-  }
-  #drive-status.drive-signedin {
-    color: var(--warn-crash);
-    background: rgba(186,117,23,0.1);
-  }
-  #drive-status.drive-error {
-    color: var(--warn-high);
-    background: rgba(226,75,74,0.14);
-  }
-  /* Header icon buttons — compact circular / square buttons for actions like
-     Drive sync / sign-out. Full text button looks out of place in a dense bar. */
-  .folder-info .icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: color 0.12s, border-color 0.12s, background 0.12s, transform 0.3s;
-  }
-  .folder-info .icon-btn:hover { color: var(--text); border-color: var(--border-control); }
-  .folder-info .icon-btn svg { display: block; }
-  .folder-info .icon-btn.spinning svg { animation: drive-sync-spin 1s linear infinite; }
   @keyframes drive-sync-spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
   }
-  /* Drive sync-status word is brief now; the sync button's own tooltip
-     carries any verbose progress text. */
-  #drive-status {
-    font-size: 10px;
-    min-width: 30px;
-    text-align: center;
-  }
-  /* Autonomic analysis toggle — global pref, shown in the app-bar so it persists
-     across views. Drives whether interpretive overlays (sympathetic flush, chills
+  /* Autonomic analysis toggle, in the viewer settings popover. Drives whether interpretive overlays (sympathetic flush, chills
      signature, HR×HRV quadrants) appear. Raw descriptive stats always show. */
   .autonomic-toggle {
     display: inline-flex;
@@ -354,7 +158,7 @@
 
   /* Main content area */
   main {
-    height: calc(100vh - 52px);
+    height: calc(100vh - 56px);
     overflow-y: auto;
     overflow-x: hidden;
   }
@@ -406,7 +210,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: calc(100vh - 52px);
+    height: calc(100vh - 56px);
     padding: 20px;
   }
   .empty-panel {
@@ -417,9 +221,7 @@
     max-width: 520px;
     text-align: center;
   }
-  .empty-panel h2 { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
-  .empty-panel p { margin: 0 0 24px; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
-  .empty-panel .hint { margin-top: 22px; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+  .empty-panel h2 { margin: 0 0 var(--s4); font-size: var(--t20); font-weight: 600; }
   .empty-choices {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -453,14 +255,9 @@
     flex-shrink: 0;
   }
   .empty-choice .empty-choice-title {
-    font-size: 13px;
+    font-size: var(--t14);
     font-weight: 600;
     color: var(--text);
-  }
-  .empty-choice .empty-choice-sub {
-    font-size: 11px;
-    color: var(--text-dim);
-    line-height: 1.45;
   }
   @media (max-width: 520px) {
     .empty-choices { grid-template-columns: 1fr; }
@@ -847,6 +644,9 @@
     font-weight: 700;
     letter-spacing: 0.02em;
   }
+  .datenav { display: inline-flex; align-items: center; gap: var(--s1); }
+  .datenav .day-title { margin: 0 var(--s1); font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
+  .datenav .btn.icon .ico { width: 20px; height: 20px; }
   .day-strip-panel {
     background: var(--bg-raised);
     border: 1px solid var(--border);
@@ -2208,8 +2008,6 @@
     overflow: auto;
   }
   body.printing .app-bar,
-  body.printing .view-nav,
-  body.printing .folder-info,
   body.printing .session-sidebar,
   body.printing .sidebar-toggle,
   body.printing .context-wrap,
@@ -2218,7 +2016,6 @@
   body.printing .legend-reset-zoom,
   body.printing .filter-chips,
   body.printing .all-granularity,
-  body.printing .export-report-btn { display: none !important; }
   body.printing #app { display: block; height: auto; }
   body.printing main { overflow: visible; height: auto; }
   body.printing .view { padding: 20px; }
@@ -2256,26 +2053,14 @@
 
   @media print {
     /* Safety net if the user hits Ctrl+P directly — still hide the chrome. */
-    .app-bar, .view-nav, .folder-info, .session-sidebar, .sidebar-toggle,
+    .app-bar, .session-sidebar, .sidebar-toggle,
     .context-wrap, .back-link, .filter-chips, .all-granularity,
-    .legend-reset-zoom, .export-report-btn { display: none !important; }
+    .legend-reset-zoom { display: none !important; }
   }
 
-  /* Export button in app bar */
-  .export-report-btn {
-    padding: 6px 14px;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 700;
-    background: var(--bg-input);
-    border: 1px solid var(--border-control);
-    color: var(--text);
-    border-radius: 999px;
-    cursor: pointer;
-    margin-left: 8px;
-  }
-  .export-report-btn:hover { background: #1a1a1a; border-color: #3a3a3a; }
+  /* Large text: fitBar() drops the Share word, then the wordmark text, so every control stays 44 px. */
+  .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark { display: none; }
+  .vbar.tight-1 .share-btn { width: 44px; padding: 0; }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -2284,10 +2069,6 @@
   ::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
 
   /* ===== MOBILE (≤768px): stacked session layout, taller charts, bigger taps ===== */
-  /* Hamburger is mobile-only; swapped title strings via media query below. */
-  .title-short { display: none; }
-  .mobile-menu-btn { display: none; }
-
   @media (max-width: 768px) {
     /* Desktop locks body to viewport so panes scroll independently. On mobile
        the layout stacks and needs the whole page to scroll. */
@@ -2296,118 +2077,17 @@
       min-height: 100vh;
       overflow: auto;
     }
-    .app-bar {
-      height: auto;
-      flex-wrap: wrap;
-      gap: 10px;
-      padding: 10px 14px;
-      position: relative;
-    }
-    .title-full { display: none; }
-    .title-short { display: inline; }
-    .app-title { font-size: 14px; flex: 0 0 auto; }
-    .mobile-menu-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-left: auto;
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text);
-      border-radius: 8px;
-      padding: 6px 10px;
-      cursor: pointer;
-    }
-    .mobile-menu-btn:hover { border-color: var(--border-control); }
-    /* Hide everything but the logo + hamburger until the menu opens. */
-    .app-nav-cross,
-    .view-switcher,
-    .folder-info,
-    .nav-feedback,
-    #watch-live-link {
-      display: none;
-    }
-    /* Always-visible mobile compact indicators. Drive sync dot + Monitor
-       link sit outside the hamburger so the user doesn't have to open the
-       menu to see whether sync is healthy or to jump back to the live
-       monitor. The full status text + Sign in / Sign out controls still
-       live inside the menu for cases that need them. */
-    .mobile-compact-indicators {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      margin-left: auto;
-    }
-    .mobile-compact-indicators + .mobile-menu-btn { margin-left: 0; }
-    .mobile-drive-dot {
-      width: 9px; height: 9px; border-radius: 50%;
-      background: #5a5a5a; flex-shrink: 0;
-    }
-    .mobile-drive-dot.synced { background: #5DCAA5; }
-    .mobile-drive-dot.syncing { background: #F0C75E; animation: dot-pulse 1.2s ease-in-out infinite; }
-    .mobile-drive-dot.error { background: #E24B4A; }
-    @keyframes dot-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
-    .mobile-monitor-link {
-      display: inline-flex; align-items: center;
-      padding: 6px 8px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text-dim);
-      text-decoration: none;
-    }
-    .mobile-monitor-link:hover { color: var(--text); border-color: var(--border-control); }
-    /* Menu open: reveal the items as a stacked column below the header. */
-    body.menu-open .app-nav-cross,
-    body.menu-open .view-switcher,
-    body.menu-open .folder-info,
-    body.menu-open .nav-feedback,
-    body.menu-open #watch-live-link.watch-live-btn {
-      display: flex;
-      width: 100%;
-      flex-basis: 100%;
-      order: 10;
-    }
-    body.menu-open #watch-live-link[hidden] { display: none; }
-    /* Stack the button + dropdown menu vertically inside the hamburger so
-       the menu opens downward, not beside the button. */
-    body.menu-open .view-switcher {
-      flex-direction: column;
-      align-items: stretch;
-      flex-basis: 100%;
-    }
-    body.menu-open .view-switcher-btn { width: 100%; }
-    body.menu-open .view-switcher.open .view-nav {
-      position: static;
-      width: 100%;
-      box-shadow: none;
-    }
-    body.menu-open .app-nav-cross,
-    body.menu-open .nav-feedback {
-      padding: 10px 12px;
-      font-size: 12px;
-    }
-    body.menu-open .folder-info {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 8px;
-      padding: 0;
-      background: transparent;
-      font-size: 12px;
-    }
-    /* Each fi-group is its own row card so the drive logout + sync can't wrap
-       off into a stray line of their own. */
-    body.menu-open .fi-group {
-      display: flex;
-      flex-wrap: nowrap;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 10px;
-      background: var(--bg-raised);
-      border-radius: 8px;
-    }
-    /* Drop the vertical "|" separators inside the menu — each row is its own card. */
-    body.menu-open .folder-info > .drive-sep { display: none; }
-    #folder-name { max-width: 140px; }
+    /* Phone bar: wordmark, view select, Drive cloud, Share, gear. */
+    .vbar { padding: 0 var(--s1) 0 var(--s3); gap: 0; }
+    .vbar .brand { margin-right: 0; }
+    .vbar .wordmark { font-size: 15px; }
+    .vbar .monitor-link, .view-tabs { display: none; }
+    .vsel { display: inline-flex; }
+    .vbar .share-btn { order: 1; margin-left: 0; padding: 0 var(--s2); border-color: transparent; background: transparent; color: var(--text); gap: 6px; }
+    .vbar .share-btn .lbl-long { display: none; }
+    .vbar .share-btn .lbl-short { display: inline; }
+    .vbar #viewer-settings-btn { order: 2; }
+    .drive-pop { right: var(--s2); }
     main { height: auto; min-height: calc(100vh - 110px); }
     .view { padding: 16px 14px; }
     .session-layout {
@@ -2453,6 +2133,8 @@
       flex: 1 1 auto;
       letter-spacing: 0.01em;
     }
+    .day-header .datenav { flex: 1 1 100%; justify-content: space-between; }
+    .datenav .day-title { flex: 1 1 auto; font-size: var(--t20); white-space: normal; text-align: center; text-wrap: balance; }
     .cal-nav { flex: 0 0 auto; gap: 8px; }
     .cal-nav button { width: 44px; height: 44px; font-size: 13px; }
     .cal-today-btn { flex: 0 0 auto; padding: 10px 16px; font-size: 12px; min-height: 44px; }
@@ -2482,25 +2164,18 @@
        baseline). Same approach the monitor uses: bump every text button,
        size icon buttons explicitly, and add 8 px gap between adjacent
        targets. icon-btn is sized as a square so the SVG stays centered. */
-    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.mobile-menu-btn):not(.cal-today-btn):not(.day-timeline-btn):not(.filter-chip):not(.view-switcher-btn):not(.index-pager-btn):where(:not(.ui *)) {
+    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.cal-today-btn):not(.day-timeline-btn):not(.filter-chip):not(.index-pager-btn):where(:not(.ui *)) {
       min-height: 44px;
       padding: 10px 16px;
     }
-    .mobile-menu-btn { width: 44px; height: 44px; padding: 0; }
-    .folder-info .icon-btn { width: 44px; height: 44px; }
-    .folder-info .icon-btn svg { width: 18px; height: 18px; }
     .session-card-kebab { width: 44px; height: 44px; top: 6px; right: 6px; }
     .interp-kebab { width: 44px; height: 44px; }
-    .view-switcher-btn { min-height: 44px; padding: 10px 14px; }
     .index-pager-btn { min-height: 44px; padding: 10px 16px; }
     .day-timeline-btn { min-height: 44px; padding: 10px 16px; }
     /* Filter chips are small by convention but a 23 px target is a miss
        waiting to happen. Bump to 44 while keeping the pill shape. */
     .filter-chip { min-height: 44px; padding: 10px 14px; }
     .filter-chips { gap: 8px; }
-    /* View-nav dropdown items live inside .view-switcher.open .view-nav.
-       Same min-height contract as everything else. */
-    .view-nav a { min-height: 44px; padding: 12px 14px; display: flex; align-items: center; }
   }
 
   @media (max-width: 480px) {
@@ -2511,7 +2186,6 @@
     .session-top-row { flex-direction: column; align-items: flex-start; gap: 8px; }
     .chart-panel { padding: 12px 14px; }
     .week-grid { grid-template-columns: 1fr; }
-    .view-nav a { padding: 12px 12px; font-size: 12px; min-height: 44px; }
     .cal-cell { padding: 4px; border-radius: 6px; }
     .cal-cell .cal-hr { font-size: 14px; }
     .cal-day-num { font-size: 10px; }
@@ -2549,70 +2223,66 @@
 </head>
 <body>
 
-<header class="app-bar">
-  <a class="app-title" href="/" style="text-decoration: none;">
+<header class="app-bar vbar ui" id="app-bar">
+  <a class="brand" href="/" aria-label="aorti.ca home">
     <svg class="aorti-nav-mark" viewBox="0 0 1779 1642" aria-hidden="true">
       <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
       <path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="#E84838"/>
     </svg>
-    <span class="title-full">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span> <span class="accent">·</span> Viewer</span>
-    <span class="title-short">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span></span>
+    <span class="wordmark">aorti<span class="aorti-nav-dot">.</span><span class="aorti-nav-ca">ca</span></span>
   </a>
-  <span class="mobile-compact-indicators" aria-hidden="false">
-    <a class="mobile-monitor-link" href="./hr_monitor.html" title="Open the live monitor" aria-label="Open live monitor">
-      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </a>
-    <span class="mobile-drive-dot" id="mobile-drive-dot" title="Drive sync: off"></span>
+  <a class="bar-link monitor-link" id="monitor-link" href="./hr_monitor.html">
+    <span class="live-dot" aria-hidden="true"></span><span class="lbl">Monitor</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+  </a>
+  <nav class="view-tabs" aria-label="Views">
+    <a data-view="month" href="#/month">Month</a>
+    <a data-view="week" href="#/week">Week</a>
+    <a data-view="day" href="#/day">Day</a>
+    <a data-view="index" href="#/index">Sessions</a>
+    <a data-view="all" href="#/all">Trends</a>
+  </nav>
+  <span class="vsel">
+    <select id="view-select" aria-label="View">
+      <option value="month">Month</option>
+      <option value="week">Week</option>
+      <option value="day">Day</option>
+      <option value="index">Sessions</option>
+      <option value="all">Trends</option>
+      <option value="monitor" id="view-select-monitor">Monitor</option>
+    </select>
+    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
   </span>
-  <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu" aria-expanded="false">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+  <span class="bar-spacer"></span>
+  <button class="btn icon sync" id="drive-cloud" type="button" aria-label="Drive: off" aria-haspopup="dialog" aria-expanded="false" aria-controls="drive-pop">
+    <svg class="ico when-synced" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 14.5 11.2 16.5 15 12.5"/></svg>
+    <svg class="ico when-syncing" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin"><path d="M9.2 13.6a3 3 0 0 1 5.1-1.5"/><polyline points="14.6 10.4 14.6 12.4 12.6 12.4"/><path d="M14.8 16a3 3 0 0 1-5.1 1.5"/><polyline points="9.4 19.2 9.4 17.2 11.4 17.2"/></g></svg>
+    <svg class="ico when-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
   </button>
-  <a class="app-nav-cross" href="./hr_monitor.html">← Live monitor</a>
-  <div class="view-switcher">
-    <button class="view-switcher-btn" id="view-switcher-btn" aria-haspopup="listbox" aria-expanded="false">
-      <span id="view-switcher-label">Sessions</span>
-      <svg class="view-switcher-chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 3l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
-    </button>
-    <nav class="view-nav" id="view-nav">
-      <a data-view="index" href="#/index">Sessions</a>
-      <a data-view="month" href="#/month">Month</a>
-      <a data-view="week" href="#/week">Week</a>
-      <a data-view="day" href="#/day">Day</a>
-      <a data-view="all" href="#/all">All</a>
-    </nav>
+  <div class="popover drive-pop" id="drive-pop" role="dialog" aria-label="Drive" hidden>
+    <div class="dp-row">
+      <span class="dp-k">Drive</span>
+      <span id="drive-status" class="drive-idle">Off</span>
+      <span id="drive-email" class="dp-email"></span>
+    </div>
+    <div class="dp-row fsa-only">
+      <span class="dp-k">Folder</span>
+      <span id="folder-name">None</span>
+    </div>
+    <div class="dp-actions">
+      <button class="btn" id="drive-signin" type="button">Sign in</button>
+      <button class="btn" id="drive-sync" type="button" style="display:none">Sync now</button>
+      <button class="btn fsa-only" id="folder-pick" type="button">Change folder</button>
+      <button class="btn" id="drive-signout" type="button" style="display:none">Sign out</button>
+    </div>
+    <div class="dp-chip" id="hrm-version-chip-slot"></div>
   </div>
-  <a id="watch-live-link" class="watch-live-btn" href="#" target="_blank" rel="noopener" hidden title="Watch the live stream from whatever device is currently broadcasting" aria-label="Watch live">
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
-    <span class="watch-live-label">Live</span>
-  </a>
-  <span id="hrm-version-chip-slot" style="margin-left: 8px;"></span>
-  <div class="folder-info">
-    <div class="fi-group fi-folder">
-      <span class="fsa-only">Folder:</span>
-      <span id="folder-name" class="fsa-only">—</span>
-      <button id="folder-pick" class="fsa-only">Change...</button>
-    </div>
-    <span class="drive-sep fsa-only">|</span>
-    <div class="fi-group fi-drive">
-      <span>Drive:</span>
-      <span id="drive-status" class="drive-idle" title="Google Drive sync status">off</span>
-      <span id="drive-email" class="fi-drive-email"></span>
-      <button id="drive-signin">Sign in</button>
-      <button class="icon-btn" id="drive-sync" style="display:none" title="Sync with Drive (pulls new files down, pushes local files up, mirrors Drive-only files back to the folder)" aria-label="Sync with Drive">
-        <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="icon-btn" id="drive-signout" style="display:none" title="Sign out of Drive" aria-label="Sign out">
-        <svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-    </div>
-    <span class="drive-sep">|</span>
-    <div class="fi-group fi-autonomic">
-      <button class="icon-btn" id="viewer-settings-btn" title="Viewer settings (autonomic analysis, HR shift thresholds)" aria-label="Viewer settings">
-        <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="export-report-btn" id="export-report" title="Print/save this view as a report" style="display:none">Export report</button>
-    </div>
-  </div>
+  <button class="btn icon" id="viewer-settings-btn" type="button" aria-label="Settings">
+    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+  <button class="btn primary share-btn" id="export-report" type="button" aria-label="Share with my doctor">
+    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg><span class="lbl lbl-long">Share with my doctor</span><span class="lbl lbl-short">Share</span>
+  </button>
+  <div class="syncbar" aria-hidden="true"><span id="syncbar-fill"></span></div>
 </header>
 
 <main>
@@ -2623,14 +2293,12 @@
   <div id="empty-state">
     <div class="empty-panel">
       <h2>No sessions yet</h2>
-      <p>Pick where your sessions live. You can open a local folder, or sign in to pull from Google Drive.</p>
       <div class="empty-choices">
         <button id="empty-pick" type="button" class="empty-choice fsa-only">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
           </svg>
           <span class="empty-choice-title">Open a local folder</span>
-          <span class="empty-choice-sub">Reads CSVs you already have on this device.</span>
         </button>
         <button id="empty-drive" type="button" class="empty-choice">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2640,10 +2308,8 @@
             <path d="M22.85 14.48H15.3l-2.72 4.65H20.14l2.71-4.65z" fill="#EA4335"/>
           </svg>
           <span class="empty-choice-title">Sign in with Google</span>
-          <span class="empty-choice-sub">Sync sessions across devices.</span>
         </button>
       </div>
-      <div class="hint">If your live app already has a folder set, this viewer will reuse it automatically. Drive sessions are cached here for faster loads.</div>
     </div>
   </div>
 
@@ -2799,7 +2465,7 @@
 
   function updateFolderUI() {
     const el = document.getElementById('folder-name');
-    el.textContent = dirHandle ? (dirHandle.name || 'selected') : '—';
+    el.textContent = dirHandle ? (dirHandle.name || 'Selected') : 'None';
   }
 
   // Watch live link shows up only when we know a broadcast key. Key can come
@@ -2819,15 +2485,21 @@
   })();
   let watchLiveSocket = null;
   let watchLiveLastTick = 0;
+  // The bar's Monitor link reads "Watch live" and opens the stream while a broadcast is live.
   function updateWatchLiveUI() {
-    const link = document.getElementById('watch-live-link');
+    const link = document.getElementById('monitor-link');
     if (!link) return;
-    if (__viewerDemoFlag) { link.hidden = true; return; }
-    const key = localStorage.getItem('hr_monitor_broadcast_key');
-    if (!key) { link.hidden = true; return; }
-    link.href = './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark';
-    const tickAgeMs = Date.now() - watchLiveLastTick;
-    link.hidden = !(watchLiveLastTick && tickAgeMs < 15000);
+    const key = __viewerDemoFlag ? null : localStorage.getItem('hr_monitor_broadcast_key');
+    const live = !!(key && watchLiveLastTick && Date.now() - watchLiveLastTick < 15000);
+    if (link.classList.contains('is-live') === live && link.dataset.wired) return;
+    link.dataset.wired = '1';
+    link.classList.toggle('is-live', live);
+    link.href = live ? './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark' : './hr_monitor.html';
+    if (live) { link.target = '_blank'; link.rel = 'noopener'; } else { link.removeAttribute('target'); link.removeAttribute('rel'); }
+    link.querySelector('.lbl').textContent = live ? 'Watch live' : 'Monitor';
+    const opt = document.getElementById('view-select-monitor');
+    if (opt) opt.textContent = live ? 'Watch live' : 'Monitor';
+    fitBar();
   }
   // Relay listener: opens once, stays open while the viewer is in the
   // foreground, stamps watchLiveLastTick on any incoming tick. Timer
@@ -2887,15 +2559,24 @@
     driveTokenExpiresAt = cached ? cached.expires_at : 0;
   }
 
-  // Mirror drive-status onto the mobile compact dot. Mobile users hide the
-  // full pill behind the hamburger; the dot is always visible so they can
-  // glance at sync health without opening the menu.
+  // Drive cloud in the bar: synced, syncing or off. Syncing is the OR of the
+  // connection state, a running driveSync (setDriveProgress) and the sync loader.
+  const cloud = { conn: 'off', label: 'off', sync: false, loader: false, frac: 0, watch: null };
+  function paintCloud() {
+    const bar = document.getElementById('app-bar');
+    const btn = document.getElementById('drive-cloud');
+    if (!bar || !btn) return;
+    const syncing = cloud.conn === 'syncing' || cloud.sync || (cloud.loader && cloud.conn !== 'off');
+    bar.classList.toggle('syncing', syncing);
+    bar.classList.toggle('drive-off', cloud.conn === 'off');
+    btn.setAttribute('aria-label', 'Drive: ' + (syncing ? 'syncing' : cloud.label));
+    const fill = document.getElementById('syncbar-fill');
+    if (fill) fill.style.transform = 'scaleX(' + (syncing ? Math.max(0.04, Math.min(1, cloud.frac)) : 0) + ')';
+  }
   function setMobileDriveDot(state, title) {
-    const dot = document.getElementById('mobile-drive-dot');
-    if (!dot) return;
-    dot.classList.remove('synced', 'syncing', 'error');
-    if (state) dot.classList.add(state);
-    if (title) dot.title = 'Drive sync: ' + title;
+    cloud.conn = state === 'synced' ? 'synced' : state === 'syncing' ? 'syncing' : 'off';
+    cloud.label = title || cloud.conn;
+    paintCloud();
   }
   function driveUpdateUI() {
     const statusEl = document.getElementById('drive-status');
@@ -2913,28 +2594,25 @@
     if (emailEl) emailEl.textContent = showEmail ? email : '';
     if (driveAccessToken) {
       if (driveFolderId) {
-        statusEl.textContent = driveRefreshing ? '↻' : 'on';
-        statusEl.title = driveRefreshing
-          ? 'Refreshing Drive session'
-          : 'Signed in. Drive sessions sync automatically.';
+        statusEl.textContent = driveRefreshing ? 'Refreshing' : 'On';
+        statusEl.removeAttribute('title');
         statusEl.classList.add('drive-syncing');
-        setMobileDriveDot(driveRefreshing ? 'syncing' : 'synced',
-          driveRefreshing ? 'refreshing session' : 'on (' + (showEmail ? email : 'signed in') + ')');
+        setMobileDriveDot(driveRefreshing ? 'syncing' : 'synced', 'synced');
       } else {
-        statusEl.textContent = '…';
-        statusEl.title = 'Signed in, connecting to folder';
+        statusEl.textContent = 'Connecting';
+        statusEl.removeAttribute('title');
         statusEl.classList.add('drive-signedin');
-        setMobileDriveDot('syncing', 'connecting to folder');
+        setMobileDriveDot('syncing', 'connecting');
       }
       signIn.style.display = 'none';
       signOut.style.display = '';
       syncBtn.style.display = driveFolderId ? '' : 'none';
       clearDriveErrorClick();
     } else {
-      statusEl.textContent = 'off';
-      statusEl.title = 'Not signed in. Click Sign in to enable Drive sync.';
+      statusEl.textContent = 'Off';
+      statusEl.removeAttribute('title');
       statusEl.classList.add('drive-idle');
-      setMobileDriveDot('', 'off (not signed in)');
+      setMobileDriveDot('', 'off');
       signIn.style.display = '';
       signOut.style.display = 'none';
       syncBtn.style.display = 'none';
@@ -2945,18 +2623,24 @@
   function setDriveProgress(text) {
     const btn = document.getElementById('drive-sync');
     if (!btn) return;
-    btn.title = text ? ('Sync with Drive. ' + text) : 'Sync with Drive';
-    const isBusy = !!text && /\//.test(text);
-    btn.classList.toggle('spinning', isBusy);
+    const m = /(\d+)\/(\d+)/.exec(text || '');
+    cloud.sync = !!text && (/^syncing/.test(text) || !!m);
+    cloud.frac = m ? +m[1] / Math.max(1, +m[2]) : 0;
+    // driveSyncRun can throw before its closing progress call; clear once the single flight settles.
+    if (cloud.sync && !cloud.watch) cloud.watch = setInterval(() => {
+      if (driveSyncInFlight) return;
+      clearInterval(cloud.watch); cloud.watch = null; cloud.sync = false; paintCloud();
+    }, 1000);
+    paintCloud();
   }
   function setDriveError(text) {
     const statusEl = document.getElementById('drive-status');
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing');
     statusEl.classList.add('drive-error');
-    statusEl.textContent = text;
+    statusEl.textContent = text ? text.charAt(0).toUpperCase() + text.slice(1) : 'Sync error';
     statusEl.style.cursor = 'pointer';
-    statusEl.title = 'Click for sign-in diagnostics + auth trace';
+    statusEl.title = 'Diagnostics';
     statusEl.onclick = openDiagnosticsModal;
     setMobileDriveDot('error', text || 'sync error');
   }
@@ -3021,7 +2705,7 @@
         ensureFolderSyncAndRender().catch(() => {});
       }
     });
-    window.addEventListener('offline', () => setDriveError('offline — will retry'));
+    window.addEventListener('offline', () => setDriveError('offline'));
     if (driveAccessToken && !driveFolderId) {
       ensureFolderSyncAndRender()
         .catch(e => { console.error('Drive restore:', e); setDriveError('folder access failed'); });
@@ -5617,19 +5301,11 @@
       return;
     }
     const { view, arg } = parseHash();
-    const VIEW_LABELS = { index: 'Sessions', session: 'Session', month: 'Month', week: 'Week', day: 'Day', all: 'All' };
-    document.querySelectorAll('.view-nav a').forEach(a => {
-      a.classList.toggle('active', a.dataset.view === view || (view === 'session' && false));
-    });
-    const vsLabel = document.getElementById('view-switcher-label');
-    if (vsLabel) vsLabel.textContent = VIEW_LABELS[view] || 'Sessions';
+    if (view === 'day' && /^\d{4}-\d{2}-\d{2}$/.test(arg || '')) shownDay = arg;
+    else if (view === 'session' && /^day:\d{4}-\d{2}-\d{2}$/.test(decodeURIComponent(arg || ''))) shownDay = decodeURIComponent(arg).slice(4);
     // Cancel any active auto-poll from a previous session view. renderSession
     // will restart it if the next view is also a session.
     if (view !== 'session' && typeof clearAutoPoll === 'function') clearAutoPoll();
-    const exportBtn = document.getElementById('export-report');
-    // Android WebView ignores window.print() without a native PrintManager, so the app hides Export.
-    const isNativeApp = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
-    if (exportBtn) exportBtn.style.display = (!isNativeApp && (view === 'session' || view === 'day')) ? '' : 'none';
     switch (view) {
       case 'index': renderIndex(); showOnly('view-index'); break;
       case 'session': await renderSession(arg); showOnly('view-session'); break;
@@ -5639,9 +5315,45 @@
       case 'all': renderAll(); showOnly('view-all'); break;
       default: renderIndex(); showOnly('view-index');
     }
+    syncBarNav(view, arg);
+  }
+
+  // The day the Day view last showed; Month and Week tabs open the period holding it.
+  let shownDay = null;
+  function barTabView(view, arg) {
+    if (view === 'session') return /^day:/.test(decodeURIComponent(arg || '')) ? 'day' : 'index';
+    return ['month', 'week', 'day', 'index', 'all'].includes(view) ? view : 'index';
+  }
+  function syncBarNav(view, arg) {
+    const cur = barTabView(view, arg);
+    document.querySelectorAll('.view-tabs a').forEach(a => {
+      if (a.dataset.view === cur) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+      if (!shownDay) return;
+      if (a.dataset.view === 'day') a.href = '#/day/' + shownDay;
+      else if (a.dataset.view === 'week') a.href = '#/week/' + shownDay;
+      else if (a.dataset.view === 'month') a.href = '#/month/' + shownDay.slice(0, 7);
+    });
+    const sel = document.getElementById('view-select');
+    if (sel) sel.value = cur;
+    fitBar();
+  }
+  // Large text: drop the Share word, then the wordmark text, until the bar fits.
+  function fitBar() {
+    const bar = document.getElementById('app-bar');
+    if (!bar) return;
+    bar.classList.remove('tight-1', 'tight-2');
+    for (const c of ['tight-1', 'tight-2']) {
+      if (bar.scrollWidth <= bar.clientWidth + 1) break;
+      bar.classList.add(c);
+    }
   }
 
   function showOnly(id) {
+    // Android WebView ignores window.print() without a native PrintManager, so the app hides Share.
+    const exportBtn = document.getElementById('export-report');
+    const isNativeApp = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+    if (exportBtn) exportBtn.hidden = isNativeApp || id === 'empty-state';
     ['empty-state', 'view-index', 'view-session', 'view-month', 'view-day', 'view-week', 'view-all'].forEach(v => {
       const el = document.getElementById(v);
       if (el) el.classList.toggle('hidden', v !== id);
@@ -6197,19 +5909,20 @@
     // Prev/next day navigation. Only allow dates where there's actual data
     // so you don't walk forever through empty days.
     const dateKeys = Object.keys(sessionsByDate).sort();
-    const idxInDates = dateKeys.indexOf(iso);
-    const prevDate = idxInDates > 0 ? dateKeys[idxInDates - 1] : (dateKeys.length ? dateKeys[dateKeys.length - 1] : iso);
-    const nextDate = idxInDates >= 0 && idxInDates < dateKeys.length - 1 ? dateKeys[idxInDates + 1] : (dateKeys.length ? dateKeys[0] : iso);
-    const [year, month] = iso.split('-');
+    let prevDate = null, nextDate = null;
+    for (const k of dateKeys) {
+      if (k < iso) prevDate = k;
+      else if (k > iso) { nextDate = k; break; }
+    }
+    shownDay = iso;
 
     el.innerHTML = `
       <div class="day-header">
-        <a class="back-link" href="#/month/${year}-${month}" style="margin: 0;">← ${date.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</a>
-        <div class="cal-nav">
-          <button id="day-prev" title="Previous day with data" aria-label="Previous day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-          <button id="day-next" title="Next day with data" aria-label="Next day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="datenav ui">
+          <button class="btn icon" id="day-prev" type="button" aria-label="Previous day"${prevDate ? '' : ' disabled'}>${UI.icon('prev')}</button>
+          <h1 class="day-title">${title}</h1>
+          <button class="btn icon" id="day-next" type="button" aria-label="Next day"${nextDate ? '' : ' disabled'}>${UI.icon('next')}</button>
         </div>
-        <div class="day-title">${title}</div>
         ${metricSwitchHTML()}
         <div style="margin-left: auto; color: var(--text-dim); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;">${files.length} session${files.length === 1 ? '' : 's'}</div>
       </div>
@@ -6252,8 +5965,8 @@
 
     wireAggregateReport(el);
     // Wire prev/next. If there's only one date with data, just stay.
-    document.getElementById('day-prev').addEventListener('click', () => setHash('day/' + prevDate));
-    document.getElementById('day-next').addEventListener('click', () => setHash('day/' + nextDate));
+    document.getElementById('day-prev').addEventListener('click', () => { if (prevDate) setHash('day/' + prevDate); });
+    document.getElementById('day-next').addEventListener('click', () => { if (nextDate) setHash('day/' + nextDate); });
     wireMetricSwitch(el, () => renderDay(dateArg));
 
     // Click + hover handlers: strip blocks and session cards share data-filename
@@ -7580,8 +7293,9 @@
   // ===== Keyboard nav: ← / → move between adjacent sessions or days =====
   function setupKeyboardNav() {
     document.addEventListener('keydown', (e) => {
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
       const { view, arg } = parseHash();
       const dir = e.key === 'ArrowLeft' ? -1 : 1;
       if (view === 'session') {
@@ -9790,7 +9504,7 @@
   function bindUiHandlers(demo) {
     window.addEventListener('hashchange', route);
     if (demo) {
-      document.querySelectorAll('.fi-folder, .fi-drive, .drive-sep').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('#drive-pop .dp-actions, #drive-pop .fsa-only, #drive-email').forEach(el => el.hidden = true);
     } else {
       if (!window.showDirectoryPicker) {
         document.querySelectorAll('.fsa-only').forEach(el => el.hidden = true);
@@ -9807,54 +9521,53 @@
         driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
       });
     }
-    const menuBtn = document.getElementById('mobile-menu-btn');
-    if (menuBtn) {
-      menuBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const open = document.body.classList.toggle('menu-open');
-        menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      });
-      document.querySelectorAll('.view-nav a, .app-nav-cross, .nav-feedback, #watch-live-link').forEach(a => {
-        a.addEventListener('click', () => {
-          document.body.classList.remove('menu-open');
-          menuBtn.setAttribute('aria-expanded', 'false');
-        });
-      });
-      // Tap anywhere outside the open menu (= outside the .app-bar header)
-      // closes it. Same pattern as the view-switcher dropdown — gives the
-      // user an obvious dismissal gesture beyond re-tapping the hamburger.
-      document.addEventListener('click', (e) => {
-        if (!document.body.classList.contains('menu-open')) return;
-        const bar = document.querySelector('.app-bar');
-        if (bar && bar.contains(e.target)) return;
-        document.body.classList.remove('menu-open');
-        menuBtn.setAttribute('aria-expanded', 'false');
-      });
-    }
-    const vsBtn = document.getElementById('view-switcher-btn');
-    const vsWrap = vsBtn ? vsBtn.closest('.view-switcher') : null;
-    if (vsBtn && vsWrap) {
-      vsBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const open = vsWrap.classList.toggle('open');
-        vsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      });
-      document.querySelectorAll('.view-nav a').forEach(a => {
-        a.addEventListener('click', () => {
-          vsWrap.classList.remove('open');
-          vsBtn.setAttribute('aria-expanded', 'false');
-        });
-      });
-      document.addEventListener('click', (e) => {
-        if (!vsWrap.classList.contains('open')) return;
-        if (vsWrap.contains(e.target)) return;
-        vsWrap.classList.remove('open');
-        vsBtn.setAttribute('aria-expanded', 'false');
-      });
-    }
+    const viewSel = document.getElementById('view-select');
+    let selArrowAt = 0;
+    viewSel.addEventListener('keydown', (e) => { if (/^Arrow|^Home$|^End$|^Page/.test(e.key)) selArrowAt = Date.now(); });
+    viewSel.addEventListener('change', () => {
+      const v = viewSel.value;
+      if (v === 'monitor' && Date.now() - selArrowAt < 300) {
+        const { view, arg } = parseHash();
+        viewSel.value = barTabView(view, arg);
+        return;
+      }
+      if (v === 'monitor') {
+        const link = document.getElementById('monitor-link');
+        const { view, arg } = parseHash();
+        viewSel.value = barTabView(view, arg);
+        if (link.target === '_blank') window.open(link.href, '_blank', 'noopener');
+        else location.href = link.href;
+        return;
+      }
+      const tab = document.querySelector('.view-tabs a[data-view="' + v + '"]');
+      location.hash = tab ? tab.getAttribute('href') : '#/' + v;
+    });
+    const cloudBtn = document.getElementById('drive-cloud');
+    const drivePop = document.getElementById('drive-pop');
+    const setPop = (open) => {
+      drivePop.hidden = !open;
+      cloudBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    cloudBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const vs = document.getElementById('viewer-settings-popover');
+      if (vs) vs.classList.remove('open');
+      setPop(drivePop.hidden);
+    });
+    document.addEventListener('click', (e) => {
+      if (drivePop.hidden || drivePop.contains(e.target)) return;
+      setPop(false);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !drivePop.hidden) { setPop(false); cloudBtn.focus(); }
+    });
+    window.addEventListener('resize', fitBar);
+    paintCloud();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitBar);
     applyAutonomicClass();
     document.getElementById('viewer-settings-btn').addEventListener('click', (e) => {
       e.stopPropagation();
+      setPop(false);
       const pop = document.getElementById('viewer-settings-popover');
       if (pop && pop.classList.contains('open')) {
         pop.classList.remove('open');
@@ -9893,10 +9606,16 @@
     const lab = label || 'Parsing sessions';
     if (text) text.textContent = current >= total ? 'Done' : `${lab}… ${current} of ${total}`;
   }
-  function showSyncLoader(current, total) { showLoader(current, total, 'Syncing with Drive'); }
+  function showSyncLoader(current, total) {
+    if (!Object.keys(sessionsIndex).length) showLoader(current, total, 'Syncing with Drive');
+    cloud.loader = total > 0 && current < total;
+    if (total > 0) cloud.frac = current / total;
+    paintCloud();
+  }
   function hideLoader() {
     const banner = document.getElementById('viewer-loading');
     if (banner) banner.classList.remove('shown');
+    if (cloud.loader) { cloud.loader = false; paintCloud(); }
   }
 
   // The native restore overlay belongs to the monitor; the viewer never shows it.
@@ -9922,7 +9641,7 @@
       updateWatchLiveUI();
       initDriveUI();
     }
-    if (!location.hash) setHash('month');
+    if (!location.hash) setHash('day');
     // Initial paint — empty-state if nothing's loaded yet.
     route();
     try {
