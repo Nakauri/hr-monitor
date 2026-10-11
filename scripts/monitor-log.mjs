@@ -1,7 +1,8 @@
 // S4b Log row checks, headless. Web monitor on a fake Web Bluetooth strap and a fake auto-save folder:
 // a Symptom tap then Undo writes no row; a held Symptom flushes into the CSV written on Stop, at its tap time;
 // a Note starting sym: or ctx: (any case) is rejected; a held Note flushes on pagehide, sanitised.
-// Phone app on the fake bridge: Symptom and Note write at once through logFact (symptom / marker), no Undo.
+// Phone app on the fake bridge: Symptom and Note write at once through logFact (symptom / marker); Undo writes
+// a rev to the marks store (S9) and drops the mark from the Marks list.
 // Also: the Log row is hidden with no session and in watch mode, 44 px targets at 360, stacked at 200% text,
 // the phone widget fills the width. Page errors fail every case.
 // Usage: node scripts/monitor-log.mjs [--shots <dir>] [--ux <ux-audit dir>]
@@ -236,7 +237,7 @@ try {
     await ctx.close();
   }
 
-  // 3. Phone app on the fake bridge: writes at once, no Undo; layout at 360, 200% text and 1440.
+  // 3. Phone app on the fake bridge: writes at once, Undo is a rev; layout at 360, 200% text and 1440.
   for (const size of ['360', '360-text200', '1440']) {
     const { ctx, page, errs } = await newPage({ phone: size !== '1440', native: true });
     await page.waitForFunction(() => document.getElementById('session-toggle').textContent.trim() === 'Stop session', null, { timeout: 10000 }).catch(() => {});
@@ -273,9 +274,21 @@ try {
       await page.click('#log-symptom');
       const t = await toast(page);
       const facts = await page.evaluate(() => window.__facts.filter((f) => f.kind !== 'posture'));
-      check(t && t.text === 'Symptom logged' && !t.undo, 'native Symptom: toast without Undo', JSON.stringify(t));
+      check(t && t.text === 'Symptom logged' && t.undo, 'native Symptom: toast with Undo', JSON.stringify(t));
       check(facts.length === 1 && facts[0].kind === 'symptom' && facts[0].text === 'sym:symptom', 'native Symptom: logFact symptom sym:symptom at once', JSON.stringify(facts));
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'native-symptom-toast-360.png') });
+      // Undo: the row stays in the segment; a rev for (ep, s, sym:symptom) goes to the marks store.
+      await page.click('.toast-host .undo');
+      await page.waitForTimeout(300);
+      const undone = await page.evaluate(async () => {
+        const recs = window.AortiMarksPage ? window.AortiMarksPage.store.list({ kind: 'rev' }) : [];
+        const mine = await new Promise((res) => { const q = indexedDB.open('aorti_marks'); q.onsuccess = () => { const tx = q.result.transaction('mine'); const g = tx.objectStore('mine').getAll(); tx.oncomplete = () => { res(g.result); q.result.close(); }; }; q.onerror = () => res(null); });
+        return { recs, mine, list: [...document.querySelectorAll('#events .event-label')].map((e) => e.textContent), facts: window.__facts.filter((f) => f.kind !== 'posture').length };
+      });
+      const r0 = undone.recs[0];
+      check(undone.recs.length === 1 && r0.row.ep === facts[0].tsMs && r0.row.k === 's' && r0.row.label === 'sym:symptom' && undone.mine && undone.mine.length === 1,
+        'native Symptom Undo: one rev (fact ep, s, sym:symptom) saved in aorti_marks', JSON.stringify(undone.recs));
+      check(undone.facts === 1 && !undone.list.includes('Symptom'), 'native Symptom Undo: no new fact, the mark leaves the Marks list', JSON.stringify(undone));
       await page.click('#log-note');
       await page.fill('#note-text', 'drank water, sat down');
       await page.keyboard.press('Enter');

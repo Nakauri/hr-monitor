@@ -31,6 +31,15 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 | SDNN (30 s, 5 min, full) | Legacy columns from `HrEngine.java:computeSdnn` | `hrv_viewer.html:sdnnFromRr` recomputes from `rr` | Filter RR in [300, 2000] ms; windows stamped with packet time; full value is running Welford; reset on `g` start and resume | Local harness (not in the repo), 0.01 ms against tee fixtures |
 | Day boundary | n/a | `hrv_viewer.html` day helper module (`dayWindow`, `dayKeyOf`, `localDateLabel`) | Local midnight | `scripts/day-boundary.test.cjs` |
 
+## Marks store (viewer-made marks, `ux-audit/redesign/S9-MARKS-STORE-SPEC.md`)
+
+| Value | Writer | Reader | Authority | Enforcement |
+|-------|--------|--------|-----------|-------------|
+| Record format | `marks-store.js` (`open`: `put`, `fileBody`); the monitor writes `rev` only | `marks-store.js` `invalidReason`, `parseFileBody` (viewer) | Common fields `v id kind m by createdAt updatedAt base deleted`; kinds `sleep tap rev` applied, `added win removed stand note` read and kept for S15; file `HR Monitor Sessions/marks/marks_<YYYY-MM>_<device>.json`, body `{"v":1,"by","m","records"}` | `scripts/marks-store.test.cjs` M1 |
+| Target class names (S15 binding) | report editor (S15) | report moment builder (S15) | `tap@<ep>`, `rise@<ep>`, `above@<ep>`, `steady@<ep>`, `added@<id>`; a detector rename must keep these words | S15 checks B1 to B5 |
+| `rev` match key | monitor `undoNativeMark` (`store.reverse`) | viewer `applyMarks` via `viewMarks` | Exact `ep` (row epoch from `summarizeCSV`), kind `s` for a `sym:` label else `e` (the `addMarker` mapping), sanitised label | `scripts/marks-store.test.cjs` M7, `scripts/marks-pages.mjs` M7, `scripts/segment-format.test.cjs` (writeFact ep) |
+| Fact label rule | `marks-store.js:cleanFactField` | the same rule on both sides of the match | `SegmentWriter.java:clean` (commas, CR, LF to spaces; 80 chars) | `scripts/segment-format.test.cjs` (JS equals Java on the same inputs) |
+
 ## Relay tick wire format
 
 | Field | JS sender | Native sender | Authority | Enforcement |

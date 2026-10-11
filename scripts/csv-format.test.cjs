@@ -136,8 +136,11 @@ if (fnSrc.every(Boolean) && noteMax) {
 const add = jsFunction(monitor, 'addMarker') || '';
 check('addMarker sends kind symptom for a sym: label, marker otherwise',
   /logNativeFact\(\s*\/\^sym:\/i\.test\(label\)\s*\?\s*'symptom'\s*:\s*'marker'/.test(add));
-check('addMarker is the only writer of state.events',
-  (monitor.match(/state\.events\.(push|splice|unshift)\(/g) || []).length === 1 && /state\.events\.splice\(/.test(add));
+// S9: a native Undo removes its own mark from the Marks list (the row stays in the segment; a rev hides it).
+const undo = jsFunction(monitor, 'undoNativeMark') || '';
+check('addMarker is the only writer of state.events; undoNativeMark only removes one',
+  (monitor.match(/state\.events\.(push|splice|unshift)\(/g) || []).length === 2 && /state\.events\.splice\(i, 0, ev\)/.test(add)
+  && /state\.events\.splice\(i, 1\)/.test(undo) && !/state\.events\.(push|unshift)\(|splice\([^)]*,[^)]*,/.test(undo));
 check('the free-text marker input is gone', !/id="marker-label"|id="add-marker"/.test(monitor));
 
 if (failures) {

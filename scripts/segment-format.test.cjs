@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// Schema v2 segment format test. Reads the Java as text, no JVM (behaviour is scripts/jvm/run-segment-test.cjs).
+// Schema v2 segment format test. Reads the Java as text (behaviour is scripts/jvm/run-segment-test.cjs); one JDK 21 probe
+// runs SegmentWriter.writeFact for the S9 marks checks (ep survives exactly; JS and Java label rules agree).
 // Guards: header drift (B7), a kind's field count drifting from BLOCK-B-SPEC.md section 2, null RMSSD as 0 (A7),
 // time_min coming back (S18), the file-name regex drifting from the viewer's, TeeSink getters reading the
 // segment (K1), and a segment open failure leaving the engine with no sink (K2).
 // Run: node scripts/segment-format.test.cjs                              (exit 0 = OK)
 //      node scripts/segment-format.test.cjs --target NativeCsvWriter.java   (negative control; must FAIL)
+//      node scripts/segment-format.test.cjs --mutant ep | --mutant clean    (negative controls; must FAIL)
 
 const fs = require('fs');
 const path = require('path');
@@ -257,6 +259,108 @@ if (symLabel) {
   const row = ['s', '1234', symLabel.replace(/,/g, ' ').replace(/[\r\n]/g, ' ')].join(',');
   const parts = row.split(',');
   check('s row reads back as kind s with one field sym:symptom', parts.length === 2 + SPEC_KINDS.s && parts[0] === 's' && parts[2] === 'sym:symptom', row);
+}
+
+// ---- Marks store (S9): the real writer, then the viewer's reader --------------
+// The JVM writes facts with SegmentWriter.writeFact; the grabbed viewer reads them back. A rev hides a row by
+// (ep, kind, label), so ep must survive exactly and the JS label rule must equal SegmentWriter.clean.
+// Negative controls: --mutant ep (summarizeCSV drops ep) and --mutant clean (JS rule keeps commas) must FAIL.
+{
+  const os = require('os');
+  const vmod = require('vm');
+  const { spawnSync } = require('child_process');
+  const mi = process.argv.indexOf('--mutant');
+  const MUT = mi > 0 ? process.argv[mi + 1] : '';
+  let viewerSrc = viewer.replace(/\r\n/g, '\n');
+  let marksSrc = fs.readFileSync(path.join(ROOT, 'marks-store.js'), 'utf8').replace(/\r\n/g, '\n');
+  const swap = (s, a, b) => { if (!s.includes(a)) throw new Error('mutant anchor missing: ' + a); return s.replace(a, b); };
+  if (MUT === 'ep') viewerSrc = swap(viewerSrc, 'events.push({ t, label: r[idx.event], ep });', 'events.push({ t, label: r[idx.event] });');
+  if (MUT === 'clean') marksSrc = swap(marksSrc, ".replace(/,/g, ' ')", '');
+  const JDK = process.env.JAVA_HOME || 'C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.10.7-hotspot';
+  const jbin = (n) => path.join(JDK, 'bin', n + (process.platform === 'win32' ? '.exe' : ''));
+  const W = Date.UTC(2026, 9, 9, 19, 10, 0);
+  const FACTS = [['s', 'sym:dizzy', W - 3 * 60000], ['e', 'water, glass', W - 14 * 60000], ['s', 'sym:symptom', W]];
+  const LABELS = ['a,b\nc\rd', 'x'.repeat(200), 'Grey, vision\r\n', '', ' sym:dizzy ', 'ü,é' + 'y'.repeat(90)];
+  const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
+  const probe = `package com.nakauri.hrmonitor;
+import java.io.File; import java.nio.file.Files; import java.util.Base64; import java.nio.charset.StandardCharsets;
+public class MarksProbe {
+  public static void main(String[] a) throws Exception {
+    File dir = new File(a[0]);
+    final long[] wall = { ${W}L }; final long[] mono = { 1000000L };
+    Clock c = new Clock() { public long wallMs() { return wall[0]; } public long monoMs() { return mono[0]; } };
+    SegmentWriter w = new SegmentWriter(dir, "abc123", c, ms -> 0, "1.0", "test", "personal", e -> {});
+    w.appendSession(wall[0] - 20L * 60000L, "start", wall[0] - 20L * 60000L);
+    w.appendHr(80, 30.0, 1, 2, 3, null, wall[0] - 20L * 60000L);
+${FACTS.map(([k, l, t]) => `    System.out.println("fact " + w.writeFact("${k}", new String[] { new String(Base64.getDecoder().decode("${b64(l)}"), StandardCharsets.UTF_8) }, ${t}L));`).join('\n')}
+    w.appendHr(81, 30.0, 1, 2, 3, null, wall[0]);
+    w.close();
+    for (File f : dir.listFiles()) System.out.println("file " + f.getName() + " " + Base64.getEncoder().encodeToString(Files.readAllBytes(f.toPath())));
+${LABELS.map(l => `    System.out.println("clean " + Base64.getEncoder().encodeToString(SegmentWriter.clean(new String(Base64.getDecoder().decode("${b64(l)}"), StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8)));`).join('\n')}
+  }
+}
+`;
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'marksjvm-'));
+  try {
+    const srcDir = path.join(work, 'src'), outDir = path.join(work, 'out'), segDir = path.join(work, 'seg');
+    for (const d of [srcDir, outDir, segDir]) fs.mkdirSync(d);
+    const javaFiles = ['HrSink.java', 'Clock.java', 'TzSource.java', 'LifecycleLog.java', 'SegmentWriter.java'].map(f => {
+      const p = path.join(srcDir, f); fs.writeFileSync(p, read(f)); return p;
+    });
+    const probePath = path.join(srcDir, 'MarksProbe.java');
+    fs.writeFileSync(probePath, probe);
+    const cc = spawnSync(jbin('javac'), ['-encoding', 'UTF-8', '-nowarn', '-d', outDir].concat(javaFiles, [probePath]), { encoding: 'utf8' });
+    check('marks probe compiles with JDK 21 (' + JDK + ')', cc.status === 0, (cc.stderr || cc.error || '').toString().split('\n')[0]);
+    const run = cc.status === 0 ? spawnSync(jbin('java'), ['-cp', outDir, 'com.nakauri.hrmonitor.MarksProbe', segDir], { encoding: 'utf8' }) : { stdout: '' };
+    const lines = (run.stdout || '').split(/\r?\n/);
+    check('the writer accepts all three facts', lines.filter(l => l === 'fact true').length === FACTS.length, lines.filter(l => l.startsWith('fact')).join(' '));
+    const fileLine = lines.find(l => l.startsWith('file '));
+    const [, segName, segB64] = fileLine ? fileLine.split(' ') : [];
+    const segText = segB64 ? Buffer.from(segB64, 'base64').toString('utf8') : '';
+    // The viewer's own reader and summary, pulled out by name.
+    const grabV = (name) => {
+      const i = viewerSrc.indexOf('function ' + name + '(');
+      const j = viewerSrc.indexOf('{', viewerSrc.indexOf(')', i));
+      let d = 0;
+      for (let k = j; k < viewerSrc.length; k++) { if (viewerSrc[k] === '{') d++; if (viewerSrc[k] === '}' && !--d) return viewerSrc.slice(i, k + 1); }
+      return '';
+    };
+    const constV = (name) => (viewerSrc.match(new RegExp('^\\s*(?:const|let) ' + name + ' = [^\\n]*;', 'm')) || [''])[0];
+    let code = ['parseSegmentV2', 'v2SessionCsv', 'summarizeCSV'].map(grabV).join('\n');
+    const have = new Set();
+    let out = null, err = null;
+    for (let attempt = 0; attempt < 80 && !out; attempt++) {
+      const ctx = vmod.createContext({ console, Math, JSON, Map, Set, Date, Number, String, Array, Object, parseFloat, parseInt, isNaN, isFinite, Infinity, NaN,
+        localStorage: { getItem() { return null; }, setItem() {} }, window: {}, document: { getElementById() { return null; } }, __seg: segText, __name: segName });
+      try {
+        vmod.runInContext(code + '\n;globalThis.__seg2 = parseSegmentV2(__seg, __name);\n' +
+          "const __sid = __seg2.rows.find(r => r.k === 'g').f[0] * 1;\n" +
+          "globalThis.__sum = summarizeCSV('v2:probe', v2SessionCsv(__sid, __seg2.rows));", ctx);
+        out = { seg: ctx.__seg2, sum: ctx.__sum };
+      } catch (e) {
+        const m = String(e && e.message).match(/^(\w+) is not defined$/);
+        if (!m || have.has(m[1])) { err = e; break; }
+        have.add(m[1]);
+        code = (grabV(m[1]) || constV(m[1])) + '\n' + code;
+      }
+    }
+    check('viewer reads the written segment', !!out, err ? String(err.message) : '');
+    if (out) {
+      const facts = out.seg.rows.filter(r => r.k === 's' || r.k === 'e');
+      check('writeFact(ts) then parseSegmentV2: ep === ts for every fact', facts.length === FACTS.length && FACTS.every(([k, , t], i) => facts[i].k === k && facts[i].ep === t), JSON.stringify(facts.map(r => [r.k, r.ep])));
+      const ev = out.sum.events || [];
+      check('summarizeCSV events keep ep === ts', ev.length === FACTS.length && FACTS.every(([, , t]) => ev.some(e => e.ep === t)), JSON.stringify(ev.map(e => e.ep)));
+    }
+    const mctx = vmod.createContext({ self: {} });
+    vmod.runInContext(marksSrc, mctx);
+    const clean = mctx.self.AortiMarks.cleanFactField;
+    const javaClean = lines.filter(l => l.startsWith('clean ')).map(l => Buffer.from(l.slice(6), 'base64').toString('utf8'));
+    const jsClean = LABELS.map(clean);
+    check('marks-store cleanFactField equals SegmentWriter.clean on ' + LABELS.length + ' inputs', javaClean.length === LABELS.length && javaClean.every((v, i) => v === jsClean[i]),
+      JSON.stringify(javaClean.map((v, i) => v === jsClean[i] ? 'ok' : [v, jsClean[i]])));
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
 }
 
 if (failures) {

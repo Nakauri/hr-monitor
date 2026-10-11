@@ -152,6 +152,10 @@
           return Object.keys(JSON.parse(raw)).length;
         } catch (e) { return -1; }
       })(),
+      marks: (function () {
+        if (isDemoView() || !window.AortiMarksPage || typeof window.AortiMarksPage.diag !== 'function') return null;
+        try { return window.AortiMarksPage.diag(); } catch (e) { return null; }
+      })(),
       driveLastSync: (function () {
         if (isDemoView()) return null;
         try {
@@ -406,6 +410,16 @@
           ['Viewer cache (sessions)', String(d.driveMetaCount), d.driveMetaCount > 0 ? 'ok' : ''],
           ['Last viewer sync', d.driveLastSync || 'never', d.driveLastSync ? 'ok' : ''],
         ])}
+        ${d.marks ? rows('Marks', [
+          ['Device', d.marks.device || '—'],
+          ['Marks', String(d.marks.records)],
+          ['Not on Drive', String(d.marks.dirty), d.marks.dirty ? 'warn' : 'ok'],
+          ['Saved on this device', d.marks.persisted, d.marks.persisted === 'yes' ? 'ok' : 'warn'],
+          ['Sync', d.marks.locks ? (d.marks.blocked ? 'Off, another account' : 'On') : 'Marks sync unavailable on this browser', d.marks.locks && !d.marks.blocked ? 'ok' : 'warn'],
+          ['Unreadable files', String(d.marks.badFiles), d.marks.badFiles ? 'warn' : 'ok'],
+          ['Skipped records', String(d.marks.badRecords), d.marks.badRecords ? 'warn' : 'ok'],
+          ['Last error', d.marks.lastError || 'none', d.marks.lastError ? 'err' : 'ok'],
+        ]) : ''}
         ${rows('Session shim', [
           ['init marker', d.sessionShimMarker || 'not loaded', d.isNative ? ok(d.sessionShimMarker === 'true' || d.sessionShimMarker === 'reader') : ''],
           ['isAvailable', yn(d.sessionShimAvailable), d.isNative ? ok(d.sessionShimAvailable) : ''],
@@ -597,8 +611,20 @@
     });
     const purgeBtn = $('hrm-diag-purge');
     purgeBtn.addEventListener('click', async () => {
+      // Marks are uploaded first (5 s deadline in beforePurge); the confirm names what is still only here.
+      let unsynced = 0;
+      const mp = window.AortiMarksPage;
+      if (mp && typeof mp.beforePurge === 'function') {
+        purgeBtn.disabled = true;
+        purgeBtn.textContent = 'Saving marks';
+        try { unsynced = await mp.beforePurge(); } catch (e) { unsynced = mp.store ? mp.store.dirtyCount() : 0; }
+        purgeBtn.textContent = 'Purge app data';
+        purgeBtn.disabled = false;
+        if (!purgeBtn.isConnected) return;
+      }
+      const marksLine = unsynced ? ' ' + unsynced + (unsynced === 1 ? ' mark' : ' marks') + ' not on Drive will be deleted.' : '';
       const go = await window.UI.confirm({ anchor: actions, key: 'diag', danger: true, title: 'Purge app data',
-        text: 'Clears sign-in, settings, cached sessions and logs on this device, then reloads. Recording files stay.', confirmLabel: 'Purge' });
+        text: 'Clears sign-in, settings, cached sessions and logs on this device, then reloads. Recording files stay.' + marksLine, confirmLabel: 'Purge' });
       if (!go || !purgeBtn.isConnected) return;
       purgeBtn.textContent = 'Purging';
       purgeBtn.disabled = true;
@@ -610,7 +636,7 @@
         } catch (e) {}
         try { sessionStorage.clear(); } catch (e) {}
         try {
-          const dbs = (indexedDB.databases && (await indexedDB.databases())) || [{ name: 'hr_monitor_kv' }];
+          const dbs = (indexedDB.databases && (await indexedDB.databases())) || [{ name: 'hr_monitor_kv' }, { name: 'aorti_marks' }];
           await Promise.all(dbs.filter(d => d && d.name).map(d => new Promise((resolve) => {
             const req = indexedDB.deleteDatabase(d.name);
             req.onsuccess = req.onerror = req.onblocked = () => resolve();
@@ -656,6 +682,15 @@
     lines.push('Drive:');
     lines.push('  native:   ' + (d.driveNativeOverride ? 'override present' : 'not overridden'));
     lines.push('  auth:     ' + (d.driveSignedIn ? 'signed in' : 'not signed in'));
+    if (d.marks) {
+      lines.push('Marks:');
+      lines.push('  device:   ' + d.marks.device);
+      lines.push('  records:  ' + d.marks.records + ', not on Drive ' + d.marks.dirty);
+      lines.push('  saved:    ' + d.marks.persisted);
+      lines.push('  sync:     ' + (d.marks.locks ? (d.marks.blocked ? 'off, another account' : 'on') : 'unavailable (no navigator.locks)'));
+      lines.push('  bad:      files ' + d.marks.badFiles + ', records ' + d.marks.badRecords);
+      lines.push('  error:    ' + (d.marks.lastError || 'none'));
+    }
     lines.push('Session shim:');
     lines.push('  marker:   ' + (d.sessionShimMarker || 'not loaded'));
     lines.push('  avail:    ' + (d.sessionShimAvailable ? 'yes' : 'no') + (d.sessionShimMode ? ' (' + d.sessionShimMode + ')' : ''));

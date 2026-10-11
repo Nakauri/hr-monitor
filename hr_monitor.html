@@ -39,6 +39,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
+<script src="./marks-store.js"></script>
+<script src="./marks-drive.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <script src="./widget.js"></script>
 <script>HRWidget.watchPhoneLayout();</script>
@@ -5252,7 +5254,7 @@
     return true;
   }
 
-  // Log row. Native taps write at once (logFact is append-only until the marks store);
+  // Log row. Native taps write at once (logFact is append-only; their Undo is a rev in the marks store);
   // web taps hold for the Undo window, so Undo drops the row before it is written.
   const SYMPTOM_LABEL = 'sym:symptom';
   const NOTE_MAX = 80;
@@ -5291,7 +5293,8 @@
       return;
     }
     if (marksWriteNative()) {
-      if (addMarker(m.label, m.at, m.hr, m.rmssd)) UI.toast(word + ' logged');
+      if (!addMarker(m.label, m.at, m.hr, m.rmssd)) return;
+      UI.toast(word + ' logged', canUndoNative(m) ? { ms: MARK_HOLD_MS, undo: () => undoNativeMark(m) } : undefined);
       return;
     }
     // One Undo at a time: an earlier held mark commits when a new toast replaces its own.
@@ -5300,6 +5303,34 @@
     m.timer = setTimeout(() => commitHeld(m), MARK_HOLD_MS);
     const t = UI.toast(word + ' logged', { ms: MARK_HOLD_MS, undo: () => { dropHeld(m); if (heldToast === t) heldToast = null; } });
     heldToast = t;
+  }
+
+  // Native rows are append-only: Undo writes a rev to the marks store and the viewer hides the row.
+  // The monitor only writes marks; it never reads or applies them.
+  let marksPage = null;
+  function marksInitMonitor() {
+    if (!window.AortiMarksDrive) return;
+    window.AortiMarksDrive.attachPage({
+      idb: window.indexedDB || null,
+      persist: navigator.storage && navigator.storage.persist ? () => navigator.storage.persist() : null,
+      driveFetch,
+      rootId: () => driveFolderId,
+      canSync: () => !!(driveAccessToken && driveFolderId) && (typeof driveSyncOn !== 'function' || driveSyncOn()),
+      locks: navigator.locks || null,
+      read: false,
+    }).then((p) => { marksPage = p; window.AortiMarksPage = p; })
+      .catch((e) => console.warn('[marks] init failed', e && e.message));
+  }
+  function canUndoNative(m) {
+    return !!(marksPage && !marksPage.memoryOnly && window.AortiMarks && Date.now() - m.at <= window.AortiMarks.UNDO_LIMIT_MS);
+  }
+  function undoNativeMark(m) {
+    if (!canUndoNative(m)) return;
+    marksPage.store.reverse({ ep: m.at, label: m.label }).then(() => {
+      const t = (m.at - state.startTime) / 60000;
+      const i = state.events.findIndex((ev) => ev.t === t && ev.label === m.label);
+      if (i >= 0) { state.events.splice(i, 1); renderEvents(); }
+    }).catch((e) => console.warn('[marks] undo failed', e && e.message));
   }
 
   // Same rule as SegmentWriter's fact fields: commas and line breaks to spaces, 80 characters.
@@ -6569,6 +6600,7 @@
       afterStopCsv = null;
       $('after-stop-export').hidden = true;
     });
+    marksInitMonitor();
     // Google Drive big toggle: click signs in when signed out. When signed in,
     // the toggle is informational (email shown below); a separate Sign-out
     // link handles the sign-out action without a confirm dialog.
