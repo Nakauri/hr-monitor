@@ -3411,6 +3411,21 @@
     return out;
   }
 
+  // An s field is <class>:<label> (class sym or ctx); a bare value reads as sym:<value>.
+  function symField(v) {
+    v = String(v == null ? '' : v).trim();
+    return /^(sym|ctx):/i.test(v) ? v : 'sym:' + (v || 'symptom');
+  }
+  // An event cell starting sym: is a symptom mark and ctx: a context tick, from a web tap or a phone s row alike.
+  function parseMark(raw) {
+    const v = String(raw == null ? '' : raw).trim();
+    const m = /^(sym|ctx):\s*(.*)$/i.exec(v);
+    if (!m) return { kind: 'note', label: v };
+    const sym = m[1].toLowerCase() === 'sym';
+    const word = (m[2] || (sym ? 'symptom' : 'context')).replace(/[_-]+/g, ' ').trim();
+    return { kind: sym ? 'symptom' : 'context', label: word.charAt(0).toUpperCase() + word.slice(1) };
+  }
+
   // One v2 session as a legacy-column CSV; summarizeCSV and loadFullSession read it unchanged.
   function v2SessionCsv(sid, rows) {
     const sd = sdnnFromRr(rows);
@@ -3431,6 +3446,7 @@
           + f2(s.match) + ',' + f2(s.fiveMin) + ',' + f2(s.full) + ',,,,,');
       } else if (r.k === 'c') line(r.ep, { 10: r.f[0] });
       else if (r.k === 'e') line(r.ep, { 8: r.f[0] });
+      else if (r.k === 's') line(r.ep, { 8: symField(r.f[0]) });
       else if (r.k === 'w') line(r.ep, { 9: r.f[0] });
       else if (r.k === 'x') line(r.ep, { 7: '1' });
       else if (r.k === 'p') line(r.ep, { 11: r.f[0] });
@@ -7597,7 +7613,7 @@
   function renderMarkerList(s) {
     const items = [];
     if (activeFilters.event) {
-      for (const e of s.events) items.push({ type: 'event', t: e.t, label: e.label });
+      for (const e of s.events) items.push({ type: 'event', t: e.t, label: parseMark(e.label).label });
     }
     if (activeFilters.warning) {
       for (const w of s.warnSegs) items.push({ type: 'warning', t: w.start, label: warnLabel(w.type) + ' (' + formatDuration(w.end - w.start) + ')' });
@@ -8462,17 +8478,24 @@
       }
     }
     if (activeFilters.event) {
+      const tickColour = getComputedStyle(document.documentElement).getPropertyValue('--text-dim').trim() || 'grey';
       for (const e of s.events) {
-        const eLabel = e.label;
+        const mark = parseMark(e.label);
+        const eLabel = mark.label;
         const eTime = formatDuration(e.t);
+        const tick = mark.kind === 'context';
         annotations['ev_' + idCounter++] = {
           type: 'line',
           xScaleID: 'x',
           xMin: e.t, xMax: e.t,
-          borderColor: '#F7E26B',
-          borderWidth: 2,
-          label: { display: true, content: e.label, position: 'start', backgroundColor: 'rgba(247,226,107,0.18)', color: '#F7E26B', font: { size: 12, weight: '600' }, padding: 4 },
-          enter: (ctx, evt) => annoEnter(e.t, `<b>Event</b><br/>${escape(eLabel)} @ ${eTime}`, evt),
+          markKind: mark.kind,
+          borderColor: tick ? tickColour : '#F7E26B',
+          borderWidth: tick ? 1 : 2,
+          borderDash: tick ? [4, 4] : undefined,
+          label: tick
+            ? { display: true, content: eLabel, position: 'end', backgroundColor: 'transparent', color: tickColour, font: { size: 12, weight: '500' }, padding: 2 }
+            : { display: true, content: eLabel, position: 'start', backgroundColor: 'rgba(247,226,107,0.18)', color: '#F7E26B', font: { size: 12, weight: '600' }, padding: 4 },
+          enter: (ctx, evt) => annoEnter(e.t, `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`, evt),
           leave: annoLeave,
         };
       }
@@ -8644,7 +8667,7 @@
                 if (d && Array.isArray(d.events)) {
                   d.events
                     .filter(e => Math.abs((e.t || 0) - xAt) < 10 / 60)
-                    .forEach(e => extras.push('Event: ' + (e.label || '—')));
+                    .forEach(e => extras.push('Mark: ' + (parseMark(e.label).label || 'none')));
                 }
                 if (d && Array.isArray(d.warnings)) {
                   d.warnings
