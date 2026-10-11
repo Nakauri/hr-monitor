@@ -61,6 +61,11 @@
             android:name="com.nakauri.hrmonitor.HrServiceHeartbeatReceiver"
             android:exported="false" />
 
+        <!-- The notification's Symptom action. Explicit intent only. -->
+        <receiver
+            android:name="com.nakauri.hrmonitor.SymptomReceiver"
+            android:exported="false" />
+
         <!-- Floating HR overlay (Pulsoid-style). Hosts a WindowManager-attached
              View that displays live BPM above other apps. Requires the
              SYSTEM_ALERT_WINDOW permission; user-toggled via long-press on

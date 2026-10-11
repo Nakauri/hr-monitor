@@ -35,6 +35,7 @@ public class ServiceStartPolicyTest {
         linkStates();
         autoEnd();
         texts();
+        symptom();
         detangle();
         System.out.println("\n" + passes + " passed, " + failures + " failed");
         System.exit(failures == 0 ? 0 : 1);
@@ -253,7 +254,7 @@ public class ServiceStartPolicyTest {
         check("[2] no stop: the engine state, else PRE_RESUME",
             ServiceStartPolicy.notificationState(false, true, State.NOT_FOUND) == State.NOT_FOUND
                 && ServiceStartPolicy.notificationState(false, false, State.RECORDING) == State.PRE_RESUME);
-        check("[2] STOPPING text", eq(ServiceStartPolicy.text(State.STOPPING, 0, null, 0), "HR Monitor", "Saving your session."));
+        check("[2] STOPPING text", eq(ServiceStartPolicy.text(State.STOPPING, 0, null, 0), "HR Monitor", "Saving"));
         check("[3] a stale Stop that left prefs live keeps the alarm",
             !ServiceStartPolicy.staleStopCancelsAlarm(true) && ServiceStartPolicy.staleStopCancelsAlarm(false));
         check("[4] a live Stop that lost its claim still releases the wake lock (no newer session)",
@@ -263,11 +264,11 @@ public class ServiceStartPolicyTest {
             ServiceStartPolicy.cancelAlarmAfterLiveStop(true, false) && !ServiceStartPolicy.cancelAlarmAfterLiveStop(false, false)
                 && !ServiceStartPolicy.cancelAlarmAfterLiveStop(true, true));
         check("[nit] ENDED names the bound used", eq(ServiceStartPolicy.endedText(1_800_000L), "HR Monitor",
-            "Session ended after 0.5 hours without the strap.")
-            && eq(ServiceStartPolicy.endedText(H12), "HR Monitor", "Session ended after 12 hours without the strap."));
+            "Ended after 0.5 h without the strap")
+            && eq(ServiceStartPolicy.endedText(H12), "HR Monitor", "Ended after 12 h without the strap"));
         String[] inexact = ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 0, false);
-        check("[nit] inexact alarm: NOT_FOUND names no 10-minute interval", !inexact[1].contains("10 minutes")
-            && ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 0, true)[1].contains("every 10 minutes"));
+        check("[nit] inexact alarm: NOT_FOUND names no 10-minute interval", !inexact[1].contains("10 min")
+            && ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 0, true)[1].contains("every 10 min"));
     }
 
     // Audit batch 2026-10-10: stale-prefs age gate (R3), declined-resume alarm, teardown-aware release.
@@ -310,24 +311,74 @@ public class ServiceStartPolicyTest {
 
     static void texts() {
         System.out.println("[S2] notification text");
-        String[] rec = ServiceStartPolicy.text(State.RECORDING, 82, 41.2, 754_000L);
-        check("RECORDING: HR 82 bpm · HRV 41ms / Recording · 12:34",
-            "HR 82 bpm · HRV 41ms".equals(rec[0]) && "Recording · 12:34".equals(rec[1]));
-        check("PRE_RESUME", eq(ServiceStartPolicy.text(State.PRE_RESUME, 0, null, 0), "HR Monitor", "Resuming your session."));
-        check("RESUMING", eq(ServiceStartPolicy.text(State.RESUMING, 0, null, 0), "HR Monitor", "Resuming your session. Connecting to the strap."));
-        check("RECONNECTING", eq(ServiceStartPolicy.text(State.RECONNECTING, 80, null, 0), "HR Monitor", "Strap disconnected. Reconnecting."));
-        check("NOT_FOUND", eq(ServiceStartPolicy.text(State.NOT_FOUND, 80, null, 0), "HR Monitor", "Strap not found. Trying again every 10 minutes."));
-        check("ENDED", eq(ServiceStartPolicy.text(State.ENDED, 0, null, 0), "HR Monitor", "Session ended after 12 hours without the strap."));
+        String[] rec = ServiceStartPolicy.text(State.RECORDING, 82, 41.2, 4_354_000L);
+        check("RECORDING: HR 82 bpm · HRV 41ms / Live · 1h 12m",
+            "HR 82 bpm · HRV 41ms".equals(rec[0]) && "Live · 1h 12m".equals(rec[1]));
+        check("RECORDING under an hour: Live · 12m", "Live · 12m".equals(ServiceStartPolicy.text(State.RECORDING, 0, null, 754_000L)[1]));
+        check("RECORDING minutes round down, never negative", "Live · 0m".equals(ServiceStartPolicy.text(State.RECORDING, 0, null, 59_999L)[1])
+            && "Live · 0m".equals(ServiceStartPolicy.text(State.RECORDING, 0, null, -5_000L)[1])
+            && "Live · 2h 0m".equals(ServiceStartPolicy.text(State.RECORDING, 0, null, 7_200_000L)[1]));
+        check("PRE_RESUME", eq(ServiceStartPolicy.text(State.PRE_RESUME, 0, null, 0), "HR Monitor", "Resuming"));
+        check("RESUMING", eq(ServiceStartPolicy.text(State.RESUMING, 0, null, 0), "HR Monitor", "Resuming"));
+        check("RECONNECTING", eq(ServiceStartPolicy.text(State.RECONNECTING, 80, null, 0), "HR Monitor", "Reconnecting"));
+        check("NOT_FOUND", eq(ServiceStartPolicy.text(State.NOT_FOUND, 80, null, 0), "HR Monitor", "Strap not found · trying every 10 min"));
+        check("NOT_FOUND, inexact alarm", eq(ServiceStartPolicy.text(State.NOT_FOUND, 80, null, 0, false), "HR Monitor",
+            "Strap not found · trying from time to time"));
+        check("ENDED", eq(ServiceStartPolicy.text(State.ENDED, 0, null, 0), "HR Monitor", "Ended after 12 h without the strap"));
         boolean onlyRecording = true;
         boolean noDash = true;
+        boolean noSeconds = true;
         for (State s : State.values()) {
-            String[] t = ServiceStartPolicy.text(s, 80, 40.0, 60_000L);
+            String[] t = ServiceStartPolicy.text(s, 80, 40.0, 3_725_000L);
             String both = t[0] + " " + t[1];
-            if (s != State.RECORDING && both.contains("Recording")) onlyRecording = false;
+            if (s != State.RECORDING && (both.contains("Live") || both.contains("Recording"))) onlyRecording = false;
+            if (t[1].matches(".*\\d:\\d\\d.*")) noSeconds = false;
             if (both.contains("—") || both.contains("–") || both.contains(" - ")) noDash = false;
         }
-        check("no state but RECORDING says Recording", onlyRecording);
+        check("no state but RECORDING says Live", onlyRecording);
         check("no dashes in any notification text", noDash);
+        check("no body carries a seconds counter", noSeconds);
+    }
+
+    static final class View implements ServiceStartPolicy.SymptomView {
+        final boolean active, teardown, boom;
+        final State state;
+        View(boolean active, boolean teardown, State state, boolean boom) {
+            this.active = active; this.teardown = teardown; this.state = state; this.boom = boom;
+        }
+        @Override public boolean isSessionActive() { if (boom) throw new IllegalStateException("boom"); return active; }
+        @Override public boolean isStopTeardownInProgress() { return teardown; }
+        @Override public State linkState() { return state; }
+    }
+
+    // True when symptomShown threw, so a throw can never read as a pass.
+    static boolean shownOrThrew(ServiceStartPolicy.SymptomView v) {
+        try { return ServiceStartPolicy.symptomShown(v); } catch (Throwable t) { return true; }
+    }
+
+    // S5: the notification Symptom action and its receiver.
+    static void symptom() {
+        System.out.println("[S5] symptom");
+        check("symptomWrites: no engine drops", !ServiceStartPolicy.symptomWrites(false, false) && !ServiceStartPolicy.symptomWrites(false, true));
+        check("symptomWrites: engine present, session not active, drops", !ServiceStartPolicy.symptomWrites(true, false));
+        check("symptomWrites: session active writes", ServiceStartPolicy.symptomWrites(true, true));
+        for (State s : State.values()) {
+            boolean want = s == State.RECORDING || s == State.RECONNECTING || s == State.NOT_FOUND;
+            check("showSymptom " + s + " = " + want, ServiceStartPolicy.showSymptom(s) == want);
+        }
+        check("showSymptom null = false", !ServiceStartPolicy.showSymptom(null));
+        long t0 = 2_000_000_000_000L;
+        check("debounce: a tap within 2 s of a write is dropped", ServiceStartPolicy.symptomDebounced(t0, t0 + 1_999L)
+            && ServiceStartPolicy.symptomDebounced(t0, t0));
+        check("debounce: 2 s later, no prior write, or a clock gone backwards writes", !ServiceStartPolicy.symptomDebounced(t0, t0 + 2_000L)
+            && !ServiceStartPolicy.symptomDebounced(0L, t0) && !ServiceStartPolicy.symptomDebounced(t0, t0 - 1L));
+        check("predicate: null engine is false, no throw", !shownOrThrew(null));
+        check("predicate: inactive engine is false, no throw", !shownOrThrew(new View(false, false, State.RECORDING, false)));
+        check("predicate: live and recording is true", shownOrThrew(new View(true, false, State.RECORDING, false)));
+        check("predicate: live with the strap not found is true", shownOrThrew(new View(true, false, State.NOT_FOUND, false)));
+        check("predicate: a stop teardown hides it", !shownOrThrew(new View(true, true, State.RECORDING, false)));
+        check("predicate: resuming hides it", !shownOrThrew(new View(true, false, State.RESUMING, false)));
+        check("predicate: an engine that throws is false, no throw", !shownOrThrew(new View(true, false, State.RECORDING, true)));
     }
 
     static boolean eq(String[] t, String title, String body) { return title.equals(t[0]) && body.equals(t[1]); }

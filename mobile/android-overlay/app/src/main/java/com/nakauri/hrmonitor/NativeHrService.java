@@ -479,14 +479,32 @@ public class NativeHrService extends Service {
         stop.putExtra(EXTRA_SESSION_START_MS, sessionStartMs);
         PendingIntent stopPi = PendingIntent.getService(ctx, 1, stop, piFlags);
 
-        return new NotificationCompat.Builder(ctx, CHANNEL_ID)
+        // Runs before an engine exists on a resume: any failure means no Symptom.
+        boolean sym;
+        try {
+            final HrEngine e = HrEngine.peek();
+            sym = ServiceStartPolicy.symptomShown(e == null ? null : new ServiceStartPolicy.SymptomView() {
+                @Override public boolean isSessionActive() { return e.isSessionActive(); }
+                @Override public boolean isStopTeardownInProgress() { return HrEngine.isStopTeardownInProgress(); }
+                @Override public LinkStatePolicy.State linkState() { return e.linkState(); }
+            });
+        } catch (Throwable t) {
+            sym = false;
+        }
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
             .setSmallIcon(ctx.getResources().getIdentifier("ic_stat_hr", "drawable", ctx.getPackageName()))
             .setContentIntent(content)
             .setOngoing(true)
             .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_LOW);
+        if (sym) {
+            PendingIntent symPi = PendingIntent.getBroadcast(ctx, 3, new Intent(ctx, SymptomReceiver.class), piFlags);
+            b.addAction(0, "Symptom", symPi);
+        }
+        return b.addAction(0, "Open", content)
             .addAction(0, "Stop session", stopPi)
             .build();
     }

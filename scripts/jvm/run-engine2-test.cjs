@@ -12,6 +12,7 @@
 //   lost-claim-leaks-lock ended-fixed-hours inexact-says-10min
 //   audit batch: release-during-other-teardown stale-no-age-limit decline-drops-alarm-on-stopping
 //   detangle: wire-name-inactive rearm-unbounded
+//   S5: symptom-inactive-writes symptom-hidden-not-found symptom-during-teardown symptom-throws live-seconds
 // Run: node scripts/jvm/run-engine2-test.cjs          (exit 0 = test passes AND every mutant fails)
 //      node scripts/jvm/run-engine2-test.cjs none     (the real classes only)
 
@@ -39,7 +40,7 @@ const MUTANTS = {
     'autoEndArmed = nowMs - notFoundSinceMs >= autoEndMs;'],
   'search-late': ['LinkStatePolicy.java', 'nowMs - searchFromMs >= STRAP_SEARCH_MS', 'nowMs - searchFromMs > STRAP_SEARCH_MS'],
   'announce-unclaimed': ['ServiceStartPolicy.java', 'return claimed && REASON_AUTO_END.equals(reason);', 'return REASON_AUTO_END.equals(reason);'],
-  'text-leak': ['ServiceStartPolicy.java', '"Strap not found. Trying again every 10 minutes."', '"Recording paused. Strap not found."'],
+  'text-leak': ['ServiceStartPolicy.java', '"Strap not found · trying every 10 min"', '"Live · strap not found"'],
   // Review batch 2026-10-10.
   'one-133-decides': ['LinkStatePolicy.java', 'if (nowMs < attemptUntilMs) return false;\n', ''],
   'no-retry': ['LinkStatePolicy.java', 'return state == State.NOT_FOUND && nowMs < attemptUntilMs;', 'return false;'],
@@ -56,7 +57,14 @@ const MUTANTS = {
   // Detangle 2026-10-10.
   'wire-name-inactive': ['LinkStatePolicy.java', 'if (!sessionActive || s == null) return "none";', 'if (s == null) return "none";'],
   'rearm-unbounded': ['LinkStatePolicy.java', 'return Math.min(d, PENDING_REARM_MAX_MS);', 'return d;'],
-  'inexact-says-10min': ['ServiceStartPolicy.java', ': "Strap not found. Trying again from time to time."', ': "Strap not found. Trying again every 10 minutes."'],
+  'inexact-says-10min': ['ServiceStartPolicy.java', ': "Strap not found · trying from time to time"', ': "Strap not found · trying every 10 min"'],
+  // S5 notification Symptom.
+  'symptom-inactive-writes': ['ServiceStartPolicy.java', 'return engineNonNull && sessionActive;', 'return engineNonNull;'],
+  'symptom-hidden-not-found': ['ServiceStartPolicy.java', '|| s == LinkStatePolicy.State.NOT_FOUND;', ';'],
+  'symptom-during-teardown': ['ServiceStartPolicy.java', ' && !e.isStopTeardownInProgress()', ''],
+  'symptom-throws': ['ServiceStartPolicy.java', '} catch (Throwable t) {\n            return false;\n        }', '} finally {\n        }'],
+  'symptom-debounce-off': ['ServiceStartPolicy.java', 'nowMs - lastWriteMs < SYMPTOM_DEBOUNCE_MS;', 'false;'],
+  'live-seconds': ['ServiceStartPolicy.java', 'long m = Math.max(0L, ms) / 60_000L;', 'long m = Math.max(0L, ms) / 1_000L;'],
 };
 
 function run(label, mutant) {
