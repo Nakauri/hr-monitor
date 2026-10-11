@@ -1,7 +1,5 @@
 package com.nakauri.hrmonitor;
 
-import java.util.Locale;
-
 // NativeHrService start decisions and the only home of the notification text. Pure Java.
 public final class ServiceStartPolicy {
     private ServiceStartPolicy() {}
@@ -108,7 +106,13 @@ public final class ServiceStartPolicy {
     // The ENDED text names the bound the auto-end used.
     public static String[] endedText(long autoEndMs) {
         String h = hoursLabel(autoEndMs);
-        return new String[] { "HR Monitor", "Session ended after " + h + ("1".equals(h) ? " hour" : " hours") + " without the strap." };
+        return new String[] { "HR Monitor", "Ended after " + h + " h without the strap" };
+    }
+
+    // 4320000 -> "1h 12m", 720000 -> "12m"; whole minutes, rounded down.
+    public static String minutesLabel(long ms) {
+        long m = Math.max(0L, ms) / 60_000L;
+        return m < 60L ? m + "m" : (m / 60L) + "h " + (m % 60L) + "m";
     }
 
     // {title, body}. hr <= 0 means no reading yet; rmssd null means none. exactAlarm false: the
@@ -116,25 +120,56 @@ public final class ServiceStartPolicy {
     public static String[] text(LinkStatePolicy.State state, int hr, Double rmssd, long elapsedMs, boolean exactAlarm) {
         String title = "HR Monitor";
         switch (state) {
-            case RECORDING: {
+            case RECORDING:
                 if (hr > 0) title = "HR " + hr + " bpm" + (rmssd != null ? " · HRV " + Math.round(rmssd) + "ms" : "");
-                long e = Math.max(0L, elapsedMs);
-                return new String[] { title, String.format(Locale.US, "Recording · %d:%02d", e / 60_000L, (e / 1000L) % 60) };
-            }
-            case RESUMING:
-                return new String[] { title, "Resuming your session. Connecting to the strap." };
+                return new String[] { title, "Live · " + minutesLabel(elapsedMs) };
             case RECONNECTING:
-                return new String[] { title, "Strap disconnected. Reconnecting." };
+                return new String[] { title, "Reconnecting" };
             case NOT_FOUND:
-                return new String[] { title, exactAlarm ? "Strap not found. Trying again every 10 minutes."
-                    : "Strap not found. Trying again from time to time." };
+                return new String[] { title, exactAlarm ? "Strap not found · trying every 10 min"
+                    : "Strap not found · trying from time to time" };
             case ENDED:
                 return endedText(LinkStatePolicy.AUTO_END_NOT_FOUND_MS);
             case STOPPING:
-                return new String[] { title, "Saving your session." };
+                return new String[] { title, "Saving" };
+            case RESUMING:
             case PRE_RESUME:
             default:
-                return new String[] { title, "Resuming your session." };
+                return new String[] { title, "Resuming" };
+        }
+    }
+
+    // The notification's Symptom action writes only into a live session.
+    public static boolean symptomWrites(boolean engineNonNull, boolean sessionActive) {
+        return engineNonNull && sessionActive;
+    }
+
+    // A second Symptom tap this soon after a write is the same symptom.
+    public static final long SYMPTOM_DEBOUNCE_MS = 2_000L;
+
+    public static boolean symptomDebounced(long lastWriteMs, long nowMs) {
+        return lastWriteMs > 0L && nowMs >= lastWriteMs && nowMs - lastWriteMs < SYMPTOM_DEBOUNCE_MS;
+    }
+
+    // Symptom shows while the session is live, the strap off included.
+    public static boolean showSymptom(LinkStatePolicy.State s) {
+        return s == LinkStatePolicy.State.RECORDING || s == LinkStatePolicy.State.RECONNECTING
+            || s == LinkStatePolicy.State.NOT_FOUND;
+    }
+
+    // The engine reads the notification predicate needs; null means no engine.
+    public interface SymptomView {
+        boolean isSessionActive();
+        boolean isStopTeardownInProgress();
+        LinkStatePolicy.State linkState();
+    }
+
+    // The notification carries Symptom; never throws, false on any failure.
+    public static boolean symptomShown(SymptomView e) {
+        try {
+            return e != null && e.isSessionActive() && !e.isStopTeardownInProgress() && showSymptom(e.linkState());
+        } catch (Throwable t) {
+            return false;
         }
     }
 }

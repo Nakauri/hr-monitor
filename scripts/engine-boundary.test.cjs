@@ -816,6 +816,60 @@ function detangleChecks() {
 }
 detangleChecks();
 
+// S5: the notification Symptom action reaches the engine through SymptomReceiver, never the Service.
+function symptomChecks() {
+  const R = readSource('SymptomReceiver.java');
+  check('[S5] SymptomReceiver.java exists', R != null);
+  if (R != null) {
+    const rc = codeView(R);
+    const banned = ['startService', 'startForegroundService', 'stopSelf', 'stopService', 'decide', 'START_LOCK']
+      .filter(w => new RegExp('\\b' + w + '\\b').test(rc));
+    check('[S5] SymptomReceiver never starts, stops or decides', banned.length === 0, banned.join(', '));
+    const lits = (R.match(/"(?:[^"\\]|\\.)*"/g) || []).filter(l => /(?:Live|Reconnecting|Strap|Saving|Resuming|Ended|Symptom|Stop session|Open|HR Monitor)/.test(l));
+    check('[S5] SymptomReceiver carries no notification literal', lits.length === 0 && !/\bNotification\w*\b/.test(rc), lits.join(' '));
+    const onr = methodSpans(rc, 'public\\s+void\\s+onReceive')[0];
+    const ob = onr ? rc.slice(onr[0], onr[1]) : '';
+    check('[S5] onReceive calls goAsync, starts one thread, finishes in a finally',
+      /goAsync\s*\(\s*\)/.test(ob) && /new\s+Thread\s*\(/.test(ob) && /finally\s*\{[^}]*\.finish\s*\(\s*\)/.test(ob));
+    check('[S5] the receiver decides through ServiceStartPolicy.symptomWrites and writes sym:symptom',
+      /ServiceStartPolicy\.symptomWrites\s*\(/.test(rc) && /\.logFact\s*\(\s*"symptom"\s*,\s*\w+\s*,\s*"sym:symptom"\s*,\s*null\s*\)/.test(R)
+        && R.includes('"symptom_dropped'));
+  }
+  const man = readRepo('mobile/android-overlay/app/src/main/AndroidManifest.xml');
+  const decl = man && (man.match(/<receiver\b[^>]*SymptomReceiver[^>]*>/) || [''])[0];
+  check('[S5] the manifest declares SymptomReceiver exported="false"', !!decl && /android:exported="false"/.test(decl), decl ? '' : 'absent');
+  const S = readSource('NativeHrService.java');
+  const b = S && methodSpans(codeView(S), 'static\\s+Notification\\s+buildNotificationStatic')[0];
+  check('[S5] buildNotificationStatic found', !!b);
+  if (b) {
+    const bc = codeView(S).slice(b[0], b[1]);
+    const raw = S.slice(b[0], b[1]);
+    const statics = [...bc.matchAll(/\bHrEngine\s*\.\s*(\w+)/g)].map(m => m[1]);
+    const vars = [...bc.matchAll(/\bHrEngine\s+(\w+)\s*=/g)].map(m => m[1]);
+    const inst = vars.length ? [...bc.matchAll(new RegExp('\\b(?:' + vars.join('|') + ')\\s*\\.\\s*(\\w+)', 'g'))].map(m => m[1]) : [];
+    const allowed = new Set(['peek', 'isSessionActive', 'isStopTeardownInProgress', 'linkState']);
+    const reads = statics.concat(inst);
+    check('[S5] buildNotificationStatic reads HrEngine only through peek, isSessionActive, isStopTeardownInProgress, linkState',
+      reads.length > 0 && reads.every(r => allowed.has(r)) && !/HrEngine\s*::/.test(bc), 'reads: ' + reads.join(', '));
+    const calls = [...bc.matchAll(/\b((?:start|stop)\w*|decide)\s*\(/g)].map(m => m[1]);
+    check('[S5] buildNotificationStatic calls no start*, stop* or decide and names no START_LOCK',
+      calls.length === 0 && !/\bSTART_LOCK\b/.test(bc), calls.join(', '));
+    const tryAt = bc.search(/try\s*\{[^}]*HrEngine\.peek\s*\(/);
+    check('[S5] the Symptom predicate runs inside try/catch (Throwable) and goes through symptomShown',
+      tryAt >= 0 && /catch\s*\(\s*Throwable\b[^)]*\)\s*\{\s*sym\s*=\s*false\s*;/.test(bc) && /ServiceStartPolicy\.symptomShown\s*\(/.test(bc));
+    check('[S5] Symptom is an explicit broadcast to SymptomReceiver, added only under if (sym)',
+      /if\s*\(\s*sym\s*\)\s*\{[^}]*PendingIntent\.getBroadcast\s*\([^;]*new\s+Intent\s*\(\s*ctx\s*,\s*SymptomReceiver\.class\s*\)[^}]*addAction\s*\(\s*0\s*,\s*"Symptom"/.test(raw));
+    check('[S5] Open and Stop session actions; Stop stays a service PendingIntent',
+      /addAction\s*\(\s*0\s*,\s*"Open"\s*,\s*content\s*\)/.test(raw) && /addAction\s*\(\s*0\s*,\s*"Stop session"\s*,\s*stopPi\s*\)/.test(raw)
+        && /stopPi\s*=\s*PendingIntent\.getService\s*\(/.test(raw));
+  }
+  const P = readSource('ServiceStartPolicy.java');
+  const sp = P && methodSpans(codeView(P), 'public\\s+static\\s+boolean\\s+symptomShown')[0];
+  check('[S5] ServiceStartPolicy.symptomShown catches Throwable and yields false',
+    !!sp && /catch\s*\(\s*Throwable\b[^)]*\)\s*\{\s*return\s+false\s*;/.test(codeView(P).slice(sp[0], sp[1])));
+}
+symptomChecks();
+
 if (failures) {
   console.error('\n' + failures + ' engine boundary check(s) FAILED.');
   process.exit(1);
