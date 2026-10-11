@@ -90,7 +90,7 @@ check('dayKeyOf only at the data-epoch sites', r.ok, r.detail);
 r = sameSet(callers('localDateLabel'), ['rangeCutoffISO', 'renderWeek', 'bucketKey']);
 check('localDateLabel only at the label sites', r.ok, r.detail);
 // Every day window comes from dayWindow, including the virtual day: key [L3].
-r = sameSet(callers('dayWindow'), ['parseSessionFilename', 'sessionDayPortion', 'buildDaySession', 'eventsInDayRange', 'renderWeek', 'bucketKey', 'dayUnionDuration']);
+r = sameSet(callers('dayWindow'), ['parseSessionFilename', 'sessionDayPortion', 'buildDaySession', 'eventsInDayRange', 'renderWeek', 'bucketKey', 'dayUnionDuration', 'marksScope']);
 check('dayWindow at every window site', r.ok, r.detail);
 const leftover = callers('localDateKeyFromEpoch');
 check('localDateKeyFromEpoch has no caller outside the module', hasModule && leftover.length === 0, leftover.join(', '));
