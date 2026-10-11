@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { uxDir } from './ux-dir.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -15,7 +16,7 @@ const argVal = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i 
 const ROOT = path.resolve(argVal('--root') || path.join(here, '..'));
 const SHOTS = argVal('--shots');
 const [W, H] = (argVal('--size') || '311x238').split('x').map(Number);
-const KIT = argVal('--kit') || 'C:/Users/Khal/Desktop/Mine/HR Monitor/ux-audit/kit/package.json';
+const KIT = argVal('--kit') || path.join(uxDir(here, argVal('--ux')), 'kit', 'package.json');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 
 function serve(root) {

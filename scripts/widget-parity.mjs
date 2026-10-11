@@ -10,13 +10,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { uxDir } from './ux-dir.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const argVal = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const ROOT = path.resolve(argVal('--root') || path.join(here, '..'));
 const VERBOSE = args.includes('--verbose');
-const KIT = argVal('--kit') || 'C:/Users/Khal/Desktop/Mine/HR Monitor/ux-audit/kit/package.json';
+const KIT = argVal('--kit') || path.join(uxDir(here, argVal('--ux')), 'kit', 'package.json');
 
 const TOGGLES = ['no-hr', 'no-hrv', 'no-live-hr', 'no-inline-trends', 'no-palp-chip',
   'no-warning', 'warning-above', 'no-conn-dot', 'conn-live', 'conn-reconnecting'];

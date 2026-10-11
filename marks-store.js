@@ -65,12 +65,12 @@
     if (typeof r.deleted !== 'boolean') return 'deleted';
     if (r.kind === 'rev') {
       const w = r.row;
-      if (!w || !isNum(w.ep) || (w.k !== 's' && w.k !== 'e') || !isStr(w.label)) return 'row';
+      if (!w || !isNum(w.ep) || (w.k !== 's' && w.k !== 'e') || !isStr(w.label) || w.label.length > FACT_FIELD_MAX) return 'row';
       if (r.id !== revId(w)) return 'rev_id';
     }
     if (r.deleted) return '';
     if (r.kind === 'sleep' && !(isNum(r.from) && isNum(r.to) && r.to > r.from)) return 'sleep_span';
-    if (r.kind === 'tap' && !(isNum(r.at) && ['sym', 'ctx', 'note'].indexOf(r.cls) >= 0 && isStr(r.label))) return 'tap_fields';
+    if (r.kind === 'tap' && !(isNum(r.at) && ['sym', 'ctx', 'note'].indexOf(r.cls) >= 0 && isStr(r.label) && r.label.length <= FACT_FIELD_MAX)) return 'tap_fields';
     return '';
   }
 

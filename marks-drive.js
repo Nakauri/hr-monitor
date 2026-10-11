@@ -7,6 +7,8 @@
   const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
   const DEBOUNCE_MS = 3000;
   const PURGE_DEADLINE_MS = 5000;
+  // A month of one device's marks is a few kB; a larger file is not ours to parse.
+  const MAX_FILE_BYTES = 2 * 1024 * 1024;
   const RETRY_MIN_MS = 30000;
   const RETRY_MAX_MS = 10 * 60000;
 
@@ -160,6 +162,7 @@
       const cached = store.files();
       const put = new Map(), keep = [];
       for (const f of listed) {
+        if (Number(f.size) > MAX_FILE_BYTES) continue;
         const c = cached.get(f.id);
         if (c && c.md5 && c.md5 === f.md5Checksum) { keep.push(f.id); continue; }
         // A network or HTTP failure throws (retried next sync); only a body that will not parse is cached as bad.
@@ -280,6 +283,8 @@
     return {
       sync, schedule, flushSoon, beforePurge,
       status() { return { locks: !!locks, lastError: st.lastError, lastSync: st.lastSync, blocked: st.blocked, dirty: store.dirtyCount() }; },
+      // The records a page applies: none while another account is signed in.
+      records() { return st.blocked ? [] : store.all(); },
       _pushMonth: pushMonth,
     };
   }
@@ -326,7 +331,7 @@
     return page;
   }
 
-  const api = { create, attachPage, olderFirst, DEBOUNCE_MS, PURGE_DEADLINE_MS };
+  const api = { create, attachPage, olderFirst, DEBOUNCE_MS, PURGE_DEADLINE_MS, MAX_FILE_BYTES };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AortiMarksDrive = api;
 })(typeof self !== 'undefined' ? self : this);
