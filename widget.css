@@ -495,10 +495,12 @@ body:not(.conn-live):not(.conn-reconnecting) #hr-widget .compact-hrv-value::afte
 }
 body:not(.conn-live):not(.conn-reconnecting) #hr-widget .pip.active { background: var(--w-pip-off); }
 
-/* Phone layout (see the header). Column 1 shrinks with the viewport and the
-   number drops a notch so 3-digit readouts still fit. */
-.phone-widget #overlay-zone .widget-row {
-  width: fit-content;
+/* Phone layout (see the header). The widget fills the width, column 1 shrinks
+   with the viewport and the number drops a notch so 3-digit readouts still fit. */
+body.phone-widget #overlay-zone .widget-row,
+body.phone-widget:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-zone .widget-row {
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
 }
 .phone-widget #hr-widget {

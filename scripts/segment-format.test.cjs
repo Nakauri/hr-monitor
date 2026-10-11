@@ -242,6 +242,23 @@ check('logFact catches Throwable and rejects with a string', /catch\s*\(\s*Throw
 check('logFact rejects bad_kind and no_session, resolves written',
   /"bad_kind"/.test(lf) && /"no_session"/.test(lf) && /call\.reject\(r\)/.test(lf) && /put\("written"/.test(lf));
 
+// ---- s row: the symptom mark (S4b) -------------------------------------------
+// The phone's Log row Symptom (and later the notification Symptom) writes s,<t>,sym:<kind>; Note writes e.
+check('logFact maps symptom to an s row with the text as its one field',
+  /"symptom"\.equals\(kind\)\)\s*\{\s*letter\s*=\s*"s";\s*fields\s*=\s*new\s+String\[\]\s*\{\s*text\s*==\s*null\s*\?\s*""\s*:\s*text\s*\};/.test(logFact));
+check('logFact maps marker to an e row', /"marker"\.equals\(kind\)\)\s*\{\s*letter\s*=\s*"e";/.test(logFact));
+check('fact fields: commas and line breaks to spaces, 80 characters',
+  /s\.replace\(',',\s*' '\)\.replace\('\\r',\s*' '\)\.replace\('\\n',\s*' '\)/.test(w) && /FACT_FIELD_MAX\s*=\s*80/.test(w));
+const mon = fs.readFileSync(path.join(ROOT, 'hr_monitor.html'), 'utf8');
+const symLabel = (mon.match(/const SYMPTOM_LABEL = '([^']*)';/) || [])[1];
+check('monitor Symptom label is sym:symptom', symLabel === 'sym:symptom', String(symLabel));
+check('monitor sends a sym: label as kind symptom', /logNativeFact\(\s*\/\^sym:\/i\.test\(label\)\s*\?\s*'symptom'/.test(mon));
+if (symLabel) {
+  const row = ['s', '1234', symLabel.replace(/,/g, ' ').replace(/[\r\n]/g, ' ')].join(',');
+  const parts = row.split(',');
+  check('s row reads back as kind s with one field sym:symptom', parts.length === 2 + SPEC_KINDS.s && parts[0] === 's' && parts[2] === 'sym:symptom', row);
+}
+
 if (failures) {
   console.log('\n' + failures + ' check(s) failed');
   process.exit(1);
