@@ -14,7 +14,7 @@ const mobileRoot = path.resolve(__dirname, '..');
 const wwwDir = path.join(mobileRoot, 'www');
 
 // Files copied as-is.
-const PASSTHROUGH = ['overlay.html', 'tokens.css', 'widget.css', 'ui.css', 'ui.js', 'widget.js', 'diagnostics.js', 'settings.js', 'auth.js', 'lifecycle-state.js',
+const PASSTHROUGH = ['overlay.html', 'tokens.css', 'widget.css', 'ui.css', 'ui.js', 'widget.js', 'diagnostics.js', 'settings.js', 'auth.js', 'lifecycle-state.js', 'marks-store.js', 'marks-drive.js',
   'assets/fonts/WorkSans-latin.woff2', 'assets/fonts/WorkSans-latin-ext.woff2', 'assets/fonts/OFL.txt'];
 // The Capacitor WebView loads index.html by default; we want it to show the
 // dedicated mobile-first landing (app-home.html), not the scrolling public

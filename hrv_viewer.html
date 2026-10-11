@@ -18,6 +18,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
+<script src="./marks-store.js"></script>
+<script src="./marks-drive.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <link rel="stylesheet" href="./ui.css">
 <script src="./ui.js"></script>
@@ -2244,12 +2246,12 @@
 
   // Drive cloud in the bar: synced, syncing or off. Syncing is the OR of the
   // connection state, a running driveSync (setDriveProgress) and the sync loader.
-  const cloud = { conn: 'off', label: 'off', sync: false, loader: false, frac: 0, watch: null };
+  const cloud = { conn: 'off', label: 'off', sync: false, loader: false, marks: false, frac: 0, watch: null };
   function paintCloud() {
     const bar = document.getElementById('app-bar');
     const btn = document.getElementById('drive-cloud');
     if (!bar || !btn) return;
-    const syncing = cloud.conn === 'syncing' || cloud.sync || (cloud.loader && cloud.conn !== 'off');
+    const syncing = cloud.conn === 'syncing' || cloud.sync || ((cloud.loader || cloud.marks) && cloud.conn !== 'off');
     const changed = bar.classList.contains('syncing') !== syncing;
     bar.classList.toggle('syncing', syncing);
     bar.classList.toggle('drive-off', cloud.conn === 'off');
@@ -2361,6 +2363,7 @@
       await driveSync({ onProgress: showSyncLoader });
       await loadSessions({ onProgress: showSyncLoader });
       route();
+      marksSyncPass().then((moved) => { if (moved) route(); });
     } finally {
       _ensureRunning = false;
       hideLoader();
@@ -3510,7 +3513,7 @@
       const sig = hashStr(JSON.stringify([S.parts, S.segs.map(n => sizes[n] == null ? null : String(sizes[n]))]));
       const hit = cache ? cache.get('sess:' + S.key) : null;
       let summary = null;
-      if (hit && hit.sig === sig) summary = hit.summary;
+      if (hit && hit.sig === sig && hit.summary && hit.summary.__schemaV === SUMMARY_SCHEMA_V) summary = hit.summary;
       else {
         try {
           const parsed = await v2ParseParts(S, readText, memo);
@@ -3532,7 +3535,7 @@
       const near = model.spans.filter(sp => sp[0] <= b + 60000 && sp[1] >= a - 60000);
       const sig = hashStr(JSON.stringify([s.hrCount, s.duration, s.startEpoch, near]));
       const hit = cache ? cache.get('prec:' + fn) : null;
-      let res = hit && hit.sig === sig ? hit : null;
+      let res = hit && hit.sig === sig && (!hit.summary || hit.summary.__schemaV === SUMMARY_SCHEMA_V) ? hit : null;
       if (!res) {
         let text;
         try { text = await readText(fn); } catch (e) { continue; }
@@ -3885,7 +3888,7 @@
     function needsReparse(fn) {
       const c = sessionsIndex[fn];
       return !c || c.__incomplete
-        || c.__schemaV !== 15
+        || c.__schemaV !== SUMMARY_SCHEMA_V
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
         || !('quadPct' in c) || !('restingHR' in c);
     }
@@ -4160,6 +4163,8 @@
     return out;
   }
 
+  // Bump to make every cached summary reparse (legacy index and the v2 sess:/prec: caches).
+  const SUMMARY_SCHEMA_V = 16;
   function summarizeCSV(filename, text) {
     const { rows, header } = parseCSV(text);
     if (!rows.length) {
@@ -4174,7 +4179,7 @@
       return {
         filename,
         __incomplete: true,
-        __schemaV: 15,
+        __schemaV: SUMMARY_SCHEMA_V,
         startEpoch: deriveFileStartEpoch(filename),
         duration: 0,
         hrCount: 0,
@@ -4245,7 +4250,7 @@
         if (v != null && !isNaN(v) && v > 0) sdnnFullSeries.push({ t, v, ep });
       }
       if (r[idx.palpitation] === '1') palpTimes.push(t);
-      if (r[idx.event] && r[idx.event] !== '') events.push({ t, label: r[idx.event] });
+      if (r[idx.event] && r[idx.event] !== '') events.push({ t, label: r[idx.event], ep });
       if (r[idx.warning] && r[idx.warning] !== '') warnings.push({ t, type: r[idx.warning] });
       if (r[idx.connection] && r[idx.connection] !== '') {
         // Normalize: native Android writes past tense ("connected" /
@@ -4596,7 +4601,7 @@
       // re-parse of cached sessionsIndex entries that were produced by older
       // code — otherwise bug fixes in the summarize path never reach past
       // sessions already in the cache.
-      __schemaV: 15,
+      __schemaV: SUMMARY_SCHEMA_V,
     };
     // Per-session quadrant percentages — how much of the session was spent in each
     // autonomic zone. Useful for cross-session POTS-severity trends.
@@ -6335,7 +6340,7 @@
       hr: hasHr,
       rmssd: (data.rmssd || []).some(p => p.y != null),
       maxmin: hasHr,
-      event: (s.events || []).length > 0,
+      event: viewMarks(s).events.length > 0,
       warning: (s.warnSegs || []).length > 0,
       palp: (s.palpClusters || []).length > 0,
       disconnect: (s.connGaps || []).length > 0,
@@ -6608,6 +6613,68 @@
   }
 
 
+  // Marks store (S9): viewer-made marks and reversals beside the recordings, applied at display time.
+  let marksPage = null;
+  let marksVersion = 0;
+  const marksMemo = new WeakMap();
+  async function marksInit() {
+    if (marksPage || !window.AortiMarksDrive) return;
+    try {
+      marksPage = await window.AortiMarksDrive.attachPage({
+        idb: window.indexedDB || null,
+        persist: navigator.storage && navigator.storage.persist ? () => navigator.storage.persist() : null,
+        driveFetch,
+        rootId: () => driveFolderId,
+        rootIds: () => driveRootIds.slice(),
+        canSync: () => !!(driveAccessToken && driveFolderId),
+        locks: navigator.locks || null,
+        read: true,
+      });
+      window.AortiMarksPage = marksPage;
+      marksPage.store.onChange(marksChanged);
+      marksChanged();
+      if (driveAccessToken && driveFolderId) marksSyncPass().then((moved) => { if (moved) route(); });
+    } catch (e) { console.warn('[marks] init failed', e && e.message); }
+  }
+  function marksChanged() {
+    marksVersion++;
+    const st = marksPage ? marksPage.drive.status() : null;
+    cloud.marks = !!(st && st.dirty && st.locks && !st.blocked);
+    paintCloud();
+  }
+  // After driveSync resolves, never inside it; a failure here never reaches the sync result.
+  async function marksSyncPass() {
+    if (!marksPage) return false;
+    try {
+      const r = await marksPage.drive.sync();
+      return !!(r && r.changed);
+    } catch (e) {
+      console.warn('[marks] sync failed', e && e.message);
+      return false;
+    }
+  }
+  // Minutes on a view's axis start at its origin: the day window, or the recording's first epoch.
+  function marksScope(s) {
+    if (s.__virtualDay) {
+      const w = dayWindow(s.__virtualDay);
+      return { originEp: w.start, fromEp: w.start, toEp: w.end };
+    }
+    let origin = null;
+    for (const p of (s.hr || [])) if (p && p.ep != null && Number.isFinite(p.t)) { origin = p.ep - p.t * 60000; break; }
+    if (origin == null) origin = sessionStartEpoch(s, parseSessionFilename(s.filename || ''));
+    return { originEp: origin, fromEp: origin, toEp: origin + (s.duration || 0) * 60000 };
+  }
+  // The events and sleep windows a view shows: reversed rows hidden, viewer marks added.
+  function viewMarks(s) {
+    const raw = (s && s.events) || [];
+    if (!marksPage || !s || marksPage.drive.status().blocked) return { events: raw, sleep: [], hidden: 0 };
+    const hit = marksMemo.get(s);
+    if (hit && hit.v === marksVersion && hit.raw === raw) return hit.out;
+    const out = AortiMarks.applyMarks(raw, marksPage.store.all(), marksScope(s));
+    marksMemo.set(s, { v: marksVersion, raw, out });
+    return out;
+  }
+
   // Auto-poll Drive while an in-session view is open. driveSync already
   // skips unchanged files via modifiedTime, so repeat polls are cheap.
   // Lets the user open a session that's still being recorded on the phone
@@ -6638,6 +6705,7 @@
         await loadSessions({ reusePhone: true });
         route();
       }
+      marksSyncPass().then((moved) => { if (moved) route(); });
     } finally {
       autoPollBusy = false;
     }
@@ -6671,8 +6739,9 @@
 
   function getEffectiveSleepWindows(s) {
     const override = currentSummary && getOverride(currentSummary.filename, 'sleep');
-    if (override) return override;
-    return s.sleepWindows;
+    const base = override || s.sleepWindows;
+    const marked = viewMarks(s).sleep;
+    return marked.length ? AortiMarks.composeSleep(base || [], marked) : base;
   }
 
   // Auto-detect sleep windows: sustained >=30 min of low HR + high RMSSD.
@@ -7570,7 +7639,7 @@
   function renderMarkerList(s) {
     const items = [];
     if (activeFilters.event) {
-      for (const e of s.events) items.push({ type: 'event', t: e.t, label: parseMark(e.label).label });
+      for (const e of viewMarks(s).events) items.push({ type: 'event', t: e.t, label: parseMark(e.label).label });
     }
     if (activeFilters.warning) {
       for (const w of s.warnSegs) items.push({ type: 'warning', t: w.start, label: warnLabel(w.type) + ' (' + formatDuration(w.end - w.start) + ')' });
@@ -8436,7 +8505,7 @@
     }
     if (activeFilters.event) {
       const tickColour = getComputedStyle(document.documentElement).getPropertyValue('--text-dim').trim() || 'grey';
-      for (const e of s.events) {
+      for (const e of viewMarks(s).events) {
         const mark = parseMark(e.label);
         const eLabel = mark.label;
         const eTime = formatDuration(e.t);
@@ -9180,7 +9249,9 @@
       document.getElementById('drive-signin').addEventListener('click', driveSignIn);
       document.getElementById('drive-signout').addEventListener('click', driveSignOut);
       document.getElementById('drive-sync').addEventListener('click', () => {
-        driveSync().catch(e => { console.error(e); setDriveError('sync failed'); });
+        driveSync()
+          .then(async () => { if (await marksSyncPass()) route(); })
+          .catch(e => { console.error(e); setDriveError('sync failed'); });
       });
     }
     const viewSel = document.getElementById('view-select');
@@ -9301,6 +9372,7 @@
       driveLoadMeta();
       driveUpdateUI();
       updateWatchLiveUI();
+      marksInit();
       initDriveUI();
     }
     if (!location.hash) setHash('day');
