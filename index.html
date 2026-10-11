@@ -25,6 +25,11 @@
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<link rel="stylesheet" href="./tokens.css">
+<script src="./widget.js"></script>
+<script>HRWidget.watchPhoneLayout();</script>
+<link rel="stylesheet" href="./widget.css">
 <style>
   :root {
     --bg: #0a0a0a;
@@ -39,14 +44,6 @@
     --accent: #E89858;
     --accent-rmssd: #5DCAA5;
     --ekg: #E84838;
-
-    /* HR stage palette — mirrors the live widget */
-    --stage-low: #7DB8E8;
-    --stage-normal: #B8D97E;
-    --stage-elevated: #F0C75E;
-    --stage-high: #E89858;
-    --stage-critical: #E84838;
-    --warn-palp: #D76CBA;
 
     --ok: #5DCAA5;
     --warn: #F0C75E;
@@ -274,217 +271,8 @@
   }
   .btn-secondary:hover { color: var(--text); border-bottom-color: var(--text-dim); }
 
-  /* ===== Live widget recreation ===== */
-  /* Mirrors widget.css in the real app. Arial Black 900 numbers,
-     heartbeat animation on the icon, cumulative stage pips (low = 1,
-     normal = 2, elevated = 3, high = 4, critical = 5), colour-coded
-     warning banner, two-line HR/HRV trend. */
-  .widget {
-    background: #0a0a0a;
-    border: 1px solid #1f1f1f;
-    border-radius: 16px;
-    padding: 14px 18px;
-    display: grid;
-    grid-template-columns: auto auto;
-    grid-template-rows: auto auto auto auto;
-    gap: 10px 16px;
-    align-items: start;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.4);
-    transition: border-color 0.3s, box-shadow 0.3s, color 0.4s;
-    color: var(--stage-low);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  }
-  .widget.stage-low { color: var(--stage-low); }
-  .widget.stage-normal { color: var(--stage-normal); }
-  .widget.stage-elevated { color: var(--stage-elevated); }
-  .widget.stage-high { color: var(--stage-high); }
-  .widget.stage-critical { color: var(--stage-critical); }
-  .widget.warn-crash { border-color: var(--stage-critical); box-shadow: 0 0 0 1px var(--stage-critical), 0 20px 50px rgba(0,0,0,0.4); }
-
-  .widget-header {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    position: relative;
-  }
-  .widget-header-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .widget-label {
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    color: #8a8a8a;
-    text-transform: uppercase;
-  }
-  .widget-heart {
-    width: 22px;
-    height: 22px;
-    fill: currentColor;
-    animation: heartbeat 1s ease-in-out infinite;
-    transition: color 0.4s;
-  }
-  @keyframes heartbeat {
-    0%, 100% { transform: scale(1); }
-    15% { transform: scale(1.18); }
-    30% { transform: scale(1); }
-    45% { transform: scale(1.12); }
-    60% { transform: scale(1); }
-  }
-
-  .widget-warning {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 10px;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    background: transparent;
-    white-space: nowrap;
-    opacity: 0;
-    transition: opacity 0.25s, border-color 0.3s, background 0.3s;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    margin-left: auto;
-  }
-  .widget-warning.active {
-    opacity: 1;
-    animation: warning-flash 1.5s ease-in-out infinite;
-  }
-  @keyframes warning-flash {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-  }
-  .widget-warning.warn-high { border-color: var(--ekg); background: rgba(232,72,56,0.12); color: var(--ekg); }
-  .widget-warning.warn-crash { border-color: var(--ekg); background: rgba(232,72,56,0.14); color: var(--ekg); }
-  .widget-warning svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 2.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-
-  .widget-number-row {
-    grid-column: 1;
-    grid-row: 2;
-    display: flex;
-    align-items: stretch;
-    gap: 14px;
-    min-width: 0;
-  }
-  .widget-hr {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-weight: 900;
-    font-size: 64px;
-    line-height: 1;
-    letter-spacing: -0.04em;
-    font-variant-numeric: tabular-nums;
-    transition: color 0.4s;
-    text-align: left;
-    flex: 0 0 auto;
-  }
-  .widget-live-trace {
-    flex: 1 1 0;
-    flex-basis: 140px;
-    min-width: 0;
-    height: 68px;
-    overflow: hidden;
-    padding: 6px 0 10px;
-  }
-  .widget-live-trace svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-  }
-  .widget-live-trace .trace {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.4;
-    stroke-linejoin: round;
-  }
-
-  .widget-pips {
-    grid-column: 1;
-    grid-row: 3;
-    margin-top: 6px;
-    display: flex;
-    gap: 6px;
-    height: 6px;
-  }
-  .widget-pip {
-    flex: 1;
-    background: #1a1a1a;
-    border-radius: 2px;
-    transition: background 0.4s;
-  }
-  .widget-pip.active { background: currentColor; }
-
-  .widget-hrv {
-    grid-column: 2;
-    grid-row: 2 / 4;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: flex-end;
-    border-left: 1px solid #1f1f1f;
-    padding-left: 16px;
-  }
-  .widget-hrv-label {
-    font-size: 12px;
-    color: #c8c8c8;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-weight: 700;
-    margin-bottom: 3px;
-  }
-  .widget-hrv-val {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-weight: 900;
-    font-size: 36px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.03em;
-    transition: color 0.4s;
-  }
-  .widget-hrv-unit {
-    font-size: 11px;
-    color: #9a9a9a;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 600;
-    margin-top: 4px;
-  }
-
-  .widget-trend {
-    grid-column: 1 / -1;
-    grid-row: 4;
-    height: 64px;
-    min-width: 0;
-    margin-top: 12px;
-    padding: 6px 0 4px;
-    border-top: 1px solid #1f1f1f;
-    overflow: hidden;
-  }
-  .widget-trend svg { width: 100%; height: 100%; display: block; }
-  .widget-trend .hr-line {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.6;
-    stroke-linejoin: round;
-    stroke-linecap: round;
-    transition: stroke 0.4s;
-  }
-  .widget-trend .hrv-line {
-    fill: none;
-    stroke: #c8c8c8;
-    stroke-width: 1.1;
-    stroke-linejoin: round;
-    stroke-dasharray: 3 3;
-    opacity: 0.7;
-  }
-  /* Trend polylines are redrawn on each tick by hero-widget JS from the
-     rolling HR history array, so there's no CSS scroll animation. */
+  /* ===== Hero widget: the real widget (widget.css) fed made-up data ===== */
+  .hero #overlay-zone { min-width: 0; display: flex; justify-content: center; }
 
   /* ===== Section shell ===== */
   section {
@@ -1428,64 +1216,31 @@
     <p class="hero-android-line">On Android? <a href="#android-app">Get the app</a> for recording with the screen off.</p>
   </div>
 
-  <!-- Widget built to match widget.css. Heart icon beats, pips fill
-       cumulatively by stage, Arial Black 900 numbers, warning banner
-       appears when the fake data drives into the high range. -->
-  <div class="widget stage-low" id="hero-widget">
-    <div class="widget-header">
-      <div class="widget-header-left">
-        <svg class="widget-heart" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 7a5.5 5.5 0 0 1 9.5 5c-2.5 4.5-9.5 9-9.5 9z"/>
-        </svg>
-        <span class="widget-label">BPM</span>
+  <div id="overlay-zone" aria-hidden="true">
+    <div class="widget-row">
+      <div class="widget stage-low" id="hr-widget">
+        <div class="widget-header">
+          <div class="header-left">
+            <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+            <span class="widget-label">bpm</span>
+          </div>
+          <div class="warning-banner" id="warning-banner">
+            <span class="warning-banner-icon" id="warning-icon"></span>
+            <span class="warning-banner-text" id="warning-text"></span>
+          </div>
+        </div>
+        <div class="number-row">
+          <div class="big-number" id="hr-big">78</div>
+          <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas><span class="no-strap-text">No strap</span></div>
+        </div>
+        <div class="pips" id="hr-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
+        <div class="compact-hrv" id="compact-hrv">
+          <div class="compact-hrv-label">HRV</div>
+          <div class="compact-hrv-value" id="compact-hrv-value">42</div>
+          <div class="compact-hrv-unit">ms RMSSD</div>
+        </div>
+        <div class="compact-trend"><canvas id="compact-chart"></canvas></div>
       </div>
-      <div class="widget-warning" id="widget-warning">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l10 18H2L12 2z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5"/></svg>
-        <span id="widget-warning-text">Heart rate high</span>
-      </div>
-    </div>
-
-    <div class="widget-number-row">
-      <div class="widget-hr" id="widget-hr">78</div>
-      <div class="widget-live-trace">
-        <svg viewBox="0 0 140 68" preserveAspectRatio="none" aria-hidden="true">
-          <g class="widget-scroll">
-            <polyline class="trace" points="
-              0,36 6,30 12,38 18,28 24,34 30,26 36,34 42,32 48,38 54,28 60,32 66,30 72,36 78,28 84,34 90,30 96,38 102,28 108,32 114,30 120,36 126,30 132,34 138,28 140,32
-              140,36 146,30 152,38 158,28 164,34 170,26 176,34 182,32 188,38 194,28 200,32 206,30 212,36 218,28 224,34 230,30 236,38 242,28 248,32 254,30 260,36 266,30 272,34 278,28 280,32
-            "/>
-          </g>
-        </svg>
-      </div>
-    </div>
-
-    <div class="widget-pips" id="widget-pips">
-      <div class="widget-pip"></div>
-      <div class="widget-pip"></div>
-      <div class="widget-pip"></div>
-      <div class="widget-pip"></div>
-      <div class="widget-pip"></div>
-    </div>
-
-    <div class="widget-hrv">
-      <div class="widget-hrv-label">HRV</div>
-      <div class="widget-hrv-val" id="widget-hrv">42</div>
-      <div class="widget-hrv-unit">MS RMSSD</div>
-    </div>
-
-    <div class="widget-trend">
-      <svg viewBox="0 0 200 56" preserveAspectRatio="none" aria-hidden="true">
-        <g class="widget-scroll">
-          <polyline class="hr-line" points="
-            0,36 10,32 20,38 30,28 40,34 50,26 60,36 70,30 80,34 90,26 100,32 110,28 120,34 130,30 140,36 150,28 160,32 170,30 180,36 190,28 200,32
-            200,36 210,32 220,38 230,28 240,34 250,26 260,36 270,30 280,34 290,26 300,32 310,28 320,34 330,30 340,36 350,28 360,32 370,30 380,36 390,28 400,32
-          "/>
-          <polyline class="hrv-line" points="
-            0,22 10,24 20,20 30,26 40,22 50,28 60,22 70,26 80,22 90,28 100,24 110,26 120,22 130,26 140,20 150,28 160,24 170,26 180,20 190,26 200,22
-            200,22 210,24 220,20 230,26 240,22 250,28 260,22 270,26 280,22 290,28 300,24 310,26 320,22 330,26 340,20 350,28 360,24 370,26 380,20 390,26 400,22
-          "/>
-        </g>
-      </svg>
     </div>
   </div>
 </section>
@@ -1859,112 +1614,69 @@
     else if (/Android/i.test(ua)) document.body.classList.add('android-device');
   })();
 
-  // Hero widget: cycles HR between 75 and 130 so every stage colour is
-  // visible in one loop. Polylines track real HR + HRV history so the
-  // trend shapes actually correspond to the big number (peaks match
-  // peaks, valleys match valleys). Mini trace holds ~30 s; main trace
-  // holds ~3 min. No CSS scroll animation — each tick redraws.
-  (function () {
-    const hrEl = document.getElementById('widget-hr');
-    const hrvEl = document.getElementById('widget-hrv');
-    const pipsEl = document.getElementById('widget-pips');
-    const widgetEl = document.getElementById('hero-widget');
-    const warnEl = document.getElementById('widget-warning');
-    const warnTextEl = document.getElementById('widget-warning-text');
-    if (!hrEl || !hrvEl || !widgetEl) return;
-
-    const miniPoly = widgetEl.querySelector('.widget-live-trace .trace');
-    const mainHrPoly = widgetEl.querySelector('.widget-trend .hr-line');
-    const mainHrvPoly = widgetEl.querySelector('.widget-trend .hrv-line');
-    // Remove the two `<g class="widget-scroll">` wrappers so our polylines
-    // render at their actual X positions without the translate animation.
-    widgetEl.querySelectorAll('.widget-scroll').forEach(g => {
-      while (g.firstChild) g.parentNode.insertBefore(g.firstChild, g);
-      g.remove();
-    });
-
-    const STAGE_PIPS = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 };
-    const MINI_N = 38;   // 30 s at ~800 ms / sample
-    const MAIN_N = 180;  // 3 min at ~1 s / sample
-
-    // Seed the histories so the chart isn't blank for the first cycle.
-    const hrHist = [];
-    const hrvHist = [];
-    for (let i = 0; i < MAIN_N; i++) {
-      const seed = 90 + Math.sin(i * 0.12) * 12;
-      hrHist.push(Math.round(seed));
-      hrvHist.push(Math.round(45 - Math.sin(i * 0.12) * 8));
-    }
-
-    // Map a value to a y-coord in the given viewBox height.
-    function yFor(v, min, max, h, pad) {
-      const clamped = Math.max(min, Math.min(max, v));
-      const t = (clamped - min) / (max - min);
-      return pad + (1 - t) * (h - 2 * pad);
-    }
-
-    function renderPoly(poly, hist, n, w, h, min, max, pad) {
-      if (!poly) return;
-      const slice = hist.slice(-n);
-      const len = slice.length;
-      const pts = slice.map((v, i) => {
-        const x = (i / (n - 1)) * w;
-        return x.toFixed(1) + ',' + yFor(v, min, max, h, pad).toFixed(1);
-      }).join(' ');
-      poly.setAttribute('points', pts);
-    }
-
-    let t = 0;
-    function tick() {
+  // Hero widget: the real widget fed made-up data that sweeps HR from 75 to
+  // 130 so every zone colour shows in one loop. Chart.js loads deferred.
+  document.addEventListener('DOMContentLoaded', function () {
+    const widgetEl = document.getElementById('hr-widget');
+    if (!widgetEl || typeof Chart === 'undefined' || !window.HRWidget) return;
+    document.body.classList.add('conn-live');
+    const W = window.HRWidget;
+    const hrEl = document.getElementById('hr-big');
+    const hrvEl = document.getElementById('compact-hrv-value');
+    const pips = widgetEl.querySelectorAll('.pip');
+    const banner = document.getElementById('warning-banner');
+    const stageOf = (hr) => hr < 85 ? 'stage-low' : hr < 95 ? 'stage-normal' : hr < 110 ? 'stage-elevated' : hr < 125 ? 'stage-high' : 'stage-critical';
+    const hrvStageOf = (v) => v < 20 ? 'stage-critical' : v < 28 ? 'stage-high' : v < 35 ? 'stage-elevated' : v < 60 ? 'stage-normal' : 'stage-low';
+    const live = W.createLiveTraceChart(document.getElementById('hr-live-trace').getContext('2d'));
+    const trend = W.createCompactTrendChart(document.getElementById('compact-chart').getContext('2d'), stageOf);
+    const STEP = 0.8;
+    const hrPts = [], hrvPts = [], beatPts = [];
+    let t = -6.3, sec = 0;
+    function sample() {
       t += 0.028;
-      const mid = 102.5;
-      const amp = 27.5;
-      const base = mid + Math.sin(t * 0.32) * amp;
-      const hr = Math.round(Math.max(75, Math.min(130, base + (Math.random() - 0.5) * 2)));
-      const hrv = Math.round(Math.max(18, Math.min(65, 40 - Math.sin(t * 0.32) * 18 + (Math.random() - 0.5) * 2)));
-      hrEl.textContent = hr;
-      hrvEl.textContent = hrv;
-
-      // Track history and cap length.
-      hrHist.push(hr);
-      hrvHist.push(hrv);
-      if (hrHist.length > MAIN_N) hrHist.shift();
-      if (hrvHist.length > MAIN_N) hrvHist.shift();
-
-      // Repaint the three polylines from the real data.
-      renderPoly(miniPoly, hrHist, MINI_N, 140, 68, 65, 140, 10);
-      renderPoly(mainHrPoly, hrHist, MAIN_N, 200, 56, 65, 140, 6);
-      renderPoly(mainHrvPoly, hrvHist, MAIN_N, 200, 56, 15, 70, 6);
-
-      // Stage bands tuned so a single 75 to 130 cycle passes through all
-      // five colours for the visitor to see.
-      let stage = 'stage-low';
-      if (hr < 85) stage = 'stage-low';
-      else if (hr < 95) stage = 'stage-normal';
-      else if (hr < 110) stage = 'stage-elevated';
-      else if (hr < 125) stage = 'stage-high';
-      else stage = 'stage-critical';
-
-      widgetEl.className = 'widget ' + stage + (hrv < 20 ? ' warn-crash' : '');
-
-      const count = STAGE_PIPS[stage] || 0;
-      Array.from(pipsEl.children).forEach((p, i) => p.classList.toggle('active', i < count));
-
-      const showCrash = hrv < 20;
-      const showHigh = hr >= 120 && !showCrash;
-      if (showCrash) {
-        warnEl.className = 'widget-warning warn-crash active';
-        warnTextEl.textContent = 'HRV crashed';
-      } else if (showHigh) {
-        warnEl.className = 'widget-warning warn-high active';
-        warnTextEl.textContent = 'Heart rate high';
-      } else {
-        warnEl.className = 'widget-warning';
+      const hr = Math.round(Math.max(75, Math.min(130, 102.5 + Math.sin(t * 0.32) * 27.5 + Math.sin(t * 3.1))));
+      const hrv = Math.round(Math.max(18, Math.min(65, 40 - Math.sin(t * 0.32) * 18 + Math.cos(t * 2.3))));
+      sec += STEP;
+      hrPts.push({ x: sec / 60, y: hr });
+      hrvPts.push({ x: sec / 60, y: hrv });
+      beatPts.push({ x: sec, y: hr + Math.sin(sec * 0.9) * 3 });
+      while (hrPts.length && hrPts[0].x < sec / 60 - 3) { hrPts.shift(); hrvPts.shift(); }
+      while (beatPts.length && beatPts[0].x < sec - 45) beatPts.shift();
+      return { hr, hrv };
+    }
+    for (let i = 0; i < 225; i++) sample();
+    function render(v) {
+      const stage = stageOf(v.hr);
+      hrEl.textContent = v.hr;
+      hrvEl.textContent = v.hrv;
+      ['stage-low', 'stage-normal', 'stage-elevated', 'stage-high', 'stage-critical'].forEach((c) => {
+        widgetEl.classList.toggle(c, c === stage);
+        hrvEl.classList.toggle(c, c === hrvStageOf(v.hrv));
+      });
+      const n = W.STAGE_PIPS[stage] || 0;
+      pips.forEach((p, i) => p.classList.toggle('active', i < n));
+      W.tintChart(live, W.STAGE_COLORS[stage]);
+      live.data.datasets[0].data = beatPts.slice();
+      live.options.scales.x.min = Math.max(0, sec - 45);
+      live.options.scales.x.max = Math.max(45, sec);
+      live.update('none');
+      trend.data.datasets[0].data = hrPts.slice();
+      trend.data.datasets[1].data = hrvPts.slice();
+      trend.options.scales.x.min = Math.max(0, sec / 60 - 3);
+      trend.options.scales.x.max = Math.max(3, sec / 60);
+      trend.update('none');
+      const warn = v.hrv < 20 ? 'warn-crash' : v.hr >= 120 ? 'warn-high' : null;
+      widgetEl.classList.toggle('warn-crash', warn === 'warn-crash');
+      banner.classList.remove('warn-high', 'warn-crash', 'active');
+      if (warn) {
+        banner.classList.add(warn, 'active');
+        document.getElementById('warning-icon').innerHTML = W.WARN_ICONS[warn];
+        document.getElementById('warning-text').textContent = W.WARN_TEXT[warn];
       }
     }
-    setInterval(tick, 800);
-    tick();
-  })();
+    render(sample());
+    setInterval(() => render(sample()), STEP * 1000);
+  });
 
   // Hand-curated changelog at /changelog.json. Was previously GitHub
   // Releases, but the CI's rolling-build releases polluted the list with

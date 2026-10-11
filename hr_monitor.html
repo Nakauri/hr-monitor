@@ -39,7 +39,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
+<link rel="stylesheet" href="./tokens.css">
 <script src="./widget.js"></script>
+<script>HRWidget.watchPhoneLayout();</script>
 <script src="./lifecycle-state.js"></script>
 <link rel="stylesheet" href="./widget.css">
 <style>
@@ -59,10 +61,6 @@
        readable and settings don't feel aggressive. Red stays reserved
        for brand + warning states. Name kept for legacy compatibility. */
     --accent-blue: #5DCAA5;
-    --warn-high: #E24B4A;
-    --warn-low: #85B7EB;
-    --warn-crash: #BA7517;
-    --warn-palp: #D76CBA;
     --overlay-bg: rgba(15,15,17,0.85);
   }
   * { box-sizing: border-box; }
@@ -742,14 +740,14 @@
   }
   .autosave-status.writing { color: var(--accent-rmssd); background: rgba(93,202,165,0.1); }
   .autosave-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
-  .autosave-status.denied { color: var(--warn-crash); background: rgba(186,117,23,0.14); }
+  .autosave-status.denied { color: var(--reconnecting); background: rgba(186,117,23,0.14); }
   .autosave-folder.drive-syncing {
     color: var(--accent-rmssd);
     background: rgba(93,202,165,0.1);
     border: 1px solid rgba(93,202,165,0.3);
   }
   .autosave-folder.drive-signedin {
-    color: var(--warn-crash);
+    color: var(--reconnecting);
     background: rgba(186,117,23,0.1);
   }
   .autosave-folder.drive-error {
@@ -1300,7 +1298,7 @@
     color: var(--text-faint);
     background: var(--bg-input);
   }
-  .streaming-status.connecting { color: var(--warn-crash); background: rgba(186,117,23,0.14); }
+  .streaming-status.connecting { color: var(--reconnecting); background: rgba(186,117,23,0.14); }
   .streaming-status.live { color: var(--accent-rmssd); background: rgba(93,202,165,0.12); }
   .streaming-status.ready { color: var(--text-dim); background: rgba(255,255,255,0.04); }
   .streaming-status.listening { color: var(--text-dim); background: rgba(255,255,255,0.04); }
@@ -1688,9 +1686,9 @@
       <div class="widget-header">
         <div class="header-left">
           <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-          <span class="widget-label">BPM</span>
+          <span class="widget-label">bpm</span>
           <span class="palp-chip" id="palp-chip" title="Palpitations in last 60 seconds"><span class="palp-dot"></span><span id="palp-chip-count">0</span></span>
-          <span class="contact-chip" id="contact-chip" title="Strap reports it's not in contact with skin"><span class="contact-chip-dot"></span>OFF BODY</span>
+          <span class="contact-chip" id="contact-chip" title="Strap reports it's not in contact with skin"><span class="contact-chip-dot"></span>Off body</span>
         </div>
         <div class="warning-banner" id="warning-banner">
           <span class="warning-banner-icon" id="warning-icon"></span>
@@ -1700,7 +1698,7 @@
       <div class="number-row">
         <div class="big-number" id="hr-big">—</div>
         <div class="inline-trend"><canvas id="hr-inline-chart"></canvas></div>
-        <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas></div>
+        <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas><span class="no-strap-text">No strap</span></div>
       </div>
       <div class="pips" id="hr-pips">
         <div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div>
@@ -1709,7 +1707,7 @@
       <div class="compact-hrv" id="compact-hrv">
         <div class="compact-hrv-label">HRV</div>
         <div class="compact-hrv-value" id="compact-hrv-value">—</div>
-        <div class="compact-hrv-unit">ms rmssd</div>
+        <div class="compact-hrv-unit">ms RMSSD</div>
       </div>
       <div class="compact-trend">
         <canvas id="compact-chart"></canvas>
@@ -2234,7 +2232,7 @@
     // use identical configs. Any tweak to the live trace or compact trend
     // goes in widget.js, not here.
     hrLiveTraceChart = HRWidget.createLiveTraceChart($('hr-live-trace').getContext('2d'));
-    compactChart = HRWidget.createCompactTrendChart($('compact-chart').getContext('2d'));
+    compactChart = HRWidget.createCompactTrendChart($('compact-chart').getContext('2d'), getHRStage);
     // Main chart - full detail
     mainChart = new Chart($('main-chart').getContext('2d'), {
       type: 'line',
@@ -2668,7 +2666,7 @@
     return 'stage-low';                                       // light blue - excellent (rare)
   }
 
-  const STAGE_PIPS = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 };
+  const STAGE_PIPS = HRWidget.STAGE_PIPS;
   function setPips(containerId, stageClass) {
     const container = $(containerId);
     const pips = container.querySelectorAll('.pip');
@@ -2704,10 +2702,6 @@
       tintChart(hrInlineChart, color);
       tintChart(rsaChart, color);
       tintChart(hrLiveTraceChart, color);
-      if (compactChart) {
-        compactChart.data.datasets[0].borderColor = color;
-        try { compactChart.update('none'); } catch(e) {}
-      }
     } else if (widgetId === 'rmssd-widget') {
       tintChart(rmssdInlineChart, color);
       // Keep compact chart's RMSSD line a fixed neutral so it's always legible against
@@ -2721,20 +2715,8 @@
     el.classList.add(stageClass);
   }
 
-  const WARN_ICONS = {
-    'warn-high': '<svg viewBox="0 0 24 24"><polyline points="17 11 12 6 7 11"></polyline><polyline points="17 17 12 12 7 17"></polyline></svg>',
-    'warn-low': '<svg viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 7 12 12 17 7"></polyline></svg>',
-    'warn-crash': '<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
-    'warn-palp': '<svg viewBox="0 0 24 24"><path d="M3 12h4l2-8 4 16 2-8h6"></path></svg>',
-  };
-  const WARN_TEXT = {
-    'warn-high': 'Heart rate high',
-    'warn-low': 'Heart rate low',
-    'warn-crash': 'HRV crashed',
-    'warn-palp': 'Ectopics high',
-    'status-reconnecting': 'Reconnecting…',
-  };
-  WARN_ICONS['status-reconnecting'] = '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>';
+  const WARN_ICONS = HRWidget.WARN_ICONS;
+  const WARN_TEXT = HRWidget.WARN_TEXT;
 
   // Conn state beats warnings: a low-HRV reading during a sensor dropout is stale.
   function showWarningBanner(warnType) {

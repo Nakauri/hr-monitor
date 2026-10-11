@@ -1,0 +1,59 @@
+/* Design tokens. Every page loads this before widget.css. Dark only.
+   Tints are plain rgba values so OBS's browser source needs no colour mixing.
+   The stream widget re-declares the set so a page's own :root cannot restyle it. */
+:root, #hr-widget, .warning-slot-above {
+  --bg: #0a0a0a;
+  --bg-raised: #101010;
+  --bg-input: #141414;
+  --border: #1f1f1f;
+  --border-control: #666666;
+  --scrim: rgba(0, 0, 0, .6);
+
+  --text: #d8d8d8;
+  --text-dim: #8a8a8a;
+  --on-fill: #0a0a0a;
+
+  --hrv: #5DCAA5;
+  --stage-1: #7DB8E8;
+  --stage-2: #B8D97E;
+  --stage-3: #F0C75E;
+  --stage-4: #E89858;
+  --stage-5: #E24B4A;
+
+  --warn-high: #E24B4A;
+  --warn-low: #7DB8E8;
+  --warn-crash: #E24B4A;
+  --warn-palp: #D76CBA;
+  --warn-high-tint: rgba(226, 75, 74, .12);
+  --warn-low-tint: rgba(125, 184, 232, .12);
+  --warn-crash-tint: rgba(226, 75, 74, .12);
+  --warn-crash-glow: rgba(226, 75, 74, .2);
+  --warn-palp-tint: rgba(215, 108, 186, .14);
+  --live: #5DCAA5;
+  --reconnecting: #BA7517;
+
+  --missing-mark: #767680;
+  --action: #ECECEC;
+  --selected-fill: rgba(236, 236, 236, .08);
+  --danger: #E24B4A;
+
+  /* Stream widget values with no general token. */
+  --w-pip-off: #1f1f1f;
+  --w-dot-off: #3a3a3a;
+  --w-reconnect-edge: #6a6a6a;
+  --w-reconnect-text: #b8b8b8;
+  --w-reconnect-tint: rgba(100, 100, 100, .14);
+
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+  --t12: 12px; --t14: 14px; --t16: 16px; --t20: 20px; --t24: 24px; --t32: 32px; --t48: 48px; --t56: 56px;
+  --r-ctl: 6px; --r-menu: 8px; --r-card: 12px; --r-widget: 16px; --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, .45);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, .5);
+  --z-sticky: 10; --z-menu: 20; --z-sheet: 30; --z-block: 40; --z-toast: 50;
+  --icon: 16px;
+
+  --ui-face: 'Work Sans', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --num-face: 'Arial Black', 'Roboto', sans-serif;
+  --mono: ui-monospace, Consolas, 'Roboto Mono', monospace;
+}

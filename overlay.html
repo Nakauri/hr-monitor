@@ -8,22 +8,15 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<link rel="stylesheet" href="./tokens.css">
 <script src="./widget.js"></script>
 <link rel="stylesheet" href="./widget.css">
 <style>
   /* Page-specific chrome only. All widget rules live in widget.css. */
-  :root {
-    --bg: #0a0a0a;
-    --text: #d8d8d8;
-    --warn-high:  #E89858;
-    --warn-low:   #7DB8E8;
-    --warn-crash: #E24B4A;
-    --warn-palp:  #D76CBA;
-  }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--ui-face);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
     background: transparent;
@@ -88,7 +81,6 @@
     pointer-events: none; padding: 16px;
     background: inherit;
   }
-  #waiting .hint { font-size: 10px; color: #3a3a3a; }
   body.connected #waiting { display: none; }
 
   body.no-dot .conn-indicator { display: none; }
@@ -125,7 +117,6 @@
 
 <div id="waiting">
   <div>◌ Waiting for live app…</div>
-  <div class="hint">Open <b>hr_monitor.html</b> in the same browser and connect the strap.</div>
 </div>
 
 <div id="overlay-zone">
@@ -142,9 +133,9 @@
       <div class="widget-header">
         <div class="header-left">
           <svg class="heart-icon" id="heart-icon" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-          <span class="widget-label">BPM</span>
+          <span class="widget-label">bpm</span>
           <span class="palp-chip" id="palp-chip"><span class="palp-dot"></span><span id="palp-count">0</span></span>
-          <span class="contact-chip" id="contact-chip"><span class="contact-chip-dot"></span>OFF BODY</span>
+          <span class="contact-chip" id="contact-chip"><span class="contact-chip-dot"></span>Off body</span>
         </div>
         <div class="warning-banner" id="warning-banner">
           <span class="warning-banner-icon" id="warning-icon"></span>
@@ -153,13 +144,13 @@
       </div>
       <div class="number-row">
         <div class="big-number" id="hr-big">—</div>
-        <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas></div>
+        <div class="inline-live-trace"><canvas id="hr-live-trace"></canvas><span class="no-strap-text">No strap</span></div>
       </div>
       <div class="pips" id="hr-pips"><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
       <div class="compact-hrv" id="compact-hrv">
         <div class="compact-hrv-label">HRV</div>
         <div class="compact-hrv-value" id="compact-hrv-value">—</div>
-        <div class="compact-hrv-unit">ms rmssd</div>
+        <div class="compact-hrv-unit">ms RMSSD</div>
       </div>
       <div class="compact-trend"><canvas id="compact-chart"></canvas></div>
     </div>
@@ -221,24 +212,12 @@
     el.classList.add(stage || 'stage-normal');
   }
   function setPips(container, stage) {
-    const stageIndex = { 'stage-low': 1, 'stage-normal': 2, 'stage-elevated': 3, 'stage-high': 4, 'stage-critical': 5 }[stage] || 2;
+    const stageIndex = HRWidget.STAGE_PIPS[stage] || 2;
     container.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('active', i < stageIndex));
   }
 
-  const WARN_ICONS = {
-    'warn-high':  '<svg viewBox="0 0 24 24"><polyline points="17 11 12 6 7 11"></polyline><polyline points="17 17 12 12 7 17"></polyline></svg>',
-    'warn-low':   '<svg viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"></polyline><polyline points="7 7 12 12 17 7"></polyline></svg>',
-    'warn-crash': '<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
-    'warn-palp':  '<svg viewBox="0 0 24 24"><path d="M3 12h4l2-8 4 16 2-8h6"></path></svg>',
-    'status-reconnecting': '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>',
-  };
-  const WARN_TEXT = {
-    'warn-high':  'Heart rate high',
-    'warn-low':   'Heart rate low',
-    'warn-crash': 'HRV crashed',
-    'warn-palp':  'Ectopics high',
-    'status-reconnecting': 'Reconnecting…',
-  };
+  const WARN_ICONS = HRWidget.WARN_ICONS;
+  const WARN_TEXT = HRWidget.WARN_TEXT;
   function applyStatusBanner(warnType, connState) {
     let effectiveType = null;
     if (connState === 'reconnecting') effectiveType = 'status-reconnecting';
@@ -313,7 +292,8 @@
 
   const tintChart = HRWidget.tintChart;
   const hrLiveTrace = HRWidget.createLiveTraceChart($('hr-live-trace').getContext('2d'));
-  const compactTrend = HRWidget.createCompactTrendChart($('compact-chart').getContext('2d'));
+  const zones = HRWidget.zoneLearner();
+  const compactTrend = HRWidget.createCompactTrendChart($('compact-chart').getContext('2d'), zones.stageOf);
 
   const broadcastKey = params.get('key');
   const RELAY_HOST = 'wss://hr-relay.nakauri.partykit.dev';
@@ -387,11 +367,9 @@
     applyStage($('compact-hrv-value'), msg.rmssdStage);
     setPips($('hr-pips'), msg.hrStage);
 
+    zones.learn(msg.hr, msg.hrStage);
     const hrColor = STAGE_COLORS[msg.hrStage || 'stage-normal'];
     tintChart(hrLiveTrace, hrColor);
-    if (compactTrend && compactTrend.data.datasets[0]) {
-      compactTrend.data.datasets[0].borderColor = hrColor;
-    }
 
     const palpChip = $('palp-chip');
     if (msg.palpPerMin > 0) {
@@ -455,6 +433,7 @@
       document.body.classList.remove('connected');
       applyStatusBanner(null, 'reconnecting');
     } else if (silent > 3000) {
+      setConnState('reconnecting');
       applyStatusBanner(null, 'reconnecting');
     }
   }, 1500);

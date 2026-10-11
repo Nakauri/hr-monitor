@@ -1,15 +1,40 @@
-/* widget.css — shared widget chrome for hr_monitor.html and overlay.html.
-   Single source of truth for everything that MUST render identically in the
-   monitor preview and the OBS overlay. Page-specific chrome (control panel,
-   chroma-key backgrounds, waiting state, crop guide) stays in its own file.
+/* widget.css — shared widget chrome for hr_monitor.html, overlay.html and the
+   landing hero. Single source of truth for everything that MUST render
+   identically in the monitor preview and the OBS overlay. Page-specific chrome
+   (control panel, chroma-key backgrounds, waiting state, crop guide) stays in
+   its own file. Values come from tokens.css, which every page loads first.
 
-   Colour vars (--warn-high, --warn-low, --warn-crash, --warn-palp) are
-   declared by each page. */
+   The phone layout hangs off .phone-widget, set by the monitor and the landing
+   from matchMedia('(max-width: 480px)'). overlay.html never sets it, so an
+   OBS source of any size keeps the preview layout. */
+
+@font-face {
+  font-family: 'Work Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('assets/fonts/WorkSans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Work Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('assets/fonts/WorkSans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+#hr-widget,
+.warning-slot-above {
+  font-family: var(--ui-face);
+  -webkit-font-smoothing: antialiased;
+}
 
 /* Container that holds the widget card. width: fit-content is load-bearing on
    desktop / OBS so the widget-row hugs its content (cropping and the OBS
    source-size ResizeObserver both rely on this). 500 px cap stops runaway
-   growth; the mobile media query below relaxes to 100% so the widget adapts
+   growth; the .phone-widget rules below relax it to 100% so the widget adapts
    to a narrow viewport instead of overflowing it.
 
    --full-widgets-width is set by hr_monitor.html's ResizeObserver whenever
@@ -33,9 +58,9 @@ body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-z
 /* Widget card + grid. auto auto columns so each column hugs content; grid
    collapses to single column when HRV is hidden (see toggle rules below). */
 #hr-widget {
-  background: #0a0a0a;
-  border: 1px solid #1f1f1f;
-  border-radius: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-widget);
   padding: 14px 18px;
   position: relative;
   transition: border-color 0.3s, box-shadow 0.3s;
@@ -49,7 +74,7 @@ body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-z
 }
 #hr-widget.warn-crash {
   border-color: var(--warn-crash);
-  box-shadow: 0 0 0 1px var(--warn-crash), 0 0 24px rgba(186,117,23,0.2);
+  box-shadow: 0 0 0 1px var(--warn-crash), 0 0 24px var(--warn-crash-glow);
 }
 
 #hr-widget > .widget-header {
@@ -67,15 +92,13 @@ body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-z
   gap: 10px;
 }
 .widget-label {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.1em;
-  color: #8a8a8a;
-  text-transform: uppercase;
+  color: var(--text-dim);
 }
 .heart-icon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   fill: currentColor;
   animation: heartbeat 1s ease-in-out infinite;
   transition: color 0.4s;
@@ -93,13 +116,12 @@ body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-z
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(215,108,186,0.14);
+  border-radius: var(--r-pill);
+  background: var(--warn-palp-tint);
   border: 1px solid var(--warn-palp);
   color: var(--warn-palp);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
 }
 .palp-chip.active { display: inline-flex; }
@@ -113,13 +135,12 @@ body:not(.no-hr):not(.no-hrv):not(.no-live-hr):not(.no-inline-trends) #overlay-z
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(232,152,88,0.12);
+  border-radius: var(--r-pill);
+  background: var(--warn-high-tint);
   border: 1px solid var(--warn-high);
   color: var(--warn-high);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
 }
 body.contact-off .contact-chip { display: inline-flex; }
 .contact-chip-dot {
@@ -151,24 +172,19 @@ body.contact-off .contact-chip { display: inline-flex; }
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #3a3a3a;
+  background: var(--w-dot-off);
   flex-shrink: 0;
   transition: background 0.3s, box-shadow 0.3s;
 }
 .conn-text {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: #8a8a8a;
-  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--text-dim);
   font-weight: 600;
   display: none;
 }
-body.conn-live .conn-dot {
-  background: #5DCAA5;
-  box-shadow: 0 0 6px rgba(93,202,165,0.6);
-}
+body.conn-live .conn-dot { background: var(--live); }
 body.conn-reconnecting .conn-dot {
-  background: #6a6a6a;
+  background: var(--w-reconnect-edge);
   animation: conn-pulse 1.4s ease-in-out infinite;
 }
 body.conn-reconnecting .conn-text { display: inline; }
@@ -187,7 +203,7 @@ body.conn-reconnecting .conn-text { display: inline; }
   min-width: 0;
 }
 #hr-widget .big-number {
-  font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+  font-family: var(--num-face);
   font-weight: 900;
   font-size: 64px;
   line-height: 1;
@@ -230,21 +246,21 @@ body.conn-reconnecting .conn-text { display: inline; }
 }
 .pip {
   flex: 1;
-  background: #1a1a1a;
+  background: var(--w-pip-off);
   border-radius: 2px;
   transition: background 0.4s;
 }
 
-.stage-low { color: #7DB8E8; }
-.stage-low .pip.active { background: #7DB8E8; }
-.stage-normal { color: #B8D97E; }
-.stage-normal .pip.active { background: #B8D97E; }
-.stage-elevated { color: #F0C75E; }
-.stage-elevated .pip.active { background: #F0C75E; }
-.stage-high { color: #E89858; }
-.stage-high .pip.active { background: #E89858; }
-.stage-critical { color: #E24B4A; }
-.stage-critical .pip.active { background: #E24B4A; }
+.stage-low { color: var(--stage-1); }
+.stage-low .pip.active { background: var(--stage-1); }
+.stage-normal { color: var(--stage-2); }
+.stage-normal .pip.active { background: var(--stage-2); }
+.stage-elevated { color: var(--stage-3); }
+.stage-elevated .pip.active { background: var(--stage-3); }
+.stage-high { color: var(--stage-4); }
+.stage-high .pip.active { background: var(--stage-4); }
+.stage-critical { color: var(--stage-5); }
+.stage-critical .pip.active { background: var(--stage-5); }
 
 /* HRV readout (grid column 2). */
 #hr-widget .compact-hrv {
@@ -254,19 +270,17 @@ body.conn-reconnecting .conn-text { display: inline; }
   flex-direction: column;
   justify-content: center;
   align-items: flex-end;
-  border-left: 1px solid #1f1f1f;
+  border-left: 1px solid var(--border);
   padding-left: 16px;
 }
 .compact-hrv-label {
   font-size: 12px;
-  color: #c8c8c8;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
+  color: var(--text);
+  font-weight: 600;
   margin-bottom: 3px;
 }
 .compact-hrv-value {
-  font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+  font-family: var(--num-face);
   font-weight: 900;
   font-size: 36px;
   line-height: 1;
@@ -275,10 +289,8 @@ body.conn-reconnecting .conn-text { display: inline; }
   transition: color 0.4s;
 }
 .compact-hrv-unit {
-  font-size: 11px;
-  color: #9a9a9a;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--text-dim);
   font-weight: 600;
   margin-top: 4px;
 }
@@ -295,7 +307,7 @@ body.conn-reconnecting .conn-text { display: inline; }
   position: relative;
   margin-top: 12px;
   padding: 6px 0 4px;
-  border-top: 1px solid #1f1f1f;
+  border-top: 1px solid var(--border);
   overflow: hidden;
 }
 #hr-widget > .compact-trend canvas {
@@ -313,7 +325,7 @@ body.conn-reconnecting .conn-text { display: inline; }
   gap: 6px;
   padding: 3px 10px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
   /* Widened from 150 so full strings render without the "Heart rate hi..."
      truncation. nowrap + ellipsis stay as a safety net for longer labels. */
@@ -355,27 +367,25 @@ body.conn-reconnecting .conn-text { display: inline; }
 .warning-banner-text {
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.warning-banner.warn-high { border-color: var(--warn-high); background: rgba(232,152,88,0.1); }
+.warning-banner.warn-high { border-color: var(--warn-high); background: var(--warn-high-tint); }
 .warning-banner.warn-high .warning-banner-icon,
 .warning-banner.warn-high .warning-banner-text { color: var(--warn-high); }
-.warning-banner.warn-low { border-color: var(--warn-low); background: rgba(125,184,232,0.1); }
+.warning-banner.warn-low { border-color: var(--warn-low); background: var(--warn-low-tint); }
 .warning-banner.warn-low .warning-banner-icon,
 .warning-banner.warn-low .warning-banner-text { color: var(--warn-low); }
-.warning-banner.warn-crash { border-color: var(--warn-crash); background: rgba(226,75,74,0.14); }
+.warning-banner.warn-crash { border-color: var(--warn-crash); background: var(--warn-crash-tint); }
 .warning-banner.warn-crash .warning-banner-icon,
 .warning-banner.warn-crash .warning-banner-text { color: var(--warn-crash); }
-.warning-banner.warn-palp { border-color: var(--warn-palp); background: rgba(215,108,186,0.14); }
+.warning-banner.warn-palp { border-color: var(--warn-palp); background: var(--warn-palp-tint); }
 .warning-banner.warn-palp .warning-banner-icon,
 .warning-banner.warn-palp .warning-banner-text { color: var(--warn-palp); }
-.warning-banner.status-reconnecting { border-color: #6a6a6a; background: rgba(100,100,100,0.14); }
+.warning-banner.status-reconnecting { border-color: var(--w-reconnect-edge); background: var(--w-reconnect-tint); }
 .warning-banner.status-reconnecting .warning-banner-icon,
-.warning-banner.status-reconnecting .warning-banner-text { color: #b8b8b8; }
+.warning-banner.status-reconnecting .warning-banner-text { color: var(--w-reconnect-text); }
 .warning-banner.status-reconnecting .warning-banner-icon svg { animation: conn-pulse 1.4s ease-in-out infinite; }
 
 /* Above-slot banner: reserved space above the widget, banner can grow to
@@ -444,35 +454,70 @@ body.no-hr.no-hrv.no-live-hr.no-inline-trends #hr-widget { display: none !import
 body.no-live-hr #hr-widget .inline-live-trace { display: none !important; }
 body.no-inline-trends #hr-widget > .compact-trend { display: none !important; }
 
-/* ===== Narrow viewport (≤480px, e.g. phones) =====
-   The widget's max-content width on desktop is ~380px (big-number + 140 px
-   live trace + HRV column). On a 375 or 390-wide phone, content-sized grid
-   columns overflow the viewport. Switch col 1 to minmax(0, 1fr) so the HR
-   column shrinks with available width, and drop the big-number font size a
-   notch so 3-digit readouts still fit. */
-@media (max-width: 480px) {
-  /* On mobile, match desktop's shrink-to-fit behaviour so turning
-     off widgets visibly shrinks the card. Still cap at 100vw so a
-     fully populated widget doesn't overflow the screen. */
-  #overlay-zone .widget-row {
-    width: fit-content;
-    max-width: 100%;
-  }
-  #hr-widget {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px 12px;
-    padding: 12px 14px;
-  }
-  #hr-widget .big-number { font-size: 56px; }
-  #hr-widget .number-row { gap: 10px; min-width: 0; }
-  #hr-widget .inline-live-trace {
-    flex-basis: 0;
-    height: 56px;
-    max-height: 56px;
-  }
-  #hr-widget .compact-hrv {
-    padding-left: 12px;
-  }
-  #hr-widget .compact-hrv-value { font-size: 30px; }
-  #hr-widget > .compact-trend { height: 56px; }
+/* No strap: neither live nor reconnecting. Grey dashes stand in for the
+   numbers and the live trace area reads "No strap". */
+.no-strap-text {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .no-strap-text { display: flex; }
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .inline-live-trace canvas,
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget > .compact-trend canvas { visibility: hidden; }
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .heart-icon { color: var(--missing-mark); animation: none; }
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .big-number,
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .compact-hrv-value {
+  position: relative;
+  color: transparent;
+}
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .big-number::after,
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .compact-hrv-value::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 40px;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: var(--missing-mark);
+}
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .compact-hrv-value::after {
+  left: auto;
+  right: 0;
+  width: 20px;
+  height: 3px;
+}
+body:not(.conn-live):not(.conn-reconnecting) #hr-widget .pip.active { background: var(--w-pip-off); }
+
+/* Phone layout (see the header). Column 1 shrinks with the viewport and the
+   number drops a notch so 3-digit readouts still fit. */
+.phone-widget #overlay-zone .widget-row {
+  width: fit-content;
+  max-width: 100%;
+}
+.phone-widget #hr-widget {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  padding: 12px 14px;
+}
+/* A single column still shrinks with the viewport, so large system text cannot push it wider. */
+body.phone-widget.no-hrv #hr-widget,
+body.phone-widget.no-hr.no-live-hr #hr-widget { grid-template-columns: minmax(0, 1fr) !important; }
+.phone-widget #hr-widget .big-number { font-size: 56px; }
+.phone-widget #hr-widget .number-row { gap: 10px; min-width: 0; }
+.phone-widget #hr-widget .inline-live-trace {
+  flex-basis: 0;
+  height: 56px;
+  max-height: 56px;
+}
+.phone-widget #hr-widget .compact-hrv {
+  padding-left: 12px;
+}
+.phone-widget #hr-widget .compact-hrv-value { font-size: 30px; }
+.phone-widget #hr-widget > .compact-trend { height: 56px; }
