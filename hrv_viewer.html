@@ -400,8 +400,6 @@
   .session-card-time {
     font-size: 12px;
     color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     margin-bottom: 8px;
   }
   .session-card-date {
@@ -414,19 +412,7 @@
     font-weight: 500;
     font-size: 15px;
   }
-  .session-card-cont {
-    display: inline-block;
-    margin-left: 8px;
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--text-dim);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    vertical-align: middle;
-  }
+  .session-card-cont { margin-left: var(--s2); vertical-align: middle; font-weight: 500; color: var(--text-dim); }
   .session-card-stats {
     display: flex;
     gap: 18px;
@@ -441,10 +427,8 @@
   }
   .session-card-stat-label {
     color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-size: 10px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     /* Keep labels on a single line so the number row below always sits at a
        consistent y position across the card grid. */
     white-space: nowrap;
@@ -647,107 +631,22 @@
   .datenav { display: inline-flex; align-items: center; gap: var(--s1); }
   .datenav .day-title { margin: 0 var(--s1); font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
   .datenav .btn.icon .ico { width: 20px; height: 20px; }
-  .day-strip-panel {
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 18px 22px;
-    margin-bottom: 20px;
-  }
+  .datenav .btn.icon { flex: 0 0 44px; }
+  .gaps-note { font-size: var(--t14); color: var(--text-dim); }
   .day-sessions-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin: 28px 0 4px;
+    margin: 28px 0 12px;
   }
-  .day-timeline-btn {
-    padding: 7px 14px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    transition: border-color 0.15s, background 0.15s;
-  }
-  .day-timeline-btn:hover:not(:disabled) {
-    border-color: var(--border-control);
-    background: var(--bg-input);
-  }
-  .day-timeline-btn:disabled { opacity: 0.5; cursor: wait; }
-  .day-strip-label {
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 700;
-    margin-bottom: 14px;
-  }
-  .day-strip {
-    position: relative;
-    height: 56px;
-    background: linear-gradient(90deg, #050505 0%, #0a0a0a 25%, #0d0d0d 50%, #0a0a0a 75%, #050505 100%);
-    border-radius: 8px;
-    overflow: hidden;
-    margin-bottom: 12px;
-  }
-  .day-strip-block {
-    position: absolute;
-    top: 0;
-    height: 100%;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: transform 0.12s, box-shadow 0.12s;
-    border: 1px solid rgba(255,255,255,0.15);
-    min-width: 4px;
-  }
-  /* Day view hover sync — mousing over EITHER a strip block or a session card
-     highlights BOTH in the same way (lift + green outline). Keeps the visual
-     language consistent no matter which side the user is on. */
-  .day-strip-block:hover,
-  .day-strip-block.hovered {
-    transform: translateY(-2px);
-    box-shadow: 0 3px 10px rgba(0,0,0,0.5);
-    outline: 2px solid var(--hrv);
-    outline-offset: 2px;
-    z-index: 2;
-  }
+  .day-sessions-title { margin: 0; font-size: var(--t16); font-weight: 600; color: var(--text); }
+  .day-loading { min-height: 240px; }
   .session-card:hover,
   .session-card.hovered {
     transform: translateY(-2px);
     box-shadow: 0 3px 10px rgba(0,0,0,0.5);
-    border-color: var(--hrv);
-    outline: 1px solid var(--hrv);
-    outline-offset: -1px;
-  }
-  .day-hour-axis {
-    position: relative;
-    height: 18px;
-    font-size: 11px;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-  }
-  .day-hour-tick {
-    position: absolute;
-    top: 0;
-    transform: translateX(-50%);
-    letter-spacing: 0.08em;
-  }
-  .day-hour-gridline {
-    position: absolute;
-    top: 0; bottom: 0;
-    width: 1px;
-    background: rgba(255,255,255,0.05);
-  }
-  .day-strip-empty {
-    padding: 30px 0;
-    text-align: center;
-    color: var(--text-dim);
-    font-size: 13px;
+    border-color: var(--border-control);
   }
 
   /* WEEK VIEW */
@@ -936,38 +835,39 @@
     min-height: 0;
   }
 
-  /* Summary header */
+  /* Summary header: a fixed grid of stats, neutral values, kebab top right. */
   .summary-bar {
-    display: flex;
-    gap: 24px;
     background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 18px 22px;
-    flex-wrap: wrap;
+    padding: 16px 64px 16px 20px;
     position: relative;
+  }
+  /* Columns in em so larger text gives fewer columns. */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr));
+    gap: 16px 24px;
+    font-size: var(--t14);
   }
   .summary-bar-title {
     display: none;
     align-items: center;
     min-height: 44px;
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--t14);
     font-weight: 600;
-    flex: 0 0 auto;
+    color: var(--text);
   }
   .summary-bar-kebab {
     display: inline-flex;
     position: absolute;
     top: 8px;
     right: 8px;
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     background: transparent;
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r-ctl);
     color: var(--text-dim);
     cursor: pointer;
     align-items: center;
@@ -975,94 +875,108 @@
     padding: 0;
     z-index: 2;
   }
-  .summary-bar-kebab svg { width: 16px; height: 16px; }
-  .summary-bar-kebab:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+  .summary-bar-kebab .ico { width: 20px; height: 20px; }
+  .summary-bar-kebab:hover, .summary-bar-kebab[aria-expanded="true"] { color: var(--text); background: var(--selected-fill); }
   .summary-bar-menu {
     position: absolute;
-    top: 44px;
+    top: 56px;
     right: 8px;
-    min-width: 220px;
+    width: 260px;
+    max-width: calc(100vw - 32px);
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
     background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 10px 6px 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-    z-index: 20;
+    border: 1px solid var(--border-control);
+    border-radius: var(--r-menu);
+    padding: var(--s2) var(--s1);
+    box-shadow: var(--shadow-2);
+    z-index: var(--z-menu);
     display: flex;
     flex-direction: column;
-    gap: 2px;
   }
   .summary-bar-menu[hidden] { display: none; }
   .summary-bar-menu-head {
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: var(--t12);
     font-weight: 600;
-    padding: 2px 10px 6px;
+    color: var(--text-dim);
+    padding: var(--s2) var(--s3) var(--s1);
   }
   .summary-bar-menu label {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
-    border-radius: 6px;
+    gap: var(--s3);
+    min-height: var(--target);
+    padding: 0 var(--s3);
+    border-radius: var(--r-ctl);
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--t14);
     color: var(--text);
     user-select: none;
   }
-  .summary-bar-menu label:hover { background: rgba(255,255,255,0.04); }
+  .summary-bar-menu label:hover { background: var(--selected-fill); }
   .summary-bar-menu label input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--stage-4, #B8D97E);
+    width: 18px;
+    height: 18px;
+    accent-color: var(--action);
     flex: 0 0 auto;
     margin: 0;
   }
   .summary-bar-menu-reset {
-    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    min-height: var(--target);
+    margin: var(--s1) 0;
+    padding: 0 var(--s3);
     background: transparent;
-    border: none;
+    border: 0;
     border-top: 1px solid var(--border);
-    color: var(--text-dim);
-    font-size: 12px;
-    text-align: left;
-    padding: 10px 10px 4px;
-    cursor: pointer;
     border-radius: 0;
+    color: var(--text);
+    font: 500 var(--t14)/1.2 var(--ui-face);
+    text-align: left;
+    cursor: pointer;
   }
-  .summary-bar-menu-reset:hover { color: var(--text); }
+  .summary-bar-menu-reset:hover { background: var(--selected-fill); }
+  .menu-tags { display: flex; flex-wrap: wrap; gap: var(--s2); padding: var(--s1) var(--s3) var(--s2); }
+  .menu-tags #tags-current { display: contents; }
+  .menu-tags .tag-input {
+    flex: 1 1 100%;
+    min-height: var(--target);
+    padding: 0 var(--s3);
+    background: var(--bg-input);
+    border: 1px solid var(--border-control);
+    border-radius: var(--r-ctl);
+    color: var(--text);
+    font: 400 var(--t14)/1.2 var(--ui-face);
+    outline: none;
+  }
+  .menu-tags .tag-input:focus-visible { box-shadow: var(--focus-ring); }
   .summary-stat {
     display: flex;
     flex-direction: column;
-    min-width: 92px;
+    min-width: 0;
   }
   .summary-stat-label {
-    font-size: 10px;
+    font-size: var(--t12);
     color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 600;
+    font-weight: 500;
   }
   .summary-stat-value {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-family: var(--num-face);
     font-weight: 900;
-    font-size: 30px;
+    font-size: 28px;
     line-height: 1.1;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
     margin-top: 4px;
   }
+  .summary-stat-value.hrv { color: var(--hrv); }
+  .summary-stat-value .pct { font-size: var(--t16); }
   .summary-stat-unit {
-    font-size: 11px;
+    font-size: var(--t12);
     color: var(--text-dim);
-    margin-top: 3px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    margin-top: 2px;
   }
-  .summary-stat-value.warn { color: var(--warn-crash); }
-  .summary-stat-value.palp { color: var(--warn-palp); }
 
   /* Chart container
      Fixed height so sibling panels (autonomic interpretation, etc.) expanding
@@ -1082,62 +996,81 @@
     min-height: 280px;
     position: relative;
   }
+  /* Zone strip: the day's HR by zone, gaps hatched; the bright window is what the chart shows. */
   .context-wrap {
-    height: 68px;
-    margin-top: 14px;
+    height: 44px;
+    margin-top: 12px;
     position: relative;
-    background: #050505;
-    border-radius: 8px;
+    background: var(--bg-input);
+    border-radius: var(--r-menu);
     overflow: hidden;
-    border: 1px solid var(--border);
   }
-  .context-wrap canvas { position: absolute; inset: 0; }
-  /* Dim the portion of the session NOT currently in view. Gives a clear "window"
-     metaphor - the bright region is what the main chart shows. */
+  .context-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .context-dim {
     position: absolute;
     top: 0;
     height: 100%;
-    background: rgba(0,0,0,0.65);
+    background: var(--scrim);
     pointer-events: none;
-    transition: none;
   }
   .context-brush {
     position: absolute;
     top: 0;
     height: 100%;
-    background: transparent;
-    border-left: 2px solid var(--hrv);
-    border-right: 2px solid var(--hrv);
+    border: 2px solid var(--action);
+    border-radius: var(--r-ctl);
     pointer-events: none;
     box-sizing: border-box;
   }
-  /* Beefier handles so they're clearly grabbable */
   .context-brush::before, .context-brush::after {
     content: '';
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 10px;
-    height: 28px;
-    background: var(--hrv);
-    opacity: 0.85;
-    pointer-events: auto;
-    cursor: ew-resize;
+    width: 8px;
+    height: 24px;
+    background: var(--action);
+    border: 1px solid var(--bg);
     border-radius: 3px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
   }
-  .context-brush::before { left: -6px; }
-  .context-brush::after { right: -6px; }
+  .context-brush::before { left: -5px; }
+  .context-brush::after { right: -5px; }
   .context-overlay {
     position: absolute;
     inset: 0;
     cursor: crosshair;
-    /* Suppress default touch scrolling so brush drags don't pan the page. */
     touch-action: none;
   }
 
-  /* Chart legend - an inline strip at the top of the chart panel. Flat, bordered below. */
+  /* Axis mode and Reset zoom above the chart. */
+  .chart-tools { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
+  .chart-tools .axis-mode { flex: 0 0 auto; }
+  .chart-tools .axis-mode > button { flex: 0 0 auto; }
+  .chart-tools .reset-zoom { margin-left: auto; }
+  .chart-tools .reset-zoom.hidden { visibility: hidden; }
+
+  /* Layer chips under the strip: on = ring and fill, off = dim outline. */
+  /* Columns sized in em so larger text gives fewer, equal columns. */
+  .layer-toggles { grid-template-columns: repeat(auto-fill, minmax(10em, 1fr)); font-size: var(--t14); margin-top: var(--s3); }
+  .layer-toggles .chip { justify-content: flex-start; gap: var(--s2); min-width: 0; padding: 0 var(--s3); }
+  .layer-toggles .chip[aria-pressed="false"] { color: var(--text-dim); border-color: var(--border); }
+  .layer-toggles .chip:disabled { opacity: .4; cursor: not-allowed; }
+  .layer-toggles .chip .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sw { flex: 0 0 auto; width: 14px; height: 14px; border-radius: 3px; border: 2px solid currentColor; }
+  .sw-hr { color: var(--stage-4); }
+  .sw-rmssd { color: var(--hrv); height: 0; border-width: 2px 0 0; border-style: dashed; border-radius: 0; }
+  .sw-maxmin { color: var(--text); border-radius: 50%; width: 10px; height: 10px; margin: 0 2px; background: currentColor; }
+  .sw-event { color: #F7E26B; width: 10px; height: 10px; margin: 0 2px; transform: rotate(45deg); border-radius: 1px; background: currentColor; }
+  .sw-warning { color: var(--warn-crash); }
+  .sw-disconnect { color: var(--missing-mark); border-style: dashed; }
+  .sw-palp { color: var(--warn-palp); border-radius: 50%; }
+  .sw-delta { color: #B48CFF; }
+  .sw-flush { color: #E8A858; }
+  .sw-chills { color: #85B7EB; }
+  .sw-posture { color: #c8a8e6; }
+  .sw-sleep { color: #6E8CC8; border-style: dashed; }
+
+  /* Month and Week legends. */
   .chart-legend {
     display: flex;
     flex-wrap: wrap;
@@ -1150,26 +1083,6 @@
     color: var(--text-dim);
     letter-spacing: 0.05em;
   }
-  /* Right-align the timeline-mode + reset-zoom buttons inline with the
-     legend row. margin-left: auto eats remaining flex space so the buttons
-     hug the chart's right edge without forcing a row break. */
-  #timeline-mode-toggle { margin-left: auto; }
-  .legend-reset-zoom {
-    padding: 4px 12px;
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 600;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s, background 0.15s, opacity 0.15s;
-  }
-  .legend-reset-zoom:hover { color: var(--text); border-color: var(--border-control); background: var(--bg-input); }
-  .legend-reset-zoom:disabled { opacity: 0; pointer-events: none; }
-  .legend-reset-zoom.hidden { display: none; }
   .chart-legend-item {
     display: flex;
     align-items: center;
@@ -1186,53 +1099,12 @@
     height: 10px;
     border-radius: 50%;
   }
-  .legend-swatch.line {
-    height: 0;
-    border-top: 2px dashed var(--hrv);
-    border-radius: 0;
-  }
-  /* Vertical solid line — for the Event marker so it's visually distinct from
-     the dashed green horizontal RMSSD line. */
-  .legend-swatch.vline {
-    width: 0;
-    height: 14px;
-    border-left: 2px solid #F7E26B;
-    background: transparent;
-    border-radius: 0;
-  }
-  /* Toggleable legend items double as filter controls — clicking one dims/hides
-     that category on the chart and in the marker drawer (single source of truth:
-     activeFilters). Dim + strikethrough signal the "off" state. */
-  .chart-legend-item.toggleable {
-    cursor: pointer;
-    user-select: none;
-    transition: opacity 0.12s;
-  }
-  .chart-legend-item.toggleable:hover { color: var(--text); }
-  .chart-legend-item.toggleable.off {
-    opacity: 0.35;
-    text-decoration: line-through;
-  }
-  .chart-legend-item.toggleable.disabled {
-    opacity: 0.22;
-    cursor: not-allowed;
-    text-decoration: none;
-  }
-  .chart-legend-item.toggleable.disabled:hover { color: inherit; }
-  .filter-chip.disabled {
-    opacity: 0.28;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
-  /* Autonomic analysis OFF: completely remove interpretive UI. Users who don't
-     want autonomic framing get a clean descriptive-only view — no flush / chills
-     chips, no HR×HRV quadrant panel. The underlying data (HR shifts, palps, etc)
-     is still visible so patterns can be discovered naturally. */
+  /* Autonomic analysis off: no flush or chills layers and no quadrant panel. */
   body.no-autonomic .interp-panel,
   body.no-autonomic .filter-chip[data-type="flush"],
   body.no-autonomic .filter-chip[data-type="chills"],
-  body.no-autonomic .chart-legend-item[data-type="flush"],
-  body.no-autonomic .chart-legend-item[data-type="chills"] { display: none !important; }
+  body.no-autonomic .layer-chip[data-layer="flush"],
+  body.no-autonomic .layer-chip[data-layer="chills"] { display: none !important; }
 
   /* Annotation hover "banner" — pinned to the top-center of the chart canvas
      so it coexists cleanly with Chart.js's own HR/RMSSD tooltip (which follows
@@ -1270,108 +1142,97 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
     cursor: pointer;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    font-weight: 700;
+    font: 600 var(--t14)/1.3 var(--ui-face);
+    color: var(--text);
+    text-align: left;
   }
   .interp-head:hover { color: var(--text); }
-  .interp-body { margin-top: 12px; }
+  .interp-body { margin-top: 8px; }
   .interp-panel.collapsed .interp-body { display: none; }
-  .interp-caret {
-    width: 10px;
-    height: 10px;
-    transition: transform 0.2s;
-  }
+  .interp-caret { width: 16px; height: 16px; transition: transform 0.2s; }
   .interp-panel.collapsed .interp-caret { transform: rotate(-90deg); }
   .interp-current {
-    padding: 10px 14px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s3) var(--s5);
+    padding: var(--s3) var(--s4);
     background: var(--bg-input);
-    border-radius: 8px;
-    margin-bottom: 10px;
-    font-weight: 600;
+    border-radius: var(--r-menu);
+    margin-bottom: var(--s3);
   }
+  .interp-line { display: flex; flex-direction: column; gap: 2px; }
+  .interp-line-label { font-size: var(--t12); color: var(--text-dim); }
+  .interp-line-value { font-size: var(--t16); font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .interp-current .interp-edit { margin-left: auto; }
   .interp-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 10px;
     margin-top: 6px;
   }
-  /* Quadrant cells are TOGGLE BUTTONS that overlay matching time ranges on the chart */
+  /* Quadrant cells toggle their time ranges on the chart. */
   .interp-cell {
-    padding: 11px 14px;
+    padding: 12px 52px 12px 14px;
     border: 1px solid var(--border);
     border-left: 4px solid var(--text-dim);
-    background: rgba(255,255,255,0.015);
-    border-radius: 8px;
+    background: transparent;
+    border-radius: var(--r-menu);
     cursor: pointer;
     user-select: none;
     color: var(--text-dim);
-    transition: background 0.15s, border-color 0.15s, transform 0.1s, color 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
     position: relative;
+    min-height: 44px;
   }
-  .interp-cell:hover {
-    background: rgba(255,255,255,0.04);
-    transform: translateY(-1px);
-  }
+  .interp-cell:hover { background: var(--selected-fill); }
   .interp-cell .interp-title {
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    margin-bottom: 5px;
-    font-size: 12px;
-    text-transform: uppercase;
-    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: var(--t14);
+    color: var(--text);
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
   }
   .interp-empty-badge {
-    font-size: 10px;
+    font-size: var(--t12);
     color: var(--text-dim);
     font-weight: 500;
-    letter-spacing: 0.02em;
-    text-transform: none;
-    font-style: italic;
   }
-  /* Active (toggled ON) state for each tone */
-  .interp-cell.on { color: var(--text); background: rgba(255,255,255,0.05); border-left-width: 6px; }
-  .interp-cell.on .interp-title { color: inherit; }
-  .interp-cell.good.on { border-color: #B8D97E; border-left-color: #B8D97E; background: rgba(184,217,126,0.10); }
-  .interp-cell.good.on .interp-title { color: #B8D97E; }
-  .interp-cell.warn.on { border-color: #E89858; border-left-color: #E89858; background: rgba(232,152,88,0.10); }
-  .interp-cell.warn.on .interp-title { color: #E89858; }
-  .interp-cell.bad.on { border-color: #E24B4A; border-left-color: #E24B4A; background: rgba(226,75,74,0.12); }
-  .interp-cell.bad.on .interp-title { color: #E24B4A; }
-  .interp-cell.ok.on { border-color: var(--hrv); border-left-color: var(--hrv); background: rgba(93,202,165,0.10); }
-  .interp-cell.ok.on .interp-title { color: var(--hrv); }
-  /* Empty state: faded, not toggleable */
+  .interp-empty-badge.has { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .interp-cell.on { color: var(--text); background: var(--selected-fill); border-color: var(--action); border-left-width: 6px; }
+  .interp-cell.good.on { border-left-color: #B8D97E; }
+  .interp-cell.warn.on { border-left-color: #E89858; }
+  .interp-cell.bad.on { border-left-color: #E24B4A; }
+  .interp-cell.ok.on { border-left-color: var(--hrv); }
   .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
-  /* Kebab (⋮) on each quadrant cell opens the shared threshold editor. All four
-     cards share the same HR / HRV cutoffs, so any kebab reaches the same pair. */
   .interp-kebab {
     position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 22px;
-    height: 22px;
+    top: 0;
+    right: 0;
+    width: 44px;
+    height: 44px;
     padding: 0;
-    border: 1px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
     background: transparent;
     color: var(--text-dim);
-    border-radius: 4px;
+    border-radius: var(--r-ctl);
     cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-    font-weight: 700;
-    letter-spacing: -0.08em;
   }
-  .interp-kebab:hover {
-    color: var(--text);
-    background: rgba(255,255,255,0.08);
-    border-color: var(--border-control);
-  }
+  .interp-kebab .ico { width: 18px; height: 18px; }
+  .interp-kebab:hover { color: var(--text); background: var(--selected-fill); }
   #quadrant-thresh-popover {
     position: fixed;
     z-index: 1001;
@@ -1463,73 +1324,27 @@
     border-color: transparent;
     margin-right: auto;
   }
-  #quadrant-thresh-popover h4 {
-    margin: 0 0 6px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-  #quadrant-thresh-popover .thresh-blurb {
-    font-size: 11.5px;
-    color: var(--text-dim);
-    line-height: 1.45;
-    margin-bottom: 12px;
-  }
-  #quadrant-thresh-popover .thresh-default-hint {
-    font-size: 11px;
-    color: var(--text-dim);
-    font-style: italic;
-    margin-top: 6px;
-    line-height: 1.4;
-  }
-  #quadrant-thresh-popover .thresh-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-  }
-  #quadrant-thresh-popover label {
-    flex: 1;
-    font-size: 13px;
-    color: var(--text);
-  }
-  #quadrant-thresh-popover label .thresh-hint {
-    display: block;
-    font-size: 11px;
-    color: var(--text-dim);
-    font-weight: 400;
-    margin-top: 2px;
-  }
+  #quadrant-thresh-popover { width: 320px; max-width: calc(100vw - 16px); }
+  #quadrant-thresh-popover h4 { margin: 0 0 6px; font-size: var(--t14); font-weight: 600; color: var(--text); }
+  #quadrant-thresh-popover .thresh-blurb { font-size: var(--t12); color: var(--text-dim); line-height: 1.45; margin-bottom: 12px; }
+  #quadrant-thresh-popover .thresh-default-hint { font-size: var(--t12); color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+  #quadrant-thresh-popover .thresh-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  #quadrant-thresh-popover label { flex: 1; font-size: var(--t14); color: var(--text); }
+  #quadrant-thresh-popover label .thresh-hint { display: block; font-size: var(--t12); color: var(--text-dim); font-weight: 400; margin-top: 2px; }
   #quadrant-thresh-popover input[type="number"] {
-    width: 70px;
-    padding: 6px 8px;
+    width: 76px;
+    min-height: var(--target);
+    padding: 0 8px;
     background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    border: 1px solid var(--border-control);
+    border-radius: var(--r-ctl);
     color: var(--text);
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 14px;
+    font: 500 var(--t16)/1.2 var(--ui-face);
+    font-variant-numeric: tabular-nums;
     text-align: center;
   }
-  #quadrant-thresh-popover .thresh-actions {
-    display: flex;
-    gap: 6px;
-    margin-top: 12px;
-    justify-content: flex-end;
-  }
-  #quadrant-thresh-popover button {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-  #quadrant-thresh-popover .thresh-reset {
-    color: var(--text-dim);
-    background: transparent;
-    border-color: transparent;
-    margin-right: auto;
-  }
-  #quadrant-thresh-popover .thresh-reset:hover { color: var(--text); border-color: var(--border-control); }
+  #quadrant-thresh-popover .thresh-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: 12px; justify-content: flex-end; }
+  #quadrant-thresh-popover .thresh-reset { margin-right: auto; }
 
   /* Aggregate report cards (Daily / Weekly / Monthly) reuse the same .insight-box
      styles as the session report but live inside view containers that have
@@ -1543,7 +1358,6 @@
   .insight-box {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-left: 3px solid var(--hrv);
     border-radius: 10px;
     overflow: hidden;
   }
@@ -1562,6 +1376,7 @@
   }
   .insight-master-head:hover { background: rgba(255,255,255,0.02); }
   .insight-master-head .insight-chevron {
+    flex: 0 0 auto;
     width: 16px;
     height: 16px;
     stroke: currentColor;
@@ -1599,8 +1414,8 @@
   }
   .insight-section-title:hover { background: rgba(255,255,255,0.02); color: var(--text); }
   .insight-section-title .insight-child-chevron {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     stroke: currentColor;
     stroke-width: 2;
     stroke-linecap: round;
@@ -1721,48 +1536,11 @@
   .pots-card-value.good { color: #B8D97E; }
 
   /* Sidebar */
-  .sidebar-head {
-    font-size: 11px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    font-weight: 700;
-    margin-bottom: 14px;
-  }
-  .filter-chips {
-    display: flex;
-    gap: 7px;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
-  }
-  .filter-chip {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 5px 12px;
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 600;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    cursor: pointer;
-    user-select: none;
-    color: var(--text-dim);
-    transition: transform 0.1s;
-    line-height: 1;
-  }
-  .filter-chip:hover { transform: translateY(-1px); }
-  .filter-chip.active {
-    color: var(--text);
-    background: var(--bg-input);
-    border-color: var(--border-control);
-  }
-  .filter-chip.type-event.active { border-color: var(--hrv); color: var(--hrv); }
-  .filter-chip.type-warning.active { border-color: var(--warn-crash); color: var(--warn-crash); }
-  .filter-chip.type-palp.active { border-color: var(--warn-palp); color: var(--warn-palp); }
-  .filter-chip.type-delta.active { border-color: #B48CFF; color: #B48CFF; }
-  .filter-chip.type-disconnect.active { border-color: var(--text-dim); color: var(--text-dim); }
+  .sidebar-head { margin: 0 0 12px; font-size: var(--t14); font-weight: 600; color: var(--text); }
+  .filter-chips { grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr)); font-size: var(--t12); margin-bottom: 14px; }
+  .filter-chips .chip { min-width: 0; padding: 0 var(--s2); font-size: var(--t12); }
+  .filter-chips .chip[aria-pressed="false"] { color: var(--text-dim); border-color: var(--border); }
+  .filter-chips .chip:disabled { opacity: .4; cursor: not-allowed; }
   .marker-list {
     overflow-y: auto;
     /* Bounded height so the sidebar doesn't stretch down indefinitely when a
@@ -1801,7 +1579,7 @@
   .marker-item.type-disconnect { border-left-color: var(--text-dim); }
   .marker-time {
     color: var(--text-dim);
-    font-family: 'Consolas', 'Monaco', monospace;
+    font-family: var(--mono);
     font-size: 12px;
     min-width: 54px;
   }
@@ -1809,11 +1587,9 @@
 
   /* Back button */
   .back-link {
-    font-size: 11px;
+    font-size: var(--t14);
     color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     margin-bottom: 12px;
     display: inline-block;
@@ -1848,57 +1624,12 @@
     flex-wrap: wrap;
   }
   .session-top-row .back-link { margin: 0; }
-  .tags-inline {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    font-size: 12px;
-    flex-wrap: wrap;
-  }
-  .tags-inline-label {
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 700;
-  }
-  .tags-inline .tag-chip {
-    padding: 2px 9px;
-    font-size: 12px;
-    background: rgba(93,202,165,0.1);
-    border: 1px solid var(--hrv);
-    color: var(--hrv);
-    border-radius: 999px;
-    display: inline-flex;
-    gap: 5px;
-    align-items: center;
-  }
-  .tags-inline .tag-chip .tag-x { color: var(--text-dim); font-weight: bold; cursor: pointer; }
-  .tags-inline .tag-chip .tag-x:hover { color: var(--warn-high); }
-  .tags-inline .tag-input {
-    background: transparent;
-    border: none;
-    border-bottom: 1px dashed var(--border-control);
-    border-radius: 0;
-    padding: 2px 4px;
-    color: var(--text);
-    font-size: 12px;
-    font-family: inherit;
-    outline: none;
-    width: 110px;
-  }
-  .tags-inline .tag-input:focus { border-bottom-color: var(--hrv); border-bottom-style: solid; }
 
   /* Auto-detected autonomic-event markers (chills-like volatility, sympathetic flush) */
   .marker-item.type-flush { border-left-color: #E8A858; }
-  .filter-chip.type-flush.active { border-color: #E8A858; color: #E8A858; }
   .marker-item.type-chills { border-left-color: #85B7EB; }
   .marker-item.type-posture { border-left-color: #c8a8e6; }
   .marker-item.type-sleep { border-left-color: #6E8CC8; }
-  .filter-chip.type-chills.active { border-color: #85B7EB; color: #85B7EB; }
-  .filter-chip.type-posture.active { border-color: #c8a8e6; color: #c8a8e6; }
-  .filter-chip.type-sleep.active { border-color: #6E8CC8; color: #6E8CC8; }
   /* Chills sensitivity slider (session view sidebar) */
   .chills-tune {
     margin-top: 10px;
@@ -1909,40 +1640,41 @@
     gap: 6px;
   }
   .chills-tune-label {
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    font-weight: 700;
+    font-size: var(--t14);
+    color: var(--text);
     display: flex;
     justify-content: space-between;
     align-items: baseline;
   }
-  .chills-tune-value { color: #85B7EB; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .chills-tune-value { color: var(--text); font-variant-numeric: tabular-nums; font-size: var(--t14); font-weight: 600; }
   .chills-tune input[type="range"] {
     -webkit-appearance: none;
+    appearance: none;
     width: 100%;
-    height: 4px;
-    background: #1a1a1a;
-    border-radius: 3px;
+    height: 44px;
+    margin: 0;
+    background: transparent;
     outline: none;
+    cursor: pointer;
   }
+  .chills-tune input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: var(--border-control); border-radius: 3px; }
+  .chills-tune input[type="range"]::-moz-range-track { height: 4px; background: var(--border-control); border-radius: 3px; }
   .chills-tune input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 20px;
+    height: 20px;
+    margin-top: -8px;
     border-radius: 50%;
-    background: #85B7EB;
-    cursor: pointer;
-    border: 2px solid #0a0a0a;
+    background: var(--action);
+    border: 2px solid var(--bg);
   }
+  .chills-tune input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--action); border: 2px solid var(--bg); }
+  .chills-tune input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--focus-ring); }
   .chills-tune-hints {
     display: flex;
     justify-content: space-between;
-    font-size: 9px;
+    font-size: var(--t12);
     color: var(--text-dim);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
   }
 
   /* TAG UI (session view) */
@@ -2012,14 +1744,19 @@
   body.printing .sidebar-toggle,
   body.printing .context-wrap,
   body.printing .back-link,
-  body.printing .tags-inline .tag-input,
-  body.printing .legend-reset-zoom,
+  body.printing .chart-tools,
+  body.printing .layer-toggles,
+  body.printing .summary-bar-kebab,
+  body.printing .summary-bar-menu,
+  body.printing .datenav .btn,
+  body.printing .interp-edit,
+  body.printing .interp-kebab,
   body.printing .filter-chips,
-  body.printing .all-granularity,
+  body.printing .all-granularity { display: none !important; }
   body.printing #app { display: block; height: auto; }
   body.printing main { overflow: visible; height: auto; }
   body.printing .view { padding: 20px; }
-  body.printing #view-session { display: block; }
+  body.printing #view-session, body.printing #view-day:not(.hidden) { display: block; }
   body.printing .session-layout {
     display: block !important;
     grid-template-columns: 1fr !important;
@@ -2055,7 +1792,8 @@
     /* Safety net if the user hits Ctrl+P directly — still hide the chrome. */
     .app-bar, .session-sidebar, .sidebar-toggle,
     .context-wrap, .back-link, .filter-chips, .all-granularity,
-    .legend-reset-zoom { display: none !important; }
+    .chart-tools, .layer-toggles, .summary-bar-kebab, .summary-bar-menu,
+    .datenav .btn, .interp-edit, .interp-kebab { display: none !important; }
   }
 
   /* Large text: fitBar() drops the Share word, then the wordmark text, so every control stays 44 px. */
@@ -2103,17 +1841,16 @@
     .session-sidebar { max-height: none; }
     .session-sidebar .marker-list { max-height: 65vh; min-height: 320px; }
     .sidebar-toggle { display: none; }
-    .summary-bar { gap: 14px; padding: 14px 56px 14px 14px; cursor: pointer; min-height: 60px; align-items: center; }
+    .summary-bar { padding: 8px 56px 14px 14px; cursor: pointer; min-height: 60px; }
+    .summary-grid { gap: 12px 16px; margin-top: 4px; }
     .summary-stat-value { font-size: 22px; }
-    .summary-stat { min-width: 74px; }
-    .summary-bar-title { display: inline-flex; }
-    .summary-bar-kebab { width: 44px; height: 44px; }
-    .summary-bar-kebab svg { width: 18px; height: 18px; }
+    .summary-bar-title { display: flex; }
     /* When collapsed: hide every stat (not just non-first). The Summary
        title carries the bar; the user expands to see the data. */
     .summary-bar.collapsed { padding: 0 56px 0 14px; min-height: 56px; }
-    .summary-bar.collapsed .summary-stat { display: none; }
+    .summary-bar.collapsed .summary-grid { display: none; }
     .chart-wrap { min-height: 260px; }
+    .chart-tools { flex-wrap: wrap; }
     .interp-grid { grid-template-columns: 1fr; }
     .sessions-grid { grid-template-columns: 1fr; }
     .all-grid { grid-template-columns: 1fr; }
@@ -2156,7 +1893,6 @@
     .cal-badges { display: none; }
     .cal-dow { font-size: 9px; padding: 4px 0; letter-spacing: 0.08em; }
     .week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .tags-inline { width: 100%; margin-left: 0; }
     .chart-legend { font-size: 10px; gap: 10px; }
     input, select, textarea { font-size: 16px !important; }
 
@@ -2164,25 +1900,18 @@
        baseline). Same approach the monitor uses: bump every text button,
        size icon buttons explicitly, and add 8 px gap between adjacent
        targets. icon-btn is sized as a square so the SVG stays centered. */
-    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.cal-today-btn):not(.day-timeline-btn):not(.filter-chip):not(.index-pager-btn):where(:not(.ui *)) {
+    button:not(.icon-btn):not(.session-card-kebab):not(.interp-kebab):not(.cal-today-btn):not(.index-pager-btn):where(:not(.ui *)) {
       min-height: 44px;
       padding: 10px 16px;
     }
     .session-card-kebab { width: 44px; height: 44px; top: 6px; right: 6px; }
     .interp-kebab { width: 44px; height: 44px; }
     .index-pager-btn { min-height: 44px; padding: 10px 16px; }
-    .day-timeline-btn { min-height: 44px; padding: 10px 16px; }
-    /* Filter chips are small by convention but a 23 px target is a miss
-       waiting to happen. Bump to 44 while keeping the pill shape. */
-    .filter-chip { min-height: 44px; padding: 10px 14px; }
-    .filter-chips { gap: 8px; }
   }
 
   @media (max-width: 480px) {
     .view { padding: 12px 10px; }
-    .summary-bar { padding: 10px 12px; gap: 12px; }
-    .summary-stat-value { font-size: 18px; }
-    .summary-stat-label { font-size: 9px; }
+    .summary-stat-value { font-size: 20px; }
     .session-top-row { flex-direction: column; align-items: flex-start; gap: 8px; }
     .chart-panel { padding: 12px 14px; }
     .week-grid { grid-template-columns: 1fr; }
@@ -3682,6 +3411,21 @@
     return out;
   }
 
+  // An s field is <class>:<label> (class sym or ctx); a bare value reads as sym:<value>.
+  function symField(v) {
+    v = String(v == null ? '' : v).trim();
+    return /^(sym|ctx):/i.test(v) ? v : 'sym:' + (v || 'symptom');
+  }
+  // An event cell starting sym: is a symptom mark and ctx: a context tick, from a web tap or a phone s row alike.
+  function parseMark(raw) {
+    const v = String(raw == null ? '' : raw).trim();
+    const m = /^(sym|ctx):\s*(.*)$/i.exec(v);
+    if (!m) return { kind: 'note', label: v };
+    const sym = m[1].toLowerCase() === 'sym';
+    const word = (m[2] || (sym ? 'symptom' : 'context')).replace(/[_-]+/g, ' ').trim();
+    return { kind: sym ? 'symptom' : 'context', label: word.charAt(0).toUpperCase() + word.slice(1) };
+  }
+
   // One v2 session as a legacy-column CSV; summarizeCSV and loadFullSession read it unchanged.
   function v2SessionCsv(sid, rows) {
     const sd = sdnnFromRr(rows);
@@ -3702,6 +3446,7 @@
           + f2(s.match) + ',' + f2(s.fiveMin) + ',' + f2(s.full) + ',,,,,');
       } else if (r.k === 'c') line(r.ep, { 10: r.f[0] });
       else if (r.k === 'e') line(r.ep, { 8: r.f[0] });
+      else if (r.k === 's') line(r.ep, { 8: symField(r.f[0]) });
       else if (r.k === 'w') line(r.ep, { 9: r.f[0] });
       else if (r.k === 'x') line(r.ep, { 7: '1' });
       else if (r.k === 'p') line(r.ep, { 11: r.f[0] });
@@ -5129,6 +4874,8 @@
       palpCount += (s.palpCount || 0);
     }
 
+    // Gaps inside recordings, before the time between recordings joins them.
+    const recGaps = mergeGaps(connGaps);
     // Day boundaries between consecutive sessions count as connection gaps so
     // the chart line breaks instead of drawing a horizontal bridge across
     // strap-off time.
@@ -5231,7 +4978,7 @@
       restingHR: null,
       palpCount, palpClusters,
       warnCount, warnSegs,
-      events, connGaps, gapTotalMin,
+      events, connGaps, gapTotalMin, recGaps,
       tachyPct, hrDeltas,
       flushes, chillsWindows,
       quadPct,
@@ -5300,17 +5047,22 @@
       showOnly('empty-state');
       return;
     }
-    const { view, arg } = parseHash();
+    let { view, arg } = parseHash();
+    // The full-day explorer is the Day view; its old route lands there.
+    const oldDay = view === 'session' && /^day:(\d{4}-\d{2}-\d{2})$/.exec(decodeURIComponent(arg || ''));
+    if (oldDay) {
+      view = 'day'; arg = oldDay[1];
+      history.replaceState(null, '', '#/day/' + arg);
+    }
     if (view === 'day' && /^\d{4}-\d{2}-\d{2}$/.test(arg || '')) shownDay = arg;
-    else if (view === 'session' && /^day:\d{4}-\d{2}-\d{2}$/.test(decodeURIComponent(arg || ''))) shownDay = decodeURIComponent(arg).slice(4);
-    // Cancel any active auto-poll from a previous session view. renderSession
-    // will restart it if the next view is also a session.
-    if (view !== 'session' && typeof clearAutoPoll === 'function') clearAutoPoll();
+    // Cancel any active auto-poll from a previous explorer. renderSession
+    // restarts it if the next view is also an explorer.
+    if (view !== 'session' && view !== 'day' && typeof clearAutoPoll === 'function') clearAutoPoll();
     switch (view) {
       case 'index': renderIndex(); showOnly('view-index'); break;
       case 'session': await renderSession(arg); showOnly('view-session'); break;
       case 'month': renderMonth(arg); showOnly('view-month'); break;
-      case 'day': renderDay(arg); showOnly('view-day'); break;
+      case 'day': showOnly('view-day'); await renderDay(arg); break;
       case 'week': renderWeek(arg); showOnly('view-week'); break;
       case 'all': renderAll(); showOnly('view-all'); break;
       default: renderIndex(); showOnly('view-index');
@@ -5810,7 +5562,10 @@
   }
 
   // ===== Day view: single date, 24-hr strip + session cards =====
-  function renderDay(dateArg) {
+  // Day view: the full-day explorer for one date, then that day's recordings.
+  let renderDayToken = 0;
+  async function renderDay(dateArg) {
+    const tok = ++renderDayToken;
     const el = document.getElementById('view-day');
     let iso = /^\d{4}-\d{2}-\d{2}$/.test(dateArg || '') ? dateArg : null;
     if (!iso) {
@@ -5820,76 +5575,74 @@
     const date = new Date(iso + 'T00:00:00'); // date-label
     const title = date.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const files = sessionsByDate[iso] || [];
+    // Arrows stop only on dates with recordings.
+    const dateKeys = Object.keys(sessionsByDate).sort();
+    let prevDate = null, nextDate = null;
+    for (const k of dateKeys) {
+      if (k < iso) prevDate = k;
+      else if (k > iso) { nextDate = k; break; }
+    }
+    shownDay = iso;
+    const headHtml = (gaps) => {
+      const gapMin = gaps.reduce((a, g) => a + Math.max(0, g.end - g.start), 0);
+      const gapsNote = gaps.length
+        ? `<span class="gaps-note">${gaps.length} gap${gaps.length === 1 ? '' : 's'} · ${formatMinutesShort(gapMin)} missing</span>`
+        : '';
+      return `
+      <div class="day-header" data-gaps="${gaps.length}">
+        <div class="datenav ui">
+          <button class="btn icon" id="day-prev" type="button" aria-label="Previous day"${prevDate ? '' : ' disabled'}>${UI.icon('prev')}</button>
+          <h1 class="day-title">${title}</h1>
+          <button class="btn icon" id="day-next" type="button" aria-label="Next day"${nextDate ? '' : ' disabled'}>${UI.icon('next')}</button>
+        </div>
+        ${gapsNote}
+      </div>`;
+    };
+    const wireNav = () => {
+      document.getElementById('day-prev').addEventListener('click', () => { if (prevDate) setHash('day/' + prevDate); });
+      document.getElementById('day-next').addEventListener('click', () => { if (nextDate) setHash('day/' + nextDate); });
+    };
+    // A different day shows its date at once while its recordings load; a reload of the same day keeps the page.
+    if (el.dataset.iso !== iso) {
+      clearExplorer();
+      el.dataset.iso = iso;
+      el.innerHTML = headHtml([]) + (files.length ? '<div class="stub-panel day-loading" aria-busy="true"></div>' : '');
+      wireNav();
+    }
+    let s = null;
+    if (files.length) {
+      try { s = await buildDaySession(iso); } catch (e) { console.error('day build failed', e); }
+    }
+    if (tok !== renderDayToken) return;
 
-    // Strip blocks per session, scaled to 24 hours. Block colour follows the
-    // user's selected headline metric (Rest / Avg / Tachy / Range) so the
-    // strip visually matches the big KPI on each card instead of always
-    // showing HR-stage green.
-    const blocksHtml = files.map(fn => {
-      const s = sessionsIndex[fn];
-      const meta = parseSessionFilename(fn);
-      if (!s || !meta) return '';
-      // Portion of the session that actually falls on THIS day.
-      // For a session that started last night, the portion starts at 00:00
-      // local and ends when the session ended (or midnight if it kept going).
-      const portion = sessionDayPortion(s, iso);
-      let left, width;
-      if (portion && portion.durationMin > 0) {
-        const startD = new Date(portion.start);
-        const startHr = startD.getHours() + startD.getMinutes() / 60 + startD.getSeconds() / 3600;
-        const durHr = portion.durationMin / 60;
-        left = (startHr / 24) * 100;
-        width = Math.max(0.3, (durHr / 24) * 100);
-      } else {
-        // Fallback for pre-epoch_ms CSVs: use filename-parsed date.
-        const realStart = s.startEpoch ? new Date(s.startEpoch) : meta.date;
-        const startHr = realStart.getHours() + realStart.getMinutes() / 60 + realStart.getSeconds() / 3600;
-        const durHr = s.duration / 60;
-        left = (startHr / 24) * 100;
-        width = Math.max(0.3, (durHr / 24) * 100);
-      }
-      const head = computeHeadline(headlineMetric, [fn]);
-      const color = head.color || STAGE_COLORS['stage-normal'];
-      const headVal = head.value != null ? (head.value + (head.unit ? ' ' + head.unit : '')) : '—';
-      const portionNote = portion && portion.isContinuation ? ' · continued from previous day' : '';
-      const tip = `${portion ? formatClockTime(portion.start) : meta.isoTime} · ${formatDuration(portion ? portion.durationMin : s.duration)}${portionNote} · ${head.label || 'HR'} ${headVal}${s.rmssdAvg != null ? ` · HRV ${s.rmssdAvg}` : ''}${s.palpCount ? ` · ${s.palpCount} palp` : ''}`;
-      return `<div class="day-strip-block" data-filename="${encodeURIComponent(fn)}" data-tip="${escape(tip)}" style="left: ${left}%; width: ${width}%; background: ${color};"></div>`;
-    }).join('');
-
-    // Hour axis (every 3 hours labeled, gridlines every hour)
-    let axisHtml = '';
-    let gridHtml = '';
-    for (let h = 0; h <= 24; h++) {
-      const pct = (h / 24) * 100;
-      if (h % 3 === 0) axisHtml += `<div class="day-hour-tick" style="left: ${pct}%;">${String(h).padStart(2, '0')}:00</div>`;
-      if (h > 0 && h < 24) gridHtml += `<div class="day-hour-gridline" style="left: ${pct}%;"></div>`;
+    const head = headHtml((s && s.recGaps) || []);
+    if (!s) {
+      clearExplorer();
+      el.innerHTML = head + `<div class="stub-panel">No recordings on this day</div>`;
+      wireNav();
+      return;
     }
 
     const autonomicOn = isAutonomicOn();
-    const sessionCardsHtml = files.length ? files.map(fn => {
+    const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const prevWeekday = WEEKDAY_SHORT[new Date(date.getTime() - 86400000).getDay()];
+    const cardsHtml = dayFilesByStart(files).map(({ fn }) => {
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
-      // Per-session headline metric — same Rest/Avg/Tachy/Range switcher as
-      // the Month / Week views so all three views present HR the same way.
       const head = computeHeadline(headlineMetric, [fn]);
       const headValue = head.value != null ? head.value : '—';
       const headUnit = head.unit || '';
       const headColor = head.color || STAGE_COLORS['stage-normal'];
-      // Flush + Chills are interpretive autonomic metrics — hide those columns
-      // when the autonomic toggle is OFF so the card stays descriptive-only.
       const autonomicCols = autonomicOn ? `
             <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-dim)'};">${(s.flushes || []).length}</span></div>
             <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-dim)'};">${(s.chillsWindows || []).length}</span></div>` : '';
-      // Day-portion: clip the session's times to the current day's
-      // boundaries so a session that started yesterday shows its
-      // continuation range (e.g. 00:00 – 09:05 AM) and a note pointing
-      // back to the full session's start on the previous day.
+      // A recording that started the day before shows only its part of this day.
       const portion = sessionDayPortion(s, iso);
       const usePortion = portion && portion.durationMin > 0;
       const cardStart = usePortion ? portion.start : sessionStartEpoch(s, meta);
       const cardDurMin = usePortion ? portion.durationMin : s.duration;
       const contNote = usePortion && portion.isContinuation
-        ? `<span class="session-card-cont" title="Full session started ${formatClockTime(portion.fullStart)} on the previous day">↺ continued from prev. day</span>`
+        ? `<span class="badge session-card-cont" title="Started ${formatClockTime(portion.fullStart)} the day before">Continued from ${prevWeekday}</span>`
         : '';
       return `
         <div class="session-card" data-filename="${encodeURIComponent(fn)}">
@@ -5904,100 +5657,28 @@
             <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable."><span class="session-card-stat-label">Uptime</span><span class="session-card-stat-value" style="color: ${uptimeColor(computeUptimePct(s))};">${computeUptimePct(s) != null ? computeUptimePct(s) + '%' : '—'}</span></div>${autonomicCols}
           </div>
         </div>`;
-    }).join('') : `<div class="stub-panel">No sessions on this date.</div>`;
+    }).join('');
+    const foot = `
+      <div class="day-sessions-head"><h2 class="day-sessions-title">Sessions · ${files.length}</h2></div>
+      <div class="sessions-grid">${cardsHtml}</div>`;
 
-    // Prev/next day navigation. Only allow dates where there's actual data
-    // so you don't walk forever through empty days.
-    const dateKeys = Object.keys(sessionsByDate).sort();
-    let prevDate = null, nextDate = null;
-    for (const k of dateKeys) {
-      if (k < iso) prevDate = k;
-      else if (k > iso) { nextDate = k; break; }
-    }
-    shownDay = iso;
-
-    el.innerHTML = `
-      <div class="day-header">
-        <div class="datenav ui">
-          <button class="btn icon" id="day-prev" type="button" aria-label="Previous day"${prevDate ? '' : ' disabled'}>${UI.icon('prev')}</button>
-          <h1 class="day-title">${title}</h1>
-          <button class="btn icon" id="day-next" type="button" aria-label="Next day"${nextDate ? '' : ' disabled'}>${UI.icon('next')}</button>
-        </div>
-        ${metricSwitchHTML()}
-        <div style="margin-left: auto; color: var(--text-dim); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;">${files.length} session${files.length === 1 ? '' : 's'}</div>
-      </div>
-
-      <div class="day-strip-panel">
-        <div class="day-strip-label">24-hour timeline · click a block to open the session</div>
-        <div class="day-strip" id="day-strip">
-          ${gridHtml}
-          ${blocksHtml}
-          ${files.length ? '' : '<div class="day-strip-empty">No sessions recorded on this day.</div>'}
-        </div>
-        <div class="day-hour-axis">${axisHtml}</div>
-      </div>
-
-      ${buildAggregateReport('Daily', files, iso)}
-
-      <div class="day-sessions-head">
-        <div class="section-head" style="margin: 0;">Sessions</div>
-        ${files.length ? `<button class="day-timeline-btn" id="day-view-timeline" title="Open every session on this day as one continuous chart with zoom, markers, and autonomic interpretation">View as full-day timeline <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="vertical-align:middle"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : ''}
-      </div>
-      <div class="sessions-grid">${sessionCardsHtml}</div>
-    `;
-
-    const timelineBtn = document.getElementById('day-view-timeline');
-    if (timelineBtn) {
-      timelineBtn.addEventListener('click', async () => {
-        timelineBtn.disabled = true;
-        timelineBtn.textContent = 'Building timeline…';
-        try {
-          const built = await buildDaySession(iso);
-          if (built) setHash('session/day:' + iso);
-          else { timelineBtn.disabled = false; timelineBtn.textContent = 'No data for timeline'; }
-        } catch (e) {
-          console.error('day timeline build failed', e);
-          timelineBtn.disabled = false;
-          timelineBtn.textContent = 'Timeline failed (see console)';
-        }
-      });
-    }
-
-    wireAggregateReport(el);
-    // Wire prev/next. If there's only one date with data, just stay.
-    document.getElementById('day-prev').addEventListener('click', () => { if (prevDate) setHash('day/' + prevDate); });
-    document.getElementById('day-next').addEventListener('click', () => { if (nextDate) setHash('day/' + nextDate); });
-    wireMetricSwitch(el, () => renderDay(dateArg));
-
-    // Click + hover handlers: strip blocks and session cards share data-filename
-    // so hovering one highlights the other (bidirectional visual sync).
-    const findByFilename = (sel, fn) => el.querySelector(sel + '[data-filename="' + fn + '"]');
-    el.querySelectorAll('.day-strip-block').forEach(b => {
-      b.addEventListener('click', () => setHash('session/' + b.dataset.filename));
-      b.addEventListener('mouseenter', (e) => {
-        showAnnoTip(b.dataset.tip.replace(/·/g, '<br/>'), e);
-        const card = findByFilename('.session-card', b.dataset.filename);
-        if (card) card.classList.add('hovered');
-      });
-      b.addEventListener('mouseleave', () => {
-        hideAnnoTip();
-        el.querySelectorAll('.session-card.hovered').forEach(c => c.classList.remove('hovered'));
-      });
-    });
+    await renderSession(encodeURIComponent('day:' + iso), { host: el, head, foot });
+    if (tok !== renderDayToken) return;
+    wireNav();
     el.querySelectorAll('.session-card').forEach(c => {
       c.addEventListener('click', () => setHash('session/' + c.dataset.filename));
-      c.addEventListener('mouseenter', () => {
-        const block = findByFilename('.day-strip-block', c.dataset.filename);
-        if (block) block.classList.add('hovered');
-      });
-      c.addEventListener('mouseleave', () => {
-        el.querySelectorAll('.day-strip-block.hovered').forEach(b => b.classList.remove('hovered'));
-      });
     });
-    // Day-view card kebab: re-render the day so the deleted card falls out
-    // of the grid. If it was the last one on the day, renderDay shows the
-    // "No sessions on this date" stub.
     wireSessionCardKebabs(el, { onDeleted: () => renderDay(iso) });
+  }
+
+  // Short duration for running text: "45 s", "18 min", "1 h 54 min".
+  function formatMinutesShort(min) {
+    if (!isFinite(min) || min <= 0) return '0 min';
+    if (min < 1) return Math.round(min * 60) + ' s';
+    const total = Math.round(min);
+    if (total < 60) return total + ' min';
+    const h = Math.floor(total / 60), m = total % 60;
+    return m ? `${h} h ${m} min` : `${h} h`;
   }
 
   // ===== Week view =====
@@ -6426,7 +6107,7 @@
 
   // ===== Session detail view =====
   let currentChart = null;
-  let currentContextChart = null;
+  let currentStrip = null;
   let currentSummary = null;
   let currentData = null;
   let currentFilename = null;
@@ -6630,11 +6311,24 @@
     'high-low': { fill: 'rgba(226,75,74,0.12)', border: 'rgba(226,75,74,0.35)' },
   };
 
-  async function renderSession(filenameEncoded) {
+  // One explorer at a time: the ids inside it (session-chart, marker-list, ...) are page-unique.
+  function clearExplorer(keepHost) {
+    for (const id of ['view-session', 'view-day']) {
+      if (id === keepHost) continue;
+      const v = document.getElementById(id);
+      if (v && v.querySelector('#session-layout')) v.innerHTML = '';
+    }
+    if (keepHost !== 'view-session' && keepHost !== 'view-day') {
+      if (currentChart) { try { currentChart.destroy(); } catch (e) {} currentChart = null; }
+      currentFilename = null;
+    }
+  }
+
+  // opts.host: element to render into (default #view-session); opts.head and opts.foot wrap the explorer.
+  async function renderSession(filenameEncoded, opts) {
+    opts = opts || {};
     const filename = decodeURIComponent(filenameEncoded || '');
-    // Virtual day sessions: summary is cached in virtualSessions; building
-    // happens when the Day view's Timeline toggle is clicked. If the user
-    // lands here via hash URL without building first, re-build on demand.
+    // Virtual day sessions: renderDay builds the summary into virtualSessions first.
     let s = sessionsIndex[filename];
     if (!s && virtualSessions[filename]) s = virtualSessions[filename].summary;
     if (!s) {
@@ -6644,8 +6338,11 @@
         if (built) s = built;
       }
     }
+    const el = opts.host || document.getElementById('view-session');
+    clearExplorer(el.id);
+    if (el.id === 'view-session') document.getElementById('view-day').dataset.iso = '';
     if (!s) {
-      document.getElementById('view-session').innerHTML = `<div class="stub-panel">Session not found: ${escape(filename)}</div>`;
+      el.innerHTML = `<div class="stub-panel">Session not found: ${escape(filename)}</div>`;
       return;
     }
     // When the auto-poll pulls a longer version of the same session and the
@@ -6676,7 +6373,11 @@
     const autonomicOn = isAutonomicOn();
     const postureAvail = (getEffectivePostureSpans(s) || []).length > 0;
     const sleepAvail = (getEffectiveSleepWindows(s) || []).length > 0;
+    const hasHr = (data.hr || []).some(p => p.y != null);
     filterAvailability = {
+      hr: hasHr,
+      rmssd: (data.rmssd || []).some(p => p.y != null),
+      maxmin: hasHr,
       event: (s.events || []).length > 0,
       warning: (s.warnSegs || []).length > 0,
       palp: (s.palpClusters || []).length > 0,
@@ -6705,74 +6406,46 @@
     const maxStage = getHRStage(s.hrMax.v);
     const minStage = getHRStage(s.hrMin.v);
 
-    const el = document.getElementById('view-session');
     const isVirtualDay = !!s.__virtualDay;
-    const backHref = isVirtualDay ? ('#/day/' + s.__virtualDay) : '#/index';
-    const backLabel = isVirtualDay ? ('← ' + s.__virtualDay) : '← All sessions';
-    // Day-to-day nav for the full-day timeline. Only dates that actually
-    // have sessions are eligible stops; stepping past the ends is a no-op
-    // (button disabled). Saves bouncing back to the month grid just to
-    // open the next day's timeline.
-    let dayNavPrev = null, dayNavNext = null;
-    if (isVirtualDay) {
-      const dayKeys = Object.keys(sessionsByDate).sort();
-      const idx = dayKeys.indexOf(s.__virtualDay);
-      if (idx > 0) dayNavPrev = dayKeys[idx - 1];
-      if (idx >= 0 && idx < dayKeys.length - 1) dayNavNext = dayKeys[idx + 1];
-    }
-    const dayNavHtml = isVirtualDay
-      ? `<div class="cal-nav" style="margin-left: 12px;">
-           <button id="session-day-prev" ${dayNavPrev ? '' : 'disabled'} title="Previous day with data" aria-label="Previous day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="15 18 9 12 15 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-           <button id="session-day-next" ${dayNavNext ? '' : 'disabled'} title="Next day with data" aria-label="Next day"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><polyline points="9 18 15 12 9 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-         </div>`
-      : '';
-    // Short date format ("18 Apr") fits the big-number KPI style; the year +
-    // time drop into the subtitle so the Date stat reads at the same height
-    // as Duration / Avg HR / HRV etc. For day-timeline sessions we skip the
-    // time because it's always 00:00 and adds noise.
+    // Short date ("18 Apr") fits the number row; year and start time go underneath.
     const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const dateObj = meta ? meta.date : null;
     const dateBig = dateObj ? `${dateObj.getDate()} ${MONTHS_SHORT[dateObj.getMonth()]}` : '—';
-    const dateSub = dateObj
-      ? (isVirtualDay
-          ? String(dateObj.getFullYear())
-          : `${dateObj.getFullYear()} · ${meta.isoTime.slice(0, 5)}`)
-      : '';
+    const dateSub = dateObj ? `${dateObj.getFullYear()} · ${meta.isoTime.slice(0, 5)}` : '';
+    const uptime = computeUptimePct(s);
     el.innerHTML = `
-      <div class="session-top-row">
-        <a class="back-link" href="${backHref}">${backLabel}</a>
-        ${dayNavHtml}
-        <div class="tags-inline">
-          <span class="tags-inline-label">Tags:</span>
-          <span id="tags-current"></span>
-          <input class="tag-input" id="tag-input" placeholder="+ add (Enter)" />
-        </div>
-      </div>
-      <div class="summary-bar" id="summary-bar">
+      ${opts.head || `<div class="session-top-row ui"><a class="back-link" href="#/index">${UI.icon('prev')}All sessions</a></div>`}
+      <div class="summary-bar ui" id="summary-bar">
         <span class="summary-bar-title">Summary</span>
-        <button class="summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Customize summary stats" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="19" r="1.6" fill="currentColor"/></svg></button>
-        <div class="summary-bar-menu" id="summary-bar-menu" role="menu" hidden>
+        <button class="summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Stats and tags" aria-haspopup="true" aria-expanded="false">${UI.icon('kebab')}</button>
+        <div class="summary-bar-menu ui" id="summary-bar-menu" hidden>
           <div class="summary-bar-menu-head">Show stats</div>
-          <label><input type="checkbox" data-stat="date" /> Date</label>
+          ${isVirtualDay ? '' : '<label><input type="checkbox" data-stat="date" /> Date</label>'}
           <label><input type="checkbox" data-stat="duration" /> Duration</label>
           <label><input type="checkbox" data-stat="hrAvg" /> Avg HR</label>
           <label><input type="checkbox" data-stat="hrMax" /> Max HR</label>
           <label><input type="checkbox" data-stat="hrMin" /> Min HR</label>
           <label><input type="checkbox" data-stat="rmssdAvg" /> Avg HRV</label>
-          <label><input type="checkbox" data-stat="sdnnMatchAvg" /> Avg SDNN ~RMSSD</label>
-          <label><input type="checkbox" data-stat="sdnn5minAvg" /> Avg SDNN (5 min)</label>
-          ${isVirtualDay ? '' : '<label><input type="checkbox" data-stat="sdnnFull" /> SDNN (session)</label>'}
+          <label><input type="checkbox" data-stat="sdnnMatchAvg" /> Avg SDNN, 30 s</label>
+          <label><input type="checkbox" data-stat="sdnn5minAvg" /> Avg SDNN, 5 min</label>
+          ${isVirtualDay ? '' : '<label><input type="checkbox" data-stat="sdnnFull" /> SDNN, session</label>'}
           <label><input type="checkbox" data-stat="palpCount" /> Palps</label>
           <label><input type="checkbox" data-stat="warnCount" /> Warnings</label>
           <label><input type="checkbox" data-stat="uptime" /> Uptime</label>
           <label><input type="checkbox" data-stat="tachyPct" /> Tachy %</label>
           <button class="summary-bar-menu-reset" id="summary-bar-menu-reset" type="button">Reset to defaults</button>
+          <div class="summary-bar-menu-head">Tags</div>
+          <div class="menu-tags">
+            <span id="tags-current"></span>
+            <input class="tag-input" id="tag-input" placeholder="Add a tag" aria-label="Add a tag" enterkeyhint="done" />
+          </div>
         </div>
-        <div class="summary-stat" data-stat="date">
+        <div class="summary-grid">
+        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="date">
           <span class="summary-stat-label">Date</span>
           <span class="summary-stat-value" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${dateBig}</span>
           <span class="summary-stat-unit">${dateSub}</span>
-        </div>
+        </div>`}
         <div class="summary-stat" data-stat="duration">
           <span class="summary-stat-label">Duration</span>
           <span class="summary-stat-value">${dur}</span>
@@ -6785,122 +6458,98 @@
         <div class="summary-stat" data-stat="hrMax">
           <span class="summary-stat-label">Max HR</span>
           <span class="summary-stat-value ${maxStage}">${s.hrMax.v}</span>
-          <span class="summary-stat-unit">@ ${formatDuration(s.hrMax.t)}</span>
+          <span class="summary-stat-unit">at ${formatDuration(s.hrMax.t)}</span>
         </div>
         <div class="summary-stat" data-stat="hrMin">
           <span class="summary-stat-label">Min HR</span>
           <span class="summary-stat-value ${minStage}">${s.hrMin.v}</span>
-          <span class="summary-stat-unit">@ ${formatDuration(s.hrMin.t)}</span>
+          <span class="summary-stat-unit">at ${formatDuration(s.hrMin.t)}</span>
         </div>
         <div class="summary-stat" data-stat="rmssdAvg">
           <span class="summary-stat-label">Avg HRV</span>
-          <span class="summary-stat-value" style="color: var(--hrv);">${s.rmssdAvg ?? '—'}</span>
-          <span class="summary-stat-unit">ms rmssd</span>
+          <span class="summary-stat-value hrv">${s.rmssdAvg ?? '—'}</span>
+          <span class="summary-stat-unit">ms, RMSSD</span>
         </div>
-        <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD. Comparable side-by-side with RMSSD on the same time scale.">
+        <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD.">
           <span class="summary-stat-label">Avg SDNN</span>
-          <span class="summary-stat-value" style="color: var(--hrv);">${s.sdnnMatchAvg ?? '—'}</span>
-          <span class="summary-stat-unit">ms · 30 s</span>
+          <span class="summary-stat-value">${s.sdnnMatchAvg ?? '—'}</span>
+          <span class="summary-stat-unit">ms, 30 s</span>
         </div>
-        <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5-minute rolling window. Standard short-term HRV window.">
+        <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5 min rolling window.">
           <span class="summary-stat-label">Avg SDNN</span>
-          <span class="summary-stat-value" style="color: var(--hrv);">${s.sdnn5minAvg ?? '—'}</span>
-          <span class="summary-stat-unit">ms · 5 min</span>
+          <span class="summary-stat-value">${s.sdnn5minAvg ?? '—'}</span>
+          <span class="summary-stat-unit">ms, 5 min</span>
         </div>
-        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across all in-range RR intervals from the entire session.">
+        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across every RR interval in the session.">
           <span class="summary-stat-label">SDNN</span>
-          <span class="summary-stat-value" style="color: var(--hrv);">${s.sdnnFull ?? '—'}</span>
-          <span class="summary-stat-unit">ms · session</span>
+          <span class="summary-stat-value">${s.sdnnFull ?? '—'}</span>
+          <span class="summary-stat-unit">ms, session</span>
         </div>`}
         <div class="summary-stat" data-stat="palpCount">
           <span class="summary-stat-label">Palps</span>
-          <span class="summary-stat-value ${s.palpCount ? 'palp' : ''}">${s.palpCount}</span>
+          <span class="summary-stat-value">${s.palpCount}</span>
           <span class="summary-stat-unit">${s.palpClusters.length} cluster${s.palpClusters.length === 1 ? '' : 's'}</span>
         </div>
         <div class="summary-stat" data-stat="warnCount">
           <span class="summary-stat-label">Warnings</span>
-          <span class="summary-stat-value ${s.warnCount ? 'warn' : ''}">${s.warnCount}</span>
+          <span class="summary-stat-value">${s.warnCount}</span>
         </div>
-        <div class="summary-stat" data-stat="uptime" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable.">
+        <div class="summary-stat" data-stat="uptime" title="Share of the time with live HR data.">
           <span class="summary-stat-label">Uptime</span>
-          <span class="summary-stat-value" style="color: ${uptimeColor(computeUptimePct(s))};">${computeUptimePct(s) != null ? computeUptimePct(s) : '—'}${computeUptimePct(s) != null ? '<span style="font-size: 14px;">%</span>' : ''}</span>
+          <span class="summary-stat-value">${uptime != null ? uptime : '—'}${uptime != null ? '<span class="pct">%</span>' : ''}</span>
           <span class="summary-stat-unit">${s.connGaps.length ? formatDuration(s.gapTotalMin) + ' across ' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
         </div>
         <div class="summary-stat" data-stat="tachyPct">
           <span class="summary-stat-label">Tachy %</span>
-          <span class="summary-stat-value" style="color: ${s.tachyPct > 20 ? 'var(--warn-high)' : 'var(--text-dim)'};">${s.tachyPct}<span style="font-size: 14px;">%</span></span>
-          <span class="summary-stat-unit">HR &gt; 100</span>
+          <span class="summary-stat-value">${s.tachyPct}<span class="pct">%</span></span>
+          <span class="summary-stat-unit">HR over 100</span>
         </div>
-      </div>
-
-      <div class="insight-box" id="insight-text"></div>
-
-      <div class="interp-panel" id="interp-panel">
-        <div class="interp-head" id="interp-head">
-          <span>Autonomic interpretation · HR × HRV</span>
-          <svg class="interp-caret" viewBox="0 0 10 10"><path d="M1 3l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
-        </div>
-        <div class="interp-body">
-          <div class="interp-current" id="interp-current"></div>
-          <div class="interp-grid">
-            <div class="interp-cell good" data-quad="low-high"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
-            <div class="interp-cell ok" data-quad="high-high"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
-            <div class="interp-cell warn" data-quad="low-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">Low HR · Low HRV</div>Commonly seen with fatigue, under-recovery, overtraining, or when you're feeling run down. Worth noticing if it lingers for days.</div>
-            <div class="interp-cell bad" data-quad="high-low"><button class="interp-kebab" title="Edit thresholds" aria-label="Edit thresholds">⋮</button><div class="interp-title">High HR · Low HRV</div>Commonly seen with stress, pain, dehydration, strong emotion, or after standing up quickly. A pattern, not a diagnosis.</div>
-          </div>
         </div>
       </div>
 
       <div class="session-layout" id="session-layout">
         <div class="session-main">
           <div class="chart-panel">
-            <div class="chart-legend">
-              <div class="chart-legend-item" title="The solid line on the chart is HR; the dashed green line is RMSSD."><span class="legend-swatch line"></span>RMSSD (dashed)</div>
-              <div class="chart-legend-item toggleable" data-type="warning" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,152,88,0.35); border: 1px solid rgba(232,152,88,0.6);"></span>Warning span</div>
-              <div class="chart-legend-item toggleable" data-type="disconnect" title="Click to toggle"><span class="legend-swatch" style="background: rgba(120,120,120,0.45); border: 1px solid rgba(120,120,120,0.7);"></span>Recording gap</div>
-              <div class="chart-legend-item toggleable" data-type="event" title="Click to toggle · manual symptom markers added during a recording"><span class="legend-swatch vline"></span>Event marker</div>
-              <div class="chart-legend-item toggleable" data-type="palp" title="Click to toggle"><span class="legend-swatch dot" style="background: #D76CBA;"></span>Palpitation cluster</div>
-              <div class="chart-legend-item toggleable" data-type="delta" title="Click to toggle"><span class="legend-swatch" style="background: rgba(180,140,255,0.2); border: 1px solid rgba(180,140,255,0.5);"></span>HR shift (≥20 bpm / 10 min)</div>
-              <div class="chart-legend-item toggleable" data-type="flush" title="Click to toggle"><span class="legend-swatch" style="background: rgba(232,168,88,0.2); border: 1px solid rgba(232,168,88,0.6);"></span>Sympathetic flush</div>
-              <div class="chart-legend-item toggleable" data-type="chills" title="Click to toggle"><span class="legend-swatch" style="background: rgba(133,183,235,0.2); border: 1px solid rgba(133,183,235,0.6);"></span>Chills / volatility</div>
-              <div class="chart-legend-item toggleable" data-type="posture" title="Click to toggle"><span class="legend-swatch" style="background: rgba(200,168,230,0.15); border: 1px solid rgba(200,168,230,0.4);"></span>Posture</div>
-              <div class="chart-legend-item toggleable" data-type="sleep" title="Click to toggle"><span class="legend-swatch" style="background: rgba(110,140,200,0.15); border: 1px dashed rgba(110,140,200,0.5);"></span>Sleep window</div>
-              <div class="chart-legend-item"><span class="legend-swatch dot" style="background: #B8D97E; border: 1px solid #000;"></span>Max / Min HR</div>
-              <button class="legend-reset-zoom" id="timeline-mode-toggle" title="Switch between elapsed time and clock time on the timeline">⟳ <span id="timeline-mode-label">Clock time</span></button>
-              <button class="legend-reset-zoom hidden" id="reset-zoom">Reset zoom</button>
+            <div class="chart-tools ui">
+              <div class="segmented axis-mode" id="axis-mode" role="group" aria-label="Time axis">
+                <button type="button" data-mode="clock">Clock</button>
+                <button type="button" data-mode="duration">Duration</button>
+              </div>
+              <button class="btn reset-zoom hidden" id="reset-zoom" type="button">Reset zoom</button>
             </div>
             <div class="chart-wrap">
-              <canvas id="session-chart"></canvas>
+              <canvas id="session-chart" role="img" aria-label="Heart rate and HRV"></canvas>
             </div>
             <div class="context-wrap">
-              <canvas id="context-chart"></canvas>
+              <canvas id="context-chart" aria-hidden="true"></canvas>
               <div class="context-dim" id="context-dim-left" style="left: 0; width: 0;"></div>
               <div class="context-dim" id="context-dim-right" style="right: 0; width: 0;"></div>
               <div class="context-brush" id="context-brush"></div>
-              <div class="context-overlay" id="context-overlay"></div>
+              <div class="context-overlay" id="context-overlay" role="slider" aria-label="Zoom window" tabindex="-1"></div>
             </div>
+            <div class="chip-row layer-toggles ui" id="layer-chips" role="group" aria-label="Layers">${layerChipsHTML()}</div>
           </div>
         </div>
-        <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle markers panel" aria-label="Toggle markers">
-          <svg viewBox="0 0 18 18"><line x1="3" y1="4" x2="15" y2="4"/><line x1="3" y1="9" x2="15" y2="9"/><line x1="3" y1="14" x2="15" y2="14"/></svg>
+        <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Markers panel">
+          <svg viewBox="0 0 18 18" aria-hidden="true"><line x1="3" y1="4" x2="15" y2="4"/><line x1="3" y1="9" x2="15" y2="9"/><line x1="3" y1="14" x2="15" y2="14"/></svg>
         </button>
-        <div class="session-sidebar">
-          <div class="sidebar-head">Markers</div>
-          <div class="filter-chips">
-            <span class="filter-chip type-event active" data-type="event">Events</span>
-            <span class="filter-chip type-warning active" data-type="warning">Warnings</span>
-            <span class="filter-chip type-palp active" data-type="palp">Palps</span>
-            <span class="filter-chip type-delta active" data-type="delta">HR shifts</span>
-            <span class="filter-chip type-flush active" data-type="flush">Flushes</span>
-            <span class="filter-chip type-chills active" data-type="chills">Chills</span>
-            <span class="filter-chip type-posture active" data-type="posture">Posture</span>
-            <span class="filter-chip type-sleep active" data-type="sleep">Sleep</span>
-            <span class="filter-chip type-disconnect active" data-type="disconnect">Gaps</span>
+        <div class="session-sidebar ui">
+          <h2 class="sidebar-head">Markers</h2>
+          <div class="filter-chips chip-row" data-wrap-group>
+            <button type="button" class="chip filter-chip" data-type="event">Marks</button>
+            <button type="button" class="chip filter-chip" data-type="warning">Warnings</button>
+            <button type="button" class="chip filter-chip" data-type="palp">Palps</button>
+            <button type="button" class="chip filter-chip" data-type="delta">HR shifts</button>
+            <button type="button" class="chip filter-chip" data-type="flush">Flushes</button>
+            <button type="button" class="chip filter-chip" data-type="chills">Chills</button>
+            <button type="button" class="chip filter-chip" data-type="posture">Posture</button>
+            <button type="button" class="chip filter-chip" data-type="sleep">Sleep</button>
+            <button type="button" class="chip filter-chip" data-type="disconnect">Gaps</button>
           </div>
           <div class="marker-list" id="marker-list"></div>
           <div class="chills-tune">
             <div class="chills-tune-label">
-              <span>Chills sensitivity</span>
+              <label for="chills-tune-slider">Chills sensitivity</label>
               <span class="chills-tune-value" id="chills-tune-value">2.5×</span>
             </div>
             <input type="range" id="chills-tune-slider" min="1.5" max="4.0" step="0.1" value="2.5" />
@@ -6911,6 +6560,25 @@
           </div>
         </div>
       </div>
+
+      <div class="interp-panel ui" id="interp-panel">
+        <button class="interp-head" id="interp-head" type="button" aria-expanded="true">
+          <span>Autonomic interpretation · HR × HRV</span>
+          ${UI.icon('chevron').replace('class="ico"', 'class="ico interp-caret"')}
+        </button>
+        <div class="interp-body">
+          <div class="interp-current" id="interp-current"></div>
+          <div class="interp-grid">
+            <div class="interp-cell good" data-quad="low-high"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
+            <div class="interp-cell ok" data-quad="high-high"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
+            <div class="interp-cell warn" data-quad="low-low"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · Low HRV</div>Commonly seen with fatigue, under-recovery, overtraining, or when you're feeling run down. Worth noticing if it lingers for days.</div>
+            <div class="interp-cell bad" data-quad="high-low"><button class="interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · Low HRV</div>Commonly seen with stress, pain, dehydration, strong emotion, or after standing up quickly. A pattern, not a diagnosis.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="insight-box" id="insight-text"></div>
+      ${opts.foot || ''}
     `;
 
     // Apply persisted summary-bar collapse state (mobile-only behaviour but
@@ -6939,25 +6607,32 @@
     document.getElementById('reset-zoom').addEventListener('click', resetZoom);
     updateResetZoomVisibility();
     wireTimelineModeToggle();
-    if (isVirtualDay) {
-      const prevBtn = document.getElementById('session-day-prev');
-      const nextBtn = document.getElementById('session-day-next');
-      if (prevBtn && dayNavPrev) prevBtn.addEventListener('click', () => setHash('session/day:' + dayNavPrev));
-      if (nextBtn && dayNavNext) nextBtn.addEventListener('click', () => setHash('session/day:' + dayNavNext));
-    }
     startAutoPoll();
   }
 
+  // Layer chips under the chart: one per dataset or overlay family, on the same filters as the markers panel.
+  const LAYERS = [
+    ['hr', 'HR'], ['rmssd', 'HRV'], ['maxmin', 'Max and min'], ['event', 'Marks'],
+    ['warning', 'Warnings'], ['disconnect', 'Gaps'], ['palp', 'Palpitations'], ['delta', 'HR shifts'],
+    ['flush', 'Flushes'], ['chills', 'Chills'], ['posture', 'Posture'], ['sleep', 'Sleep'],
+  ];
+  function layerChipsHTML() {
+    return LAYERS.map(([t, label]) =>
+      `<button type="button" class="chip layer-chip" data-layer="${t}" aria-pressed="false"><span class="sw sw-${t}" aria-hidden="true"></span><span class="lbl">${label}</span></button>`
+    ).join('');
+  }
+
   function wireTimelineModeToggle() {
-    const btn = document.getElementById('timeline-mode-toggle');
-    const label = document.getElementById('timeline-mode-label');
-    if (!btn || !label) return;
+    const group = document.getElementById('axis-mode');
+    if (!group) return;
     const refresh = () => {
-      label.textContent = timelineMode === 'clock' ? 'Duration' : 'Clock time';
+      group.querySelectorAll('button[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === timelineMode)));
     };
     refresh();
-    btn.addEventListener('click', () => {
-      setTimelineMode(timelineMode === 'clock' ? 'duration' : 'clock');
+    group.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-mode]');
+      if (!b || b.dataset.mode === timelineMode) return;
+      setTimelineMode(b.dataset.mode);
       refresh();
       // Swap the tick label function in place — same linear scale, just
       // different labels — so we don't reset brush / zoom state. Prefer
@@ -6969,22 +6644,12 @@
           return m && m.date ? m.date.getTime() : null;
         })();
         currentChart.options.scales.x.ticks.callback = makeTimeTickFormatter(startEpoch);
-        // Cheap path: rebuild only the x-axis ticks then repaint. Skips
-        // decimation, plugin afterUpdate (which walks every annotation),
-        // and dataset re-parsing — none of which changed. ~10ms vs ~150ms
-        // of chart.update('none') on long sessions with many annotations.
-        const xScale = currentChart.scales.x;
-        try {
-          if (xScale && typeof xScale.buildTicks === 'function') xScale.buildTicks();
-          if (xScale && typeof xScale.afterBuildTicks === 'function') xScale.afterBuildTicks();
-          currentChart.draw();
-        } catch (e) {
-          // Fallback if internal API shape shifts in a Chart.js update.
-          currentChart.update('none');
-        }
+        // Tick labels are generated during update, so a draw alone keeps the old format.
+        currentChart.update('none');
       }
     });
   }
+
 
   // Auto-poll Drive while an in-session view is open. driveSync already
   // skips unchanged files via modifiedTime, so repeat polls are cheap.
@@ -7229,9 +6894,7 @@
     const all = loadTags();
     const mine = all[filename] || [];
     const container = document.getElementById('tags-current');
-    container.innerHTML = mine.length === 0
-      ? '<span style="color: var(--text-dim); font-size: 12px; font-style: italic;">none yet</span>'
-      : mine.map(t => `<span class="tag-chip selected" data-tag="${escape(t)}">${escape(t)} <span class="tag-x" data-remove="${escape(t)}">×</span></span>`).join(' ');
+    container.innerHTML = mine.map(t => `<span class="chip-removable" data-tag="${escape(t)}">${escape(t)}<button type="button" class="tag-x" data-remove="${escape(t)}" aria-label="Remove ${escape(t)}">${UI.icon('close')}</button></span>`).join('');
     container.querySelectorAll('.tag-x').forEach(x => {
       x.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -7264,7 +6927,7 @@
   function resizeAllViewerCharts() {
     // Force every Chart.js instance in the page to pick up its new container size.
     try { if (currentChart) currentChart.resize(); } catch(e) {}
-    try { if (currentContextChart) currentContextChart.resize(); } catch(e) {}
+    try { if (currentStrip) currentStrip(); } catch(e) {}
     // Chart.js registry holds refs to every active chart — resize them all.
     if (Chart && Chart.instances) {
       for (const id of Object.keys(Chart.instances)) {
@@ -7846,8 +7509,7 @@
       summaryBits.push(`avg ${s.hrAvg} bpm`);
     }
     if (s.hrMax && s.hrMin) {
-      const range = s.hrMax.v - s.hrMin.v;
-      summaryBits.push(`Δ ${range} bpm (${s.hrMin.v}–${s.hrMax.v})`);
+      summaryBits.push(`range ${s.hrMin.v} to ${s.hrMax.v} bpm`);
     }
     const summaryText = summaryBits.join(' · ');
 
@@ -7888,7 +7550,7 @@
     box.innerHTML = `
       <div class="insight-master-head">
         ${chevron}
-        <span>Session report</span>
+        <span>${s.__virtualDay ? 'Day report' : 'Session report'}</span>
         <span class="insight-master-summary">${escape(summaryText)}</span>
       </div>
       <div class="insight-body">${bodyHtml}</div>
@@ -7951,7 +7613,7 @@
   function renderMarkerList(s) {
     const items = [];
     if (activeFilters.event) {
-      for (const e of s.events) items.push({ type: 'event', t: e.t, label: e.label });
+      for (const e of s.events) items.push({ type: 'event', t: e.t, label: parseMark(e.label).label });
     }
     if (activeFilters.warning) {
       for (const w of s.warnSegs) items.push({ type: 'warning', t: w.start, label: warnLabel(w.type) + ' (' + formatDuration(w.end - w.start) + ')' });
@@ -7964,12 +7626,12 @@
     }
     if (activeFilters.delta && s.hrDeltas) {
       for (const d of s.hrDeltas) {
-        const arrow = d.direction === 'rise' ? '↑' : '↓';
-        items.push({ type: 'delta', t: d.start, label: `${arrow} ${Math.abs(d.delta)} bpm in ${formatDuration(d.end - d.start)} (${d.startHR} → ${d.endHR})` });
+        const word = d.direction === 'rise' ? 'Rise' : 'Drop';
+        items.push({ type: 'delta', t: d.start, label: `${word} ${Math.abs(d.delta)} bpm in ${formatDuration(d.end - d.start)}, ${d.startHR} to ${d.endHR}` });
       }
     }
     if (activeFilters.flush && s.flushes) {
-      for (const f of s.flushes) items.push({ type: 'flush', t: f.t, label: `Sympathetic flush · HR +${f.hrDelta} bpm, HRV ↓${f.rmssdDropPct}%` });
+      for (const f of s.flushes) items.push({ type: 'flush', t: f.t, label: `Sympathetic flush · HR +${f.hrDelta} bpm, HRV down ${f.rmssdDropPct}%` });
     }
     if (activeFilters.chills && s.chillsWindows) {
       for (const c of s.chillsWindows) items.push({ type: 'chills', t: c.start, label: `Chills signature · ${formatDuration(c.end - c.start)} of high HR volatility` });
@@ -8186,21 +7848,12 @@
   }
 
   function renderInterpretation(s) {
-    if (s.rmssdAvg == null) {
-      document.getElementById('interp-current').textContent = 'Not enough HRV data to classify.';
-      return;
-    }
-    const q = classifyQuadrant(s.hrAvg, s.rmssdAvg);
-    // Dominant quadrant by time share — surfaces the real shape of the
-    // session. Average-based classification almost always lands in the
-    // middle ("neutral") because session means rarely cross both axes.
+    const cur = document.getElementById('interp-current');
     const QUAD_LABELS = {
-      'low-high':  { label: 'Low HR · High HRV',  tone: 'Rest or recovery mode. Strong parasympathetic tone.' },
-      'high-high': { label: 'High HR · High HRV', tone: 'Post-exertion rebound or regulated arousal.' },
-      'low-low':   { label: 'Low HR · Low HRV',   tone: 'Fatigue or under-recovery pattern.' },
-      'high-low':  { label: 'High HR · Low HRV',  tone: 'Sympathetic stress. Classic flare or orthostatic pattern.' },
+      'low-high': 'Low HR · High HRV', 'high-high': 'High HR · High HRV',
+      'low-low': 'Low HR · Low HRV', 'high-low': 'High HR · Low HRV',
     };
-    const totalSession = s.duration || 1;
+    const totalSession = s.activeDuration || s.duration || 1;
     let dominant = null, dominantPct = 0;
     if (currentQuadRanges) {
       for (const key of Object.keys(QUAD_LABELS)) {
@@ -8210,44 +7863,41 @@
         if (pct > dominantPct) { dominantPct = pct; dominant = key; }
       }
     }
-    let html =
-      `<div style="font-size: 11px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px;">Session average</div>` +
-      `<div style="font-size: 16px;">${q.label} — <span style="color: var(--text-dim); font-weight: 500;">${q.tone}</span></div>`;
-    if (q.key === 'neutral' && dominant && dominantPct >= 25) {
-      const dq = QUAD_LABELS[dominant];
-      html +=
-        `<div style="font-size: 11px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; margin: 12px 0 4px;">Most time in</div>` +
-        `<div style="font-size: 16px;">${dq.label} <span style="color: var(--text-dim); font-weight: 500;">(${Math.round(dominantPct)}% of session)</span> — <span style="color: var(--text-dim); font-weight: 500;">${dq.tone}</span></div>`;
+    const q = s.rmssdAvg == null ? null : classifyQuadrant(s.hrAvg, s.rmssdAvg);
+    const editKey = q && q.key !== 'neutral' ? q.key : (dominant || 'high-low');
+    let html = `<div class="interp-line"><span class="interp-line-label">${s.__virtualDay ? 'Day average' : 'Recording average'}</span>` +
+      (q ? `<span class="interp-line-value">${s.hrAvg} bpm · HRV ${s.rmssdAvg} ms · ${q.label}</span>`
+         : `<span class="interp-line-value">${s.hrAvg} bpm · not enough HRV</span>`) + `</div>`;
+    if (q && q.key === 'neutral' && dominant && dominantPct >= 25) {
+      html += `<div class="interp-line"><span class="interp-line-label">Most time in</span>` +
+        `<span class="interp-line-value">${QUAD_LABELS[dominant]} · ${Math.round(dominantPct)}%</span></div>`;
     }
-    html += `<div style="font-size: 11px; color: var(--text-dim); margin-top: 8px;">Click a card below to highlight the time ranges on the chart that match that quadrant.</div>`;
-    document.getElementById('interp-current').innerHTML = html;
-    // Decorate each cell: show percent of session time, total duration, span count.
-    // Empty cells get "none in this session" and are non-clickable.
+    html += `<button class="btn interp-edit" id="interp-edit" type="button">Edit thresholds</button>`;
+    cur.innerHTML = html;
+    document.getElementById('interp-edit').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openQuadrantThreshEditor(e.currentTarget, editKey);
+    });
+    // Each cell shows its share of the time and total duration; empty cells are not clickable.
     document.querySelectorAll('.interp-cell').forEach(cell => {
       const key = cell.dataset.quad;
       const ranges = (currentQuadRanges && currentQuadRanges[key]) || [];
       const titleEl = cell.querySelector('.interp-title');
       const oldBadge = titleEl.querySelector('.interp-empty-badge');
       if (oldBadge) oldBadge.remove();
+      const badge = document.createElement('span');
+      badge.className = 'interp-empty-badge';
       if (ranges.length === 0) {
-        const badge = document.createElement('span');
-        badge.className = 'interp-empty-badge';
-        badge.textContent = 'none in this session';
-        titleEl.appendChild(badge);
+        badge.textContent = 'None';
         cell.classList.add('empty');
         cell.classList.remove('on');
       } else {
         cell.classList.remove('empty');
         const totalMin = ranges.reduce((x, r) => x + (r.end - r.start), 0);
-        const pct = Math.round((totalMin / totalSession) * 100);
-        const badge = document.createElement('span');
-        badge.className = 'interp-empty-badge';
-        badge.style.color = 'var(--text-dim)';
-        badge.style.fontStyle = 'normal';
-        badge.style.fontWeight = '700';
-        badge.textContent = `${pct}% · ${formatDuration(totalMin)}`;
-        titleEl.appendChild(badge);
+        badge.classList.add('has');
+        badge.textContent = `${Math.round((totalMin / totalSession) * 100)}% · ${formatDuration(totalMin)}`;
       }
+      titleEl.appendChild(badge);
     });
   }
 
@@ -8256,7 +7906,7 @@
       cell.addEventListener('click', (e) => {
         // Kebab clicks open the threshold editor; don't also fire the quadrant
         // overlay toggle for the same click.
-        if (e.target.classList.contains('interp-kebab')) return;
+        if (e.target.closest('.interp-kebab')) return;
         if (cell.classList.contains('empty')) return;
         const key = cell.dataset.quad;
         activeQuadrants[key] = !activeQuadrants[key];
@@ -8317,29 +7967,32 @@
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'quadrant-thresh-popover';
+      pop.className = 'ui';
+      pop.setAttribute('role', 'dialog');
+      pop.setAttribute('aria-labelledby', 'thresh-title');
       pop.innerHTML = `
         <h4 id="thresh-title"></h4>
         <div class="thresh-blurb" id="thresh-blurb"></div>
         <div class="thresh-row">
-          <label id="thresh-hr-label"></label>
+          <label id="thresh-hr-label" for="thresh-hr"></label>
           <input type="number" id="thresh-hr" min="40" max="200" step="1" />
         </div>
         <div class="thresh-row">
-          <label id="thresh-hrv-label"></label>
+          <label id="thresh-hrv-label" for="thresh-hrv"></label>
           <input type="number" id="thresh-hrv" min="5" max="200" step="1" />
         </div>
         <div class="thresh-default-hint" id="thresh-default-hint"></div>
         <div class="thresh-actions">
-          <button class="thresh-reset" id="thresh-reset">Reset to default</button>
-          <button id="thresh-cancel">Cancel</button>
-          <button class="primary" id="thresh-save" style="background: var(--hrv); color: #0a1a14; border-color: var(--hrv);">Save</button>
+          <button class="btn ghost thresh-reset" id="thresh-reset" type="button">Reset to default</button>
+          <button class="btn" id="thresh-cancel" type="button">Cancel</button>
+          <button class="btn primary" id="thresh-save" type="button">Save</button>
         </div>
       `;
       document.body.appendChild(pop);
       // Dismiss handlers (wired once, work for every open).
       document.addEventListener('click', (e) => {
         if (!pop.classList.contains('open')) return;
-        if (pop.contains(e.target) || e.target.classList.contains('interp-kebab')) return;
+        if (pop.contains(e.target) || e.target.closest('.interp-kebab, #interp-edit')) return;
         pop.classList.remove('open');
       });
       document.addEventListener('keydown', (e) => {
@@ -8416,9 +8069,11 @@
     // Default collapsed state from localStorage
     const saved = localStorage.getItem('hrv_viewer_interp_collapsed') === 'true';
     panel.classList.toggle('collapsed', saved);
+    head.setAttribute('aria-expanded', String(!saved));
     head.addEventListener('click', () => {
-      panel.classList.toggle('collapsed');
-      localStorage.setItem('hrv_viewer_interp_collapsed', panel.classList.contains('collapsed'));
+      const collapsed = panel.classList.toggle('collapsed');
+      head.setAttribute('aria-expanded', String(!collapsed));
+      localStorage.setItem('hrv_viewer_interp_collapsed', collapsed);
     });
   }
 
@@ -8508,6 +8163,14 @@
         m.hidden = true;
         if (b) b.setAttribute('aria-expanded', 'false');
       });
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const m = document.getElementById('summary-bar-menu');
+        const b = document.getElementById('summary-bar-kebab');
+        if (!m || m.hidden) return;
+        m.hidden = true;
+        if (b) { b.setAttribute('aria-expanded', 'false'); b.focus(); }
+      });
     }
   }
 
@@ -8532,7 +8195,7 @@
     const chart = currentChart;
     const canvas = chart && chart.canvas;
     const sessionViewVisible = (() => {
-      const v = document.getElementById('view-session');
+      const v = canvas && canvas.closest('.view');
       return v && !v.classList.contains('hidden');
     })();
     const isSessionChartContext = !!canvas && document.body.contains(canvas) && sessionViewVisible;
@@ -8572,21 +8235,14 @@
   // rebuilds the DOM, so the UI and state can't drift apart. Unavailable types
   // (no data this session) get a 'disabled' class; their clicks are ignored.
   function syncFilterUI() {
-    document.querySelectorAll('.filter-chip[data-type]').forEach(chip => {
-      const t = chip.dataset.type;
+    document.querySelectorAll('.filter-chip[data-type], .layer-chip[data-layer]').forEach(chip => {
+      const t = chip.dataset.type || chip.dataset.layer;
       const avail = !!filterAvailability[t];
       const on = !!activeFilters[t];
-      chip.classList.toggle('active', on && avail);
-      chip.classList.toggle('disabled', !avail);
-      if (!avail) chip.title = 'No ' + chip.textContent.toLowerCase() + ' detected in this session';
+      chip.setAttribute('aria-pressed', String(on && avail));
+      chip.disabled = !avail;
+      if (!avail) chip.title = 'None here';
       else chip.removeAttribute('title');
-    });
-    document.querySelectorAll('.chart-legend-item.toggleable[data-type]').forEach(item => {
-      const t = item.dataset.type;
-      const avail = !!filterAvailability[t];
-      const on = !!activeFilters[t];
-      item.classList.toggle('off', !on || !avail);
-      item.classList.toggle('disabled', !avail);
     });
   }
 
@@ -8602,15 +8258,11 @@
   }
 
   function wireFilterChips() {
-    // Chips in the marker drawer.
-    document.querySelectorAll('.filter-chip[data-type]').forEach(chip => {
-      chip.addEventListener('click', () => setFilter(chip.dataset.type, !activeFilters[chip.dataset.type]));
+    // Markers panel chips and the layer chips under the chart drive the same filters.
+    document.querySelectorAll('.filter-chip[data-type], .layer-chip[data-layer]').forEach(chip => {
+      const t = chip.dataset.type || chip.dataset.layer;
+      chip.addEventListener('click', () => setFilter(t, !activeFilters[t]));
     });
-    // Toggleable legend items above the chart — same filters, second UI entry point.
-    document.querySelectorAll('.chart-legend-item.toggleable[data-type]').forEach(item => {
-      item.addEventListener('click', () => setFilter(item.dataset.type, !activeFilters[item.dataset.type]));
-    });
-    // Initial sync so legend dim-state matches activeFilters on first render.
     syncFilterUI();
   }
 
@@ -8720,8 +8372,12 @@
     const ctx = document.getElementById('session-chart').getContext('2d');
     if (currentChart) currentChart.destroy();
 
-    const hr = downsample(data.hr, 2000);
-    const rmssd = downsample(data.rmssd, 2000);
+    // On the Day view the lines break inside each gap between and within recordings.
+    const breakAtGaps = (arr) => s.__virtualDay && (s.connGaps || []).length
+      ? arr.concat(s.connGaps.map(g => ({ x: (g.start + g.end) / 2, y: null }))).sort((a, b) => a.x - b.x)
+      : arr;
+    const hr = breakAtGaps(downsample(data.hr, 2000));
+    const rmssd = breakAtGaps(downsample(data.rmssd, 2000));
     // Session start epoch — lets the x-axis flip between MM:SS duration and
     // absolute wall-clock time. Prefer the CSV's epoch_ms column (s.startEpoch)
     // since the filename string is UTC for web-recorded sessions but LOCAL
@@ -8822,17 +8478,24 @@
       }
     }
     if (activeFilters.event) {
+      const tickColour = getComputedStyle(document.documentElement).getPropertyValue('--text-dim').trim() || 'grey';
       for (const e of s.events) {
-        const eLabel = e.label;
+        const mark = parseMark(e.label);
+        const eLabel = mark.label;
         const eTime = formatDuration(e.t);
+        const tick = mark.kind === 'context';
         annotations['ev_' + idCounter++] = {
           type: 'line',
           xScaleID: 'x',
           xMin: e.t, xMax: e.t,
-          borderColor: '#F7E26B',
-          borderWidth: 2,
-          label: { display: true, content: e.label, position: 'start', backgroundColor: 'rgba(247,226,107,0.18)', color: '#F7E26B', font: { size: 11, weight: '600' }, padding: 4 },
-          enter: (ctx, evt) => annoEnter(e.t, `<b>Event</b><br/>${escape(eLabel)} @ ${eTime}`, evt),
+          markKind: mark.kind,
+          borderColor: tick ? tickColour : '#F7E26B',
+          borderWidth: tick ? 1 : 2,
+          borderDash: tick ? [4, 4] : undefined,
+          label: tick
+            ? { display: true, content: eLabel, position: 'end', backgroundColor: 'transparent', color: tickColour, font: { size: 12, weight: '500' }, padding: 2 }
+            : { display: true, content: eLabel, position: 'start', backgroundColor: 'rgba(247,226,107,0.18)', color: '#F7E26B', font: { size: 12, weight: '600' }, padding: 4 },
+          enter: (ctx, evt) => annoEnter(e.t, `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`, evt),
           leave: annoLeave,
         };
       }
@@ -8905,7 +8568,7 @@
         });
       }
     }
-    // Max/min markers (always shown)
+    if (activeFilters.maxmin !== false) {
     annotations['maxHR'] = {
       type: 'point',
       xScaleID: 'x', yScaleID: 'y',
@@ -8917,9 +8580,9 @@
       type: 'label',
       xScaleID: 'x', yScaleID: 'y',
       xValue: s.hrMax.t, yValue: s.hrMax.v,
-      content: [`MAX ${s.hrMax.v}`],
+      content: [`Max ${s.hrMax.v}`],
       color: STAGE_COLORS[getHRStage(s.hrMax.v)],
-      font: { size: 10, weight: 'bold' },
+      font: { size: 12, weight: 'bold' },
       position: { x: 'center', y: 'start' },
       yAdjust: -14,
       backgroundColor: 'rgba(10,10,10,0.8)',
@@ -8936,13 +8599,14 @@
       type: 'label',
       xScaleID: 'x', yScaleID: 'y',
       xValue: s.hrMin.t, yValue: s.hrMin.v,
-      content: [`MIN ${s.hrMin.v}`],
+      content: [`Min ${s.hrMin.v}`],
       color: STAGE_COLORS[getHRStage(s.hrMin.v)],
-      font: { size: 10, weight: 'bold' },
+      font: { size: 12, weight: 'bold' },
       yAdjust: 14,
       backgroundColor: 'rgba(10,10,10,0.8)',
       padding: 3,
     };
+    }
 
     // Kill stale tooltip when pointer leaves the canvas entirely. Also clears
     // the marker-list / highlight-line state so nothing lingers on the chart
@@ -8953,8 +8617,8 @@
       type: 'line',
       data: {
         datasets: [
-          { label: 'HR', data: hr, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
-          { label: 'RMSSD', data: rmssd, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
+          { label: 'HR', data: hr, hidden: activeFilters.hr === false, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
+          { label: 'RMSSD', data: rmssd, hidden: activeFilters.rmssd === false, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
           { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: palpDots.map(p => Math.min(3 + p._count, 10)), pointHoverRadius: 12, pointStyle: 'circle' },
           // Highlight overlay datasets for marker-list hover (populated on demand)
           { label: '_HL_LINE', data: [], borderColor: '#ffffff', backgroundColor: 'transparent', yAxisID: 'y', showLine: true, pointRadius: 0, borderWidth: 2, fill: false, order: -1 },
@@ -8976,7 +8640,7 @@
         // palp cluster or event nearby — instead of separate popups per line.
         interaction: { mode: 'index', intersect: false, axis: 'x' },
         plugins: {
-          legend: { labels: { color: '#b0b0b0', font: { size: 13, weight: '600' }, boxWidth: 14, padding: 12, filter: (item) => item.text !== 'Palp' && !item.text.startsWith('_HL') } },
+          legend: { display: false },
           tooltip: {
             mode: 'index',
             intersect: false,
@@ -9003,7 +8667,7 @@
                 if (d && Array.isArray(d.events)) {
                   d.events
                     .filter(e => Math.abs((e.t || 0) - xAt) < 10 / 60)
-                    .forEach(e => extras.push('Event: ' + (e.label || '—')));
+                    .forEach(e => extras.push('Mark: ' + (parseMark(e.label).label || 'none')));
                 }
                 if (d && Array.isArray(d.warnings)) {
                   d.warnings
@@ -9041,11 +8705,13 @@
           },
           y: {
             position: 'left',
+            display: activeFilters.hr !== false,
             ticks: { color: '#E89858', font: { size: 12, weight: '600' } },
             grid: { color: 'rgba(255,255,255,0.04)' },
           },
           y1: {
             position: 'right',
+            display: activeFilters.rmssd !== false,
             ticks: { color: '#5DCAA5', font: { size: 12, weight: '600' } },
             grid: { display: false },
           },
@@ -9065,27 +8731,66 @@
     });
   }
 
+  // Zone strip under the chart: HR coloured by zone per pixel column, recording gaps hatched.
+  let _stripResizeObserver = null;
   function drawContextChart(s, data) {
-    const ctx = document.getElementById('context-chart').getContext('2d');
-    if (currentContextChart) currentContextChart.destroy();
-    const hr = downsample(data.hr, 600);
-    currentContextChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        datasets: [
-          { data: hr, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.12)', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1, fill: true },
-        ],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        parsing: false, normalized: true, resizeDelay: 200,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: {
-          x: { type: 'linear', min: 0, max: s.duration, display: false },
-          y: { display: false },
-        },
-      },
-    });
+    const canvas = document.getElementById('context-chart');
+    if (!canvas) return;
+    if (_stripResizeObserver) { try { _stripResizeObserver.disconnect(); } catch (e) {} _stripResizeObserver = null; }
+    const dur = s.duration || 1;
+    const pts = (data.hr || []).filter(p => p && p.y != null && isFinite(p.x));
+    const gaps = s.connGaps || [];
+    const draw = () => {
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (!w || !h) return;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const top = 8, bandH = h - 16;
+      const cols = Math.max(1, Math.floor(w));
+      const col = (x) => Math.max(0, Math.min(cols - 1, Math.floor((x / dur) * cols)));
+      const sum = new Float64Array(cols), cnt = new Uint32Array(cols), covered = new Uint8Array(cols);
+      for (let k = 0; k < pts.length; k++) {
+        const c = col(pts[k].x);
+        sum[c] += pts[k].y; cnt[c]++; covered[c] = 1;
+        // Consecutive samples under 2 min apart fill the columns between them.
+        if (k + 1 < pts.length && pts[k + 1].x - pts[k].x <= 2) {
+          const c2 = col(pts[k + 1].x);
+          for (let q = c + 1; q < c2; q++) covered[q] = 1;
+        }
+      }
+      let colour = null, runStart = -1, runColour = null;
+      const flush = (end) => { if (runStart >= 0 && runColour) { ctx.fillStyle = runColour; ctx.fillRect(runStart, top, end - runStart, bandH); } runStart = -1; };
+      for (let c = 0; c < cols; c++) {
+        if (cnt[c]) colour = STAGE_COLORS[getHRStage(sum[c] / cnt[c])];
+        const paint = covered[c] ? colour : null;
+        if (paint !== runColour || !paint) { flush(c); }
+        if (paint && runStart < 0) { runStart = c; runColour = paint; }
+        if (!paint) runColour = null;
+      }
+      flush(cols);
+      const css = getComputedStyle(document.documentElement);
+      const tile = document.createElement('canvas');
+      tile.width = tile.height = 6;
+      const tc = tile.getContext('2d');
+      tc.strokeStyle = css.getPropertyValue('--missing-mark').trim() || 'grey';
+      tc.lineWidth = 1.5;
+      tc.beginPath(); tc.moveTo(0, 6); tc.lineTo(6, 0); tc.stroke();
+      ctx.fillStyle = ctx.createPattern(tile, 'repeat');
+      for (const g of gaps) {
+        const x0 = (g.start / dur) * w, x1 = (g.end / dur) * w;
+        if (x1 < 0 || x0 > w) continue;
+        ctx.fillRect(x0, top, Math.max(3, x1 - x0), bandH);
+      }
+    };
+    draw();
+    currentStrip = draw;
+    if (typeof ResizeObserver !== 'undefined') {
+      _stripResizeObserver = new ResizeObserver(() => draw());
+      _stripResizeObserver.observe(canvas);
+    }
   }
 
   // Module-scope handle so each wireBrush disconnects the previous observer
@@ -9338,7 +9043,7 @@
     if (!start || durationMin == null) return '';
     const startEpoch = typeof start === 'number' ? start : start.getTime();
     const end = startEpoch + durationMin * 60000;
-    return `${formatClockTime(startEpoch)} – ${formatClockTime(end)}`;
+    return `${formatClockTime(startEpoch)} to ${formatClockTime(end)}`;
   }
   // Best wall-clock start for a session card. Always prefer the CSV's first
   // epoch_ms (timezone-correct on every platform) over the filename string
