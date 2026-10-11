@@ -20,6 +20,13 @@ on:
       - 'index.html'
       - 'widget.css'
       - 'widget.js'
+      - 'app-home.html'
+      - 'ui.css'
+      - 'ui.js'
+      - 'tokens.css'
+      - 'diagnostics.js'
+      - 'marks-store.js'
+      - 'marks-drive.js'
       - 'mobile/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
