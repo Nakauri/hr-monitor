@@ -132,7 +132,7 @@ public class FloatingOverlayService extends Service {
         GradientDrawable bg = new GradientDrawable();
         int bgRgb = Color.parseColor(TOKEN_BG);
         bg.setColor(Color.argb(BG_ALPHA, Color.red(bgRgb), Color.green(bgRgb), Color.blue(bgRgb)));
-        bg.setCornerRadius(dp(20));
+        bg.setCornerRadius(dp(8));
         bg.setStroke(dp(1), Color.parseColor(TOKEN_BORDER_CONTROL));
         pill.setBackground(bg);
 
