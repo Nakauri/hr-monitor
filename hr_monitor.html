@@ -728,7 +728,7 @@
     width: 14px;
     height: 14px;
     flex: 0 0 auto;
-    border: 1.75px solid currentColor;
+    background: currentColor;
     border-radius: 2px;
   }
   .btn-session-toggle[data-state="idle"] {
@@ -2899,7 +2899,7 @@
   // path (onHRNotification, desktop/web) and the native plugin event path
   // (HRMNativeHrSession.onHr, Capacitor/Android). Same state updates, same
   // UI refresh, same warning/breath/broadcast work regardless of source.
-  function processHRData(hr, rrs, contactSupported, contactDetected) {
+  function processHRData(hr, rrs, contactSupported, contactDetected, engineRmssd) {
     // Guard against notifications arriving before startTime is set
     if (state.startTime == null) state.startTime = Date.now();
     const now = (Date.now() - state.startTime) / 60000;
@@ -2957,7 +2957,8 @@
       // on the live RMSSD number instead of being averaged away.
       const cutoff = now - 0.5;
       state.rrBuffer = state.rrBuffer.filter(r => r.t >= cutoff);
-      const rmssd = computeRMSSD(state.rrBuffer.map(r => r.rr));
+      // Native sessions show the engine's RMSSD so app, bubble and stream agree.
+      const rmssd = engineRmssd !== undefined ? engineRmssd : computeRMSSD(state.rrBuffer.map(r => r.rr));
       const sdnnMatch = computeSDNN(state.rrBuffer.map(r => r.rr));
       // 5 min rolling RR window for clinical-standard SDNN.
       state.rrBuffer5min.push(...rrs.map(rr => ({ t: now, rr })));
@@ -4330,7 +4331,7 @@
         const rrs = Array.isArray(d.rrIntervals) ? d.rrIntervals.slice() : [];
         // Native emits contactOff (true = strap off skin). Map back to
         // Web-BLE-style contactSupported/contactDetected pair.
-        processHRData(d.hr || 0, rrs, true, !d.contactOff);
+        processHRData(d.hr || 0, rrs, true, !d.contactOff, typeof d.rmssd === 'number' ? d.rmssd : null);
       });
       // Every engine change (event or settled status) lands through the one sync.
       if (typeof window.HRMNativeHrSession.onSnapshot === 'function') {
