@@ -1,3 +1,4 @@
+// Guards: PDF raster OOM on the S8 (heap budget, page geometry, page count). Files: PdfPrinter.java. Runtime: about 6 s via run-pdf-test.cjs.
 package com.nakauri.hrmonitor;
 
 // S15a pure parts of PdfPrinter: page geometry, memory budget, page count, file name.

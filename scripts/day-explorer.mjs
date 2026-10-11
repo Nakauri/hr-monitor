@@ -1,3 +1,4 @@
+// Guards: v2 day Duration reading 0:00 (S10a), stats drifting from f7cbb1a, mark edits writing twice (S10b HIGH). Files: hrv_viewer.html Day view. Runtime: about 50 s per --part; run when hrv_viewer.html changes.
 // S10a Day explorer checks, headless.
 // 1. Stats parity: the stats bar on a real legacy day and a real v2 day equals the pre-step build
 //    (--ref, default f7cbb1a, read through `git show`, opened at its old #/session/day: route).

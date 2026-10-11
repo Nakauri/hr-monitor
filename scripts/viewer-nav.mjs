@@ -1,3 +1,4 @@
+// Guards: dead hash routes, the select changing width per view and dropping Share (2026-10-11), the cloud spinning on every open (2026-10-11). Files: hrv_viewer.html bar and controls. Runtime: base about 55 s, --part s23 about 120 s; run by part.
 // S8 viewer bar and navigation checks, on demo data (?demo=1), headless:
 // every old hash route resolves; the viewer opens on the latest day; day arrows and arrow keys skip
 // days without data; the Week tab opens the week holding the shown day; every bar control is wired

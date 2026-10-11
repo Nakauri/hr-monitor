@@ -1,3 +1,4 @@
+// Guards: web uploads while Drive sync is off; a Stop skipping the final upload (S4c). Files: hr_monitor.html, app-home.html. Runtime: about 90 s.
 // S4c checks, headless. Web monitor on a fake strap, a fake folder and a fetch spy on Drive:
 // sync on gives one upload per autosave tick and holds single flight; sync off gives zero uploads across
 // five ticks while the folder write still happens; an old ?mode=offline link and a stored offline mode

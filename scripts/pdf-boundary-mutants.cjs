@@ -1,3 +1,4 @@
+// Guards: PdfPrinter reaching the recorder or the plugin's shared thread (the 2026-09-13 stranded PluginCall). Files: PdfPrinter.java, NativeHrSessionPlugin.printPdf. Runtime: about 4 s.
 // S15a negative controls for engine-boundary.test.cjs: mutate a copied tree, run --root, each mutant must FAIL an [S15a] check.
 // Run: node scripts/pdf-boundary-mutants.cjs   (exit 0 = baseline passes and every mutant is caught)
 const fs = require('fs'), os = require('os'), path = require('path'), { spawnSync } = require('child_process');

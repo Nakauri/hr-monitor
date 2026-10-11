@@ -1,3 +1,4 @@
+// Guards: a phone Undo still showing on the laptop, a laptop sleep mark missing on the phone. Files: marks-store.js, marks-drive.js, hrv_viewer.html, hr_monitor.html. Runtime: about 35 s with --checks.
 // S9 marks store on the real pages, headless. Each check also runs against a mutated copy of one shipped file,
 // served in place of the real one, and that run must FAIL.
 //   M7  a rev hides its recorded mark from the Day chart and the markers list (v2 s row and legacy sym: cell);

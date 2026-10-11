@@ -1,3 +1,4 @@
+// Guards: phone and web symptoms drawing differently; ctx: cells lost (S4b viewer half). Files: hrv_viewer.html. Runtime: about 15 s.
 // S4b viewer half, headless: a phone symptom (v2 `s` row, prefixed or bare) and a web symptom (legacy event
 // cell `sym:symptom`) draw the same mark on the Day chart and in the markers list; a legacy `ctx:water` cell
 // draws a context tick. Each case loads only its own synthetic recording.

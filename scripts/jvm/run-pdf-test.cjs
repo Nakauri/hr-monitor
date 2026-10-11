@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Guards: PDF raster OOM on the S8 (24 MB heap budget, 1224 x 1584 page, page count). Files: PdfPrinter.java. Runtime: about 6 s.
 // Compiles the JVM-PURE block of PdfPrinter.java as a plain class and runs scripts/jvm/PdfPlanTest.java
 // on JDK 21 (no Gradle, no Android), then reruns it against mutated copies, each of which must FAIL.
 // Run: node scripts/jvm/run-pdf-test.cjs          (exit 0 = test passes AND every mutant fails)
