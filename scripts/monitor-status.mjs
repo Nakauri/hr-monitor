@@ -1,3 +1,4 @@
+// Guards: LIVE shown while reconnecting; a snap missing fields breaking syncFromEngine (S4a). Files: hr_monitor.html status line. Runtime: about 35 s.
 // S4a monitor checks on the fake phone bridge: the status line text per engine state (live, reconnecting,
 // not found, resuming, idle), "LIVE" never shown outside the live state, Stop in the viewport with every
 // section collapsed, no posture preselected until the first tap, a snapshot with missing fields leaves

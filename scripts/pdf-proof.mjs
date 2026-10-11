@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Device tool, not a gate: proves a print while recording leaves no gap over 3 s. Files: PdfPrinter.java, native-pdf.js. Runtime: one phone session.
 // S15a device proof for the native report PDF. No page loads native-pdf.js yet, so this injects it over CDP.
 //   drive: node scripts/pdf-proof.mjs drive --port 9334 [--no-share]
 //          needs `adb forward tcp:9334 localabstract:webview_devtools_remote_<pid>` (debug build).

@@ -1,3 +1,4 @@
+// Guards: Symptom shown or written outside a live session; notification words drifting. Files: ServiceStartPolicy.java. Runtime: about 27 s via run-engine2-test.cjs.
 import com.nakauri.hrmonitor.LinkStatePolicy;
 import com.nakauri.hrmonitor.LinkStatePolicy.State;
 import com.nakauri.hrmonitor.ServiceStartPolicy;

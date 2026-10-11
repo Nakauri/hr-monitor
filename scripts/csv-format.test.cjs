@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Guards: CSV column drift and a second writer of state.events. Files: hr_monitor.html buildSessionCSV, addMarker. Runtime: under 1 s.
 // CSV row-shape test for the native writer (NativeCsvWriter.java).
 // Reads the Java source as text, so a column added to the header but not to
 // the row format strings (or the reverse) fails here before a build.

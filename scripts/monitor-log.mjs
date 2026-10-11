@@ -1,3 +1,4 @@
+// Guards: a web Symptom then Undo still writing a row; raw sym: notes; held marks lost on Stop (S4b). Files: hr_monitor.html Log row. Runtime: about 45 s.
 // S4b Log row checks, headless. Web monitor on a fake Web Bluetooth strap and a fake auto-save folder:
 // a Symptom tap then Undo writes no row; a held Symptom flushes into the CSV written on Stop, at its tap time;
 // a Note starting sym: or ctx: (any case) is rejected; a held Note flushes on pagehide, sanitised.

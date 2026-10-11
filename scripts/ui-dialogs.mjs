@@ -1,3 +1,4 @@
+// Guards: native dialogs coming back and dialogs losing focus or Escape (S3). Files: ui.js, ui.css, the pages. Runtime: about 90 s.
 // The monitor's inline Stop confirm (#stop-confirm) stays in the page hidden, so it is left out of every .confirm match.
 // S3 dialog checks on the shared components (ui.css, ui.js): destructive confirms are spied
 // (Cancel, Escape, backdrop and close-then-reopen make 0 calls; only the danger button makes 1),

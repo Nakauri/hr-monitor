@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Guards: engine policy regressions (start, link state, Symptom). Files: ServiceStartPolicy.java, LinkStatePolicy. Runtime: about 27 s.
 // Compiles and runs scripts/jvm/ServiceStartPolicyTest.java with plain JDK 21 (no Gradle, no Android),
 // then reruns it against mutated copies, each of which must FAIL:
 //   resume-on-engine   decide resumes on origin=engine (our own FGS start re-enters onStartCommand) [S3]

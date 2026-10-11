@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Guards: services, receivers or the PDF path reaching engine state they must not touch. Files: HrEngine and its callers, SymptomReceiver, PdfPrinter. Runtime: under 1 s.
 // Engine boundary test: reads the native Java as text, no JVM.
 // Guards three bugs: the C3 orphan neutralize on Activity recreate, a
 // sessionActive seeded outside start/stop (skips strap reconnection after a

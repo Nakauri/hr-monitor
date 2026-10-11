@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Guards: a reversed tap reappearing (Fable HIGH 2026-10-11, rev matched on rounded minutes), lost tombstones, doubled month files. Files: marks-store.js, marks-drive.js. Runtime: about 60 s; run when either changes and before a push.
 // S9 marks store checks (ux-audit/redesign/S9-MARKS-STORE-SPEC.md section 10, as cut by section 16).
 // marks-store.js and marks-drive.js run against an in-memory fake Drive with one store per device, each with
 // its own device id and clock; viewer functions are pulled out of hrv_viewer.html by name.

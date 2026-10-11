@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Guards: v2 segment rows drifting from the Java writer; fact ep not exact (Fable HIGH). Files: SegmentWriter.java, hrv_viewer.html parser. Runtime: about 1 s.
 // Schema v2 segment format test. Reads the Java as text (behaviour is scripts/jvm/run-segment-test.cjs); one JDK 21 probe
 // runs SegmentWriter.writeFact for the S9 marks checks (ep survives exactly; JS and Java label rules agree).
 // Guards: header drift (B7), a kind's field count drifting from BLOCK-B-SPEC.md section 2, null RMSSD as 0 (A7),
