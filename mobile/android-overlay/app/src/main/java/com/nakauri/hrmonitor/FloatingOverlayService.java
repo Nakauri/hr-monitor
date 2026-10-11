@@ -55,6 +55,27 @@ public class FloatingOverlayService extends Service {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private String mode = "compact"; // "compact" | "card" | "chart"
 
+    // Two checks in a row without a live session close the bubble.
+    private static final long SESSION_CHECK_MS = 5000;
+    private int idleChecks = 0;
+    private final Runnable sessionCheck = new Runnable() {
+        @Override
+        public void run() {
+            boolean live = false;
+            try {
+                HrEngine e = HrEngine.peek();
+                live = e != null && e.isSessionActive();
+            } catch (Throwable ignored) {}
+            idleChecks = live ? 0 : idleChecks + 1;
+            if (idleChecks >= 2) {
+                Log.i(TAG, "No live session; closing.");
+                stopSelf();
+                return;
+            }
+            mainHandler.postDelayed(this, SESSION_CHECK_MS);
+        }
+    };
+
     // Plugin's handleHrReading calls this on every HR tick. Both fields are
     // best-effort: bpm is 0 if no parse, rmssd is 0 if no RR window yet.
     public interface HrUpdateListener {
@@ -82,6 +103,7 @@ public class FloatingOverlayService extends Service {
             });
         };
         Log.i(TAG, "Overlay attached (mode=" + mode + ").");
+        mainHandler.postDelayed(sessionCheck, SESSION_CHECK_MS);
     }
 
     @Override
@@ -91,6 +113,7 @@ public class FloatingOverlayService extends Service {
 
     @Override
     public void onDestroy() {
+        mainHandler.removeCallbacks(sessionCheck);
         HrEngine.floatingOverlayListener = null;
         if (overlayView != null && windowManager != null) {
             try { windowManager.removeView(overlayView); } catch (Throwable ignored) {}
