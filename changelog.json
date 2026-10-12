@@ -70,7 +70,7 @@
       "date": "2026-10-11",
       "area": "Android app",
       "title": "Symptom from the notification",
-      "body": "The recording notification has a Symptom button, so you can mark a moment without opening the app. Its status now reads in hours and minutes."
+      "body": "The recording notification has a Symptom button for marking a moment. Its status now reads in hours and minutes."
     },
     {
       "date": "2026-10-11",
@@ -135,8 +135,8 @@
     {
       "date": "2026-07-05",
       "area": "Android app",
-      "title": "Security tightening",
-      "body": "Sign-in details are stored more securely on the phone, and live data from other devices is checked before it shows. A few stop and restart edge cases were fixed along the way."
+      "title": "Safer sign-in on the phone",
+      "body": "Sign-in details are stored more securely on the phone, and live data from other devices is checked before it shows."
     },
     {
       "date": "2026-05-23",
