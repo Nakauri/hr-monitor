@@ -580,7 +580,7 @@ if (want('mutants')) {
   const MUTANTS = [
     ['diamonds', 'no diamond handles', "          annotations['mk_' + idCounter++] = handle;", "          void handle;"],
     ['focus', 'marker click jumps with the old zoom, no highlight', '    easeBrushTo(lo, hi, () => { if (pinnedMarkT === item.t) highlightAtTime(item.t); });', '    zoomTo(item.t);'],
-    ['focus', 'marker click without the highlight', '    pinnedMarkT = item.t;\n    if (fromSheet) {', '    if (fromSheet) {'],
+    ['focus', 'marker click without the highlight', '    pinnedMarkT = item.t;\n    // A tooltip left by a tap', '    // A tooltip left by a tap'],
     ['tap', 'delete skips the confirm', "    if (!ok) return;\n    const id = item.edit.markId;", "    const id = item.edit.markId;"],
     ['tap', 'a save resets the layers', '    if (priorFilters) for (const k of Object.keys(activeFilters))', '    if (false) for (const k of Object.keys(activeFilters))'],
     ['tap', 'Undo does nothing', '      undo: () => marksWrite(() => id ? store.restore(id) : store.unreverse(row)),', '      undo: () => {},'],
@@ -591,7 +591,9 @@ if (want('mutants')) {
     ['sleep', 'a sleep edit keeps the old window', '    marksWrite(() => rec ? store.edit(rec.id, { from: a, to: b }) : store.createSleep({ from: a, to: b }), box);', '    marksWrite(() => rec ? store.edit(rec.id, {}) : store.createSleep({ from: a, to: b }), box);'],
     ['phone', 'no markers sheet', "    if (!sb || (markersSheet && !markersSheet.closed)) return;", "    return;"],
   ];
-  for (const [sub, name, a, b] of MUTANTS) {
+  // --only <n,n> runs those mutants by index, so the set can run in parts.
+  const onlyM = argVal('--only') ? argVal('--only').split(',').map(Number) : null;
+  for (const [sub, name, a, b] of MUTANTS.filter((m, i) => !onlyM || onlyM.includes(i))) {
     if (!real.includes(a)) { ok(false, `mutant ${name}: anchor missing`); continue; }
     const m = await serve(real.replace(a, b));
     const rows = await runSub(sub, m.base);
