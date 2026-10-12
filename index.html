@@ -29,6 +29,7 @@
 <script>HRWidget.watchPhoneLayout();</script>
 <link rel="stylesheet" href="./widget.css">
 <link rel="stylesheet" href="./ui.css">
+<link rel="stylesheet" href="./assets/landing/site.css">
 <style>
   /* Landing page. Type and colour come from tokens.css (Work Sans, the app's palette) so the
      site and the app read as one product. Structure and copy follow LANDING-AUDIT 2026-10-11
@@ -49,68 +50,8 @@
   img { max-width: 100%; }
   .wrap { max-width: 1120px; margin: 0 auto; padding-left: var(--s6); padding-right: var(--s6); }
 
-  /* ===== Nav ===== */
-  .nav {
-    position: sticky;
-    top: 0;
-    z-index: var(--z-sticky);
-    background: rgba(10,10,10,0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border);
-  }
-  .nav-inner {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--s2) var(--s5);
-    min-height: 64px;
-    padding-top: var(--s2);
-    padding-bottom: var(--s2);
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s3);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    font-size: var(--t20);
-    color: var(--text);
-  }
-  .brand-mark { width: 32px; height: 30px; display: inline-block; flex: none; }
-  .brand-dot { color: var(--brand); font-weight: 700; }
-  .brand-ca { color: var(--text-dim); font-weight: 500; }
-  .nav-links { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2) var(--s5); }
-  .nav-link {
-    font-size: var(--t14);
-    font-weight: 500;
-    color: var(--text-dim);
-    padding: var(--s2) 0;
-    border-bottom: 1px solid transparent;
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .nav-link:hover { color: var(--text); border-bottom-color: var(--text); }
 
-  /* ===== Buttons ===== */
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--s2);
-    min-height: 48px;
-    padding: 0 var(--s5);
-    border-radius: var(--r-ctl);
-    font: 600 var(--t16)/1.2 var(--ui-face);
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-    border: 1px solid var(--border-control);
-    background: transparent;
-    color: var(--text);
-  }
-  .btn:hover { border-color: var(--text-dim); background: rgba(255,255,255,0.04); }
-  .btn-primary { background: var(--action); border-color: var(--action); color: var(--on-fill); }
-  .btn-primary:hover { background: #ffffff; border-color: #ffffff; }
-  .btn-sm { min-height: 40px; padding: 0 var(--s4); font-size: var(--t14); }
+  /* ===== Buttons: ui.css .btn and .btn.primary, sized by site.css .btn.lg ===== */
   .btn svg { width: 16px; height: 16px; flex: none; }
   :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-ctl); }
   .text-link { color: var(--text); border-bottom: 1px solid var(--border-control); transition: border-color 0.15s; }
@@ -135,7 +76,7 @@
   .hero {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--s7);
     align-items: center;
     padding-top: var(--s8);
@@ -154,12 +95,13 @@
   }
   .hero > * { position: relative; }
   .hero-title {
-    font-size: clamp(36px, 4.6vw, 60px);
-    line-height: 1.06;
+    font-size: clamp(36px, 4.2vw, 56px);
+    line-height: 1.08;
     font-weight: 700;
     letter-spacing: -0.025em;
     margin: 0 0 var(--s5);
-    max-width: 14em;
+    max-width: 17em;
+    text-wrap: balance;
   }
   .hero-sub {
     font-size: var(--t20);
@@ -169,7 +111,10 @@
     margin: 0 0 var(--s6);
   }
   .hero-cta { display: flex; flex-wrap: wrap; gap: var(--s3); }
-  .hero-signin { margin: var(--s4) 0 0; font-size: var(--t14); color: var(--text-dim); }
+  .hero-signin { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); margin-top: var(--s5); }
+  .hero-signin[hidden] { display: none; }
+  .hero-signin-note { margin: 0; font-size: var(--t14); color: var(--text-dim); }
+  .hero-signin .signin-msg { flex-basis: 100%; margin: 0; }
   .hero #overlay-zone { min-width: 0; display: flex; justify-content: center; }
 
   /* ===== Sections ===== */
@@ -209,43 +154,33 @@
   body.ios-device .android-card { opacity: 0.5; pointer-events: none; }
 
   /* ===== Story ===== */
-  .story { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--s7); align-items: center; }
-  .story-lede { font-size: var(--t20); line-height: 1.65; color: var(--text-dim); margin: 0 0 var(--s4); max-width: 34em; }
-  .story-logo { display: flex; justify-content: center; }
-  .story-logo svg { width: 100%; max-width: 280px; height: auto; }
+  .story { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 260px); gap: var(--s8); align-items: center; }
+  .story-text > :last-child { margin-bottom: 0; }
+  .story-lede { font-size: var(--t20); line-height: 1.6; color: var(--text-dim); margin: 0 0 var(--s4); max-width: 46em; }
+  .story-logo { display: flex; justify-content: center; align-items: center; }
+  .story-logo svg { display: block; width: 100%; max-width: 240px; height: auto; }
 
   /* ===== Stream overlay ===== */
+
+  .stream-split { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: var(--s7); align-items: center; }
   .stream-frame {
-    display: flex;
-    align-items: flex-end;
-    min-height: 320px;
-    padding: var(--s5);
+    position: relative;
+    aspect-ratio: 16 / 9;
     border-radius: var(--r-card);
     border: 1px solid var(--border);
-    background: linear-gradient(160deg, #1a1a1d 0%, #121214 55%, #0d0d0e 100%);
     overflow: hidden;
+    background: #1d1530;
   }
-  #variant-frame { display: block; border: 0; width: 320px; height: 240px; max-width: 100%; background: transparent; }
-  .variant-bar { margin-top: var(--s4); }
-  .seg { display: inline-flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--border-control); border-radius: var(--r-ctl); overflow: hidden; }
-  .seg button {
-    min-height: 44px;
-    padding: 0 var(--s4);
-    background: transparent;
-    border: 0;
-    border-right: 1px solid var(--border-control);
-    color: var(--text-dim);
-    font: 500 var(--t14)/1.2 var(--ui-face);
-    cursor: pointer;
-  }
-  .seg button:last-child { border-right: 0; }
-  .seg button:hover { color: var(--text); }
-  .seg button[aria-pressed="true"] { background: var(--selected-fill); color: var(--text); font-weight: 600; }
+  .stream-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .stream-res { position: absolute; bottom: var(--s2); right: var(--s3); font-size: var(--t12); color: #f2e6da; background: rgba(0,0,0,0.55); padding: 0 var(--s2); border-radius: var(--r-ctl); font-variant-numeric: tabular-nums; }
+  #variant-frame { position: absolute; left: 0; bottom: 0; display: block; border: 0; width: 320px; height: 240px; background: transparent; transform-origin: 0 100%; }
+  .variant-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: var(--s4); }
+  .variant-seg > button { min-width: 0; white-space: normal; line-height: 1.2; padding: var(--s1) var(--s2); }
   .variant-size { margin: var(--s3) 0 0; font-size: var(--t14); color: var(--text); font-variant-numeric: tabular-nums; }
   .variant-note { margin: var(--s1) 0 0; font-size: var(--t14); color: var(--text-dim); }
 
   /* ===== Viewer: before and after, then Month ===== */
-  .ba { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--s6); align-items: end; }
+  .ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s6); align-items: start; }
   .shot { margin: 0; }
   .shot img {
     display: block;
@@ -255,44 +190,68 @@
     border: 1px solid var(--border);
     background: var(--bg-raised);
   }
-  .shot figcaption { margin-top: var(--s3); font-size: var(--t14); color: var(--text-dim); max-width: 34em; }
+  /* Before and after share one frame shape, cropped from the top, so neither reads smaller. */
+  .ba .shot img { aspect-ratio: 1440 / 790; object-fit: cover; object-position: top; }
+  .shot figcaption { margin-top: var(--s3); font-size: var(--t14); color: var(--text-dim); }
   .shot figcaption strong { color: var(--text); font-weight: 600; margin-right: var(--s2); }
-  .ba-before img { opacity: 0.85; }
   .month-shot { margin-top: var(--s7); }
 
+
   /* ===== Straps ===== */
-  .straps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); max-width: 720px; }
-  .straps li {
+  .straps { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--s6); align-items: stretch; }
+  .strap-feature {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    padding: var(--s6);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-control);
+    border-radius: var(--r-card);
+  }
+  .strap-feature h3 { margin: 0; font-size: var(--t24); line-height: 1.2; font-weight: 700; }
+  .strap-feature p { margin: 0; color: var(--text-dim); }
+  .strap-feature .badge { align-self: flex-start; }
+  /* Store links go here later; the row keeps its height so the card does not grow when they land. */
+  .strap-links { margin-top: auto; min-height: 44px; display: flex; flex-wrap: wrap; gap: var(--s3); }
+  .strap-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+  .strap-list li {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     flex-wrap: wrap;
     gap: var(--s1) var(--s4);
-    padding: var(--s3) 0;
+    min-height: 56px;
+    padding: var(--s2) 0;
     border-bottom: 1px solid var(--border);
   }
-  .strap-name { color: var(--text); font-weight: 500; }
+  .strap-name { color: var(--text); font-weight: 600; }
   .strap-status { color: var(--text-dim); font-size: var(--t14); }
 
   /* ===== Questions ===== */
-  .faq { max-width: 820px; border-top: 1px solid var(--border); }
+  .faq { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 var(--s7); }
+  @media (min-width: 1024px) { .faq { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+  .faq-col { border-top: 1px solid var(--border); }
   .faq-item { border-bottom: 1px solid var(--border); }
   .faq-item summary {
     list-style: none;
     cursor: pointer;
-    min-height: 56px;
+    min-height: 64px;
     padding: var(--s3) 0;
+    font-size: var(--t18, 18px);
     font-weight: 600;
+    line-height: 1.35;
+    color: var(--text);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--s3);
+    gap: var(--s4);
   }
+  .faq-item summary:hover { text-decoration: underline; text-underline-offset: 4px; }
   .faq-item summary::-webkit-details-marker { display: none; }
-  .faq-item summary svg { width: 16px; height: 16px; flex: none; color: var(--text-dim); transition: transform 0.2s; }
+  .faq-item summary svg { width: 18px; height: 18px; flex: none; color: var(--text-dim); transition: transform 0.2s; }
   .faq-item[open] summary svg { transform: rotate(180deg); }
-  .faq-item-body { padding: 0 0 var(--s4); color: var(--text-dim); max-width: 40em; }
-  .faq-item-body p { margin: 0 0 var(--s2); }
+  .faq-item-body { padding: 0 0 var(--s5); color: var(--text-dim); font-size: var(--t16); line-height: 1.65; }
+  .faq-item-body p { margin: 0 0 var(--s3); }
   .faq-item-body p:last-child { margin: 0; }
 
   /* ===== Tip ===== */
@@ -341,68 +300,35 @@
   .contact-status.success { color: var(--live); }
   .contact-status.error { color: var(--danger); }
 
-  /* ===== Footer: identical on index, changelog and legal (scripts/landing.mjs compares them) ===== */
-  .site-footer { border-top: 1px solid var(--border); }
-  .footer-inner { padding-top: var(--s6); padding-bottom: var(--s7); font-size: var(--t14); color: var(--text-dim); }
-  .footer-line { margin: 0 0 var(--s3); }
-  .footer-links { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); }
-  .footer-links a { display: inline-flex; align-items: center; gap: var(--s2); min-height: 44px; color: var(--text); text-decoration: none; }
-  .footer-links a:hover { text-decoration: underline; text-underline-offset: 4px; }
-  .gh-mark { width: 16px; height: 16px; flex: none; }
 
-  /* ===== Back to top: neutral, static ===== */
-  .fab {
-    position: fixed;
-    bottom: var(--s5);
-    right: var(--s5);
-    z-index: var(--z-menu);
-    width: 48px;
-    height: 48px;
-    border-radius: var(--r-pill);
-    background: var(--bg-raised);
-    border: 1px solid var(--border-control);
-    color: var(--text);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s;
-  }
-  .fab.visible { opacity: 1; pointer-events: auto; }
-  .fab:hover { border-color: var(--text-dim); }
-  .fab svg { width: 20px; height: 20px; }
 
   /* ===== Phone ===== */
   @media (max-width: 760px) {
     .wrap { padding-left: var(--s4); padding-right: var(--s4); }
-    .nav-inner { min-height: 56px; gap: var(--s2) var(--s3); }
-    .nav-link { display: none; }
     .hero { grid-template-columns: minmax(0, 1fr); gap: var(--s6); padding-top: var(--s6); padding-bottom: var(--s7); }
     .hero::before { width: 100%; top: auto; bottom: 0; height: 50%; }
     .hero-sub { font-size: var(--t16); }
     .hero-cta .btn { flex: 1 1 auto; }
-    .seg button { flex: 1 1 auto; }
-    .stream-frame { min-height: 0; padding: var(--s3); }
+    .variant-seg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .straps { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
+    .strap-feature { padding: var(--s5); }
     section { padding-top: var(--s7); padding-bottom: var(--s7); }
     .lede, .story-lede { font-size: var(--t16); }
-    .split, .story, .ba { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
-    .story-logo svg { max-width: 160px; }
+    .split, .story, .ba, .stream-split { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
+    .story-logo svg { max-width: 140px; }
     .ba-after { order: -1; }
     .android-card { grid-template-columns: minmax(0, 1fr); padding: var(--s5); gap: var(--s3); }
     .android-card-icon { display: none; }
     .android-card .btn { justify-self: start; }
     .support { grid-template-columns: minmax(0, 1fr); padding: var(--s5); gap: var(--s5); }
-    .fab { bottom: var(--s4); right: var(--s4); }
   }
 </style>
 </head>
 <body>
 
-<nav class="nav">
+<nav class="nav" aria-label="Main" data-signin-scope>
   <div class="wrap nav-inner">
-    <a class="brand" href="/">
+    <a class="brand" href="/" aria-label="aorti.ca home">
       <svg class="brand-mark" viewBox="0 0 1779 1642" aria-hidden="true">
       <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
       <path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="url(#navEkg)"/>
@@ -421,9 +347,10 @@
     <div class="nav-links">
       <a class="nav-link" href="./hrv_viewer.html?demo=1">Sample data</a>
       <a class="nav-link" href="./hrv_viewer.html">Viewer</a>
-      <a class="nav-link" href="./hr_monitor.html?mode=online" data-signin>Sign in</a>
-      <a class="btn btn-primary btn-sm" href="./hr_monitor.html">Open monitor</a>
+      <a class="nav-link" href="./hrv_viewer.html" data-signin>Sign in</a>
+      <a class="btn primary" href="./hr_monitor.html">Open monitor</a>
     </div>
+    <p class="signin-msg" role="status" hidden></p>
   </div>
 </nav>
 
@@ -439,10 +366,14 @@
     <h1 class="hero-title">Live heart rate and HRV, for your stream and your own records.</h1>
     <p class="hero-sub">Put your heart rate on stream, or record it day and night and read it back later. Free.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" id="hero-open-monitor" href="./hr_monitor.html">Open monitor</a>
-      <a class="btn" href="#android-app">Get the Android app</a>
+      <a class="btn primary lg" id="hero-open-monitor" href="./hr_monitor.html">Open monitor</a>
+      <a class="btn lg" href="#android-app">Get the Android app</a>
     </div>
-    <p class="hero-signin">No account needed. <a class="text-link" href="./hr_monitor.html?mode=online" data-signin>Sign in with Google</a> to keep sessions in your own Drive.</p>
+    <div class="hero-signin" data-signin-row data-signin-scope>
+      <a class="btn google" id="hero-google" href="./hrv_viewer.html" data-signin><span class="g-mark"><svg class="g-logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.75h3.57c2.08-1.92 3.28-4.74 3.28-8.07z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.75c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg></span>Sign in with Google</a>
+      <p class="hero-signin-note">No account needed. Signing in keeps sessions in your own Drive.</p>
+      <p class="signin-msg" role="status" hidden></p>
+    </div>
   </div>
 
   <div id="overlay-zone" aria-hidden="true">
@@ -486,13 +417,13 @@
       <p class="android-card-note">Not on the Play Store yet, so Android asks you to allow installs from your browser.</p>
       <div class="android-card-version" id="apk-version"></div>
     </div>
-    <span class="btn">Download the APK</span>
+    <span class="btn lg">Download the APK</span>
   </a>
 </section>
 
 <section class="wrap" id="story">
   <div class="story">
-    <div>
+    <div class="story-text">
       <h2>Why I built it</h2>
       <p class="story-lede">I was dealing with heart rate swings, high and low, that nobody seemed to take seriously. I wanted a quiet 24/7 way to record HR and HRV, then look back at the patterns myself over weeks and months.</p>
       <p class="story-lede">I also stream and play games. I'd been using Pulsoid for the OBS widget and realized I wanted one app that did both. I wanted the stream widget and the long-term record from one strap, without a subscription.</p>
@@ -516,30 +447,52 @@
 </section>
 
 <section class="wrap" id="stream">
-  <div class="split">
+  <div class="stream-split">
     <div>
       <h2>Stream overlay</h2>
       <p class="lede">Add it to OBS as a browser source, or window-capture it with a chroma key.</p>
       <div class="actions">
-        <a class="btn btn-primary" href="./hr_monitor.html">Open monitor</a>
+        <a class="btn primary lg" href="./hr_monitor.html">Open monitor</a>
       </div>
     </div>
-    <div>
-      <div class="stream-frame">
+    <div class="stream-preview" id="stream-preview">
+      <div class="stream-frame" id="stream-frame">
+        <!-- A made-up 1920 by 1080 game scene; the widget sits on it at its true share of the stream. -->
+        <svg class="stream-scene" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs>
+            <linearGradient id="sceneSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d1530"/><stop offset="0.55" stop-color="#4a2c4a"/><stop offset="1" stop-color="#b8664a"/></linearGradient>
+            <linearGradient id="sceneGround" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a1d2c"/><stop offset="1" stop-color="#110c15"/></linearGradient>
+          </defs>
+          <rect width="1920" height="1080" fill="url(#sceneSky)"/>
+          <circle cx="1320" cy="600" r="130" fill="#f0b06a" opacity="0.8"/>
+          <path d="M0 650 L220 480 L420 610 L640 440 L900 620 L1120 490 L1380 630 L1600 460 L1920 610 V1080 H0Z" fill="#3a2440"/>
+          <path d="M0 730 L300 610 L560 710 L820 600 L1080 720 L1400 620 L1700 730 L1920 660 V1080 H0Z" fill="#2a1a30"/>
+          <rect y="770" width="1920" height="310" fill="url(#sceneGround)"/>
+          <path d="M880 770 L1040 770 L1520 1080 L400 1080Z" fill="#3b2a36"/>
+          <path d="M954 790 L966 790 L978 840 L942 840Z M944 880 L976 880 L992 950 L928 950Z M928 1000 L992 1000 L1008 1080 L912 1080Z" fill="#d9a066" opacity="0.55"/>
+          <path d="M140 770 L190 640 L240 770Z M260 780 L300 680 L340 780Z M1600 775 L1650 650 L1700 775Z M1720 785 L1760 690 L1800 785Z" fill="#160f1a"/>
+          <rect x="40" y="40" width="380" height="30" rx="6" fill="#000000" opacity="0.5"/>
+          <rect x="46" y="46" width="270" height="18" rx="4" fill="#efe2cf"/>
+          <rect x="40" y="80" width="260" height="20" rx="5" fill="#000000" opacity="0.5"/>
+          <rect x="46" y="85" width="150" height="10" rx="3" fill="#c9a36a"/>
+          <rect x="1650" y="40" width="230" height="230" rx="10" fill="#000000" opacity="0.45" stroke="#efe2cf" stroke-opacity="0.5" stroke-width="3"/>
+          <path d="M1700 220 L1760 120 L1830 200" fill="none" stroke="#efe2cf" stroke-opacity="0.4" stroke-width="4"/>
+          <circle cx="1765" cy="155" r="9" fill="#f0b06a"/>
+          <g fill="#000000" opacity="0.5" stroke="#efe2cf" stroke-opacity="0.45" stroke-width="3"><rect x="752" y="976" width="72" height="72" rx="8"/><rect x="836" y="976" width="72" height="72" rx="8"/><rect x="920" y="976" width="72" height="72" rx="8"/><rect x="1004" y="976" width="72" height="72" rx="8"/><rect x="1088" y="976" width="72" height="72" rx="8"/></g>
+        </svg>
+        <span class="stream-res">1920 × 1080 stream</span>
         <!-- The overlay's own widget markup, styled only by widget.css, in a frame of its own so its
              body classes (the monitor's Widgets switches) never touch the hero widget. -->
         <iframe id="variant-frame" title="Widget preview" scrolling="no" tabindex="-1" aria-hidden="true"></iframe>
       </div>
-      <div class="variant-bar">
-        <div class="seg" role="group" aria-label="Widget layout" id="variant-seg">
-          <button type="button" data-classes="" aria-pressed="true">Full chip</button>
-          <button type="button" data-classes="no-hrv no-live-hr no-inline-trends" aria-pressed="false">Slim, heart rate only</button>
-          <button type="button" data-classes="no-live-hr no-inline-trends" aria-pressed="false">HR and HRV</button>
-          <button type="button" data-classes="no-inline-trends" aria-pressed="false">No trends</button>
-        </div>
-        <p class="variant-size" id="variant-size" aria-live="polite"></p>
-        <p class="variant-note">The monitor's Widgets tab has the same switches.</p>
+      <div class="segmented variant-seg" role="group" aria-label="Widget layout" id="variant-seg">
+        <button type="button" data-classes="" aria-pressed="true">Full chip</button>
+        <button type="button" data-classes="no-hrv no-live-hr no-inline-trends" aria-pressed="false">Slim, heart rate only</button>
+        <button type="button" data-classes="no-live-hr no-inline-trends" aria-pressed="false">HR and HRV</button>
+        <button type="button" data-classes="no-inline-trends" aria-pressed="false">No trends</button>
       </div>
+      <p class="variant-size" id="variant-size" aria-live="polite"></p>
+      <p class="variant-note">The monitor's Widgets tab has the same switches.</p>
     </div>
   </div>
 </section>
@@ -553,82 +506,93 @@
         <source media="(max-width: 600px)" srcset="./assets/landing/viewer-day-before-360.webp">
         <img src="./assets/landing/viewer-day-before-1440.webp" width="1440" height="933" alt="The Day view before: session blocks on a 24-hour bar, with each session's numbers in its own card" loading="lazy">
       </picture>
-      <figcaption><strong>Before</strong>Session blocks on a 24-hour bar, with each session's numbers in its own card.</figcaption>
+      <figcaption><strong>Before</strong>One block per session, each with its own card.</figcaption>
     </figure>
     <figure class="shot ba-after">
       <picture>
         <source media="(max-width: 600px)" srcset="./assets/landing/viewer-day-360.webp">
-        <img src="./assets/landing/viewer-day-1440.webp" width="1440" height="900" alt="The Day view now: the day's numbers above one chart of heart rate and HRV across 24 hours" loading="lazy">
+        <img src="./assets/landing/viewer-day-1440.webp" width="1440" height="790" alt="The Day view now: the day's numbers above one chart of heart rate and HRV across 24 hours" loading="lazy">
       </picture>
-      <figcaption><strong>Now</strong>Every session that day on one 24-hour line, with the day's numbers above it.</figcaption>
+      <figcaption><strong>Now</strong>The whole day on one line, its numbers above.</figcaption>
     </figure>
   </div>
   <figure class="shot month-shot">
     <picture>
       <source media="(max-width: 600px)" srcset="./assets/landing/viewer-month-360.webp">
-      <img src="./assets/landing/viewer-month-1440.webp" width="1440" height="1180" alt="The Month view: a calendar with each recorded day's resting heart rate" loading="lazy">
+      <img src="./assets/landing/viewer-month-1440.webp" width="1440" height="1000" alt="The Month view: a calendar with each recorded day's resting heart rate" loading="lazy">
     </picture>
-    <figcaption><strong>Month</strong>Each day's heart rate range on one calendar.</figcaption>
+    <figcaption><strong>Month</strong>Each day's resting heart rate on one calendar.</figcaption>
   </figure>
   <div class="actions">
-    <a class="btn" href="./hrv_viewer.html?demo=1">Try it with sample data</a>
-    <a class="btn" href="./hrv_viewer.html">Open viewer</a>
+    <a class="btn lg" href="./hrv_viewer.html?demo=1">Try it with sample data</a>
+    <a class="btn lg" href="./hrv_viewer.html">Open viewer</a>
   </div>
 </section>
 
 <section class="wrap" id="straps">
   <h2>Straps</h2>
-  <p class="lede">Tested on a Coospo H808S, which I wear daily. The others use the same Bluetooth profile and should work.</p>
-  <ul class="straps">
-    <li><span class="strap-name">Coospo H808S</span><span class="strap-status">Tested</span></li>
-    <li><span class="strap-name">Polar H10</span><span class="strap-status">Untested</span></li>
-    <li><span class="strap-name">Wahoo TICKR</span><span class="strap-status">Untested</span></li>
-    <li><span class="strap-name">Garmin HRM-Dual</span><span class="strap-status">Untested</span></li>
-    <li><span class="strap-name">Apple Watch, Garmin Fenix, Fitbit</span><span class="strap-status">Not supported: no Bluetooth heart rate service</span></li>
-  </ul>
+  <p class="lede">Any chest strap with the standard Bluetooth heart rate profile should work.</p>
+  <div class="straps">
+    <article class="strap-feature">
+      <h3>Coospo H808S</h3>
+      <p>The strap I use. Tested daily, day and night.</p>
+      <span class="badge">Tested</span>
+      <div class="strap-links" data-store-links></div>
+    </article>
+    <ul class="strap-list">
+      <li><span class="strap-name">Polar H10</span><span class="strap-status">Same profile, untested</span></li>
+      <li><span class="strap-name">Wahoo TICKR</span><span class="strap-status">Same profile, untested</span></li>
+      <li><span class="strap-name">Garmin HRM-Dual</span><span class="strap-status">Same profile, untested</span></li>
+      <li><span class="strap-name">Apple Watch, Garmin Fenix, Fitbit</span><span class="strap-status">Not supported: no Bluetooth heart rate service</span></li>
+    </ul>
+  </div>
 </section>
 
 <section class="wrap" id="questions">
   <h2>Questions</h2>
   <div class="faq">
-    <details class="faq-item">
-      <summary>Do I need an account?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-      <div class="faq-item-body">
-        <p>No. Open monitor works without one, and sessions stay on this device until you export them. Once the page has loaded, recording keeps going without a connection.</p>
-        <p>Sign in with Google to save sessions to your own Drive and open them on any device signed in to the same account. Broadcasting and CSV export work either way.</p>
-      </div>
-    </details>
-    <details class="faq-item">
-      <summary>Can I record all day?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-      <div class="faq-item-body">
-        <p>The Android app keeps recording with the screen off or the phone locked. Browsers slow down background tabs. Keep the tab visible and the screen awake, or use the Android app.</p>
-        <p>Uses more battery than idle. Stop recording when you're done.</p>
-      </div>
-    </details>
-    <details class="faq-item">
-      <summary>What does HRV measure?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-      <div class="faq-item-body">
-        <p>RMSSD: how much the gap between beats changes. It moves with sleep, activity and time of day.</p>
-      </div>
-    </details>
-    <details class="faq-item">
-      <summary>Is my data private?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-      <div class="faq-item-body">
-        <p>CSVs stay on your device, or in your own Google Drive when signed in. No server stores your data. The broadcast relay passes live readings through to viewers and keeps nothing.</p>
-      </div>
-    </details>
-    <details class="faq-item">
-      <summary>Can two people share one broadcast?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-      <div class="faq-item-body">
-        <p>No. Each session has its own broadcast key. Anyone with it can watch; one device sends to it at a time.</p>
-      </div>
-    </details>
-    <details class="faq-item">
-      <summary>Is this a medical device?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
-      <div class="faq-item-body">
-        <p>No. It shows heart rate and an HRV estimate for personal and creative use. It is not a diagnostic tool and does not replace clinical equipment or advice.</p>
-      </div>
-    </details>
+    <div class="faq-col">
+      <details class="faq-item" open>
+        <summary>Do I need an account?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="faq-item-body">
+          <p>No. Open monitor works without one, and sessions stay on this device until you export them. Once the page has loaded, recording keeps going without a connection.</p>
+          <p>Sign in with Google to save sessions to your own Drive and open them on any device signed in to the same account. Broadcasting and CSV export work either way.</p>
+        </div>
+      </details>
+      <details class="faq-item">
+        <summary>Can I record all day?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="faq-item-body">
+          <p>The Android app keeps recording with the screen off or the phone locked. Browsers slow down background tabs. Keep the tab visible and the screen awake, or use the Android app.</p>
+          <p>Uses more battery than idle. Stop recording when you're done.</p>
+        </div>
+      </details>
+      <details class="faq-item">
+        <summary>What does HRV measure?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="faq-item-body">
+          <p>RMSSD: how much the gap between beats changes. It moves with sleep, activity and time of day.</p>
+        </div>
+      </details>
+    </div>
+    <div class="faq-col">
+      <details class="faq-item">
+        <summary>Is my data private?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="faq-item-body">
+          <p>CSVs stay on your device, or in your own Google Drive when signed in. No server stores your data. The broadcast relay passes live readings through to viewers and keeps nothing.</p>
+        </div>
+      </details>
+      <details class="faq-item">
+        <summary>Can two people share one broadcast?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="faq-item-body">
+          <p>No. Each session has its own broadcast key. Anyone with it can watch; one device sends to it at a time.</p>
+        </div>
+      </details>
+      <details class="faq-item">
+        <summary>Is this a medical device?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="faq-item-body">
+          <p>No. It shows heart rate and an HRV estimate for personal and creative use. It is not a diagnostic tool and does not replace clinical equipment or advice.</p>
+        </div>
+      </details>
+    </div>
   </div>
 </section>
 
@@ -640,8 +604,8 @@
       <div class="support-links">
         <!-- PayPal link is guarded with rel="noopener noreferrer" + data-no-prefetch, and hidden on
              phones (see .support-paypal), because a prerender can launch the PayPal app. -->
-        <a class="btn btn-primary support-paypal" href="https://paypal.me/crowek" rel="noopener noreferrer" data-no-prefetch>Tip via PayPal</a>
-        <a class="btn" href="https://ko-fi.com/crowek" rel="noopener noreferrer">Ko-fi</a>
+        <a class="btn primary lg support-paypal" href="https://paypal.me/crowek" rel="noopener noreferrer" data-no-prefetch>Tip via PayPal</a>
+        <a class="btn lg" href="https://ko-fi.com/crowek" rel="noopener noreferrer">Ko-fi</a>
       </div>
     </div>
     <div class="support-paypal">
@@ -673,7 +637,7 @@
       </label>
     </div>
     <div class="contact-actions">
-      <button type="submit" class="btn btn-primary contact-submit">Send</button>
+      <button type="submit" class="btn primary lg contact-submit">Send</button>
       <span class="contact-status" id="contact-status" aria-live="polite"></span>
     </div>
   </form>
@@ -693,8 +657,8 @@
   </div>
 </footer>
 
-<button class="fab" id="back-to-top" type="button" aria-label="Back to top">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+<button class="to-top" id="back-to-top" type="button" aria-label="Back to top">
+  <svg viewBox="0 0 1779 1642" aria-hidden="true"><path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/><path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="#ffffff"/></svg>
 </button>
 
 <script>
@@ -821,14 +785,19 @@
       + '<scr' + 'ipt src="./widget.js"></scr' + 'ipt></head><body class="conn-live">'
       + row.outerHTML + '</body></html>');
     fdoc.close();
+    // The widget at its true share of a 1920 by 1080 stream, 32 stream pixels in from the corner.
+    const stage = document.getElementById('stream-frame');
     function fit() {
       const w = fdoc.getElementById('hr-widget');
-      if (!w) return;
+      if (!w || !stage) return;
       const r = w.getBoundingClientRect();
+      const k = stage.clientWidth / 1920;
       frame.style.width = Math.ceil(r.width) + 'px';
       frame.style.height = Math.ceil(r.height) + 'px';
-      sizeEl.textContent = 'Footprint in OBS: ' + Math.round(r.width) + ' × ' + Math.round(r.height) + ' px';
+      frame.style.transform = 'translate(' + (32 * k) + 'px, ' + (-32 * k) + 'px) scale(' + k + ')';
+      sizeEl.textContent = 'Footprint in OBS: ' + Math.round(r.width) + ' × ' + Math.round(r.height) + ' px, ' + (100 * r.width * r.height / (1920 * 1080)).toFixed(1) + '% of a 1080p stream';
     }
+    if (window.ResizeObserver && stage) new ResizeObserver(() => fit()).observe(stage);
     function pick(btn) {
       seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
       const body = fdoc.body;
@@ -881,15 +850,6 @@
       .catch(() => {});
   })();
 
-  // Back to top: shows after the hero, scrolls to the top on tap.
-  (function () {
-    const btn = document.getElementById('back-to-top');
-    if (!btn) return;
-    function update() { btn.classList.toggle('visible', window.scrollY > window.innerHeight * 0.6); }
-    window.addEventListener('scroll', update, { passive: true });
-    update();
-    btn.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
-  })();
 
   // Contact form: AJAX submit so the page stays put on send (Web3Forms returns JSON).
   (function () {
@@ -926,31 +886,7 @@
     img.onerror = () => { img.style.display = 'none'; };
   })();
 
-  // Sign-in links (marked data-signin, pointing at hr_monitor.html?mode=online): if aortiAuth
-  // already holds a session, go straight to the monitor; otherwise run the shared sign-in, then
-  // go. "Open monitor" links carry no marker and never ask for an account.
-  (function () {
-    const MONITOR_URL = './hr_monitor.html?mode=online';
-    async function startSignIn() {
-      if (!window.aortiAuth || window.aortiAuth.isSignedIn()) { window.location.href = MONITOR_URL; return; }
-      try {
-        await window.aortiAuth.signIn();
-        window.location.href = MONITOR_URL;
-      } catch (e) {
-        const msg = e && e.message ? e.message : String(e);
-        if (/popup_closed|cancel/i.test(msg)) return;
-        console.warn('[aorti sign-in] failed:', msg);
-        window.location.href = MONITOR_URL;
-      }
-    }
-    document.addEventListener('click', (e) => {
-      const a = e.target.closest && e.target.closest('a');
-      if (!a || !a.hasAttribute('data-signin')) return;
-      if (!/hr_monitor\.html\?mode=online/.test(a.getAttribute('href') || '')) return;
-      e.preventDefault();
-      startSignIn();
-    }, true);
-  })();
 </script>
+<script src="./assets/landing/site.js"></script>
 </body>
 </html>
