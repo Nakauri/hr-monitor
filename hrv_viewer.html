@@ -15,7 +15,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
 <script src="./marks-store.js"></script>
@@ -8452,7 +8451,7 @@
   // line or label covers the pointer x.
   function marksPlugin(marks, rowsOf) {
     let list = null;
-    return {
+    const plugin = {
     id: 'hrMarks',
     beforeInit(chart) { chart.$marks = marks; },
     _layout(chart) {
@@ -8499,8 +8498,6 @@
       return out;
     },
     _draw(chart) {
-      if (chart._hrMkDrawn) return;
-      chart._hrMkDrawn = true;
       const items = this._layout(chart);
       if (!items.length) return;
       const H = Chart.helpers, ctx = chart.ctx, a = chart.chartArea;
@@ -8557,13 +8554,6 @@
       }
       H.unclipArea(ctx);
     },
-    beforeDraw(chart) { chart._hrMkDrawn = false; },
-    // After the last dataset (and the highlight), before the annotation plugin's max and min.
-    afterDatasetDraw(chart, args) {
-      const metas = chart.getSortedVisibleDatasetMetas();
-      if (metas.length && args.meta === metas[0]) this._draw(chart);
-    },
-    afterDatasetsDraw(chart) { this._draw(chart); },
     beforeEvent(chart, args) {
       const e = args.event;
       if (!e || (e.type !== 'mousemove' && e.type !== 'mouseout')) return;
@@ -8583,6 +8573,7 @@
       if (hit) annoEnter(hit.t, hit.html, e);
     },
     };
+    return Object.assign(plugin, lastDatasetLayer('hrMarks', (chart) => plugin._draw(chart)));
   }
 
   const _gapBroken = new WeakMap();
@@ -8629,10 +8620,8 @@
       return { x: midT, y: near.y, _count: c.count, _start: c.start, _end: c.end };
     }) : [];
 
-    // Box overlays go through the custom batching plugin (HR_OVERLAY_PLUGIN);
-    // chartjs-plugin-annotation handles only events (lines) + max/min markers.
+    // Box overlays: HR_OVERLAY_PLUGIN; marks: marksPlugin; max and min: maxMinPlugin.
     const hrOverlays = [];
-    const annotations = {};
     const marks = {};
     let idCounter = 0;
     let markLayer = null;
@@ -8812,44 +8801,12 @@
         });
       }
     }
-    if (activeFilters.maxmin !== false) {
-    annotations['maxHR'] = {
-      type: 'point',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMax.t, yValue: s.hrMax.v,
-      backgroundColor: STAGE_COLORS[getHRStage(s.hrMax.v)],
-      radius: 5, borderWidth: 2, borderColor: '#000',
-    };
-    annotations['maxHR_label'] = {
-      type: 'label',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMax.t, yValue: s.hrMax.v,
-      content: [`Max ${s.hrMax.v}`],
-      color: STAGE_COLORS[getHRStage(s.hrMax.v)],
-      font: { size: 12, weight: 'bold' },
-      ...labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false),
-      backgroundColor: 'rgba(10,10,10,0.8)',
-      padding: 3,
-    };
-    annotations['minHR'] = {
-      type: 'point',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMin.t, yValue: s.hrMin.v,
-      backgroundColor: STAGE_COLORS[getHRStage(s.hrMin.v)],
-      radius: 5, borderWidth: 2, borderColor: '#000',
-    };
-    annotations['minHR_label'] = {
-      type: 'label',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMin.t, yValue: s.hrMin.v,
-      content: [`Min ${s.hrMin.v}`],
-      color: STAGE_COLORS[getHRStage(s.hrMin.v)],
-      font: { size: 12, weight: 'bold' },
-      ...labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true),
-      backgroundColor: 'rgba(10,10,10,0.8)',
-      padding: 3,
-    };
-    }
+    const maxMin = activeFilters.maxmin === false ? null : maxMinPlugin([
+      { t: s.hrMax.t, v: s.hrMax.v, text: `Max ${s.hrMax.v}`, colour: STAGE_COLORS[getHRStage(s.hrMax.v)],
+        place: labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false) },
+      { t: s.hrMin.t, v: s.hrMin.v, text: `Min ${s.hrMin.v}`, colour: STAGE_COLORS[getHRStage(s.hrMin.v)],
+        place: labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true) },
+    ]);
 
     // Kill stale tooltip when pointer leaves the canvas entirely. Also clears
     // the marker-list / highlight-line state so nothing lingers on the chart
@@ -8926,7 +8883,6 @@
             padding: 10,
             boxPadding: 4,
           },
-          annotation: { annotations },
           hrOverlays: { overlays: hrOverlays },
           // min-max keeps every point when a pixel column holds one, and the envelope when it holds more.
           // Threshold 1 keeps it on at every zoom: the decimated set covers only the visible range, and a
@@ -8965,15 +8921,14 @@
           }
         },
       },
-      plugins: markLayer ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN],
+      plugins: [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer, maxMin].filter(Boolean),
     });
   }
 
   // A point label kept inside the plot: clamped sideways, flipped to the other side of its point at the top or bottom.
-  // Hidden while its point is outside the shown range.
   function labelInPlot(xv, yv, text, below) {
     let wCache = 0;
-    const place = (chart) => {
+    return (chart) => {
       const a = chart.chartArea, px = chart.scales.x.getPixelForValue(xv), py = chart.scales.y.getPixelForValue(yv);
       if (!wCache) {
         const c = chart.ctx;
@@ -8986,12 +8941,83 @@
       if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;
       return { dx: cx - px, dy: cy - py };
     };
+  }
+
+  // Draws its own layer once per frame: after the last dataset (and the highlight), or after all datasets
+  // when none is visible. Plugins using it draw in their order in the chart's plugins list.
+  function lastDatasetLayer(id, draw) {
+    const flag = '_' + id + 'Drawn';
+    const run = (chart) => { if (chart[flag]) return; chart[flag] = true; draw(chart); };
     return {
-      position: 'center',
-      display: (ctx) => { const x = ctx.chart.scales.x; return xv >= x.min && xv <= x.max; },
-      xAdjust: (ctx) => place(ctx.chart).dx,
-      yAdjust: (ctx) => place(ctx.chart).dy,
+      beforeDraw(chart) { chart[flag] = false; },
+      afterDatasetDraw(chart, args) {
+        const metas = chart.getSortedVisibleDatasetMetas();
+        if (metas.length && args.meta === metas[0]) run(chart);
+      },
+      afterDatasetsDraw: run,
     };
+  }
+
+  // Max and Min: a ringed point and a label placed by labelInPlot, hidden while the point is outside the shown
+  // range; drawn as chartjs-plugin-annotation drew them. The HR axis always spans both, at every zoom.
+  // Label boxes land on chart.$maxMin for checks.
+  function maxMinPlugin(items) {
+    const limits = (sc) => {
+      const o = sc.options;
+      let changed = false;
+      if (o.min == null && o.suggestedMin == null) {
+        const v = Math.min(sc.min == null ? -Infinity : sc.min, ...items.map((m) => m.v));
+        if (isFinite(v)) { changed = sc.min !== v; sc.min = v; }
+      }
+      if (o.max == null && o.suggestedMax == null) {
+        const v = Math.max(sc.max == null ? Infinity : sc.max, ...items.map((m) => m.v));
+        if (isFinite(v)) { changed = sc.max !== v || changed; sc.max = v; }
+      }
+      if (changed && typeof sc.handleTickRangeOptions === 'function') sc.handleTickRangeOptions();
+    };
+    const draw = (chart) => {
+      const H = Chart.helpers, ctx = chart.ctx, a = chart.chartArea, xs = chart.scales.x, ys = chart.scales.y;
+      const boxes = [];
+      H.clipArea(ctx, a);
+      for (const m of items) {
+        const px = xs.getPixelForValue(m.t), py = ys.getPixelForValue(m.v);
+        ctx.save();
+        ctx.fillStyle = m.colour;
+        ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        if (!(m.t >= xs.min && m.t <= xs.max)) continue;
+        if (!m.font) {
+          m.font = H.toFont({ size: 12, weight: 'bold' });
+          ctx.save(); ctx.font = m.font.string; m.tw = ctx.measureText(m.text).width; ctx.restore();
+        }
+        const d = m.place(chart), w = m.tw + 6, h = m.font.lineHeight + 6;
+        const x = px - w / 2 + d.dx, y = py - h / 2 + d.dy;
+        boxes.push({ name: m.text, x, y, x2: x + w, y2: y + h });
+        ctx.save();
+        ctx.fillStyle = 'rgba(10,10,10,0.8)';
+        ctx.beginPath();
+        H.addRoundedRectPath(ctx, { x, y, w, h, radius: { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 } });
+        ctx.closePath();
+        ctx.fill();
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.font = m.font.string;
+        ctx.fillStyle = m.colour;
+        ctx.fillText(m.text, x + 3 + (w - 6) / 2, y + 3 + m.font.lineHeight / 2);
+        ctx.restore();
+      }
+      H.unclipArea(ctx);
+      chart.$maxMin = boxes;
+    };
+    return Object.assign({ id: 'hrMaxMin', afterDataLimits(chart, args) { if (args.scale.id === 'y') limits(args.scale); } }, lastDatasetLayer('hrMaxMin', draw));
   }
 
 

@@ -214,8 +214,9 @@ const signature = (page) => page.evaluate(() => {
   if (!c) return null;
   const ds = c.data.datasets.filter((d) => !String(d.label).startsWith('_HL')).map((d) => `${d.label}:${d.hidden ? 'h' : 'v'}:${d.data.length}`).join(',');
   const ov = ((c.options.plugins.hrOverlays || {}).overlays || []).length;
-  const an = Object.keys((c.options.plugins.annotation || {}).annotations || {}).length;
-  return `${ds}|ov${ov}|an${an}`;
+  const mk = Object.keys(c.$marks || {}).length;
+  const mm = c.config.plugins.some((p) => p.id === 'hrMaxMin') ? 1 : 0;
+  return `${ds}|ov${ov}|mk${mk}|mm${mm}`;
 });
 const covered = new Set(), seen = new Set();
 if (want('chips')) {
@@ -383,7 +384,7 @@ const SUBCHECKS = {
     const { ctx, page } = await openFixture(base);
     const got = await page.evaluate(() => {
       const c = Chart.getChart(document.getElementById('session-chart'));
-      const ann = Object.entries(c.options.plugins.annotation.annotations);
+      const ann = Object.entries(c.$marks || {});
       const text = getComputedStyle(document.documentElement).getPropertyValue('--text').trim();
       const dim = getComputedStyle(document.documentElement).getPropertyValue('--text-dim').trim();
       const dia = ann.filter(([k]) => k.startsWith('mk_')).map(([, a]) => a);
@@ -578,7 +579,7 @@ if (want('marks')) {
 if (want('mutants')) {
   const real = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
   const MUTANTS = [
-    ['diamonds', 'no diamond handles', "          annotations['mk_' + idCounter++] = handle;", "          void handle;"],
+    ['diamonds', 'no diamond handles', "          marks['mk_' + idCounter++] = handle;", "          void handle;"],
     ['focus', 'marker click jumps with the old zoom, no highlight', '    easeBrushTo(lo, hi, () => { if (pinnedMarkT === item.t) highlightAtTime(item.t); });', '    zoomTo(item.t);'],
     ['focus', 'marker click without the highlight', '    pinnedMarkT = item.t;\n    // A tooltip left by a tap', '    // A tooltip left by a tap'],
     ['tap', 'delete skips the confirm', "    if (!ok) return;\n    const id = item.edit.markId;", "    const id = item.edit.markId;"],
@@ -618,13 +619,12 @@ async function openDemo(base, width, scale = 1, init) {
   await page.waitForTimeout(300);
   return { ctx, page };
 }
-// Max and Min label boxes against the chart area, from the annotation plugin's laid-out elements.
+// Max and Min label boxes against the chart area, as the max and min plugin last drew them.
 const labelBoxes = (page) => page.evaluate(() => {
   const c = Chart.getChart(document.getElementById('session-chart'));
-  const st = Chart.registry.plugins.get('annotation')._getState(c);
   const a = c.chartArea;
-  return (st ? st.elements : []).filter((e) => e.options && /^(Max|Min) /.test(String(e.options.content)) && e.options.display !== false)
-    .map((e) => ({ name: String(e.options.content), inside: e.x >= a.left - 0.5 && e.x2 <= a.right + 0.5 && e.y >= a.top - 0.5 && e.y2 <= a.bottom + 0.5, box: [e.x, e.y, e.x2, e.y2].map(Math.round), area: [a.left, a.top, a.right, a.bottom].map(Math.round) }));
+  return (c.$maxMin || [])
+    .map((e) => ({ name: e.name, inside: e.x >= a.left - 0.5 && e.x2 <= a.right + 0.5 && e.y >= a.top - 0.5 && e.y2 <= a.bottom + 0.5, box: [e.x, e.y, e.x2, e.y2].map(Math.round), area: [a.left, a.top, a.right, a.bottom].map(Math.round) }));
 });
 const rect = (page, sel) => page.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, shown: r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }; }, sel);
 // Drags the strip's right handle to a share of the strip width.
@@ -839,8 +839,8 @@ if (want('layout-mutants')) {
     ['laptop', 'Reset zoom at the canvas corner over the right axis (1440)', '  .chart-wrap .reset-zoom { position: absolute; top: var(--plot-top, 8px); right: var(--plot-right, 8px);', '  .chart-wrap .reset-zoom { position: absolute; top: 4px; right: 4px;'],
     ['phone', 'Layers rows faded as before (off dim, no data at 40%)', '    background: transparent; border-color: var(--border); box-shadow: none; opacity: 1;\n  }\n', '  }\n  .markers-sheet .layer-toggles .chip[aria-pressed="false"] { color: var(--text-dim); }\n  .markers-sheet .layer-toggles .chip:disabled { opacity: .4; }\n'],
     ['phone', 'Layers rows without the drawn box (on read from the ring)', '  .markers-sheet .layer-toggles .chip[aria-pressed="true"]::after { background: var(--action); border-color: var(--action); }\n', ''],
-    ['phone', 'Max and Min labels unclamped', "      ...labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true),", '      yAdjust: 14,'],
-    ['laptop', 'Max label unclamped', "      ...labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false),", "      position: { x: 'center', y: 'start' },\n      yAdjust: -14,"],
+    ['phone', 'Max and Min labels unclamped', "        place: labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true) },", '        place: () => ({ dx: 0, dy: 14 }) },'],
+    ['laptop', 'Max label unclamped', "        place: labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false) },", '        place: () => ({ dx: 0, dy: -4 }) },'],
     ['laptop', 'panel content sizes the row (empty band)', '  .session-layout > .session-sidebar { contain: size; }\n', ''],
     ['laptop', 'chips auto-fill (11 plus 1)', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(var(--lc), minmax(0, 1fr));', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));'],
     ['laptop', 'hover line frozen at the pinned mark', '      const t = hov ? chart.data.datasets[hov.datasetIndex].data[hov.index].x : chart.$hlT;', '      const t = chart.$hlT;'],

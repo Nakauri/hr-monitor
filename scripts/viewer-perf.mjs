@@ -3,10 +3,10 @@
 // into the viewer's Drive cache, opens the Day view headless, runs the REPORT actions with long-task,
 // frame and Chart.update counters, then checks the REPORT budgets as PASS/FAIL rows.
 // --config desk (1440 at 4x CPU) | phone (360 at 6x) | all (both, about 140 s). --w/--cpu measure any other
-// cell without budgets. --mutants drag|hover serves a broken viewer whose budget rows must FAIL.
+// cell without budgets. --mutants drag|hover|marks serves a broken viewer whose budget rows must FAIL (marks runs the phone drags).
 // --shots <dir> --tag <name> shoots the chart at 1440: full day, a 10 min window, a marker clicked. --ref <commit>
 // serves that commit's viewer instead of the working file (before and after pairs). --counts adds V8 call counts.
-// Usage: node scripts/viewer-perf.mjs [--config desk|phone|all] [--mutants drag|hover] [--only a,b] [--ux <dir>]
+// Usage: node scripts/viewer-perf.mjs [--config desk|phone|all] [--mutants drag|hover|marks] [--only a,b] [--ux <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,7 +24,7 @@ const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'ven
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const OUTDIR = argVal('--out', path.join(UX, 'redesign', 'perf-2026-10-12', 's26'));
 const COUNTS = args.includes('--counts');
-const ONLY = argVal('--only', null);
+let ONLY = argVal('--only', null);
 const SHOTS = argVal('--shots', null), SHOT_TAG = argVal('--tag', 'shot'), SHOT_PREFIX = argVal('--prefix', 's26');
 const MUTANT = argVal('--mutants', null);
 const want = (a) => !ONLY || ONLY.split(',').includes(a);
@@ -32,7 +32,7 @@ const CONFIGS = { desk: [1440, 4], phone: [360, 6] };
 let runs;
 if (SHOTS) runs = [['shots', +argVal('--w', 1440), 1]];
 else if (args.includes('--w') || args.includes('--cpu')) runs = [['adhoc', +argVal('--w', 1440), +argVal('--cpu', 1)]];
-else if (MUTANT) runs = [['desk', ...CONFIGS.desk]];
+else if (MUTANT) runs = null;
 else { const c = argVal('--config', 'all'); runs = (c === 'all' ? ['desk', 'phone'] : [c]).map((k) => [k, ...CONFIGS[k]]); }
 
 const REF = argVal('--ref', null);
@@ -41,13 +41,25 @@ const REAL = (REF ? execFileSync('git', ['-C', ROOT, 'show', REF + ':hrv_viewer.
 const MUTANTS = {
   drag: { rows: ['brush'], a: '      scheduleChartRange();\n', b: '      applyChartRange();\n', why: 'brush drag calls the chart update from pointermove' },
   hover: { rows: ['hover'], a: '    chart.$hlT = t;\n', b: '    chart.$hlT = t;\n    chart.update(\'none\');\n', why: 'hover highlight runs a chart update' },
+  // S28 negative control: chartjs-plugin-annotation re-resolves every mark on each update (BUILD-PLAN S28).
+  marks: { rows: ['update'], config: 'phone', only: 'brush', why: 'marks drawn by chartjs-plugin-annotation', pairs: [
+    ['<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>\n',
+      '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>\n'],
+    ['          hrOverlays: { overlays: hrOverlays },\n', '          annotation: { annotations: marks },\n          hrOverlays: { overlays: hrOverlays },\n'],
+    ['RESET_POS_PLUGIN, markLayer, maxMin]', 'RESET_POS_PLUGIN, maxMin]'],
+  ] },
 };
 let SERVED = REAL;
 if (MUTANT) {
   const m = MUTANTS[MUTANT];
   if (!m) { console.log('FAIL unknown mutant ' + MUTANT); process.exit(2); }
-  if (!REAL.includes(m.a)) { console.log('FAIL mutant ' + MUTANT + ': anchor missing'); process.exit(1); }
-  SERVED = REAL.replace(m.a, m.b);
+  for (const [a, b] of m.pairs || [[m.a, m.b]]) {
+    if (!SERVED.includes(a)) { console.log('FAIL mutant ' + MUTANT + ': anchor missing'); process.exit(1); }
+    SERVED = SERVED.replace(a, b);
+  }
+  const c = m.config || 'desk';
+  runs = [[c, ...CONFIGS[c]]];
+  if (m.only && !ONLY) ONLY = m.only;
 }
 
 // ---- Fixture: 2026-09-15 in America/Edmonton (UTC-6). 06:30-12:00, 12:15-18:15, 18:40-23:40 local. ----
