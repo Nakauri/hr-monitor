@@ -4,23 +4,28 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.view.WindowMetrics;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -44,6 +49,21 @@ public class FloatingOverlayService extends Service {
     static final String TOKEN_TEXT_DIM = "#8a8a8a";
     static final String TOKEN_HRV = "#5DCAA5";
     static final int BG_ALPHA = 220;
+
+    // JVM-PURE BEGIN: scripts/jvm/run-bubble-test.cjs compiles this block on a plain JDK.
+    static final class Bounds {
+        private Bounds() {}
+
+        // Keeps [pos, pos + size) inside [0, avail); a bubble larger than the area pins to 0.
+        static int clamp(int pos, int size, int avail) {
+            return Math.max(0, Math.min(pos, avail - size));
+        }
+
+        static int[] place(int x, int y, int w, int h, int areaW, int areaH) {
+            return new int[] { clamp(x, w, areaW), clamp(y, h, areaH) };
+        }
+    }
+    // JVM-PURE END
 
     private WindowManager windowManager;
     private View overlayView;
@@ -95,6 +115,11 @@ public class FloatingOverlayService extends Service {
         buildView();
         applyMode();
         attachToWindow();
+        if (overlayView != null) {
+            overlayView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if (r - l != or - ol || b - t != ob - ot) mainHandler.post(this::reclamp);
+            });
+        }
         HrEngine.floatingOverlayListener = (bpm, rmssd) -> {
             mainHandler.post(() -> {
                 if (bpmText != null) bpmText.setText(bpm > 0 ? String.valueOf(bpm) : "—");
@@ -109,6 +134,12 @@ public class FloatingOverlayService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         return START_NOT_STICKY;
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        mainHandler.post(this::reclamp);
     }
 
     @Override
@@ -193,6 +224,7 @@ public class FloatingOverlayService extends Service {
         //              tap → toggle display mode; else it was a drag → no-op.
         pill.setOnTouchListener(new View.OnTouchListener() {
             private int initialX, initialY;
+            private int[] area;
             private float touchX, touchY;
             private long touchStart;
             private static final int TAP_MOVE_THRESHOLD_DP = 8;
@@ -203,13 +235,19 @@ public class FloatingOverlayService extends Service {
                     case MotionEvent.ACTION_DOWN:
                         initialX = params.x;
                         initialY = params.y;
+                        area = usableArea();
                         touchX = event.getRawX();
                         touchY = event.getRawY();
                         touchStart = System.currentTimeMillis();
                         return true;
                     case MotionEvent.ACTION_MOVE:
-                        params.x = initialX + (int) (event.getRawX() - touchX);
-                        params.y = initialY + (int) (event.getRawY() - touchY);
+                        if (area == null) area = usableArea();
+                        int[] p = Bounds.place(
+                            initialX + (int) (event.getRawX() - touchX),
+                            initialY + (int) (event.getRawY() - touchY),
+                            overlayView.getWidth(), overlayView.getHeight(), area[0], area[1]);
+                        params.x = p[0];
+                        params.y = p[1];
                         try { windowManager.updateViewLayout(overlayView, params); } catch (Throwable ignored) {}
                         return true;
                     case MotionEvent.ACTION_UP:
@@ -270,14 +308,48 @@ public class FloatingOverlayService extends Service {
         // first layout, so we approximate with the screen width minus a
         // typical pill width — the user can drag wherever afterward.
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
-        params.x = Math.max(0, screenWidth - dp(200));
-        params.y = dp(100);
+        int[] area = usableArea();
+        int[] p = Bounds.place(screenWidth - dp(200), dp(100), 0, 0, area[0], area[1]);
+        params.x = p[0];
+        params.y = p[1];
         try {
             windowManager.addView(overlayView, params);
         } catch (Throwable t) {
             Log.w(TAG, "addView failed: " + t.getMessage());
             stopSelf();
         }
+    }
+
+    // Size of the window's parent frame, whose top-left is params (0, 0) under TOP|START gravity.
+    private int[] usableArea() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            try {
+                WindowMetrics wm = windowManager.getMaximumWindowMetrics();
+                Rect b = wm.getBounds();
+                android.graphics.Insets in = wm.getWindowInsets().getInsetsIgnoringVisibility(
+                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                return new int[] { b.width() - in.left - in.right, b.height() - in.top - in.bottom };
+            } catch (Throwable ignored) {}
+        }
+        // Before API 30 the frame is the app area below the status bar.
+        DisplayMetrics dm = new DisplayMetrics();
+        windowManager.getDefaultDisplay().getMetrics(dm);
+        return new int[] { dm.widthPixels, dm.heightPixels - statusBarHeight() };
+    }
+
+    private int statusBarHeight() {
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
+    }
+
+    private void reclamp() {
+        if (overlayView == null || params == null || windowManager == null) return;
+        int[] area = usableArea();
+        int[] p = Bounds.place(params.x, params.y, overlayView.getWidth(), overlayView.getHeight(), area[0], area[1]);
+        if (p[0] == params.x && p[1] == params.y) return;
+        params.x = p[0];
+        params.y = p[1];
+        try { windowManager.updateViewLayout(overlayView, params); } catch (Throwable ignored) {}
     }
 
     private int dp(int v) {
