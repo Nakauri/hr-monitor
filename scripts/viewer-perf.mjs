@@ -238,6 +238,31 @@ async function runConfig(name, W, CPU) {
     return r;
   }
   const settle = (ms) => page.waitForTimeout(ms * Math.max(1, CPU / 2));
+  // S28: the block-index decimation returns Chart.js 4.4.0 min-max output (mean x to 1e-6 min) on random ranges.
+  async function decimationParity() {
+    return page.evaluate(() => {
+      const c = window.Chart.getChart(document.getElementById('session-chart'));
+      const pl = c && c.config.plugins.find((p) => p.id === 'hrDecimation');
+      if (!pl) return { ok: false, why: 'no hrDecimation plugin' };
+      let rng = 7; const rnd = () => ((rng = (rng * 1103515245 + 12345) % 2147483648) / 2147483648);
+      let cases = 0, bad = 0, why = '';
+      for (const ds of c.data.datasets.slice(0, 2)) {
+        const data = ds._data || ds.data, orig = new Set(data);
+        for (let k = 0; k < 150; k++) {
+          const a = Math.floor(rnd() * (data.length - 2)), n = 2 + Math.floor(rnd() * (k % 3 ? 2000 : data.length - a - 2));
+          const count = Math.min(n, data.length - a), W = [976, 300, 1200][k % 3];
+          const fast = pl._parity.fast(data, a, count, W), walk = pl._parity.walk(data, a, count, W); cases++;
+          const same = fast && fast.length === walk.length && fast.every((p, i) => orig.has(walk[i]) ? p === walk[i] : !orig.has(p) && p.y === walk[i].y && Math.abs(p.x - walk[i].x) < 1e-6);
+          if (!same) {
+            bad++;
+            const i = fast ? fast.findIndex((p, i) => !(orig.has(walk[i]) ? p === walk[i] : !orig.has(p) && p.y === walk[i].y && Math.abs(p.x - walk[i].x) < 1e-6)) : -1;
+            if (!why) why = `${ds.label} start ${a} count ${count} W ${W}: ${fast ? fast.length : 'null'} vs ${walk.length}` + (i >= 0 ? ` at ${i}: ${JSON.stringify(fast[i])} vs ${JSON.stringify(walk[i])} orig ${orig.has(fast[i])}/${orig.has(walk[i])}` : '');
+          }
+        }
+      }
+      return { ok: !bad, cases, bad, why };
+    });
+  }
   const chartRange = () => page.evaluate(() => { const c = window.Chart.getChart(document.getElementById('session-chart')); return c ? [c.scales.x.min, c.scales.x.max] : null; });
 
   await measure('1-load', async () => {
@@ -365,6 +390,8 @@ async function runConfig(name, W, CPU) {
 
   if (want('idle') && !MUTANT) await measure('8-idle-10s', async () => { await page.waitForTimeout(10000); return null; });
 
+  // After the timed actions: the check allocates enough to put a GC inside them.
+  if (!MUTANT) { results.decimation = await decimationParity(); console.log('  decimation parity', JSON.stringify(results.decimation)); }
   results.errors = errors.slice(0, 10);
   fs.mkdirSync(OUTDIR, { recursive: true });
   const out = path.join(OUTDIR, `result-${name}-${W}-cpu${CPU}${MUTANT ? '-mut-' + MUTANT : ''}${COUNTS ? '-counts' : ''}.json`);
@@ -404,6 +431,8 @@ function budgetRows(res) {
     const r = A[a]; if (!r) continue;
     add('floor', r.longTasks === 0 && (r.counts['update:main'] || 0) === 0, `${a} 0 long tasks and 0 chart updates (${r.longTasks}, ${r.counts['update:main'] || 0})`);
   }
+  const dp = res.decimation;
+  if (dp) add('decimation', dp.ok, `decimation matches Chart.js min-max on ${dp.cases} random ranges (${dp.bad} differ${dp.why ? ': ' + dp.why : ''})`);
   add('errors', !res.errors.length, `no page errors ${res.errors.join(' | ')}`);
   return rowsOut;
 }

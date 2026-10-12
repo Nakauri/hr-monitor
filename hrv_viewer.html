@@ -7424,6 +7424,7 @@
   function cancelEase() {
     if (_easeRaf) cancelAnimationFrame(_easeRaf);
     _easeRaf = 0;
+    if (_drawOwed && currentChart) { _drawOwed = false; requestChartDraw(currentChart); }
   }
   function easeBrushTo(lo, hi, done) {
     cancelEase();
@@ -7678,14 +7679,22 @@
     currentChart.$hlT = null;
     requestChartDraw(currentChart);
   }
-  // A redraw without an update: the highlight and the scales are already laid out.
-  let _chartDrawRaf = 0;
+  // A redraw without an update: the highlight and the scales are already laid out. An ease step or range
+  // update queued for the same frame draws the highlight itself.
+  let _chartDrawRaf = 0, _drawOwed = false;
   function requestChartDraw(chart) {
     if (_chartDrawRaf) return;
     _chartDrawRaf = requestAnimationFrame(() => {
       _chartDrawRaf = 0;
-      if (chart === currentChart) chart.draw();
+      if (chart !== currentChart) return;
+      if (_easeRaf || _chartRangeRaf) { _drawOwed = true; return; }
+      chart.draw();
     });
+  }
+  function payDrawOwed(updated) {
+    if (!_drawOwed) return;
+    _drawOwed = false;
+    if (!updated && currentChart) currentChart.draw();
   }
   // Places Reset zoom at the plot area's top right after each layout; writes only on a change.
   const RESET_POS_PLUGIN = {
@@ -8884,10 +8893,9 @@
             boxPadding: 4,
           },
           hrOverlays: { overlays: hrOverlays },
-          // min-max keeps every point when a pixel column holds one, and the envelope when it holds more.
-          // Threshold 1 keeps it on at every zoom: the decimated set covers only the visible range, and a
-          // range change otherwise re-lays all of a day's points (Chart.js updates every element then).
-          decimation: { enabled: true, algorithm: 'min-max', threshold: 1 },
+          // DECIMATION_PLUGIN: min-max at every zoom over the visible range only (Chart.js otherwise updates every
+          // element of the day on a range change).
+          decimation: false,
         },
         scales: {
           x: {
@@ -8921,7 +8929,7 @@
           }
         },
       },
-      plugins: [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer, maxMin].filter(Boolean),
+      plugins: [DECIMATION_PLUGIN, HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer, maxMin].filter(Boolean),
     });
   }
 
@@ -8941,6 +8949,135 @@
       if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;
       return { dx: cx - px, dy: cy - py };
     };
+  }
+
+  // Chart.js 4.4.0 min-max decimation (plugins.decimation, threshold 1) with the same output, except each
+  // column's mean x comes from prefix sums: per column it finds the edges by binary search and the min and max
+  // by a block index built once per data array, instead of walking every visible point on each update.
+  const _decIndex = new WeakMap();
+  const DEC_B = 16;
+  function decIndex(data) {
+    if (_decIndex.has(data)) return _decIndex.get(data);
+    const n = data.length;
+    const X = new Float64Array(n), Y = new Float64Array(n), P = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) {
+      const p = data[i], y = p.y;
+      // null compares as 0 in the original; anything else non-numeric keeps the original's walk.
+      if (y !== null && (typeof y !== 'number' || y !== y)) { _decIndex.set(data, null); return null; }
+      X[i] = p.x; Y[i] = y === null ? 0 : y; P[i + 1] = P[i] + p.x;
+    }
+    const nb = Math.ceil(n / DEC_B), lv = [];
+    const lo = (a, b) => (Y[b] < Y[a] || (Y[b] === Y[a] && b < a)) ? b : a;
+    const hi = (a, b) => (Y[b] > Y[a] || (Y[b] === Y[a] && b < a)) ? b : a;
+    const mn0 = new Int32Array(nb), mx0 = new Int32Array(nb);
+    for (let b = 0; b < nb; b++) {
+      let m = b * DEC_B, M = m;
+      for (let i = m + 1, e = Math.min(n, m + DEC_B); i < e; i++) { if (Y[i] < Y[m]) m = i; if (Y[i] > Y[M]) M = i; }
+      mn0[b] = m; mx0[b] = M;
+    }
+    lv.push([mn0, mx0]);
+    for (let k = 1; (1 << k) <= nb; k++) {
+      const [pm, pM] = lv[k - 1], h = 1 << (k - 1), len = nb - (1 << k) + 1;
+      const mn = new Int32Array(len), mx = new Int32Array(len);
+      for (let b = 0; b < len; b++) { mn[b] = lo(pm[b], pm[b + h]); mx[b] = hi(pM[b], pM[b + h]); }
+      lv.push([mn, mx]);
+    }
+    // Earliest indexes of the min and the max in [l, r], into res[0] and res[1].
+    const res = [0, 0];
+    const range = (l, r) => {
+      let m = l, M = l;
+      const bl = Math.floor(l / DEC_B) + 1, br = Math.floor(r / DEC_B) - 1;
+      if (bl > br) {
+        for (let i = l + 1; i <= r; i++) { const y = Y[i]; if (y < Y[m]) m = i; else if (y > Y[M]) M = i; }
+        res[0] = m; res[1] = M; return res;
+      }
+      for (let i = l + 1, e = bl * DEC_B; i < e; i++) { const y = Y[i]; if (y < Y[m]) m = i; else if (y > Y[M]) M = i; }
+      const k = 31 - Math.clz32(br - bl + 1), t = lv[k], j = br - (1 << k) + 1;
+      m = lo(lo(m, t[0][bl]), t[0][j]); M = hi(hi(M, t[1][bl]), t[1][j]);
+      for (let i = (br + 1) * DEC_B; i <= r; i++) { const y = Y[i]; if (y < Y[m]) m = i; else if (y > Y[M]) M = i; }
+      res[0] = m; res[1] = M; return res;
+    };
+    const ix = { X, P, range };
+    _decIndex.set(data, ix);
+    return ix;
+  }
+  function decimateMinMax(data, ix, start, count, W) {
+    const out = [], end = start + count - 1, X = ix.X, P = ix.P, xMin = X[start], dx = X[end] - xMin;
+    let avgX = 0, minIndex, maxIndex, startIndex, step = Math.max(1, Math.floor(count / Math.max(1, W)));
+    for (let gs = start; gs <= end;) {
+      const g = ((X[gs] - xMin) / dx * W) | 0;
+      // Last index still in column g: gallop from the mean column size, then bisect.
+      let a = gs, b = gs + step;
+      while (b <= end && (((X[b] - xMin) / dx * W) | 0) === g) { a = b; b = a + step * 2; }
+      if (b > end) b = end;
+      while (a < b) { const m = (a + b + 1) >> 1; if ((((X[m] - xMin) / dx * W) | 0) === g) a = m; else b = m - 1; }
+      const ge = a, lastIndex = gs - 1;
+      if (minIndex != null && maxIndex != null) {
+        const i1 = Math.min(minIndex, maxIndex), i2 = Math.max(minIndex, maxIndex);
+        if (i1 !== startIndex && i1 !== lastIndex) out.push({ ...data[i1], x: avgX });
+        if (i2 !== startIndex && i2 !== lastIndex) out.push({ ...data[i2], x: avgX });
+      }
+      if (gs > 0 && lastIndex !== startIndex) out.push(data[lastIndex]);
+      out.push(data[gs]);
+      startIndex = gs;
+      if (ge > gs) { const r = ix.range(gs, ge); minIndex = r[0]; maxIndex = r[1]; avgX = (P[ge + 1] - P[gs + 1]) / (ge - gs); }
+      else minIndex = maxIndex = gs;
+      gs = ge + 1;
+    }
+    return out;
+  }
+  const DECIMATION_PLUGIN = {
+    id: 'hrDecimation',
+    // For the parity check in scripts/viewer-perf.mjs.
+    _parity: { fast: (data, start, count, W) => decIndex(data) ? decimateMinMax(data, decIndex(data), start, count, W) : null, walk: minMaxWalk },
+    beforeElementsUpdate(chart) {
+      const H = Chart.helpers, W = chart.width;
+      chart.data.datasets.forEach((dataset, di) => {
+        const meta = chart.getDatasetMeta(di), data = dataset._data || dataset.data;
+        if (!meta.controller.supportsDecimation || chart.options.parsing) return;
+        const xs = chart.scales[meta.xAxisID];
+        if (!xs || xs.type !== 'linear' || data.length < 2) return;
+        const { min, max, minDefined, maxDefined } = xs.getUserBounds();
+        const n = data.length;
+        const start = minDefined ? H._limitValue(H._lookupByKey(data, 'x', min).lo, 0, n - 1) : 0;
+        const count = maxDefined ? H._limitValue(H._lookupByKey(data, 'x', max).hi + 1, start, n) - start : n - start;
+        if (count <= 1) {
+          if (dataset._decimated) { delete dataset._decimated; delete dataset._data; Object.defineProperty(dataset, 'data', { configurable: true, enumerable: true, writable: true, value: data }); }
+          return;
+        }
+        const ix = count > 32 * W ? decIndex(data) : null;
+        if (dataset._data == null) {
+          dataset._data = data;
+          delete dataset.data;
+          Object.defineProperty(dataset, 'data', { configurable: true, enumerable: true, get() { return this._decimated; }, set(d) { this._data = d; } });
+        }
+        // The walk is cheaper below about 32 points per column.
+        dataset._decimated = ix && count > 32 * W ? decimateMinMax(data, ix, start, count, W) : minMaxWalk(data, start, count, W);
+      });
+    },
+  };
+  // The original walk, for data the block index does not cover.
+  function minMaxWalk(data, start, count, W) {
+    let avgX = 0, countX = 0, prevX, minIndex, maxIndex, startIndex, minY, maxY;
+    const out = [], xMin = data[start].x, dx = data[start + count - 1].x - xMin;
+    for (let i = start; i < start + count; ++i) {
+      const point = data[i], y = point.y, truncX = ((point.x - xMin) / dx * W) | 0;
+      if (truncX === prevX) {
+        if (y < minY) { minY = y; minIndex = i; } else if (y > maxY) { maxY = y; maxIndex = i; }
+        avgX = (countX * avgX + point.x) / ++countX;
+      } else {
+        const lastIndex = i - 1;
+        if (minIndex != null && maxIndex != null) {
+          const i1 = Math.min(minIndex, maxIndex), i2 = Math.max(minIndex, maxIndex);
+          if (i1 !== startIndex && i1 !== lastIndex) out.push({ ...data[i1], x: avgX });
+          if (i2 !== startIndex && i2 !== lastIndex) out.push({ ...data[i2], x: avgX });
+        }
+        if (i > 0 && lastIndex !== startIndex) out.push(data[lastIndex]);
+        out.push(point);
+        prevX = truncX; countX = 0; minY = maxY = y; minIndex = maxIndex = startIndex = i;
+      }
+    }
+    return out;
   }
 
   // Draws its own layer once per frame: after the last dataset (and the highlight), or after all datasets
@@ -9235,11 +9372,12 @@
     if (!currentChart) return;
     const xo = currentChart.options.scales.x;
     const so = currentChart.scales && currentChart.scales.x ? currentChart.scales.x.options : null;
-    if (xo.min === brushMin && xo.max === brushMax && (!so || (so.min === brushMin && so.max === brushMax))) return;
+    if (xo.min === brushMin && xo.max === brushMax && (!so || (so.min === brushMin && so.max === brushMax))) { payDrawOwed(false); return; }
     xo.min = brushMin;
     xo.max = brushMax;
     if (so) { so.min = brushMin; so.max = brushMax; }
     currentChart.update('none');
+    payDrawOwed(true);
   }
 
   let _paintBrushRafId = 0;
