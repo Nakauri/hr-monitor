@@ -825,12 +825,12 @@
 
   .thresh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s3) var(--s4); }
   .unit-row { display: flex; align-items: center; gap: var(--s2); }
-  .field .unit-row input { flex: 0 0 auto; width: 10ch; text-align: center; }
+  .section .field .unit-row input { flex: 1 1 0; min-width: 0; width: auto; text-align: center; }
   .unit { color: var(--text-dim); font-size: var(--t12); font-weight: 400; }
   .settings-note { margin: var(--s2) 0 0; font-size: var(--t12); line-height: 1.4; color: var(--text-dim); }
   .row-label.settings-gap { margin-top: var(--s5); }
   #sec-settings-body .tabs { margin-bottom: var(--s4); }
-  #sec-settings-body .tab-panel .field + .field, #sec-settings-body .tab-panel .settings-note + .thresh-grid { margin-top: var(--s3); }
+  #sec-settings-body .tab-panel .settings-note + .thresh-grid { margin-top: var(--s3); }
   .stats-foot { display: flex; justify-content: flex-end; margin-top: var(--s3); }
   input:is([type="number"], [type="text"], [type="password"]):where(:not(.ui *)) {
     background: var(--bg-input);
@@ -1068,6 +1068,9 @@
       font-size: 14px;
       justify-content: center;
     }
+    /* Shared tabs and inline action buttons keep their own width. */
+    .section .tabs > button, .section .audio-actions .btn, .section .obs-size-row .btn { width: auto; }
+    .section .btn.icon { width: 44px; }
     /* Folder / Drive / sign-in rows: stack their label + button combo
        vertically so the row doesn't squeeze and the button stays a full
        tap target. drive-backup-row is applied to the Drive section's
