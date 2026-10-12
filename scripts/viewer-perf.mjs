@@ -299,7 +299,7 @@ async function runConfig(name, W, CPU) {
   }
 
   if (want('marker') && !MUTANT) {
-    if (PHONE) { const btn = page.locator('button', { hasText: /^\s*Markers/ }).first(); if (await btn.count()) { await btn.click().catch(() => {}); await settle(600); } }
+    if (PHONE) { const btn = page.locator('#markers-open').first(); if (await btn.count()) { await btn.click().catch(() => {}); await settle(600); } }
     await measure('5-marker-click', async () => {
       const it = page.locator('#marker-list .marker-item').nth(5);
       await it.scrollIntoViewIfNeeded({ timeout: 5000 }); await it.click({ timeout: 5000 }); await settle(800);

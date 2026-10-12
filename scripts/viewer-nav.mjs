@@ -14,7 +14,9 @@
 // plus the Drive cloud synced, syncing and off, and the gear popover.
 // --part base | s23 | shots runs one half, or only the shots (default both halves); --mutants runs the S23
 // negative controls, each must FAIL (--part then picks one group: sweep, bar, actions, cloud).
-// Usage: node scripts/viewer-nav.mjs [--part base|s23] [--mutants] [--shots <dir>] [--ux <ux-audit dir>]
+// S27 (AUDIT-NOTES 2026-10-11 item 4, "Tachy %" on 2 lines): every Month and Week headline pill label sits on one line,
+// the pills share one width (from the longest) and a wrapped set keeps its columns, at 1440, 360 and 360 at 200% text.
+// Usage: node scripts/viewer-nav.mjs [--part base|s23|s27] [--mutants [--part pills]] [--shots <dir>] [--ux <ux-audit dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,7 +36,7 @@ const { FakeDrive } = createRequire(import.meta.url)('./marks-store.test.cjs');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const PART = argVal('--part');
 const MUTANTS_ONLY = args.includes('--mutants');
-const PARTS = MUTANTS_ONLY ? ['sweep', 'bar', 'actions', 'cloud'] : ['base', 's23', 'shots'];
+const PARTS = MUTANTS_ONLY ? ['sweep', 'bar', 'actions', 'cloud', 'pills'] : ['base', 's23', 's27', 'shots'];
 if (PART && !PARTS.includes(PART)) { console.log('unknown --part ' + PART + ' (one of ' + PARTS.join(', ') + ')'); process.exit(2); }
 if (PART === 'shots' && !SHOTS) { console.log('--part shots needs --shots <dir>'); process.exit(2); }
 // Served-file overrides for the negative controls: { '/hrv_viewer.html': [find, replace] }.
@@ -316,6 +318,32 @@ async function s23Cloud() {
   return rows;
 }
 
+// S27: headline pills on Month and Week.
+async function s27Pills() {
+  const rows = [];
+  for (const [w, scale] of [[1440, 1], [360, 1], [360, 2]]) {
+    for (const hash of ['#/month/2026-04', '#/week/2026-04-26']) {
+      const { ctx, page } = await open(w, 'demo=1', hash, scale);
+      const m = await page.evaluate(() => {
+        const bs = [...document.querySelectorAll('.metric-switch > button')].filter((b) => b.getBoundingClientRect().width > 0);
+        const lines = bs.map((b) => { const r = document.createRange(); r.selectNodeContents(b); return [...r.getClientRects()].reduce((s, x) => s.add(Math.round(x.top)), new Set()).size; });
+        const rects = bs.map((b) => b.getBoundingClientRect());
+        const widths = rects.map((r) => Math.round(r.width));
+        const tops = [...new Set(rects.map((r) => Math.round(r.top)))];
+        const firstRow = rects.filter((r) => Math.round(r.top) === tops[0]).map((r) => Math.round(r.left));
+        const onCols = rects.every((r) => firstRow.some((l) => Math.abs(l - Math.round(r.left)) <= 1));
+        return { labels: bs.map((b) => b.textContent.trim()), lines, widths, rows: tops.length, onCols, overflow: document.documentElement.scrollWidth > innerWidth };
+      });
+      const tag = `${w}${scale === 2 ? ' at 200% text' : ''} ${hash.split('/')[1]}`;
+      rows.push([`S27 pills ${tag}: ${m.labels.length} labels on one line each, one width, on columns`,
+        m.labels.length === 4 && m.lines.every((n) => n === 1) && Math.max(...m.widths) - Math.min(...m.widths) <= 1 && m.onCols && !m.overflow, JSON.stringify(m)]);
+      rows.push([`S27 pills ${tag}: no page errors`, !page.errors.length, page.errors.join(' | ')]);
+      await ctx.close();
+    }
+  }
+  return rows;
+}
+
 const S23_MUTANTS = [
   ['sweep', 'Sessions range select without .field', { '/hrv_viewer.html': ['<span class="field"><span class="select"><select id="index-range" aria-label="Date range">${rangeOptionsHtml}</select></span></span>', '<select id="index-range" aria-label="Date range">${rangeOptionsHtml}</select>'] },
     () => s23Sweep({ widths: [360], views: ['sessions'], quick: true })],
@@ -326,6 +354,7 @@ const S23_MUTANTS = [
   ['bar', 'view select sized to the chosen view', { '/hrv_viewer.html': ['  .vsel select { cursor: pointer; }', '  .vsel select { cursor: pointer; field-sizing: content; }'] }, s23Bar],
   ['bar', 'Share hidden on Sessions', { '/hrv_viewer.html': ["exportBtn.hidden = isNativeApp || id === 'empty-state';", "exportBtn.hidden = isNativeApp || id === 'empty-state' || id === 'view-index';"] }, s23Bar],
   ['actions', 'Cancel and Save at content width', { '/ui.css': ['.action-row > .pair { flex: 1 1 14em; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }', '.action-row > .pair { display: flex; gap: var(--s2); margin-left: auto; }'] }, s23Actions],
+  ['pills', 'pills sized to their own labels', { '/hrv_viewer.html': ['  .segmented.metric-switch { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }\n  .metric-switch > button { white-space: nowrap; }\n', ''] }, s27Pills],
   ['cloud', 'no 1 s delay', { '/hrv_viewer.html': ['    const syncing = busy && cloud.shown;', '    const syncing = busy;'] }, s23Cloud],
 ];
 
@@ -546,6 +575,7 @@ try {
     report(await s23Actions());
     report(await s23Cloud());
   }
+  if (!MUTANTS_ONLY && (!PART || PART === 's27')) report(await s27Pills());
   if (MUTANTS_ONLY) {
     console.log('\nS23 negative controls (each must FAIL):');
     for (const [id, name, mut, fn] of S23_MUTANTS.filter((m) => !PART || m[0] === PART)) {

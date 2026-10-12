@@ -1,4 +1,4 @@
-// Guards: v2 day Duration reading 0:00 (S10a), stats drifting from f7cbb1a, mark edits writing twice (S10b HIGH). Files: hrv_viewer.html Day view. Runtime: about 50 s per --part; run when hrv_viewer.html changes.
+// Guards: v2 day Duration reading 0:00 (S10a), stats drifting from f7cbb1a, mark edits writing twice (S10b HIGH), S27 layout (AUDIT-NOTES 2026-10-11 items 7, 8, 11, 14 to 18). Files: hrv_viewer.html Day view. Runtime: about 50 s per --part; run when hrv_viewer.html changes.
 // S10a Day explorer checks, headless.
 // 1. Stats parity: the stats bar on a real legacy day and a real v2 day equals the pre-step build
 //    (--ref, default f7cbb1a, read through `git show`, opened at its old #/session/day: route).
@@ -12,7 +12,10 @@
 //    the phone sheet. Each mutant of the viewer must FAIL its sub-check.
 // --shots <dir> shoots Day at 1440, 360 and 360 with 200% text, zoomed, a marker selected, layers toggled,
 // a single recording, and the S10b panel, sheet, sleep mark, edit and delete states.
-// --part parity,chips,phone,marks,mutants,day-shots,marks-shots runs those parts only (default: all).
+// 6. Layout (S27): one phone tools row at 360 and 200% text, the Layers sheet, Reset zoom on the chart corner, gaps line
+//    below the chart, Max and Min labels inside the plot, date title on one line, collapsed Summary numbers, no empty
+//    band under the chart, chips in full rows, hover line past a pinned mark, clock tooltip; layout-mutants must FAIL.
+// --part parity,chips,phone,marks,mutants,layout,layout-mutants,day-shots,marks-shots runs those parts only (default: all).
 // Usage: node scripts/day-explorer.mjs [--ref <commit>] [--shots <dir>] [--part <list>] [--ux <ux-audit dir>] [--fixtures <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
@@ -595,6 +598,210 @@ if (want('mutants')) {
     m.server.close();
     const failed = rows.filter((r) => !r[0]);
     ok(failed.length > 0, `MUTANT ${sub}: ${name}: ` + (failed.length ? 'FAILED as required (' + failed.map((r) => r[1].slice(0, 70)).join(' | ') + ')' : 'NOT CAUGHT'));
+  }
+}
+
+// ---- 6. Layout (S27) ----
+// Named bugs, AUDIT-NOTES-2026-10-11: item 7 (empty band under the chart, 11 plus 1 chips), item 8 (hover line frozen
+// at a pinned mark), items 11 and 18 (phone tools row wraps; Layers sheet), item 14 (gaps line above the chart), item 15
+// (phone Summary shows no numbers), item 16 (Max and Min labels clipped), item 17 (date title on 2 lines at 360; a
+// left-edge tooltip in duration form on a clock axis). Each mutant below must FAIL the layout rows.
+async function openDemo(base, width, scale = 1, init) {
+  const { ctx, page } = await newPage(width, scale);
+  if (init) await ctx.addInitScript(init);
+  await page.goto(base + '/hrv_viewer.html?demo=1#/day/2026-04-26', { waitUntil: 'networkidle' });
+  await waitExplorer(page, '#view-day #session-chart');
+  await page.waitForTimeout(400);
+  await page.scaleText();
+  await page.waitForTimeout(300);
+  return { ctx, page };
+}
+// Max and Min label boxes against the chart area, from the annotation plugin's laid-out elements.
+const labelBoxes = (page) => page.evaluate(() => {
+  const c = Chart.getChart(document.getElementById('session-chart'));
+  const st = Chart.registry.plugins.get('annotation')._getState(c);
+  const a = c.chartArea;
+  return (st ? st.elements : []).filter((e) => e.options && /^(Max|Min) /.test(String(e.options.content)) && e.options.display !== false)
+    .map((e) => ({ name: String(e.options.content), inside: e.x >= a.left - 0.5 && e.x2 <= a.right + 0.5 && e.y >= a.top - 0.5 && e.y2 <= a.bottom + 0.5, box: [e.x, e.y, e.x2, e.y2].map(Math.round), area: [a.left, a.top, a.right, a.bottom].map(Math.round) }));
+});
+const rect = (page, sel) => page.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, shown: r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }; }, sel);
+// Drags the strip's right handle to a share of the strip width.
+async function dragStrip(page, share) {
+  await page.evaluate(() => document.getElementById('context-overlay').scrollIntoView({ block: 'center' }));
+  const hb = await page.$eval('#context-brush', (e) => { const r = e.getBoundingClientRect(); return [r.left, r.right, r.top + r.height / 2]; });
+  const strip = await rect(page, '#context-overlay');
+  await page.mouse.move(hb[1] - 1, hb[2]); await page.mouse.down();
+  await page.mouse.move(strip.l + strip.w * share, hb[2], { steps: 6 }); await page.mouse.up();
+  await page.waitForTimeout(500);
+}
+// White pixels down a canvas column inside the chart area (the highlight and hover line are white).
+const whiteAt = (page, x) => page.evaluate((x) => {
+  const c = Chart.getChart(document.getElementById('session-chart'));
+  const a = c.chartArea, ctx = c.canvas.getContext('2d');
+  let n = 0, w = 0;
+  for (let y = Math.ceil(a.top) + 4; y < a.bottom - 4; y += 6) { n++; const d = ctx.getImageData(Math.round(x), y, 1, 1).data; if (d[0] > 235 && d[1] > 235 && d[2] > 235) w++; }
+  return n ? w / n : 0;
+}, x);
+
+const LAYOUT = {
+  async phone(base) {
+    const rows = [];
+    for (const scale of [1, 2]) {
+      const tag = scale === 1 ? '360' : '360 at 200% text';
+      const { ctx, page } = await openDemo(base, 360, scale);
+      await page.evaluate(() => document.querySelector('.chart-panel').scrollIntoView({ block: 'start' }));
+      const seg = await rect(page, '#axis-mode'), lay = await rect(page, '#markers-open'), chart = await rect(page, '.chart-wrap'), panel = await page.evaluate(() => { const e = document.querySelector('.chart-panel'); const r = e.getBoundingClientRect(), cs = getComputedStyle(e); return { l: r.left + parseFloat(cs.paddingLeft), r: r.right - parseFloat(cs.paddingRight) }; });
+      const segTops = await page.$$eval('#axis-mode > button', (bs) => bs.map((b) => Math.round(b.getBoundingClientRect().top)));
+      const layFits = await page.$eval('#markers-open', (e) => e.scrollWidth <= e.clientWidth + 1);
+      const segRight = await page.$$eval('#axis-mode > button', (bs) => Math.max(...bs.map((b) => b.getBoundingClientRect().right)));
+      const oneRow = seg && lay && Math.abs(seg.t - lay.t) < 2 && segTops.every((t) => Math.abs(t - segTops[0]) < 2) && lay.b <= chart.t && lay.r <= panel.r + 0.5 && seg.l >= panel.l - 0.5 && segRight <= lay.l + 0.5 && layFits && lay.h >= 43.5;
+      rows.push([oneRow, `${tag}: Clock, Duration and Layers on one row above the chart, inside the card (segmented top ${seg && Math.round(seg.t)} right ${Math.round(segRight)}, Layers top ${lay && Math.round(lay.t)} ${lay && Math.round(lay.l)}..${lay && Math.round(lay.r)}, card right ${Math.round(panel.r)})`]);
+      const reset0 = await rect(page, '#reset-zoom');
+      rows.push([!reset0.shown, `${tag}: Reset zoom is not shown at full range`]);
+      const chipsInPage = await page.evaluate(() => { const c = document.querySelector('.chart-panel > #layer-chips'); return !!c && c.getBoundingClientRect().height > 0; });
+      rows.push([!chipsInPage, `${tag}: no layer chips under the chart on the phone`]);
+      const gaps = await rect(page, '#view-day .gaps-note'), strip = await rect(page, '.context-wrap');
+      rows.push([!!gaps && gaps.shown && gaps.t >= chart.b && gaps.t >= strip.b - 0.5, `${tag}: gaps line sits below the chart and the strip (${gaps ? Math.round(gaps.t) : 'none'} vs chart bottom ${Math.round(chart.b)})`]);
+      if (scale === 1) {
+        const title = await page.evaluate(() => { const h = document.querySelector('#view-day .day-title'); const lines = [...h.querySelectorAll('span')].filter((s) => s.getBoundingClientRect().width > 0).reduce((n, s) => n + s.getClientRects().length, 0); return { lines, text: h.innerText.trim() }; });
+        rows.push([title.lines === 1, `360: date title on one line ("${title.text}", ${title.lines} line boxes)`]);
+      }
+      const lb = await labelBoxes(page);
+      rows.push([lb.length === 2 && lb.every((b) => b.inside), `${tag}: Max and Min labels inside the plot ${JSON.stringify(lb.map((b) => [b.name, b.box, b.area]))}`]);
+      // Layers sheet: full-width 44 px layer rows, then the markers list.
+      await tap(page, '#markers-open'); await page.waitForTimeout(400);
+      const sh = await page.evaluate(() => {
+        const s = document.querySelector('.markers-sheet .sheet-body');
+        if (!s) return null;
+        const cs = getComputedStyle(s), inner = s.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const chips = [...s.querySelectorAll('#layer-chips .chip')].filter((c) => c.getBoundingClientRect().height > 0);
+        const list = s.querySelector('#marker-list'), lastChip = chips[chips.length - 1];
+        return { title: document.querySelector('.markers-sheet .sheet-head h2').textContent.trim(), n: chips.length, full: chips.every((c) => c.getBoundingClientRect().width >= inner - 1), tall: chips.every((c) => c.getBoundingClientRect().height >= 43.5), listBelow: !!list && !!lastChip && list.getBoundingClientRect().top >= lastChip.getBoundingClientRect().bottom };
+      });
+      rows.push([!!sh && sh.title === 'Layers' && sh.n >= 10 && sh.full && sh.tall && sh.listBelow, `${tag}: Layers sheet holds full-width 44 px layer rows, then the markers list ${JSON.stringify(sh)}`]);
+      await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+      const back = await page.evaluate(() => !!document.querySelector('.chart-panel > #layer-chips') && !!document.querySelector('#session-layout > .session-sidebar'));
+      rows.push([back, `${tag}: closing the sheet puts the chips and the panel back`]);
+      // Zoomed: Reset zoom on the chart's top corner.
+      await dragStrip(page, 0.3);
+      await page.evaluate(() => document.querySelector('.chart-panel').scrollIntoView({ block: 'start' }));
+      const rz = await rect(page, '#reset-zoom'), cw = await rect(page, '.chart-wrap'), lay2 = await rect(page, '#markers-open');
+      const segRight2 = await page.$$eval('#axis-mode > button', (bs) => Math.max(...bs.map((b) => b.getBoundingClientRect().right)));
+      rows.push([rz && rz.shown && rz.t >= cw.t - 0.5 && rz.t - cw.t <= 12 && cw.r - rz.r <= 12 && rz.r <= cw.r + 0.5 && Math.abs(lay2.t - lay.t) < 2 && segRight2 <= lay2.l + 0.5 && Math.abs(lay2.r - lay.r) < 1, `${tag}: zoomed, Reset zoom shows on the chart's top corner and the tools row keeps its places (reset ${rz && [Math.round(rz.t - cw.t), Math.round(cw.r - rz.r)]}, segmented right ${Math.round(segRight2)}, Layers ${Math.round(lay2.l)}..${Math.round(lay2.r)})`]);
+      const lbz = await labelBoxes(page);
+      rows.push([lbz.every((b) => b.inside), `${tag}: zoomed, shown Max and Min labels inside the plot ${JSON.stringify(lbz.map((b) => [b.name, b.box, b.area]))}`]);
+      rows.push([!page.errors.length, `${tag}: no page errors ` + page.errors.join(' | ')]);
+      await ctx.close();
+    }
+    // Collapsed Summary keeps the key numbers.
+    const { ctx, page } = await openDemo(base, 360, 1, () => { try { localStorage.setItem('hrv_summary_collapsed', '1'); } catch (e) {} });
+    const sum = await page.evaluate(() => {
+      const bar = document.getElementById('summary-bar');
+      const shown = [...bar.querySelectorAll('.summary-stat')].filter((s) => s.getBoundingClientRect().height > 0).map((s) => s.dataset.stat);
+      const vals = [...bar.querySelectorAll('.summary-stat-value')].filter((v) => v.getBoundingClientRect().height > 0).length;
+      return { collapsed: bar.classList.contains('collapsed'), shown, vals, h: Math.round(bar.getBoundingClientRect().height) };
+    });
+    rows.push([sum.collapsed && ['hrAvg', 'hrMax', 'hrMin', 'rmssdAvg'].every((k) => sum.shown.includes(k)) && sum.vals === 4 && sum.h <= 160, `360: collapsed Summary shows Avg HR, Max, Min and Avg HRV (${JSON.stringify(sum)})`]);
+    await ctx.close();
+    return rows;
+  },
+
+  async laptop(base) {
+    const rows = [];
+    for (const width of [1440, 1767]) {
+      const { ctx, page } = await openDemo(base, width);
+      for (const collapsed of [false, true]) {
+        if (collapsed) { await page.click('#sidebar-toggle'); await page.waitForTimeout(500); }
+        const tag = `${width}${collapsed ? ' panel closed' : ''}`;
+        const band = await page.evaluate(() => { const c = document.querySelector('.chart-panel').getBoundingClientRect(), n = document.getElementById('interp-panel').getBoundingClientRect(); return Math.round(n.top - c.bottom); });
+        rows.push([band >= 0 && band <= 32, `${tag}: next card ${band} px below the chart card (32 at most)`]);
+        const chipRows = await page.$$eval('#layer-chips .chip', (cs) => { const shown = cs.filter((c) => c.getBoundingClientRect().height > 0); const tops = new Map(); for (const c of shown) { const t = Math.round(c.getBoundingClientRect().top); tops.set(t, (tops.get(t) || 0) + 1); } return [...tops.values()]; });
+        const last = chipRows[chipRows.length - 1];
+        rows.push([chipRows.length === 1 || (last >= 2 && chipRows.every((n, i) => i === chipRows.length - 1 || n === chipRows[0])), `${tag}: layer chips in full rows, never one alone (${chipRows.join(' + ')})`]);
+      }
+      const gaps = await rect(page, '#view-day .gaps-note'), chart = await rect(page, '.chart-wrap');
+      rows.push([!!gaps && gaps.t >= chart.b, `${width}: gaps line below the chart (${gaps ? Math.round(gaps.t) : 'none'} vs ${Math.round(chart.b)})`]);
+      const lb = await labelBoxes(page);
+      rows.push([lb.length === 2 && lb.every((b) => b.inside), `${width}: Max and Min labels inside the plot ${JSON.stringify(lb.map((b) => [b.name, b.box, b.area]))}`]);
+      await ctx.close();
+    }
+    // A long markers list (the fixture day with every layer on) never sizes the row.
+    {
+      const { ctx, page } = await openFixture(base, 1440);
+      for (const t of ['disconnect', 'delta']) await tap(page, `#layer-chips .chip[data-layer="${t}"][aria-pressed="false"]:not([disabled])`);
+      await page.waitForTimeout(300);
+      for (const collapsed of [false, true]) {
+        if (collapsed) { await page.click('#sidebar-toggle'); await page.waitForTimeout(500); }
+        const m = await page.evaluate(() => ({ band: Math.round(document.getElementById('interp-panel').getBoundingClientRect().top - document.querySelector('.chart-panel').getBoundingClientRect().bottom), items: document.querySelectorAll('#marker-list .marker-item').length }));
+        rows.push([m.band >= 0 && m.band <= 32, `1440 fixture day, ${m.items} markers${collapsed ? ', panel closed' : ''}: next card ${m.band} px below the chart card (32 at most)`]);
+      }
+      await ctx.close();
+    }
+    // Hover line follows the pointer while a mark is pinned; the pinned line returns on leave.
+    const { ctx, page } = await openDemo(base, 1440);
+    await page.click('#axis-mode button[data-mode="clock"]'); await page.waitForTimeout(250);
+    const mk = page.locator('#marker-list .marker-item .mk-go').first();
+    await mk.click({ timeout: 4000 }).catch(() => {}); await page.waitForTimeout(900);
+    await page.evaluate(() => document.querySelector('.chart-wrap').scrollIntoView({ block: 'center' }));
+    const geo = await page.evaluate(() => { const c = Chart.getChart(document.getElementById('session-chart')); const r = c.canvas.getBoundingClientRect(); return { l: r.left, t: r.top, a: c.chartArea, pin: c.$hlT == null ? null : c.scales.x.getPixelForValue(c.$hlT) }; });
+    const seen = [];
+    for (const share of [0.2, 0.75]) {
+      await page.mouse.move(geo.l + geo.a.left + geo.a.width * share, geo.t + geo.a.top + geo.a.height / 2, { steps: 3 });
+      await page.waitForTimeout(250);
+      const hx = await page.evaluate(() => { const c = Chart.getChart(document.getElementById('session-chart')); const act = c.tooltip.getActiveElements(); return act.length ? act[0].element.x : null; });
+      const at = hx == null ? 0 : await whiteAt(page, hx);
+      const atPin = geo.pin == null || hx == null || Math.abs(geo.pin - hx) < 6 ? 0 : await whiteAt(page, geo.pin);
+      seen.push({ hx: hx && Math.round(hx), at: +at.toFixed(2), atPin: +atPin.toFixed(2) });
+    }
+    rows.push([geo.pin != null && seen.every((s) => s.hx != null && s.at > 0.7 && s.atPin < 0.3) && seen[0].hx !== seen[1].hx, `1440: with a mark pinned, the hover line follows the pointer and the pinned line steps aside ${JSON.stringify({ pin: geo.pin && Math.round(geo.pin), seen })}`]);
+    await page.mouse.move(geo.l - 20, geo.t - 20); await page.waitForTimeout(250);
+    const back = geo.pin == null ? 0 : await whiteAt(page, geo.pin);
+    rows.push([back > 0.7, `1440: the pinned line returns when the pointer leaves (${back.toFixed(2)})`]);
+    // Left edge, clock axis: the tooltip reads clock time.
+    await page.click('#reset-zoom').catch(() => {}); await page.waitForTimeout(400);
+    const g2 = await page.evaluate(() => { const c = Chart.getChart(document.getElementById('session-chart')); const r = c.canvas.getBoundingClientRect(); return { l: r.left, t: r.top, a: c.chartArea }; });
+    await page.mouse.move(g2.l + g2.a.left + 2, g2.t + g2.a.top + g2.a.height / 2); await page.waitForTimeout(250);
+    const tip = await page.evaluate(() => { const c = Chart.getChart(document.getElementById('session-chart')); const t = c.tooltip; return { title: (t.title || []).join(' '), x: Math.round(t.x), w: Math.round(t.width), tick: c.scales.x.ticks[0] && c.scales.x.ticks[0].label }; });
+    rows.push([/^\d{1,2}:\d{2} (AM|PM)$/.test(tip.title) && /AM|PM/.test(tip.tick || '') && tip.x >= 0, `1440: left-edge tooltip on the clock axis reads clock time (${JSON.stringify(tip)})`]);
+    rows.push([!page.errors.length, 'laptop: no page errors ' + page.errors.join(' | ')]);
+    await ctx.close();
+    return rows;
+  },
+};
+async function runLayout(name, base) {
+  try { return await LAYOUT[name](base); }
+  catch (e) { return [[false, `layout ${name} threw: ${String(e && e.message).split(String.fromCharCode(10))[0]}`]]; }
+}
+if (want('layout')) {
+  for (const name of ['phone', 'laptop']) report5(await runLayout(name, cur.base));
+}
+if (want('layout-mutants')) {
+  const real = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+  const L_MUTANTS = [
+    ['phone', 'gaps line back above the chart', "chartNote: gapsNoteHtml((s && s.recGaps) || []) });", "});"],
+    ['phone', 'Layers keeps its name at 200% text (row overflows)', '  @container (max-width: 18em) {\n    .chart-tools .markers-open { width: 44px; padding: 0; }\n    .chart-tools .markers-open .lbl { display: none; }\n  }\n', ''],
+    ['phone', 'tools row wraps as before', '    .chart-tools { display: contents; }\n', '    .chart-tools { flex-wrap: wrap; }\n'],
+    ['phone', 'long date title on the phone', '    .datenav .day-title .t-long { display: none; }\n', ''],
+    ['phone', 'collapsed Summary hides every stat', '    .summary-bar.collapsed .summary-grid { grid-template-columns:', '    .summary-bar.collapsed .summary-grid { display: none; grid-template-columns:'],
+    ['phone', 'Layers sheet without the layer rows', 'body: chips ? [chips, sb] : sb,', 'body: sb,'],
+    ['phone', 'Reset zoom stays in the tools row', '    .chart-tools .reset-zoom { grid-row: 2; grid-column: 1 / -1;', '    .chart-tools .reset-zoom { grid-row: 1; grid-column: 2;'],
+    ['phone', 'Reset zoom widens the Layers column (Layers over Duration)', '    .chart-tools .markers-open { grid-row: 1; grid-column: 2; justify-self: end; }\n    .chart-panel > .chart-wrap { grid-row: 2; }\n    /* Spans both columns so its width never widens the Layers column. */\n    .chart-tools .reset-zoom { grid-row: 2; grid-column: 1 / -1;', '    .chart-tools .markers-open { grid-row: 1; grid-column: 2; }\n    .chart-panel > .chart-wrap { grid-row: 2; }\n    .chart-tools .reset-zoom { grid-row: 2; grid-column: 2;'],
+    ['phone', 'Max and Min labels unclamped', "      ...labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true),", '      yAdjust: 14,'],
+    ['laptop', 'Max label unclamped', "      ...labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false),", "      position: { x: 'center', y: 'start' },\n      yAdjust: -14,"],
+    ['laptop', 'panel content sizes the row (empty band)', '  .session-layout > .session-sidebar { contain: size; }\n', ''],
+    ['laptop', 'chips auto-fill (11 plus 1)', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(var(--lc), minmax(0, 1fr));', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));'],
+    ['laptop', 'hover line frozen at the pinned mark', '      const t = hov ? chart.data.datasets[hov.datasetIndex].data[hov.index].x : chart.$hlT;', '      const t = chart.$hlT;'],
+    ['laptop', 'tooltip title in duration form', "              title: (items) => items.length ? makeTimeTickFormatter(sessionStartEpochMs)(items[0].parsed.x) : '',", "              title: (items) => items.length ? formatDuration(items[0].parsed.x) : '',"],
+  ];
+  // --only <n,n> runs those layout mutants by index (the whole set runs past one 170 s run).
+  const only = argVal('--only') ? argVal('--only').split(',').map(Number) : null;
+  for (const [sub, name, a, b] of L_MUTANTS.filter((m, i) => !only || only.includes(i))) {
+    if (!real.includes(a)) { ok(false, `layout mutant ${name}: anchor missing`); continue; }
+    const m = await serve(real.replace(a, b));
+    const rows = await runLayout(sub, m.base);
+    m.server.close();
+    const failed = rows.filter((r) => !r[0]);
+    ok(failed.length > 0, `LAYOUT MUTANT ${sub}: ${name}: ` + (failed.length ? 'FAILED as required (' + failed.map((r) => r[1].slice(0, 70)).join(' | ') + ')' : 'NOT CAUGHT'));
   }
 }
 
