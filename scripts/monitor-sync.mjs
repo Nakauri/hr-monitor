@@ -170,10 +170,10 @@ async function afterStop(page) {
     const v = document.getElementById('after-stop-view');
     const d = document.getElementById('after-stop-drive');
     const x = document.getElementById('after-stop-export');
-    const t = document.getElementById('hrm-toast');
+    const t = document.querySelector('.toast-host .toast');
     return { shown: vis(b), saved: document.getElementById('after-stop-saved').textContent, drive: vis(d) ? d.textContent : null,
       view: vis(v) ? v.getAttribute('href') : null, viewH: vis(v) ? Math.round(v.getBoundingClientRect().height) : 0, exp: vis(x),
-      toast: !!(t && t.classList.contains('visible')), posture: document.querySelectorAll('.posture-btn').length,
+      toast: !!t, posture: document.querySelectorAll('.posture-btn').length,
       overflow: document.documentElement.scrollWidth > innerWidth + 1 };
   });
 }
