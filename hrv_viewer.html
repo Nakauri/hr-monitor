@@ -3492,15 +3492,25 @@
   }
 
   let staleUpgrade = null;
+  // S35: a current-schema summary whose duration far outruns its samples was built from a stale time_min.
+  // Re-read it once in the background; __s35 marks it done so a genuinely sparse session is not re-read forever.
+  function s35Suspect(c) {
+    return !!c && !c.__incomplete && !c.__s35 && c.__schemaV === SUMMARY_SCHEMA_V
+      && Number.isFinite(c.duration) && c.duration * 60 > 4 * (c.hrCount || 0) + 3600;
+  }
+  let s35Logged = false;
   async function upgradeStaleSummaries(list) {
     try {
       if (loadInFlight) await loadInFlight.catch(() => {});
       let done = 0;
       for (const fn of list) {
         const c = sessionsIndex[fn];
-        if (!c || c.__schemaV === SUMMARY_SCHEMA_V) continue;
+        const suspect = s35Suspect(c);
+        if (!c || (c.__schemaV === SUMMARY_SCHEMA_V && !suspect)) continue;
         const summary = await parseSessionFile(fn);
+        if (summary && suspect) summary.__s35 = 1;
         if (summary) { sessionsIndex[fn] = summary; done++; }
+        else if (suspect) { c.__s35 = 1; done++; }
         if (done > 0 && done % 25 === 0) persistIndex();
         await new Promise(r => setTimeout(r, 0));
       }
@@ -3546,7 +3556,9 @@
       return !!c && !c.__incomplete && c.__schemaV === SUMMARY_SCHEMA_V - 1
         && ('flushes' in c) && ('chillsWindows' in c) && ('hrDeltas' in c) && ('quadPct' in c) && ('restingHR' in c);
     }
-    const deferred = filenames.filter(staleOnly);
+    const s35 = filenames.filter(fn => s35Suspect(sessionsIndex[fn]));
+    if (s35.length && !s35Logged) { s35Logged = true; console.info('[S35] re-read ' + s35.length + ' sessions'); }
+    const deferred = filenames.filter(staleOnly).concat(s35);
     const todo = filenames.filter(fn => needsReparse(fn) && !staleOnly(fn));
     if (onProgress) onProgress(0, todo.length);
 
@@ -3649,6 +3661,43 @@
       rows.push(cells);
     }
     return { rows, header };
+  }
+
+  // S35 (AUDIT-NOTES item 31): every row's elapsed minutes come from here, never from time_min directly.
+  // A JS writer once carried a stale session start into time_min (4235 min on a 3 min file), so time_min
+  // is trusted only when it starts plausibly and its span agrees with epoch_ms; otherwise the real
+  // timestamps decide. A normal file returns time_min untouched, so its summary is unchanged.
+  const ELAPSED_MAX_START_MIN = 10;
+  const ELAPSED_MAX_DRIFT_MIN = 1;
+  function rowElapsedMinFn(rows, idx) {
+    const tI = idx.time_min, eI = idx.epoch_ms;
+    const tm = (r) => tI == null ? NaN : parseFloat(r[tI]);
+    const em = (r) => (eI == null || r[eI] == null || r[eI] === '') ? NaN : parseFloat(r[eI]);
+    let firstT = NaN, pt0 = NaN, pe0 = NaN, ptN = NaN, peN = NaN;
+    for (const r of rows) {
+      const t = tm(r);
+      if (!Number.isFinite(t)) continue;
+      if (!Number.isFinite(firstT)) firstT = t;
+      const e = em(r);
+      if (!Number.isFinite(e)) continue;
+      if (!Number.isFinite(pt0)) { pt0 = t; pe0 = e; }
+      ptN = t; peN = e;
+    }
+    const plausible = !Number.isFinite(firstT) || (firstT >= 0 && firstT <= ELAPSED_MAX_START_MIN);
+    const round4 = (x) => Math.round(x * 1e4) / 1e4;
+    if (Number.isFinite(pt0)) {
+      const agree = Math.abs((ptN - pt0) - (peN - pe0) / 60000) <= ELAPSED_MAX_DRIFT_MIN;
+      if (plausible && agree) return tm;
+      const base = plausible ? pt0 : 0;
+      return (r) => {
+        const e = em(r);
+        if (Number.isFinite(e)) return round4(base + (e - pe0) / 60000);
+        const t = tm(r);
+        return Number.isFinite(t) ? round4(base + t - pt0) : NaN;
+      };
+    }
+    if (plausible) return tm;
+    return (r) => { const t = tm(r); return Number.isFinite(t) ? round4(t - firstT) : NaN; };
   }
 
   // ===== Autonomic event detection (v2) =====
@@ -3883,8 +3932,9 @@
     // that was really a BLE / pause gap.
     const GAP_MIN = 10 / 60; // 10 seconds
     let lastT = null;
+    const elapsedMin = rowElapsedMinFn(rows, idx);
     for (const r of rows) {
-      const t = parseFloat(r[idx.time_min]);
+      const t = elapsedMin(r);
       if (isNaN(t)) continue;
       if (lastT != null && t - lastT > GAP_MIN) {
         hr.push({ t: t - 0.001, v: null });
@@ -4332,8 +4382,9 @@
     const fileStartEpoch = deriveFileStartEpoch(filename);
     const hasEpochCol = idx.epoch_ms != null;
     const hr = [], rmssd = [], sdnnMatch = [], sdnn5min = [];
+    const elapsedMin = rowElapsedMinFn(rows, idx);
     for (const r of rows) {
-      const t = parseFloat(r[idx.time_min]);
+      const t = elapsedMin(r);
       if (isNaN(t)) continue;
       let ep = fileStartEpoch + t * 60000;
       if (hasEpochCol && r[idx.epoch_ms] !== '') {
@@ -5576,8 +5627,9 @@
         header.forEach((h, i) => idx[h.trim()] = i);
         // Downsample to ~30 points per session
         const stride = Math.max(1, Math.floor(rows.length / 30));
+        const elapsedMin = rowElapsedMinFn(rows, idx);
         for (let i = 0; i < rows.length; i += stride) {
-          const t = parseFloat(rows[i][idx.time_min]);
+          const t = elapsedMin(rows[i]);
           const h = parseFloat(rows[i][idx.hr_bpm]);
           if (!isNaN(t) && !isNaN(h)) points.push({ x: startHr + t / 60, y: h });
         }
