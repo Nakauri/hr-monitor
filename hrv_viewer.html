@@ -710,8 +710,9 @@
     position: relative;
     background: var(--bg-input);
     border-radius: var(--r-menu);
-    overflow: hidden;
   }
+  /* The drawing is clipped to the strip; the overlay is not, so its grab zone reaches past both ends. */
+  .context-clip { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
   .context-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .context-dim {
     position: absolute;
@@ -748,6 +749,10 @@
     cursor: crosshair;
     touch-action: none;
   }
+  /* 12 px of grab zone past each strip end, so the outer half of an end handle can be grabbed. */
+  .context-overlay::before { content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px; }
+  /* Pinch, pan and double-tap belong to the chart; a vertical swipe still scrolls the page. */
+  #session-chart { touch-action: pan-y; }
 
   /* Axis mode and Reset zoom above the chart. */
   .chart-tools { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
@@ -6221,10 +6226,12 @@
               <button class="btn icon reset-zoom hidden" id="reset-zoom" type="button" aria-label="Reset zoom" title="Reset zoom"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16" y2="16"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>
             </div>
             <div class="context-wrap">
-              <canvas id="context-chart" aria-hidden="true"></canvas>
-              <div class="context-dim" id="context-dim-left" style="left: 0; width: 0;"></div>
-              <div class="context-dim" id="context-dim-right" style="right: 0; width: 0;"></div>
-              <div class="context-brush" id="context-brush"></div>
+              <div class="context-clip">
+                <canvas id="context-chart" aria-hidden="true"></canvas>
+                <div class="context-dim" id="context-dim-left" style="left: 0; width: 0;"></div>
+                <div class="context-dim" id="context-dim-right" style="right: 0; width: 0;"></div>
+                <div class="context-brush" id="context-brush"></div>
+              </div>
               <div class="context-overlay" id="context-overlay" role="slider" aria-label="Zoom window" tabindex="-1"></div>
             </div>
             ${opts.chartNote || ''}
@@ -6301,6 +6308,7 @@
     drawSessionChart(s, data);
     drawContextChart(s, data);
     wireBrush(s);
+    wireChartGestures();
     syncFilterUI();
     wireInterpToggle();
     wireQuadrantToggles();
@@ -9443,28 +9451,41 @@
     // Pointer events unify mouse + touch — mouse-only handlers before this
     // meant the brush slider was unusable on phones. touch-action: none on the
     // overlay (CSS) suppresses browser scrolling so drags don't pan the page.
+    // What a press at overlay x does. Distances run from each handle's drawn centre (2 px inside the window,
+    // the brush border): 22 px each side on touch (44 px), 12 px on a mouse, the nearer handle wins. A press
+    // within 24 px of a handle never starts a new window; outside the zone it does nothing.
+    function brushModeAt(x, touch) {
+      const w = overlay.clientWidth;
+      const loPx = (brushMin / duration) * w, hiPx = (brushMax / duration) * w;
+      const dl = Math.abs(x - (loPx + 2)), dr = Math.abs(x - (hiPx - 2)), near = Math.min(dl, dr);
+      const hit = touch ? 22 : 12;
+      if (near < hit) return dl <= dr ? 'left' : 'right';
+      if (x > loPx && x < hiPx) return 'pan';
+      if (near < 24) return 'none';
+      return 'create';
+    }
     overlay.addEventListener('pointerdown', (e) => {
+      if (e.button > 0) return;
       cancelEase();
       const rect = overlay.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const w = rect.width;
-      const loPx = (brushMin / duration) * w;
-      const hiPx = (brushMax / duration) * w;
-      let mode = 'create';
-      // Bigger hit target on touch (12 px) than on mouse (6 px).
-      const hit = e.pointerType === 'touch' ? 12 : 6;
-      if (Math.abs(x - loPx) < hit) mode = 'left';
-      else if (Math.abs(x - hiPx) < hit) mode = 'right';
-      else if (x > loPx && x < hiPx) mode = 'pan';
+      const mode = brushModeAt(x, e.pointerType === 'touch');
+      e.preventDefault();
+      if (mode === 'none') return;
+      if (mode === 'pan') overlay.style.cursor = 'grabbing';
       drag = { mode, startX: x, startMin: brushMin, startMax: brushMax, pointerId: e.pointerId };
       overlay.setPointerCapture(e.pointerId);
       if (mode === 'create') {
         brushMin = xToMin(x); brushMax = brushMin + 0.01;
         renderBrush();
       }
-      e.preventDefault();
     });
+    const CURSORS = { left: 'ew-resize', right: 'ew-resize', pan: 'grab', none: 'default', create: 'crosshair' };
     overlay.addEventListener('pointermove', (e) => {
+      if (!drag && e.pointerType === 'mouse') {
+        const c = CURSORS[brushModeAt(e.clientX - overlay.getBoundingClientRect().left, false)];
+        if (overlay.style.cursor !== c) overlay.style.cursor = c;
+      }
       if (!drag || e.pointerId !== drag.pointerId) return;
       const rect = overlay.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -9492,6 +9513,7 @@
         brushMin = 0; brushMax = duration;
         renderBrush();
       }
+      if (drag.mode === 'pan') overlay.style.cursor = 'grab';
       drag = null;
     };
     overlay.addEventListener('pointerup', endDrag);
@@ -9586,6 +9608,129 @@
     brushMin = r.start;
     brushMax = r.end;
     paintBrush();
+  }
+
+  // Touch and wheel zoom on the Day chart. Every range change goes through paintBrush or easeBrushTo, so the
+  // chart updates at most once per frame. Units are minutes from the day's start.
+  const MIN_ZOOM_SPAN = 2;
+  // The finger spread ratio is raised to this power: a strong spread across a phone takes a day to under an hour.
+  const PINCH_GAIN = 1.5;
+  function clampZoomRange(lo, hi) {
+    const d = currentSummary.duration;
+    const span = Math.min(d, Math.max(Math.min(MIN_ZOOM_SPAN, d), hi - lo));
+    if (span !== hi - lo) lo = (lo + hi) / 2 - span / 2;
+    lo = Math.max(0, Math.min(d - span, lo));
+    return [lo, lo + span];
+  }
+  function setZoomRange(lo, hi) {
+    [brushMin, brushMax] = clampZoomRange(lo, hi);
+    paintBrush();
+  }
+  // The plot fraction under clientX (0 at the left edge of the plot, 1 at the right) and the time there.
+  function chartPointAt(clientX) {
+    const c = currentChart, a = c.chartArea, r = c.canvas.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (clientX - r.left - a.left) / Math.max(1, a.right - a.left)));
+    return { f, t: brushMin + f * (brushMax - brushMin) };
+  }
+  function zoomAtPoint(clientX, factor) {
+    const { f, t } = chartPointAt(clientX), span = (brushMax - brushMin) / factor;
+    setZoomRange(t - f * span, t + (1 - f) * span);
+  }
+  function wireChartGestures() {
+    const canvas = document.getElementById('session-chart');
+    if (!canvas || canvas._gestures) return;
+    canvas._gestures = true;
+    const ready = () => currentChart && currentChart.canvas === canvas && currentSummary && currentChart.chartArea && brushMin != null && brushMax != null;
+    const pts = new Map();
+    let pinch = null, pan = null, multi = false, lastTap = null, quiet = false;
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch' || !ready()) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t0: e.timeStamp });
+      if (pts.size === 2) {
+        cancelEase();
+        multi = true; pan = null; lastTap = null;
+        const [a, b] = [...pts.values()];
+        pinch = { d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), span0: brushMax - brushMin, t: chartPointAt((a.x + b.x) / 2).t };
+      } else if (pts.size === 1) {
+        pan = { id: e.pointerId, x0: e.clientX, y0: e.clientY, lo0: brushMin, hi0: brushMax, mode: null };
+      }
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      const p = pts.get(e.pointerId);
+      if (!p || !ready()) return;
+      p.x = e.clientX; p.y = e.clientY;
+      if (pinch && pts.size >= 2) {
+        const [a, b] = [...pts.values()];
+        const d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+        const span = pinch.span0 / Math.pow(d / pinch.d0, PINCH_GAIN);
+        const { f } = chartPointAt((a.x + b.x) / 2);
+        setZoomRange(pinch.t - f * span, pinch.t + (1 - f) * span);
+        return;
+      }
+      if (!pan || pan.id !== e.pointerId || multi) return;
+      const dx = e.clientX - pan.x0, dy = e.clientY - pan.y0;
+      if (!pan.mode) {
+        // The first 10 px decide: mostly sideways on a zoomed chart pans, anything else is left to the page.
+        if (Math.hypot(dx, dy) < 10) return;
+        pan.mode = Math.abs(dx) > Math.abs(dy) && pan.hi0 - pan.lo0 < currentSummary.duration - 0.001 ? 'pan' : 'none';
+        if (pan.mode === 'pan') cancelEase();
+      }
+      if (pan.mode !== 'pan') return;
+      const a = currentChart.chartArea, dt = -dx / Math.max(1, a.right - a.left) * (pan.hi0 - pan.lo0);
+      setZoomRange(pan.lo0 + dt, pan.hi0 + dt);
+    });
+    const end = (e) => {
+      const p = pts.get(e.pointerId);
+      if (!p) return;
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinch = null;
+      // A tap: one finger, under 10 px of travel, under 300 ms. Two taps within 320 ms and 30 px zoom.
+      if (e.type === 'pointerup' && !multi && pan && pan.id === e.pointerId && !pan.mode && e.timeStamp - p.t0 < 300 && ready()) {
+        if (lastTap && e.timeStamp - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
+          lastTap = null;
+          doubleTapZoom(e.clientX);
+        } else lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+      }
+      if (!pts.size) { pan = null; multi = false; quiet = false; }
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    // pan-y lets the browser scroll a two-finger gesture; the chart keeps it once a second finger is down. While
+    // a pinch or pan runs, the touch stops at the chart's wrapper (capture phase), so Chart.js does not redraw
+    // its tooltip on every move as well as the range update.
+    canvas.parentElement.addEventListener('touchmove', (e) => {
+      if (e.target !== canvas) return;
+      if (e.touches.length > 1 && e.cancelable) e.preventDefault();
+      if (pinch || (pan && pan.mode === 'pan')) {
+        e.stopPropagation();
+        // Chart.js replays its last event on every update (a second render per update). A mouseout, once per
+        // gesture, clears that event and the tooltip through Chart.js itself; a gesture has no hover.
+        if (!quiet) { quiet = true; canvas.dispatchEvent(new MouseEvent('mouseout')); }
+      }
+    }, { passive: false, capture: true });
+    // Pointer events reach the canvas first, so the gesture state is set before this touchstart; a second finger
+    // clears the tooltip the first one opened.
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 1 && currentChart && currentChart.tooltip && currentChart.tooltip.getActiveElements().length) {
+        currentChart.tooltip.setActiveElements([], { x: 0, y: 0 }); currentChart.setActiveElements([]);
+      }
+    }, { passive: true });
+    // Laptop: ctrl+wheel and trackpad pinch (a wheel event with ctrlKey) zoom around the pointer; a plain wheel scrolls the page.
+    canvas.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey || !ready()) return;
+      e.preventDefault();
+      cancelEase();
+      const dy = Math.max(-50, Math.min(50, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
+      zoomAtPoint(e.clientX, Math.exp(-dy * 0.01));
+    }, { passive: false });
+  }
+  // Double-tap zooms 4x around the tap; at the minimum window it resets.
+  function doubleTapZoom(clientX) {
+    const span = brushMax - brushMin;
+    if (span <= Math.min(MIN_ZOOM_SPAN, currentSummary.duration) + 0.001) { resetZoom(); return; }
+    const { f, t } = chartPointAt(clientX), ns = span / 4;
+    const [lo, hi] = clampZoomRange(t - f * ns, t + (1 - f) * ns);
+    easeBrushTo(lo, hi);
   }
 
   // Walk the HR series to find the actual filled span - skips leading and trailing
