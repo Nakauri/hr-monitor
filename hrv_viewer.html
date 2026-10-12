@@ -779,6 +779,12 @@
   .context-overlay::before { content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px; }
   /* Pinch, pan and double-tap belong to the chart; a vertical swipe still scrolls the page. */
   #session-chart { touch-action: pan-y; }
+  /* Mouse drag-to-zoom: a plain div over the plot while the mouse drags; the chart itself is not touched until release. */
+  #session-chart.plot-hover { cursor: crosshair; }
+  .drag-band { position: absolute; display: none; pointer-events: none; background: color-mix(in srgb, var(--action) 18%, transparent); border-left: 1px solid var(--action); border-right: 1px solid var(--action); }
+  .drag-band.on { display: block; }
+  #viewer-open-diagnostics { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); width: 100%; min-height: 44px; margin-top: var(--s4); }
+  #viewer-open-diagnostics .sub { color: var(--text-dim); font-size: var(--t12); }
 
   /* Axis mode and Reset zoom above the chart. */
   .chart-tools { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
@@ -1580,7 +1586,6 @@
       <button class="btn fsa-only" id="folder-pick" type="button">Change folder</button>
       <button class="btn" id="drive-signout" type="button" style="display:none">Sign out</button>
     </div>
-    <div class="dp-chip" id="hrm-version-chip-slot"></div>
   </div>
   <button class="btn icon" id="viewer-settings-btn" type="button" aria-label="Settings">
     <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1629,7 +1634,6 @@
 
 <script src="./diagnostics.js"></script>
 <script src="./settings.js"></script>
-<script>HRMDiagnostics.mountChip('#hrm-version-chip-slot');</script>
 <script>
 (function() {
   'use strict';
@@ -6106,8 +6110,13 @@
           <button class="btn ghost thresh-reset" id="hrshift-reset" type="button">Reset</button>
           <span class="pair"><button class="btn" id="hrshift-cancel" type="button">Cancel</button><button class="btn primary" id="hrshift-save" type="button">Save</button></span>
         </div>
+        <button type="button" class="btn" id="viewer-open-diagnostics"><span>Diagnostics</span><span class="sub">Version 0.5</span></button>
       `;
       document.body.appendChild(pop);
+      pop.querySelector('#viewer-open-diagnostics').addEventListener('click', () => {
+        pop.classList.remove('open');
+        if (window.HRMDiagnostics) window.HRMDiagnostics.open();
+      });
       // Bind the autonomic toggle once on first open — it's stateful and
       // affects rendering immediately on change, so no save button needed.
       const autTog = pop.querySelector('#autonomic-toggle');
@@ -9935,6 +9944,7 @@
         currentChart.tooltip.setActiveElements([], { x: 0, y: 0 }); currentChart.setActiveElements([]);
       }
     }, { passive: true });
+    wireMouseDragZoom(canvas, ready);
     // Laptop: ctrl+wheel and trackpad pinch (a wheel event with ctrlKey) zoom around the pointer; a plain wheel scrolls the page.
     canvas.addEventListener('wheel', (e) => {
       if (!e.ctrlKey || !ready()) return;
@@ -9943,6 +9953,81 @@
       const dy = Math.max(-50, Math.min(50, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
       zoomAtPoint(e.clientX, Math.exp(-dy * 0.01));
     }, { passive: false });
+  }
+  // Laptop: press and drag across the plot to zoom to that band (Warcraft Logs style). Performance first: while the
+  // mouse drags, only a div over the plot moves and Chart.js sees no mousemove (no tooltip redraws); release eases to
+  // the band in one rAF ease. Under 5 px is a click. Escape, or the pointer leaving the window, cancels. Touch is S32's.
+  const DRAG_ZOOM_PX = 5;
+  function wireMouseDragZoom(canvas, ready) {
+    const wrap = canvas.parentElement;
+    const band = document.createElement('div');
+    band.className = 'drag-band';
+    wrap.appendChild(band);
+    let drag = null, swallowClick = false;
+    const inPlot = (e) => {
+      const a = currentChart && currentChart.chartArea;
+      if (!a) return false;
+      const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      return x >= a.left && x <= a.right && y >= a.top && y <= a.bottom;
+    };
+    const stop = () => {
+      drag = null;
+      band.classList.remove('on');
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('keydown', key, true);
+      document.removeEventListener('pointerout', out, true);
+      document.removeEventListener('selectstart', noSelect, true);
+    };
+    const noSelect = (e) => e.preventDefault();
+    const move = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.x = e.clientX;
+      if (!drag.on) {
+        if (Math.abs(drag.x - drag.x0) < DRAG_ZOOM_PX) return;
+        drag.on = true;
+        cancelEase();
+        // Chart.js replays its last hover on updates; one mouseout clears the tooltip for the drag.
+        canvas.dispatchEvent(new MouseEvent('mouseout'));
+        band.style.top = drag.top + 'px';
+        band.style.height = drag.h + 'px';
+        band.classList.add('on');
+      }
+      const x = Math.max(drag.pl, Math.min(drag.pr, drag.x));
+      const lo = Math.min(x, Math.max(drag.pl, Math.min(drag.pr, drag.x0))), hi = Math.max(x, Math.max(drag.pl, Math.min(drag.pr, drag.x0)));
+      band.style.left = (lo - drag.wl) + 'px';
+      band.style.width = (hi - lo) + 'px';
+    };
+    const up = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const d = drag;
+      stop();
+      if (!d.on || !ready()) return;
+      swallowClick = true;
+      setTimeout(() => { swallowClick = false; }, 0);
+      const a = chartPointAt(d.x0).t, b = chartPointAt(d.x).t;
+      const [lo, hi] = clampZoomRange(Math.min(a, b), Math.max(a, b));
+      easeBrushTo(lo, hi);
+    };
+    const key = (e) => { if (e.key === 'Escape' && drag) { e.stopPropagation(); stop(); } };
+    const out = (e) => { if (drag && !e.relatedTarget) stop(); };
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || drag || !ready() || !inPlot(e)) return;
+      const r = canvas.getBoundingClientRect(), w = wrap.getBoundingClientRect(), ca = currentChart.chartArea;
+      drag = { id: e.pointerId, x0: e.clientX, x: e.clientX, on: false, pl: r.left + ca.left, pr: r.left + ca.right, wl: w.left, top: r.top - w.top + ca.top, h: ca.bottom - ca.top };
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', up, true);
+      window.addEventListener('keydown', key, true);
+      document.addEventListener('pointerout', out, true);
+      document.addEventListener('selectstart', noSelect, true);
+    });
+    // While a drag runs, mouse moves stop at the wrapper so Chart.js does no hover work; the click after a drag is eaten.
+    wrap.addEventListener('mousemove', (e) => { if (drag && drag.on) e.stopPropagation(); }, true);
+    wrap.addEventListener('click', (e) => { if (swallowClick) { swallowClick = false; e.stopPropagation(); } }, true);
+    canvas.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse') canvas.classList.toggle('plot-hover', inPlot(e));
+    });
+    canvas.addEventListener('pointerleave', () => canvas.classList.remove('plot-hover'));
   }
   // Double-tap zooms 4x around the tap; at the minimum window it resets.
   function doubleTapZoom(clientX) {
