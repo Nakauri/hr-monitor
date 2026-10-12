@@ -8446,21 +8446,142 @@
       return rows;
     };
   }
-  // Mark label rows and diamond heights as plain option values, set after layout and before the annotation
-  // plugin resolves them, so an update resolves no per-label functions.
-  function markLayoutPlugin(rowsOf, labels, handles) {
+  // Mark lines, labels and diamonds, drawn as chartjs-plugin-annotation drew them (same order, geometry and
+  // canvas calls) from positions cached per x range and chart area; an update resolves nothing per mark.
+  // marks: { ev_N: line, mk_N: diamond } in draw order; rowsOf: markLabelRows(...). Hover: the nearest mark whose
+  // line or label covers the pointer x.
+  function marksPlugin(marks, rowsOf) {
+    let list = null;
     return {
-      id: 'markLayout',
-      afterLayout(chart) {
-        const rows = rowsOf(chart);
-        for (let i = 0; i < labels.length; i++) {
-          const r = rows[i];
-          labels[i].display = r < 3;
-          labels[i].yAdjust = 18 + 20 * r;
+    id: 'hrMarks',
+    beforeInit(chart) { chart.$marks = marks; },
+    _layout(chart) {
+      const xs = chart.scales.x, ys = chart.scales.y, a = chart.chartArea;
+      const key = xs.min + '_' + xs.max + '_' + a.left + '_' + a.right + '_' + a.top + '_' + a.bottom;
+      if (chart._hrMkKey === key && chart._hrMk) return chart._hrMk;
+      chart._hrMkKey = key;
+      const H = Chart.helpers, ctx = chart.ctx;
+      if (!list) list = Object.values(marks);
+      const rows = rowsOf(chart);
+      const topPx = ys ? ys.getPixelForValue(ys.max) : a.top;
+      const out = [];
+      let li = 0;
+      for (const m of list) {
+        if (m.type === 'point') {
+          const px = xs.getPixelForValue(m.xValue);
+          if (px >= a.left - 8 && px <= a.right + 8) out.push({ m, kind: 'dia', px, py: topPx + m.yAdjust });
+          continue;
         }
-        const top = chart.scales.y ? chart.scales.y.max : 0;
-        for (const h of handles) h.yValue = top;
-      },
+        const r = rows[li++] || 0;
+        m.label.display = r < 3;
+        m.label.yAdjust = 18 + 20 * r;
+        const px = xs.getPixelForValue(m.xMin);
+        if (!(px >= a.left && px <= a.right)) continue;
+        const it = { m, kind: 'line', px, lab: null };
+        if (m.label.display) {
+          if (!m._font) {
+            m._font = H.toFont(m.label.font);
+            ctx.save(); ctx.font = m._font.string; m._tw = ctx.measureText(m.label.content).width; ctx.restore();
+          }
+          const pad = m.label.padding, w = m._tw + 2 * pad, h = m._font.lineHeight + 2 * pad;
+          let cx = px;
+          if (w > a.right - a.left) cx = (a.right + a.left) / 2;
+          else {
+            if (a.left >= cx - pad - w / 2) cx = a.left + pad + w / 2;
+            if (a.right <= cx + pad + w / 2) cx = a.right - pad - w / 2;
+          }
+          const cy = a.top + pad + h / 2 + m.label.yAdjust;
+          it.lab = { x: cx - w / 2, y: cy - h / 2, w, h, cx };
+        }
+        out.push(it);
+      }
+      chart._hrMk = out;
+      return out;
+    },
+    _draw(chart) {
+      if (chart._hrMkDrawn) return;
+      chart._hrMkDrawn = true;
+      const items = this._layout(chart);
+      if (!items.length) return;
+      const H = Chart.helpers, ctx = chart.ctx, a = chart.chartArea;
+      H.clipArea(ctx, a);
+      for (const it of items) {
+        const m = it.m;
+        if (it.kind === 'dia') {
+          const r = m.radius, x = it.px, y = it.py;
+          ctx.save();
+          ctx.fillStyle = m.backgroundColor;
+          ctx.setLineDash([]);
+          ctx.lineDashOffset = 0;
+          ctx.lineWidth = m.borderWidth;
+          ctx.strokeStyle = m.borderColor;
+          ctx.beginPath();
+          ctx.moveTo(x - r, y);
+          ctx.lineTo(x, y - r);
+          ctx.lineTo(x + r, y);
+          ctx.lineTo(x, y + r);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+          continue;
+        }
+        ctx.save();
+        ctx.setLineDash(m.borderDash || []);
+        ctx.lineDashOffset = 0;
+        ctx.lineWidth = m.borderWidth;
+        ctx.strokeStyle = m.borderColor;
+        ctx.translate(it.px, a.bottom);
+        ctx.rotate(Math.atan2(a.top - a.bottom, 0));
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(a.bottom - a.top, 0);
+        ctx.stroke();
+        ctx.restore();
+        const L = it.lab;
+        if (!L) continue;
+        const lo = m.label, pad = lo.padding;
+        ctx.save();
+        ctx.fillStyle = lo.backgroundColor;
+        ctx.beginPath();
+        const rad = Math.min(6, Math.min(L.w, L.h) / 2);
+        H.addRoundedRectPath(ctx, { x: L.x, y: L.y, w: L.w, h: L.h, radius: { topLeft: rad, topRight: rad, bottomLeft: rad, bottomRight: rad } });
+        ctx.closePath();
+        ctx.fill();
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.font = m._font.string;
+        ctx.fillStyle = lo.color;
+        ctx.fillText(lo.content, L.x + pad + (L.w - 2 * pad) / 2, L.y + pad + m._font.lineHeight / 2);
+        ctx.restore();
+      }
+      H.unclipArea(ctx);
+    },
+    beforeDraw(chart) { chart._hrMkDrawn = false; },
+    // After the last dataset (and the highlight), before the annotation plugin's max and min.
+    afterDatasetDraw(chart, args) {
+      const metas = chart.getSortedVisibleDatasetMetas();
+      if (metas.length && args.meta === metas[0]) this._draw(chart);
+    },
+    afterDatasetsDraw(chart) { this._draw(chart); },
+    beforeEvent(chart, args) {
+      const e = args.event;
+      if (!e || (e.type !== 'mousemove' && e.type !== 'mouseout')) return;
+      let hit = null;
+      if (e.type === 'mousemove' && chart._hrMk) {
+        let best = Infinity;
+        for (const it of chart._hrMk) {
+          if (it.kind !== 'line') continue;
+          const L = it.lab, d = Math.abs(e.x - it.px);
+          const covers = d <= it.m.borderWidth / 2 || (L && e.x >= L.x - 0.001 && e.x <= L.x + L.w + 0.001);
+          if (covers && d <= best) { best = d; hit = it.m; }
+        }
+      }
+      if (hit === (chart._hrMkHover || null)) return;
+      if (chart._hrMkHover) annoLeave();
+      chart._hrMkHover = hit;
+      if (hit) annoEnter(hit.t, hit.html, e);
+    },
     };
   }
 
@@ -8512,8 +8633,9 @@
     // chartjs-plugin-annotation handles only events (lines) + max/min markers.
     const hrOverlays = [];
     const annotations = {};
+    const marks = {};
     let idCounter = 0;
-    let markLayout = null;
+    let markLayer = null;
 
     if (currentQuadRanges) {
       const QUAD_LABELS = {
@@ -8586,8 +8708,7 @@
       const markColour = rootStyle.getPropertyValue('--text').trim() || 'white';
       const bgColour = rootStyle.getPropertyValue('--bg').trim() || 'black';
       const labelRows = markLabelRows(viewMarks(s).events.map((e) => ({ t: e.t, text: parseMark(e.label).label })));
-      const markLabels = [], markHandles = [];
-      markLayout = markLayoutPlugin(labelRows, markLabels, markHandles);
+      markLayer = marksPlugin(marks, labelRows);
       viewMarks(s).events.forEach((e) => {
         const mark = parseMark(e.label);
         const eLabel = mark.label;
@@ -8596,27 +8717,22 @@
         const label = tick
           ? { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: tickColour, font: { size: 12, weight: '500' }, padding: 4 }
           : { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: markColour, font: { size: 12, weight: '600' }, padding: 4 };
-        markLabels.push(label);
-        annotations['ev_' + idCounter++] = {
+        marks['ev_' + idCounter++] = {
           type: 'line',
-          xScaleID: 'x',
           xMin: e.t, xMax: e.t,
           markKind: mark.kind,
           borderColor: tick ? tickColour : markColour,
           borderWidth: tick ? 1 : 1.25,
           borderDash: tick ? [4, 4] : undefined,
           label,
-          enter: (ctx, evt) => annoEnter(e.t, `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`, evt),
-          leave: annoLeave,
+          t: e.t,
+          html: `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`,
         };
         // Diamond handle at the top of a user mark; the top follows the y axis, so it never widens it.
         if (!tick) {
           const handle = {
             type: 'point',
-            xScaleID: 'x', yScaleID: 'y',
             xValue: e.t,
-            yValue: 0,
-            adjustScaleRange: false,
             yAdjust: 7,
             pointStyle: 'rectRot',
             radius: 6,
@@ -8624,8 +8740,7 @@
             borderColor: bgColour,
             borderWidth: 1.5,
           };
-          markHandles.push(handle);
-          annotations['mk_' + idCounter++] = handle;
+          marks['mk_' + idCounter++] = handle;
         }
       });
     }
@@ -8811,7 +8926,7 @@
             padding: 10,
             boxPadding: 4,
           },
-          annotation: { annotations: nearMarks(annotations, brushMin !== null ? brushMin : 0, brushMax !== null ? brushMax : s.duration, canvasEl.clientWidth) },
+          annotation: { annotations },
           hrOverlays: { overlays: hrOverlays },
           // min-max keeps every point when a pixel column holds one, and the envelope when it holds more.
           // Threshold 1 keeps it on at every zoom: the decimated set covers only the visible range, and a
@@ -8850,9 +8965,8 @@
           }
         },
       },
-      plugins: markLayout ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN],
+      plugins: markLayer ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN],
     });
-    currentChart.$marks = annotations;
   }
 
   // A point label kept inside the plot: clamped sideways, flipped to the other side of its point at the top or bottom.
@@ -8880,26 +8994,6 @@
     };
   }
 
-  // The annotation plugin re-resolves every entry on each update, so it gets only the marks within 200 px of the
-  // visible range (wider than any label); entries keep their order, which is the draw order.
-  function nearMarks(all, lo, hi, width) {
-    const pad = (hi - lo) * 200 / Math.max(1, width);
-    const out = {};
-    for (const k of Object.keys(all)) {
-      const a = all[k];
-      const x = k.startsWith('ev_') ? a.xMin : k.startsWith('mk_') ? a.xValue : null;
-      if (x == null || (x >= lo - pad && x <= hi + pad)) out[k] = a;
-    }
-    return out;
-  }
-  function syncNearMarks(chart, lo, hi) {
-    if (!chart.$marks) return;
-    const plug = chart.config.options.plugins.annotation;
-    const next = nearMarks(chart.$marks, lo, hi, chart.width);
-    const a = Object.keys(next), b = Object.keys(plug.annotations);
-    if (a.length === b.length && a.every((k, i) => k === b[i])) return;
-    plug.annotations = next;
-  }
 
   // Zone strip under the chart: HR coloured by zone per pixel column, recording gaps hatched.
   let _stripResizeObserver = null;
@@ -9119,7 +9213,6 @@
     xo.min = brushMin;
     xo.max = brushMax;
     if (so) { so.min = brushMin; so.max = brushMax; }
-    syncNearMarks(currentChart, brushMin, brushMax);
     currentChart.update('none');
   }
 

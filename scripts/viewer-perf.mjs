@@ -25,12 +25,12 @@ const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwr
 const OUTDIR = argVal('--out', path.join(UX, 'redesign', 'perf-2026-10-12', 's26'));
 const COUNTS = args.includes('--counts');
 const ONLY = argVal('--only', null);
-const SHOTS = argVal('--shots', null), SHOT_TAG = argVal('--tag', 'shot');
+const SHOTS = argVal('--shots', null), SHOT_TAG = argVal('--tag', 'shot'), SHOT_PREFIX = argVal('--prefix', 's26');
 const MUTANT = argVal('--mutants', null);
 const want = (a) => !ONLY || ONLY.split(',').includes(a);
 const CONFIGS = { desk: [1440, 4], phone: [360, 6] };
 let runs;
-if (SHOTS) runs = [['shots', 1440, 1]];
+if (SHOTS) runs = [['shots', +argVal('--w', 1440), 1]];
 else if (args.includes('--w') || args.includes('--cpu')) runs = [['adhoc', +argVal('--w', 1440), +argVal('--cpu', 1)]];
 else if (MUTANT) runs = [['desk', ...CONFIGS.desk]];
 else { const c = argVal('--config', 'all'); runs = (c === 'all' ? ['desk', 'phone'] : [c]).map((k) => [k, ...CONFIGS[k]]); }
@@ -258,18 +258,41 @@ async function runConfig(name, W, CPU) {
 
   if (SHOTS) {
     const shoot = async (file) => { const el = page.locator('.chart-wrap').first(); await el.scrollIntoViewIfNeeded(); await el.screenshot({ path: path.join(SHOTS, file) }); console.log('shot', file); };
+    const reset = async () => { await page.evaluate(() => document.getElementById('context-overlay').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))); await settle(600); };
     await settle(600);
     fs.mkdirSync(SHOTS, { recursive: true });
-    await shoot(`s26-${SHOT_TAG}-full.png`);
+    await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-full.png`);
     let o = await ov(); await settle(300); o = await ov();
     const dur = await page.evaluate(() => { const c = window.Chart.getChart(document.getElementById('session-chart')); return c.scales.x.max - c.scales.x.min; });
     await drag(line(o.bx + o.bw - 2, o.bx + Math.max(4, o.w * 10 / dur), o.y, 20)); await settle(600);
-    await page.mouse.move(1, 1); await settle(300);
+    if (!PHONE) await page.mouse.move(1, 1); await settle(300);
     console.log('10 min range', JSON.stringify(await chartRange()));
-    await shoot(`s26-${SHOT_TAG}-10min.png`);
+    await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-10min.png`);
+    await reset();
+    if (PHONE) { const btn = page.locator('#markers-open').first(); if (await btn.count()) { await btn.click().catch(() => {}); await settle(600); } }
     const it = page.locator('#marker-list .marker-item').nth(5);
-    await it.scrollIntoViewIfNeeded(); await it.click(); await settle(800); await page.mouse.move(1, 1); await settle(300);
-    await shoot(`s26-${SHOT_TAG}-marker.png`);
+    await it.scrollIntoViewIfNeeded(); await it.click(); await settle(800);
+    if (PHONE) { await page.keyboard.press('Escape').catch(() => {}); await settle(600); } else { await page.mouse.move(1, 1); await settle(300); }
+    console.log('marker range', JSON.stringify(await chartRange()));
+    await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-marker.png`);
+    if (!PHONE) {
+      // Hover inside the first mark's label (row 0, 10 px right of its line).
+      await reset();
+      const p = await page.evaluate(() => {
+        const c = window.Chart.getChart(document.getElementById('session-chart'));
+        const ts = [...document.querySelectorAll('#marker-list .marker-item.type-event')].map((e) => Number(e.dataset.t)).filter((t) => t >= c.scales.x.min && t <= c.scales.x.max).sort((a, b) => a - b);
+        c.canvas.scrollIntoView({ block: 'center' });
+        const r = c.canvas.getBoundingClientRect();
+        return { x: r.left + c.scales.x.getPixelForValue(ts[0]) + 10, y: r.top + c.chartArea.top + 4 + 11.2 + 18, t: ts[0] };
+      });
+      await page.mouse.move(p.x - 30, p.y); await settle(100); await page.mouse.move(p.x, p.y); await settle(400);
+      const tip = await page.evaluate(() => { const e = document.getElementById('anno-tip'); return e && e.style.display !== 'none' ? e.textContent : null; });
+      const hl = await page.evaluate(() => window.Chart.getChart(document.getElementById('session-chart')).$hlT);
+      const row = await page.evaluate(() => { const e = document.querySelector('#marker-list .marker-item.chart-hover'); return e ? e.textContent.trim().slice(0, 40) : null; });
+      console.log('hover', JSON.stringify({ at: p, tip, hl, listRow: row }));
+      await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-hover.png`);
+    }
+    if (errors.length) console.log('page errors', JSON.stringify(errors.slice(0, 5)));
     await ctx.close();
     return;
   }
