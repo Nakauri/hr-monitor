@@ -15,6 +15,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
 <script src="./marks-store.js"></script>
@@ -549,7 +550,7 @@
   .all-granularity { width: fit-content; max-width: 100%; margin-bottom: 16px; }
   .all-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 18px;
   }
   .all-card {
@@ -562,8 +563,33 @@
     gap: 10px;
   }
   .all-card.wide { grid-column: 1 / -1; }
-  .all-card-title { font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
-  .all-card-sub { font-size: 12px; color: var(--text-dim); margin-top: -4px; }
+  .all-card { min-width: 0; }
+  .all-card[hidden] { display: none; }
+  /* S34: the card header is the drag handle (SortableJS); the Widgets list is the keyboard and touch path. */
+  .all-card-head { display: flex; flex-direction: column; gap: var(--s1); cursor: grab; touch-action: pan-y; }
+  .all-card-head:active { cursor: grabbing; }
+  .all-card-title { margin: 0; font-size: var(--t16); color: var(--text); font-weight: 600; }
+  .all-card-sub { margin: 0; font-size: var(--t12); color: var(--text-dim); }
+  .all-card.w-ghost { opacity: .4; border-style: dashed; border-color: var(--action); }
+  .all-card.w-chosen { box-shadow: var(--shadow-2); }
+  .all-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin: var(--s2) 0 var(--s4); }
+  .all-top-title { margin: 0; font-size: var(--t16); font-weight: 600; color: var(--text); }
+  .all-top .count { font-weight: 500; color: var(--text-dim); }
+  .all-top .widgets-open { flex: 0 0 auto; white-space: nowrap; }
+  .layers-pop .layer-rows.widget-rows, .layer-rows.widget-rows { display: flex; flex-direction: column; gap: var(--s1); }
+  .widget-row { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+  .widget-row > .chip { flex: 1 1 auto; }
+  .widget-row .segmented { flex: 0 0 auto; flex-wrap: nowrap; gap: 0; }
+  .widget-row .segmented > button { min-width: 56px; border-radius: 0; }
+  .widget-row .segmented > button:first-child { border-radius: var(--r-ctl) 0 0 var(--r-ctl); }
+  .widget-row .segmented > button:last-child { border-radius: 0 var(--r-ctl) var(--r-ctl) 0; margin-left: -1px; }
+  .widget-row .btn.icon:disabled { opacity: .35; cursor: default; }
+  .layers-pop.widgets-pop .sheet { width: 520px; }
+  @media (max-width: 480px) {
+    .widget-row { flex-wrap: wrap; row-gap: 0; }
+    .widget-row > .chip { flex-basis: 100%; }
+    .widget-row .segmented { margin-left: auto; }
+  }
   .all-chart-wrap { height: 220px; position: relative; }
   .all-polar-wrap { height: 280px; position: relative; }
   .all-headline {
@@ -1415,7 +1441,7 @@
     .metric-switch > button { padding: 0 var(--s2); }
     .interp-grid { grid-template-columns: 1fr; }
     .sessions-grid { grid-template-columns: 1fr; }
-    .all-grid { grid-template-columns: 1fr; }
+    .all-grid { grid-template-columns: minmax(0, 1fr); }
     .all-card.wide { grid-column: auto; }
     /* Month / Week / Day view headers wrap: title + nav + today compact on
        one row, metric switch + legend drop to the next row instead of
@@ -5604,6 +5630,158 @@
   const reduceSum = arr => arr.reduce((a, b) => a + b, 0);
   const reduceAvg1 = arr => +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1);
 
+  // S34 Trends widgets: one layout { order, hidden, size } in localStorage; the grid reflows, hidden cards take no cell.
+  const TREND_WIDGETS = [
+    { id: 'hr', name: 'Heart rate trend', canvas: 'all-morning-hr', wrap: 'all-chart-wrap', size: 'half' },
+    { id: 'rmssd', name: 'HRV average', canvas: 'all-rmssd-roll', wrap: 'all-chart-wrap', size: 'half' },
+    { id: 'warn', name: 'Warnings', canvas: 'all-warn-bar', wrap: 'all-chart-wrap', size: 'half' },
+    { id: 'palp', name: 'Palpitations by hour', canvas: 'all-palp-hour', wrap: 'all-polar-wrap', size: 'half' },
+    { id: 'symp', name: 'High HR with low HRV', canvas: 'all-sympathetic', wrap: 'all-chart-wrap', size: 'full' },
+    { id: 'events', name: 'Events', canvas: 'all-auto-events', wrap: 'all-chart-wrap', size: 'full' },
+  ];
+  const TRENDS_LAYOUT_KEY = 'aorti_trends_layout_v1';
+  let trendsLayout = null, widgetsSheet = null;
+  function loadTrendsLayout() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(TRENDS_LAYOUT_KEY) || 'null'); } catch (e) {}
+    const ids = TREND_WIDGETS.map(w => w.id);
+    const order = (saved && Array.isArray(saved.order) ? saved.order.filter(id => ids.includes(id)) : []);
+    ids.forEach(id => { if (!order.includes(id)) order.push(id); });
+    const hidden = (saved && Array.isArray(saved.hidden) ? saved.hidden.filter(id => ids.includes(id)) : []);
+    const size = {};
+    TREND_WIDGETS.forEach(w => { const v = saved && saved.size && saved.size[w.id]; size[w.id] = v === 'full' || v === 'half' ? v : w.size; });
+    return { order: [...new Set(order)], hidden, size };
+  }
+  function saveTrendsLayout() {
+    try { localStorage.setItem(TRENDS_LAYOUT_KEY, JSON.stringify(trendsLayout)); } catch (e) {}
+  }
+  const trendsChartOf = (id) => {
+    const w = TREND_WIDGETS.find(x => x.id === id);
+    try { return w ? Chart.getChart(document.getElementById(w.canvas)) : null; } catch (e) { return null; }
+  };
+  // Puts the cards in layout order and applies shown and size; resizeIds get one chart.resize() each.
+  function applyTrendsLayout(save, resizeIds) {
+    if (!trendsLayout) trendsLayout = loadTrendsLayout();
+    const grid = document.getElementById('all-grid');
+    const resize = new Set(resizeIds || []);
+    if (grid) {
+      // A half card left alone in its row (next shown card is full, or none) widens to fill it.
+      const shown = trendsLayout.order.filter(id => !trendsLayout.hidden.includes(id));
+      const fill = new Set();
+      let lone = null;
+      shown.forEach(id => {
+        if (trendsLayout.size[id] === 'full') { if (lone) fill.add(lone); lone = null; }
+        else lone = lone ? null : id;
+      });
+      if (lone) fill.add(lone);
+      trendsLayout.order.forEach(id => {
+        const card = grid.querySelector(`.all-card[data-w="${id}"]`);
+        if (!card) return;
+        grid.appendChild(card);
+        card.hidden = trendsLayout.hidden.includes(id);
+        const wide = trendsLayout.size[id] === 'full' || fill.has(id);
+        if (card.classList.contains('wide') !== wide && !card.hidden) resize.add(id);
+        card.classList.toggle('wide', wide);
+      });
+    }
+    const n = document.querySelector('#widgets-open .n');
+    if (n) n.textContent = ' · ' + (TREND_WIDGETS.length - trendsLayout.hidden.length);
+    if (save) resize.forEach(id => { const c = trendsChartOf(id); if (c) c.resize(); });
+    if (save) saveTrendsLayout();
+    if (widgetsSheet && !widgetsSheet.closed) paintWidgetRows(widgetsSheet.body.querySelector('.widget-rows'));
+  }
+  const ICO_UP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>';
+  const ICO_DOWN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+  function paintWidgetRows(box) {
+    if (!box) return;
+    const active = document.activeElement && box.contains(document.activeElement) ? document.activeElement : null;
+    const row = active && active.closest('.widget-row');
+    const focusKey = row ? { w: row.dataset.w, act: active.dataset.act, size: active.dataset.size } : null;
+    const L = trendsLayout, last = L.order.length - 1;
+    box.innerHTML = L.order.map((id, i) => {
+      const w = TREND_WIDGETS.find(x => x.id === id);
+      const shown = !L.hidden.includes(id), size = L.size[id];
+      return `<div class="widget-row" data-w="${id}">
+        <button type="button" class="chip layer-chip" data-act="show" aria-pressed="${shown}"><span class="lbl">${w.name}</span></button>
+        <div class="segmented" role="group" aria-label="${w.name} width">${[['half', 'Half'], ['full', 'Full']].map(([v, l]) => `<button type="button" data-act="size" data-size="${v}" aria-pressed="${size === v}">${l}</button>`).join('')}</div>
+        <button type="button" class="btn icon" data-act="up" aria-label="Move ${w.name} up"${i === 0 ? ' disabled' : ''}>${ICO_UP}</button>
+        <button type="button" class="btn icon" data-act="down" aria-label="Move ${w.name} down"${i === last ? ' disabled' : ''}>${ICO_DOWN}</button>
+      </div>`;
+    }).join('');
+    if (focusKey) {
+      const sel = (act) => `.widget-row[data-w="${focusKey.w}"] [data-act="${act}"]` + (focusKey.size ? `[data-size="${focusKey.size}"]` : '');
+      let t = box.querySelector(sel(focusKey.act));
+      if (t && t.disabled) t = box.querySelector(sel(focusKey.act === 'up' ? 'down' : 'up'));
+      try { if (t) t.focus({ preventScroll: true }); } catch (e) {}
+    }
+  }
+  function widgetRowsEl() {
+    const box = document.createElement('div');
+    box.className = 'layer-rows widget-rows ui';
+    box.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-act]');
+      const row = b && b.closest('.widget-row');
+      if (!row || b.disabled) return;
+      const id = row.dataset.w, L = trendsLayout;
+      if (b.dataset.act === 'show') {
+        L.hidden = L.hidden.includes(id) ? L.hidden.filter(x => x !== id) : [...L.hidden, id];
+        applyTrendsLayout(true, L.hidden.includes(id) ? [] : [id]);
+      } else if (b.dataset.act === 'size') {
+        if (L.size[id] === b.dataset.size) return;
+        L.size[id] = b.dataset.size;
+        applyTrendsLayout(true, [id]);
+      } else {
+        const i = L.order.indexOf(id), j = b.dataset.act === 'up' ? i - 1 : i + 1;
+        if (j < 0 || j >= L.order.length) return;
+        [L.order[i], L.order[j]] = [L.order[j], L.order[i]];
+        applyTrendsLayout(true);
+      }
+    });
+    paintWidgetRows(box);
+    return box;
+  }
+  function openWidgetsSheet() {
+    if (widgetsSheet && !widgetsSheet.closed) return;
+    const anchor = document.getElementById('widgets-open');
+    const phone = phoneTools();
+    const sheet = UI.sheet({
+      title: 'Widgets', className: phone ? 'layers-sheet widgets-sheet' : 'layers-pop widgets-pop', body: widgetRowsEl(),
+      onClose: () => {
+        const a = document.getElementById('widgets-open');
+        if (a) a.setAttribute('aria-expanded', 'false');
+        if (widgetsSheet === sheet) widgetsSheet = null;
+      },
+    });
+    widgetsSheet = sheet;
+    if (anchor) anchor.setAttribute('aria-expanded', 'true');
+    if (!phone && anchor) {
+      const r = anchor.getBoundingClientRect(), w = sheet.sheet.offsetWidth;
+      sheet.sheet.style.left = Math.round(Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)) + 'px';
+      sheet.sheet.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - sheet.sheet.offsetHeight - 8))) + 'px';
+      const first = sheet.body.querySelector('button[data-act]');
+      try { if (first) first.focus({ preventScroll: true }); } catch (e) {}
+    }
+  }
+  function wireTrendsWidgets(el) {
+    const open = el.querySelector('#widgets-open');
+    if (open) open.addEventListener('click', openWidgetsSheet);
+    const grid = el.querySelector('#all-grid');
+    // Drag by the card header (XI AssetBook pattern); the page still works if the library did not load.
+    if (grid && typeof Sortable !== 'undefined') {
+      Sortable.create(grid, {
+        animation: 160, easing: 'cubic-bezier(0.2, 0, 0, 1)',
+        handle: '.all-card-head', draggable: '.all-card', filter: 'button, select, input', preventOnFilter: false,
+        ghostClass: 'w-ghost', chosenClass: 'w-chosen', delayOnTouchOnly: true, delay: 150,
+        onEnd: () => {
+          const order = [...grid.querySelectorAll('.all-card[data-w]')].map(c => c.dataset.w);
+          if (order.length !== trendsLayout.order.length) return;
+          trendsLayout.order = order;
+          applyTrendsLayout(true);
+        },
+      });
+    }
+  }
+
   function renderAll() {
     const el = document.getElementById('view-all');
     const allFilenames = Object.keys(sessionsIndex).sort(compareFilesByStart);
@@ -5648,44 +5826,33 @@
     const fMap = byKey(flushAgg), cMap = byKey(chillsAgg), pMap = byKey(palpClustAgg), sMap = byKey(shiftAgg);
 
     const granLabel = { session: 'Session', day: 'Day', week: 'Week', month: 'Month' }[gran];
+    const per = granLabel.toLowerCase();
+    const copy = {
+      hr: ['Heart rate trend', `Average HR per ${per}, with resting HR as the dashed line. A rising line means HR is drifting up.`],
+      rmssd: ['HRV average', `RMSSD averaged over ${rollWin} ${per}s. Higher is usually better.`],
+      warn: [`Warnings per ${per}`, `Times HR crossed a warning line, added up per ${per}.`],
+      palp: ['Palpitations by hour of day', 'Extra beats, by the hour each session started.'],
+      symp: ['Time in high HR with low HRV', `Average share of each ${per} spent with high HR and low HRV. Taller bars mean harder ${per}s.`],
+      events: [`Events per ${per}`, 'Flushes, chills, palpitation clusters and HR shifts, stacked.'],
+    };
+    const cardHtml = (w) => `
+        <section class="all-card" data-w="${w.id}" aria-labelledby="wt-${w.id}">
+          <div class="all-card-head"><h3 class="all-card-title" id="wt-${w.id}">${copy[w.id][0]}</h3><p class="all-card-sub">${copy[w.id][1]}</p></div>
+          <div class="${w.wrap}"><canvas id="${w.canvas}"></canvas></div>
+        </section>`;
     el.innerHTML = `
-      <div class="section-head">All-time trends · ${allFilenames.length} sessions</div>
+      <div class="all-top ui">
+        <h2 class="all-top-title">All-time trends <span class="count">· ${allFilenames.length} sessions</span></h2>
+        <button class="btn markers-open widgets-open" id="widgets-open" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Widgets"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="18" height="8" rx="1"/></svg><span class="lbl">Widgets<span class="n"></span></span></button>
+      </div>
       <div class="ui segmented all-granularity" role="group" aria-label="Group by">
         ${[['session', 'Session'], ['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(([g, l]) => `<button type="button" data-gran="${g}" aria-pressed="${gran === g}">${l}</button>`).join('')}
       </div>
-      <div class="all-grid">
-        <div class="all-card">
-          <div class="all-card-title">Heart rate trend</div>
-          <div class="all-card-sub">Average HR per ${granLabel.toLowerCase()} (warm) + resting HR baseline (cool). Rising = bad-day drift.</div>
-          <div class="all-chart-wrap"><canvas id="all-morning-hr"></canvas></div>
-        </div>
-        <div class="all-card">
-          <div class="all-card-title">Rolling RMSSD baseline</div>
-          <div class="all-card-sub">${rollWin}-${granLabel.toLowerCase()} rolling average. Higher = better parasympathetic tone.</div>
-          <div class="all-chart-wrap"><canvas id="all-rmssd-roll"></canvas></div>
-        </div>
-        <div class="all-card">
-          <div class="all-card-title">Warnings per ${granLabel.toLowerCase()}</div>
-          <div class="all-card-sub">Threshold crossings summed across ${gran === 'session' ? 'each session' : 'the bucket'}.</div>
-          <div class="all-chart-wrap"><canvas id="all-warn-bar"></canvas></div>
-        </div>
-        <div class="all-card">
-          <div class="all-card-title">Palpitations by hour of day</div>
-          <div class="all-card-sub">Ectopic beats aggregated by session start-hour (granularity-independent).</div>
-          <div class="all-polar-wrap"><canvas id="all-palp-hour"></canvas></div>
-        </div>
-        <div class="all-card wide">
-          <div class="all-card-title">Sympathetic-stress time</div>
-          <div class="all-card-sub">Avg % per ${granLabel.toLowerCase()} in the high-HR + low-HRV quadrant — the POTS-flare pattern. Rising bars = worse ${granLabel.toLowerCase() === 'session' ? 'sessions' : granLabel.toLowerCase() + 's'}.</div>
-          <div class="all-chart-wrap"><canvas id="all-sympathetic"></canvas></div>
-        </div>
-        <div class="all-card wide">
-          <div class="all-card-title">Autonomic events per ${granLabel.toLowerCase()}</div>
-          <div class="all-card-sub">Stacked count of flushes, chills windows, palpitation clusters, and HR shifts.</div>
-          <div class="all-chart-wrap"><canvas id="all-auto-events"></canvas></div>
-        </div>
+      <div class="all-grid" id="all-grid">${TREND_WIDGETS.map(cardHtml).join('')}
       </div>
     `;
+    applyTrendsLayout(false);
+    wireTrendsWidgets(el);
 
     // Wire granularity buttons
     el.querySelectorAll('.all-granularity button').forEach(btn => {
@@ -5759,16 +5926,16 @@
       },
     });
 
-    // Sympathetic-stress % (avg per bucket of the 'high-low' quadrant)
+    // Time in high HR with low HRV (avg per bucket of the 'high-low' quadrant)
     freshChart(document.getElementById('all-sympathetic'), {
       type: 'bar',
       data: {
         labels: sympAgg.map(p => p.x),
-        datasets: [{ label: 'High-HR × Low-HRV %', data: sympAgg.map(p => p.y), backgroundColor: sympAgg.map(p => p.y > 40 ? '#E24B4A' : p.y > 20 ? '#E89858' : p.y > 10 ? '#F0C75E' : '#5a5a5a'), borderWidth: 0 }],
+        datasets: [{ label: 'High HR with low HRV', data: sympAgg.map(p => p.y), backgroundColor: sympAgg.map(p => p.y > 40 ? '#E24B4A' : p.y > 20 ? '#E89858' : p.y > 10 ? '#F0C75E' : '#5a5a5a'), borderWidth: 0 }],
       },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.raw}% avg in sympathetic stress` } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.raw}% of the time in high HR with low HRV` } } },
         scales: {
           x: { ticks: { color: '#7a7a7a', font: { size: 9 }, maxRotation: 60, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
           y: { ticks: { color: '#9a9a9a', font: { size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true, max: 100 },
