@@ -790,44 +790,6 @@
     margin-top: 2px;
     line-height: 1.4;
   }
-  .toggle-switch {
-    position: relative;
-    display: inline-block;
-    width: 40px;
-    height: 22px;
-    flex-shrink: 0;
-  }
-  .toggle-switch input {
-    opacity: 0;
-    width: 0; height: 0;
-  }
-  .toggle-slider {
-    position: absolute;
-    inset: 0;
-    background: #2a2a2a;
-    border: 1px solid var(--border-control);
-    border-radius: 999px;
-    transition: background 0.15s, border-color 0.15s;
-    cursor: pointer;
-  }
-  .toggle-slider::before {
-    content: '';
-    position: absolute;
-    top: 2px; left: 2px;
-    width: 16px; height: 16px;
-    background: #8a8a8a;
-    border-radius: 50%;
-    transition: transform 0.15s, background 0.15s;
-  }
-  .toggle-switch input:checked + .toggle-slider {
-    background: rgba(93,202,165,0.25);
-    border-color: var(--hrv);
-  }
-  .toggle-switch input:checked + .toggle-slider::before {
-    transform: translateX(18px);
-    background: var(--hrv);
-  }
-  .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
 
   /* .toggle-row sets display: flex, which without this rule silently wins
      against the HTML `hidden` attribute. Without this override, the
@@ -1176,7 +1138,7 @@
   /* Controls: Stop, posture, Log and sharing sit behind one closed header so a pocket tap cannot reach them. */
   .section[data-section="controls"] { margin-top: var(--s3); }
   #sec-controls-body > * + * { margin-top: var(--s4); }
-  #broadcast-toggle-row .toggle-desc, #broadcast-toggle-row .streaming-status { font-size: var(--t12); }
+  #broadcast-toggle-row .streaming-status { font-size: var(--t12); }
   #sec-controls-body .session-ctl { padding: 0; }
   .posture-block { container-type: inline-size; }
   .popout-hint { margin: var(--s2) 0 0; font-size: var(--t12); color: var(--text-dim); text-align: center; }
@@ -1539,16 +1501,12 @@
             <button type="button" class="btn btn-log" id="log-note"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>Note</button>
           </div>
         </div>
-        <div class="toggle-row" id="broadcast-toggle-row">
-          <label class="toggle-switch">
-            <input type="checkbox" id="toggle-broadcast" />
-            <span class="toggle-slider" aria-hidden="true"></span>
-          </label>
-          <div class="toggle-text">
-            <div class="toggle-label">Share live HR</div>
-            <div class="toggle-desc" id="broadcast-toggle-desc">Publish live HR so other monitors and OBS can read it.</div>
-          </div>
-          <span class="streaming-status" id="relay-status">offline</span>
+        <div class="ui toggle-row" id="broadcast-toggle-row">
+          <button type="button" class="toggle" role="switch" id="toggle-broadcast" aria-checked="false">
+            <span class="txt"><span class="t">Share live HR</span><span class="d" id="broadcast-toggle-desc">Publish live HR so other monitors and OBS can read it.</span></span>
+            <span class="streaming-status" id="relay-status">offline</span>
+            <span class="track" aria-hidden="true"></span>
+          </button>
         </div>
       </div>
     </div>
@@ -6692,6 +6650,16 @@
     wirePostureButtons();
     loadSectionStates();
     loadAudioConfig();
+    // A role=switch button standing in for a checkbox: aria-checked holds the state; .checked and 'change' keep the old wiring.
+    function wireSwitch(el) {
+      if (!el || el.__switch) return;
+      el.__switch = true;
+      Object.defineProperty(el, 'checked', { configurable: true,
+        get() { return el.getAttribute('aria-checked') === 'true'; },
+        set(v) { el.setAttribute('aria-checked', v ? 'true' : 'false'); } });
+      el.addEventListener('click', () => { el.checked = !el.checked; el.dispatchEvent(new Event('change')); });
+    }
+    ['toggle-broadcast'].forEach((id) => wireSwitch($(id)));
     loadWidgetStyle();
     loadWidgetPrefs();
     wireAudioControls();

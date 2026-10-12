@@ -117,7 +117,7 @@ const waitStop = (page) => page.waitForFunction(() => document.getElementById('s
 function hits(page) {
   return page.evaluate(() => {
     const T = { stop: '#session-toggle', lying: '.posture-btn[data-posture="lying"]', sitting: '.posture-btn[data-posture="sitting"]', standing: '.posture-btn[data-posture="standing"]',
-      symptom: '#log-symptom', note: '#log-note', share: '#broadcast-toggle-row .toggle-switch' };
+      symptom: '#log-symptom', note: '#log-note', share: '#toggle-broadcast' };
     const out = {};
     for (const [k, sel] of Object.entries(T)) {
       const el = document.querySelector(sel);
@@ -187,11 +187,11 @@ async function runAll(parts) {
     // Header follows posture and sharing.
     await page.click('.posture-btn[data-posture="sitting"]');
     check((await controls(page)).meta === 'Sitting', `${t}: header reads "Sitting" after the tap`, (await controls(page)).meta);
-    await page.click('#broadcast-toggle-row .toggle-switch');
+    await page.click('#toggle-broadcast');
     await page.waitForTimeout(300);
     const on = await page.evaluate(() => document.getElementById('toggle-broadcast').checked);
     check(on && (await controls(page)).meta === 'Sitting · Live', `${t}: header reads "Sitting · Live" while sharing`, (await controls(page)).meta);
-    await page.click('#broadcast-toggle-row .toggle-switch');
+    await page.click('#toggle-broadcast');
     await page.waitForTimeout(300);
     check((await controls(page)).meta === 'Sitting', `${t}: "Live" leaves the header when sharing stops`, (await controls(page)).meta);
     // Stop still confirms (the session is 72 min old).
