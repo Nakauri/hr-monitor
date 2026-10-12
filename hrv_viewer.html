@@ -8599,8 +8599,8 @@
       type: 'line',
       data: {
         datasets: [
-          { label: 'HR', data: hr, hidden: activeFilters.hr === false, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
-          { label: 'RMSSD', data: rmssd, hidden: activeFilters.rmssd === false, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
+          { label: 'HR', data: hr, hidden: activeFilters.hr === false, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
+          { label: 'RMSSD', data: rmssd, hidden: activeFilters.rmssd === false, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
           { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: palpDots.map(p => Math.min(3 + p._count, 10)), pointHoverRadius: 12, pointStyle: 'circle' },
           // Highlight overlay datasets for marker-list hover (populated on demand)
           { label: '_HL_LINE', data: [], borderColor: '#ffffff', backgroundColor: 'transparent', yAxisID: 'y', showLine: true, pointRadius: 0, borderWidth: 2, fill: false, order: -1 },
