@@ -15,7 +15,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
 <script src="./marks-store.js"></script>
@@ -7425,6 +7424,7 @@
   function cancelEase() {
     if (_easeRaf) cancelAnimationFrame(_easeRaf);
     _easeRaf = 0;
+    if (_drawOwed && currentChart) { _drawOwed = false; requestChartDraw(currentChart); }
   }
   function easeBrushTo(lo, hi, done) {
     cancelEase();
@@ -7679,14 +7679,22 @@
     currentChart.$hlT = null;
     requestChartDraw(currentChart);
   }
-  // A redraw without an update: the highlight and the scales are already laid out.
-  let _chartDrawRaf = 0;
+  // A redraw without an update: the highlight and the scales are already laid out. An ease step or range
+  // update queued for the same frame draws the highlight itself.
+  let _chartDrawRaf = 0, _drawOwed = false;
   function requestChartDraw(chart) {
     if (_chartDrawRaf) return;
     _chartDrawRaf = requestAnimationFrame(() => {
       _chartDrawRaf = 0;
-      if (chart === currentChart) chart.draw();
+      if (chart !== currentChart) return;
+      if (_easeRaf || _chartRangeRaf) { _drawOwed = true; return; }
+      chart.draw();
     });
+  }
+  function payDrawOwed(updated) {
+    if (!_drawOwed) return;
+    _drawOwed = false;
+    if (!updated && currentChart) currentChart.draw();
   }
   // Places Reset zoom at the plot area's top right after each layout; writes only on a change.
   const RESET_POS_PLUGIN = {
@@ -8326,8 +8334,10 @@
   // Each overlay: { xMin, xMax, fill, border, borderWidth, borderDash, t, html }.
   const HR_OVERLAY_PLUGIN = {
     id: 'hrOverlays',
-    afterUpdate(chart, args, opts) {
-      const overlays = (opts && opts.overlays) || [];
+    afterUpdate(chart) {
+      // The raw config: the resolved plugin options wrap every overlay in an option proxy.
+      const raw = chart.config.options.plugins.hrOverlays;
+      const overlays = (raw && raw.overlays) || [];
       if (!overlays.length) {
         chart._hrOvCache = null;
         chart._hrOvCacheKey = null;
@@ -8446,22 +8456,129 @@
       return rows;
     };
   }
-  // Mark label rows and diamond heights as plain option values, set after layout and before the annotation
-  // plugin resolves them, so an update resolves no per-label functions.
-  function markLayoutPlugin(rowsOf, labels, handles) {
-    return {
-      id: 'markLayout',
-      afterLayout(chart) {
-        const rows = rowsOf(chart);
-        for (let i = 0; i < labels.length; i++) {
-          const r = rows[i];
-          labels[i].display = r < 3;
-          labels[i].yAdjust = 18 + 20 * r;
+  // Mark lines, labels and diamonds, drawn as chartjs-plugin-annotation drew them (same order, geometry and
+  // canvas calls) from positions cached per x range and chart area; an update resolves nothing per mark.
+  // marks: { ev_N: line, mk_N: diamond } in draw order; rowsOf: markLabelRows(...). Hover: the nearest mark whose
+  // line or label covers the pointer x.
+  function marksPlugin(marks, rowsOf) {
+    let list = null;
+    const plugin = {
+    id: 'hrMarks',
+    beforeInit(chart) { chart.$marks = marks; },
+    _layout(chart) {
+      const xs = chart.scales.x, ys = chart.scales.y, a = chart.chartArea;
+      const key = xs.min + '_' + xs.max + '_' + a.left + '_' + a.right + '_' + a.top + '_' + a.bottom;
+      if (chart._hrMkKey === key && chart._hrMk) return chart._hrMk;
+      chart._hrMkKey = key;
+      const H = Chart.helpers, ctx = chart.ctx;
+      if (!list) list = Object.values(marks);
+      const rows = rowsOf(chart);
+      const topPx = ys ? ys.getPixelForValue(ys.max) : a.top;
+      const out = [];
+      let li = 0;
+      for (const m of list) {
+        if (m.type === 'point') {
+          const px = xs.getPixelForValue(m.xValue);
+          if (px >= a.left - 8 && px <= a.right + 8) out.push({ m, kind: 'dia', px, py: topPx + m.yAdjust });
+          continue;
         }
-        const top = chart.scales.y ? chart.scales.y.max : 0;
-        for (const h of handles) h.yValue = top;
-      },
+        const r = rows[li++] || 0;
+        m.label.display = r < 3;
+        m.label.yAdjust = 18 + 20 * r;
+        const px = xs.getPixelForValue(m.xMin);
+        if (!(px >= a.left && px <= a.right)) continue;
+        const it = { m, kind: 'line', px, lab: null };
+        if (m.label.display) {
+          if (!m._font) {
+            m._font = H.toFont(m.label.font);
+            ctx.save(); ctx.font = m._font.string; m._tw = ctx.measureText(m.label.content).width; ctx.restore();
+          }
+          const pad = m.label.padding, w = m._tw + 2 * pad, h = m._font.lineHeight + 2 * pad;
+          let cx = px;
+          if (w > a.right - a.left) cx = (a.right + a.left) / 2;
+          else {
+            if (a.left >= cx - pad - w / 2) cx = a.left + pad + w / 2;
+            if (a.right <= cx + pad + w / 2) cx = a.right - pad - w / 2;
+          }
+          const cy = a.top + pad + h / 2 + m.label.yAdjust;
+          it.lab = { x: cx - w / 2, y: cy - h / 2, w, h, cx };
+        }
+        out.push(it);
+      }
+      chart._hrMk = out;
+      return out;
+    },
+    _draw(chart) {
+      const items = this._layout(chart);
+      if (!items.length) return;
+      const H = Chart.helpers, ctx = chart.ctx, a = chart.chartArea;
+      // One save for the pass; each item sets every state it draws with.
+      H.clipArea(ctx, a);
+      ctx.lineDashOffset = 0;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      let dash = null;
+      for (const it of items) {
+        const m = it.m;
+        if (it.kind === 'dia') {
+          const r = m.radius, x = it.px, y = it.py;
+          if (dash !== '') { ctx.setLineDash([]); dash = ''; }
+          ctx.fillStyle = m.backgroundColor;
+          ctx.lineWidth = m.borderWidth;
+          ctx.strokeStyle = m.borderColor;
+          ctx.beginPath();
+          ctx.moveTo(x - r, y);
+          ctx.lineTo(x, y - r);
+          ctx.lineTo(x + r, y);
+          ctx.lineTo(x, y + r);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          continue;
+        }
+        const d = m.borderDash ? m.borderDash.join(',') : '';
+        if (d !== dash) { ctx.setLineDash(m.borderDash || []); dash = d; }
+        ctx.lineWidth = m.borderWidth;
+        ctx.strokeStyle = m.borderColor;
+        ctx.beginPath();
+        ctx.moveTo(it.px, a.bottom);
+        ctx.lineTo(it.px, a.top);
+        ctx.stroke();
+        const L = it.lab;
+        if (!L) continue;
+        const lo = m.label, pad = lo.padding;
+        ctx.fillStyle = lo.backgroundColor;
+        ctx.beginPath();
+        const rad = Math.min(6, Math.min(L.w, L.h) / 2);
+        H.addRoundedRectPath(ctx, { x: L.x, y: L.y, w: L.w, h: L.h, radius: { topLeft: rad, topRight: rad, bottomLeft: rad, bottomRight: rad } });
+        ctx.closePath();
+        ctx.fill();
+        ctx.font = m._font.string;
+        ctx.fillStyle = lo.color;
+        ctx.fillText(lo.content, L.x + pad + (L.w - 2 * pad) / 2, L.y + pad + m._font.lineHeight / 2);
+      }
+      H.unclipArea(ctx);
+    },
+    beforeEvent(chart, args) {
+      const e = args.event;
+      if (!e || (e.type !== 'mousemove' && e.type !== 'mouseout')) return;
+      let hit = null;
+      if (e.type === 'mousemove' && chart._hrMk) {
+        let best = Infinity;
+        for (const it of chart._hrMk) {
+          if (it.kind !== 'line') continue;
+          const L = it.lab, d = Math.abs(e.x - it.px);
+          const covers = d <= it.m.borderWidth / 2 || (L && e.x >= L.x - 0.001 && e.x <= L.x + L.w + 0.001);
+          if (covers && d <= best) { best = d; hit = it.m; }
+        }
+      }
+      if (hit === (chart._hrMkHover || null)) return;
+      if (chart._hrMkHover) annoLeave();
+      chart._hrMkHover = hit;
+      if (hit) annoEnter(hit.t, hit.html, e);
+    },
     };
+    return Object.assign(plugin, lastDatasetLayer('hrMarks', (chart) => plugin._draw(chart)));
   }
 
   const _gapBroken = new WeakMap();
@@ -8508,12 +8625,11 @@
       return { x: midT, y: near.y, _count: c.count, _start: c.start, _end: c.end };
     }) : [];
 
-    // Box overlays go through the custom batching plugin (HR_OVERLAY_PLUGIN);
-    // chartjs-plugin-annotation handles only events (lines) + max/min markers.
+    // Box overlays: HR_OVERLAY_PLUGIN; marks: marksPlugin; max and min: maxMinPlugin.
     const hrOverlays = [];
-    const annotations = {};
+    const marks = {};
     let idCounter = 0;
-    let markLayout = null;
+    let markLayer = null;
 
     if (currentQuadRanges) {
       const QUAD_LABELS = {
@@ -8586,8 +8702,7 @@
       const markColour = rootStyle.getPropertyValue('--text').trim() || 'white';
       const bgColour = rootStyle.getPropertyValue('--bg').trim() || 'black';
       const labelRows = markLabelRows(viewMarks(s).events.map((e) => ({ t: e.t, text: parseMark(e.label).label })));
-      const markLabels = [], markHandles = [];
-      markLayout = markLayoutPlugin(labelRows, markLabels, markHandles);
+      markLayer = marksPlugin(marks, labelRows);
       viewMarks(s).events.forEach((e) => {
         const mark = parseMark(e.label);
         const eLabel = mark.label;
@@ -8596,27 +8711,22 @@
         const label = tick
           ? { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: tickColour, font: { size: 12, weight: '500' }, padding: 4 }
           : { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: markColour, font: { size: 12, weight: '600' }, padding: 4 };
-        markLabels.push(label);
-        annotations['ev_' + idCounter++] = {
+        marks['ev_' + idCounter++] = {
           type: 'line',
-          xScaleID: 'x',
           xMin: e.t, xMax: e.t,
           markKind: mark.kind,
           borderColor: tick ? tickColour : markColour,
           borderWidth: tick ? 1 : 1.25,
           borderDash: tick ? [4, 4] : undefined,
           label,
-          enter: (ctx, evt) => annoEnter(e.t, `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`, evt),
-          leave: annoLeave,
+          t: e.t,
+          html: `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`,
         };
         // Diamond handle at the top of a user mark; the top follows the y axis, so it never widens it.
         if (!tick) {
           const handle = {
             type: 'point',
-            xScaleID: 'x', yScaleID: 'y',
             xValue: e.t,
-            yValue: 0,
-            adjustScaleRange: false,
             yAdjust: 7,
             pointStyle: 'rectRot',
             radius: 6,
@@ -8624,8 +8734,7 @@
             borderColor: bgColour,
             borderWidth: 1.5,
           };
-          markHandles.push(handle);
-          annotations['mk_' + idCounter++] = handle;
+          marks['mk_' + idCounter++] = handle;
         }
       });
     }
@@ -8697,44 +8806,12 @@
         });
       }
     }
-    if (activeFilters.maxmin !== false) {
-    annotations['maxHR'] = {
-      type: 'point',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMax.t, yValue: s.hrMax.v,
-      backgroundColor: STAGE_COLORS[getHRStage(s.hrMax.v)],
-      radius: 5, borderWidth: 2, borderColor: '#000',
-    };
-    annotations['maxHR_label'] = {
-      type: 'label',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMax.t, yValue: s.hrMax.v,
-      content: [`Max ${s.hrMax.v}`],
-      color: STAGE_COLORS[getHRStage(s.hrMax.v)],
-      font: { size: 12, weight: 'bold' },
-      ...labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false),
-      backgroundColor: 'rgba(10,10,10,0.8)',
-      padding: 3,
-    };
-    annotations['minHR'] = {
-      type: 'point',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMin.t, yValue: s.hrMin.v,
-      backgroundColor: STAGE_COLORS[getHRStage(s.hrMin.v)],
-      radius: 5, borderWidth: 2, borderColor: '#000',
-    };
-    annotations['minHR_label'] = {
-      type: 'label',
-      xScaleID: 'x', yScaleID: 'y',
-      xValue: s.hrMin.t, yValue: s.hrMin.v,
-      content: [`Min ${s.hrMin.v}`],
-      color: STAGE_COLORS[getHRStage(s.hrMin.v)],
-      font: { size: 12, weight: 'bold' },
-      ...labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true),
-      backgroundColor: 'rgba(10,10,10,0.8)',
-      padding: 3,
-    };
-    }
+    const maxMin = activeFilters.maxmin === false ? null : maxMinPlugin([
+      { t: s.hrMax.t, v: s.hrMax.v, text: `Max ${s.hrMax.v}`, colour: STAGE_COLORS[getHRStage(s.hrMax.v)],
+        place: labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false) },
+      { t: s.hrMin.t, v: s.hrMin.v, text: `Min ${s.hrMin.v}`, colour: STAGE_COLORS[getHRStage(s.hrMin.v)],
+        place: labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true) },
+    ]);
 
     // Kill stale tooltip when pointer leaves the canvas entirely. Also clears
     // the marker-list / highlight-line state so nothing lingers on the chart
@@ -8765,7 +8842,7 @@
         // palp cluster or event nearby — instead of separate popups per line.
         interaction: { mode: 'index', intersect: false, axis: 'x' },
         plugins: {
-          legend: { display: false },
+          legend: false,
           tooltip: {
             mode: 'index',
             intersect: false,
@@ -8811,12 +8888,10 @@
             padding: 10,
             boxPadding: 4,
           },
-          annotation: { annotations: nearMarks(annotations, brushMin !== null ? brushMin : 0, brushMax !== null ? brushMax : s.duration, canvasEl.clientWidth) },
           hrOverlays: { overlays: hrOverlays },
-          // min-max keeps every point when a pixel column holds one, and the envelope when it holds more.
-          // Threshold 1 keeps it on at every zoom: the decimated set covers only the visible range, and a
-          // range change otherwise re-lays all of a day's points (Chart.js updates every element then).
-          decimation: { enabled: true, algorithm: 'min-max', threshold: 1 },
+          // DECIMATION_PLUGIN: min-max at every zoom over the visible range only (Chart.js otherwise updates every
+          // element of the day on a range change).
+          decimation: false,
         },
         scales: {
           x: {
@@ -8850,16 +8925,14 @@
           }
         },
       },
-      plugins: markLayout ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN],
+      plugins: [DECIMATION_PLUGIN, TICK_FONT_PLUGIN, HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer, maxMin].filter(Boolean),
     });
-    currentChart.$marks = annotations;
   }
 
   // A point label kept inside the plot: clamped sideways, flipped to the other side of its point at the top or bottom.
-  // Hidden while its point is outside the shown range.
   function labelInPlot(xv, yv, text, below) {
     let wCache = 0;
-    const place = (chart) => {
+    return (chart) => {
       const a = chart.chartArea, px = chart.scales.x.getPixelForValue(xv), py = chart.scales.y.getPixelForValue(yv);
       if (!wCache) {
         const c = chart.ctx;
@@ -8872,34 +8945,231 @@
       if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;
       return { dx: cx - px, dy: cy - py };
     };
-    return {
-      position: 'center',
-      display: (ctx) => { const x = ctx.chart.scales.x; return xv >= x.min && xv <= x.max; },
-      xAdjust: (ctx) => place(ctx.chart).dx,
-      yAdjust: (ctx) => place(ctx.chart).dy,
-    };
   }
 
-  // The annotation plugin re-resolves every entry on each update, so it gets only the marks within 200 px of the
-  // visible range (wider than any label); entries keep their order, which is the draw order.
-  function nearMarks(all, lo, hi, width) {
-    const pad = (hi - lo) * 200 / Math.max(1, width);
-    const out = {};
-    for (const k of Object.keys(all)) {
-      const a = all[k];
-      const x = k.startsWith('ev_') ? a.xMin : k.startsWith('mk_') ? a.xValue : null;
-      if (x == null || (x >= lo - pad && x <= hi + pad)) out[k] = a;
+  // Chart.js 4.4.0 min-max decimation (plugins.decimation, threshold 1) with the same output, except each
+  // column's mean x comes from prefix sums: per column it finds the edges by binary search and the min and max
+  // by a block index built once per data array, instead of walking every visible point on each update.
+  const _decIndex = new WeakMap();
+  const DEC_B = 16;
+  function decIndex(data) {
+    if (_decIndex.has(data)) return _decIndex.get(data);
+    const n = data.length;
+    const X = new Float64Array(n), Y = new Float64Array(n), P = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) {
+      const p = data[i], y = p.y;
+      // null compares as 0 in the original; anything else non-numeric keeps the original's walk.
+      if (y !== null && (typeof y !== 'number' || y !== y)) { _decIndex.set(data, null); return null; }
+      X[i] = p.x; Y[i] = y === null ? 0 : y; P[i + 1] = P[i] + p.x;
+    }
+    const nb = Math.ceil(n / DEC_B), lv = [];
+    const lo = (a, b) => (Y[b] < Y[a] || (Y[b] === Y[a] && b < a)) ? b : a;
+    const hi = (a, b) => (Y[b] > Y[a] || (Y[b] === Y[a] && b < a)) ? b : a;
+    const mn0 = new Int32Array(nb), mx0 = new Int32Array(nb);
+    for (let b = 0; b < nb; b++) {
+      let m = b * DEC_B, M = m;
+      for (let i = m + 1, e = Math.min(n, m + DEC_B); i < e; i++) { if (Y[i] < Y[m]) m = i; if (Y[i] > Y[M]) M = i; }
+      mn0[b] = m; mx0[b] = M;
+    }
+    lv.push([mn0, mx0]);
+    for (let k = 1; (1 << k) <= nb; k++) {
+      const [pm, pM] = lv[k - 1], h = 1 << (k - 1), len = nb - (1 << k) + 1;
+      const mn = new Int32Array(len), mx = new Int32Array(len);
+      for (let b = 0; b < len; b++) { mn[b] = lo(pm[b], pm[b + h]); mx[b] = hi(pM[b], pM[b + h]); }
+      lv.push([mn, mx]);
+    }
+    // Earliest indexes of the min and the max in [l, r], into res[0] and res[1].
+    const res = [0, 0];
+    const range = (l, r) => {
+      let m = l, M = l;
+      const bl = Math.floor(l / DEC_B) + 1, br = Math.floor(r / DEC_B) - 1;
+      if (bl > br) {
+        for (let i = l + 1; i <= r; i++) { const y = Y[i]; if (y < Y[m]) m = i; else if (y > Y[M]) M = i; }
+        res[0] = m; res[1] = M; return res;
+      }
+      for (let i = l + 1, e = bl * DEC_B; i < e; i++) { const y = Y[i]; if (y < Y[m]) m = i; else if (y > Y[M]) M = i; }
+      const k = 31 - Math.clz32(br - bl + 1), t = lv[k], j = br - (1 << k) + 1;
+      m = lo(lo(m, t[0][bl]), t[0][j]); M = hi(hi(M, t[1][bl]), t[1][j]);
+      for (let i = (br + 1) * DEC_B; i <= r; i++) { const y = Y[i]; if (y < Y[m]) m = i; else if (y > Y[M]) M = i; }
+      res[0] = m; res[1] = M; return res;
+    };
+    const ix = { X, P, range };
+    _decIndex.set(data, ix);
+    return ix;
+  }
+  function decimateMinMax(data, ix, start, count, W) {
+    const out = [], end = start + count - 1, X = ix.X, P = ix.P, xMin = X[start], dx = X[end] - xMin;
+    let avgX = 0, minIndex, maxIndex, startIndex, step = Math.max(1, Math.floor(count / Math.max(1, W)));
+    for (let gs = start; gs <= end;) {
+      const g = ((X[gs] - xMin) / dx * W) | 0;
+      // Last index still in column g: gallop from the mean column size, then bisect.
+      let a = gs, b = gs + step;
+      while (b <= end && (((X[b] - xMin) / dx * W) | 0) === g) { a = b; b = a + step * 2; }
+      if (b > end) b = end;
+      while (a < b) { const m = (a + b + 1) >> 1; if ((((X[m] - xMin) / dx * W) | 0) === g) a = m; else b = m - 1; }
+      const ge = a, lastIndex = gs - 1;
+      if (minIndex != null && maxIndex != null) {
+        const i1 = Math.min(minIndex, maxIndex), i2 = Math.max(minIndex, maxIndex);
+        if (i1 !== startIndex && i1 !== lastIndex) out.push({ ...data[i1], x: avgX });
+        if (i2 !== startIndex && i2 !== lastIndex) out.push({ ...data[i2], x: avgX });
+      }
+      if (gs > 0 && lastIndex !== startIndex) out.push(data[lastIndex]);
+      out.push(data[gs]);
+      startIndex = gs;
+      if (ge > gs) { const r = ix.range(gs, ge); minIndex = r[0]; maxIndex = r[1]; avgX = (P[ge + 1] - P[gs + 1]) / (ge - gs); }
+      else minIndex = maxIndex = gs;
+      gs = ge + 1;
     }
     return out;
   }
-  function syncNearMarks(chart, lo, hi) {
-    if (!chart.$marks) return;
-    const plug = chart.config.options.plugins.annotation;
-    const next = nearMarks(chart.$marks, lo, hi, chart.width);
-    const a = Object.keys(next), b = Object.keys(plug.annotations);
-    if (a.length === b.length && a.every((k, i) => k === b[i])) return;
-    plug.annotations = next;
+  const DECIMATION_PLUGIN = {
+    id: 'hrDecimation',
+    // For the parity check in scripts/viewer-perf.mjs.
+    _parity: { fast: (data, start, count, W) => decIndex(data) ? decimateMinMax(data, decIndex(data), start, count, W) : null, walk: minMaxWalk },
+    beforeElementsUpdate(chart) {
+      const H = Chart.helpers, W = chart.width;
+      chart.data.datasets.forEach((dataset, di) => {
+        const meta = chart.getDatasetMeta(di), data = dataset._data || dataset.data;
+        if (!meta.controller.supportsDecimation || chart.options.parsing) return;
+        const xs = chart.scales[meta.xAxisID];
+        if (!xs || xs.type !== 'linear' || data.length < 2) return;
+        const { min, max, minDefined, maxDefined } = xs.getUserBounds();
+        const n = data.length;
+        const start = minDefined ? H._limitValue(H._lookupByKey(data, 'x', min).lo, 0, n - 1) : 0;
+        const count = maxDefined ? H._limitValue(H._lookupByKey(data, 'x', max).hi + 1, start, n) - start : n - start;
+        if (count <= 1) {
+          if (dataset._decimated) { delete dataset._decimated; delete dataset._data; Object.defineProperty(dataset, 'data', { configurable: true, enumerable: true, writable: true, value: data }); }
+          return;
+        }
+        const ix = count > 32 * W ? decIndex(data) : null;
+        if (dataset._data == null) {
+          dataset._data = data;
+          delete dataset.data;
+          Object.defineProperty(dataset, 'data', { configurable: true, enumerable: true, get() { return this._decimated; }, set(d) { this._data = d; } });
+        }
+        // The walk is cheaper below about 32 points per column.
+        dataset._decimated = ix && count > 32 * W ? decimateMinMax(data, ix, start, count, W) : minMaxWalk(data, start, count, W);
+      });
+    },
+  };
+  // Tick fonts here are plain options, the same for every tick: Chart.js 4.4.0 resolves them once per tick
+  // (Scale._resolveTickFontOptions); this resolves them once per scale per update.
+  const TICK_FONT_PLUGIN = {
+    id: 'hrTickFont',
+    beforeLayout(chart) {
+      for (const sc of Object.values(chart.scales)) {
+        if (sc.$tickFont) continue;
+        const orig = sc._resolveTickFontOptions;
+        if (typeof orig !== 'function') continue;
+        sc.$tickFont = true;
+        sc._resolveTickFontOptions = function (i) {
+          if (this.$tfFor !== this.options) { this.$tfFor = this.options; this.$tf = orig.call(this, i); }
+          return this.$tf;
+        };
+      }
+    },
+  };
+  // The original walk, for data the block index does not cover.
+  function minMaxWalk(data, start, count, W) {
+    let avgX = 0, countX = 0, prevX, minIndex, maxIndex, startIndex, minY, maxY;
+    const out = [], xMin = data[start].x, dx = data[start + count - 1].x - xMin;
+    for (let i = start; i < start + count; ++i) {
+      const point = data[i], y = point.y, truncX = ((point.x - xMin) / dx * W) | 0;
+      if (truncX === prevX) {
+        if (y < minY) { minY = y; minIndex = i; } else if (y > maxY) { maxY = y; maxIndex = i; }
+        avgX = (countX * avgX + point.x) / ++countX;
+      } else {
+        const lastIndex = i - 1;
+        if (minIndex != null && maxIndex != null) {
+          const i1 = Math.min(minIndex, maxIndex), i2 = Math.max(minIndex, maxIndex);
+          if (i1 !== startIndex && i1 !== lastIndex) out.push({ ...data[i1], x: avgX });
+          if (i2 !== startIndex && i2 !== lastIndex) out.push({ ...data[i2], x: avgX });
+        }
+        if (i > 0 && lastIndex !== startIndex) out.push(data[lastIndex]);
+        out.push(point);
+        prevX = truncX; countX = 0; minY = maxY = y; minIndex = maxIndex = startIndex = i;
+      }
+    }
+    return out;
   }
+
+  // Draws its own layer once per frame: after the last dataset (and the highlight), or after all datasets
+  // when none is visible. Plugins using it draw in their order in the chart's plugins list.
+  function lastDatasetLayer(id, draw) {
+    const flag = '_' + id + 'Drawn';
+    const run = (chart) => { if (chart[flag]) return; chart[flag] = true; draw(chart); };
+    return {
+      beforeDraw(chart) { chart[flag] = false; },
+      afterDatasetDraw(chart, args) {
+        const metas = chart.getSortedVisibleDatasetMetas();
+        if (metas.length && args.meta === metas[0]) run(chart);
+      },
+      afterDatasetsDraw: run,
+    };
+  }
+
+  // Max and Min: a ringed point and a label placed by labelInPlot, hidden while the point is outside the shown
+  // range; drawn as chartjs-plugin-annotation drew them. The HR axis always spans both, at every zoom.
+  // Label boxes land on chart.$maxMin for checks.
+  function maxMinPlugin(items) {
+    const limits = (sc) => {
+      const o = sc.options;
+      let changed = false;
+      if (o.min == null && o.suggestedMin == null) {
+        const v = Math.min(sc.min == null ? -Infinity : sc.min, ...items.map((m) => m.v));
+        if (isFinite(v)) { changed = sc.min !== v; sc.min = v; }
+      }
+      if (o.max == null && o.suggestedMax == null) {
+        const v = Math.max(sc.max == null ? Infinity : sc.max, ...items.map((m) => m.v));
+        if (isFinite(v)) { changed = sc.max !== v || changed; sc.max = v; }
+      }
+      if (changed && typeof sc.handleTickRangeOptions === 'function') sc.handleTickRangeOptions();
+    };
+    const draw = (chart) => {
+      const H = Chart.helpers, ctx = chart.ctx, a = chart.chartArea, xs = chart.scales.x, ys = chart.scales.y;
+      const boxes = [];
+      H.clipArea(ctx, a);
+      for (const m of items) {
+        const px = xs.getPixelForValue(m.t), py = ys.getPixelForValue(m.v);
+        ctx.save();
+        ctx.fillStyle = m.colour;
+        ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        if (!(m.t >= xs.min && m.t <= xs.max)) continue;
+        if (!m.font) {
+          m.font = H.toFont({ size: 12, weight: 'bold' });
+          ctx.save(); ctx.font = m.font.string; m.tw = ctx.measureText(m.text).width; ctx.restore();
+        }
+        const d = m.place(chart), w = m.tw + 6, h = m.font.lineHeight + 6;
+        const x = px - w / 2 + d.dx, y = py - h / 2 + d.dy;
+        boxes.push({ name: m.text, x, y, x2: x + w, y2: y + h });
+        ctx.save();
+        ctx.fillStyle = 'rgba(10,10,10,0.8)';
+        ctx.beginPath();
+        H.addRoundedRectPath(ctx, { x, y, w, h, radius: { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 } });
+        ctx.closePath();
+        ctx.fill();
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.font = m.font.string;
+        ctx.fillStyle = m.colour;
+        ctx.fillText(m.text, x + 3 + (w - 6) / 2, y + 3 + m.font.lineHeight / 2);
+        ctx.restore();
+      }
+      H.unclipArea(ctx);
+      chart.$maxMin = boxes;
+    };
+    return Object.assign({ id: 'hrMaxMin', afterDataLimits(chart, args) { if (args.scale.id === 'y') limits(args.scale); } }, lastDatasetLayer('hrMaxMin', draw));
+  }
+
 
   // Zone strip under the chart: HR coloured by zone per pixel column, recording gaps hatched.
   let _stripResizeObserver = null;
@@ -9115,12 +9385,12 @@
     if (!currentChart) return;
     const xo = currentChart.options.scales.x;
     const so = currentChart.scales && currentChart.scales.x ? currentChart.scales.x.options : null;
-    if (xo.min === brushMin && xo.max === brushMax && (!so || (so.min === brushMin && so.max === brushMax))) return;
+    if (xo.min === brushMin && xo.max === brushMax && (!so || (so.min === brushMin && so.max === brushMax))) { payDrawOwed(false); return; }
     xo.min = brushMin;
     xo.max = brushMax;
     if (so) { so.min = brushMin; so.max = brushMax; }
-    syncNearMarks(currentChart, brushMin, brushMax);
     currentChart.update('none');
+    payDrawOwed(true);
   }
 
   let _paintBrushRafId = 0;

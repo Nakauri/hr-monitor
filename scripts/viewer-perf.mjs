@@ -3,10 +3,10 @@
 // into the viewer's Drive cache, opens the Day view headless, runs the REPORT actions with long-task,
 // frame and Chart.update counters, then checks the REPORT budgets as PASS/FAIL rows.
 // --config desk (1440 at 4x CPU) | phone (360 at 6x) | all (both, about 140 s). --w/--cpu measure any other
-// cell without budgets. --mutants drag|hover serves a broken viewer whose budget rows must FAIL.
+// cell without budgets. --mutants drag|hover|marks serves a broken viewer whose budget rows must FAIL (marks runs the phone drags).
 // --shots <dir> --tag <name> shoots the chart at 1440: full day, a 10 min window, a marker clicked. --ref <commit>
 // serves that commit's viewer instead of the working file (before and after pairs). --counts adds V8 call counts.
-// Usage: node scripts/viewer-perf.mjs [--config desk|phone|all] [--mutants drag|hover] [--only a,b] [--ux <dir>]
+// Usage: node scripts/viewer-perf.mjs [--config desk|phone|all] [--mutants drag|hover|marks] [--only a,b] [--ux <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,15 +24,15 @@ const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'ven
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const OUTDIR = argVal('--out', path.join(UX, 'redesign', 'perf-2026-10-12', 's26'));
 const COUNTS = args.includes('--counts');
-const ONLY = argVal('--only', null);
-const SHOTS = argVal('--shots', null), SHOT_TAG = argVal('--tag', 'shot');
+let ONLY = argVal('--only', null);
+const SHOTS = argVal('--shots', null), SHOT_TAG = argVal('--tag', 'shot'), SHOT_PREFIX = argVal('--prefix', 's26');
 const MUTANT = argVal('--mutants', null);
 const want = (a) => !ONLY || ONLY.split(',').includes(a);
 const CONFIGS = { desk: [1440, 4], phone: [360, 6] };
 let runs;
-if (SHOTS) runs = [['shots', 1440, 1]];
+if (SHOTS) runs = [['shots', +argVal('--w', 1440), 1]];
 else if (args.includes('--w') || args.includes('--cpu')) runs = [['adhoc', +argVal('--w', 1440), +argVal('--cpu', 1)]];
-else if (MUTANT) runs = [['desk', ...CONFIGS.desk]];
+else if (MUTANT) runs = null;
 else { const c = argVal('--config', 'all'); runs = (c === 'all' ? ['desk', 'phone'] : [c]).map((k) => [k, ...CONFIGS[k]]); }
 
 const REF = argVal('--ref', null);
@@ -41,13 +41,25 @@ const REAL = (REF ? execFileSync('git', ['-C', ROOT, 'show', REF + ':hrv_viewer.
 const MUTANTS = {
   drag: { rows: ['brush'], a: '      scheduleChartRange();\n', b: '      applyChartRange();\n', why: 'brush drag calls the chart update from pointermove' },
   hover: { rows: ['hover'], a: '    chart.$hlT = t;\n', b: '    chart.$hlT = t;\n    chart.update(\'none\');\n', why: 'hover highlight runs a chart update' },
+  // S28 negative control: chartjs-plugin-annotation re-resolves every mark on each update (BUILD-PLAN S28).
+  marks: { rows: ['update'], config: 'phone', only: 'brush', why: 'marks drawn by chartjs-plugin-annotation', pairs: [
+    ['<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>\n',
+      '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>\n'],
+    ['          hrOverlays: { overlays: hrOverlays },\n', '          annotation: { annotations: marks },\n          hrOverlays: { overlays: hrOverlays },\n'],
+    ['RESET_POS_PLUGIN, markLayer, maxMin]', 'RESET_POS_PLUGIN, maxMin]'],
+  ] },
 };
 let SERVED = REAL;
 if (MUTANT) {
   const m = MUTANTS[MUTANT];
   if (!m) { console.log('FAIL unknown mutant ' + MUTANT); process.exit(2); }
-  if (!REAL.includes(m.a)) { console.log('FAIL mutant ' + MUTANT + ': anchor missing'); process.exit(1); }
-  SERVED = REAL.replace(m.a, m.b);
+  for (const [a, b] of m.pairs || [[m.a, m.b]]) {
+    if (!SERVED.includes(a)) { console.log('FAIL mutant ' + MUTANT + ': anchor missing'); process.exit(1); }
+    SERVED = SERVED.replace(a, b);
+  }
+  const c = m.config || 'desk';
+  runs = [[c, ...CONFIGS[c]]];
+  if (m.only && !ONLY) ONLY = m.only;
 }
 
 // ---- Fixture: 2026-09-15 in America/Edmonton (UTC-6). 06:30-12:00, 12:15-18:15, 18:40-23:40 local. ----
@@ -226,6 +238,31 @@ async function runConfig(name, W, CPU) {
     return r;
   }
   const settle = (ms) => page.waitForTimeout(ms * Math.max(1, CPU / 2));
+  // S28: the block-index decimation returns Chart.js 4.4.0 min-max output (mean x to 1e-6 min) on random ranges.
+  async function decimationParity() {
+    return page.evaluate(() => {
+      const c = window.Chart.getChart(document.getElementById('session-chart'));
+      const pl = c && c.config.plugins.find((p) => p.id === 'hrDecimation');
+      if (!pl) return { ok: false, why: 'no hrDecimation plugin' };
+      let rng = 7; const rnd = () => ((rng = (rng * 1103515245 + 12345) % 2147483648) / 2147483648);
+      let cases = 0, bad = 0, why = '';
+      for (const ds of c.data.datasets.slice(0, 2)) {
+        const data = ds._data || ds.data, orig = new Set(data);
+        for (let k = 0; k < 150; k++) {
+          const a = Math.floor(rnd() * (data.length - 2)), n = 2 + Math.floor(rnd() * (k % 3 ? 2000 : data.length - a - 2));
+          const count = Math.min(n, data.length - a), W = [976, 300, 1200][k % 3];
+          const fast = pl._parity.fast(data, a, count, W), walk = pl._parity.walk(data, a, count, W); cases++;
+          const same = fast && fast.length === walk.length && fast.every((p, i) => orig.has(walk[i]) ? p === walk[i] : !orig.has(p) && p.y === walk[i].y && Math.abs(p.x - walk[i].x) < 1e-6);
+          if (!same) {
+            bad++;
+            const i = fast ? fast.findIndex((p, i) => !(orig.has(walk[i]) ? p === walk[i] : !orig.has(p) && p.y === walk[i].y && Math.abs(p.x - walk[i].x) < 1e-6)) : -1;
+            if (!why) why = `${ds.label} start ${a} count ${count} W ${W}: ${fast ? fast.length : 'null'} vs ${walk.length}` + (i >= 0 ? ` at ${i}: ${JSON.stringify(fast[i])} vs ${JSON.stringify(walk[i])} orig ${orig.has(fast[i])}/${orig.has(walk[i])}` : '');
+          }
+        }
+      }
+      return { ok: !bad, cases, bad, why };
+    });
+  }
   const chartRange = () => page.evaluate(() => { const c = window.Chart.getChart(document.getElementById('session-chart')); return c ? [c.scales.x.min, c.scales.x.max] : null; });
 
   await measure('1-load', async () => {
@@ -258,18 +295,41 @@ async function runConfig(name, W, CPU) {
 
   if (SHOTS) {
     const shoot = async (file) => { const el = page.locator('.chart-wrap').first(); await el.scrollIntoViewIfNeeded(); await el.screenshot({ path: path.join(SHOTS, file) }); console.log('shot', file); };
+    const reset = async () => { await page.evaluate(() => document.getElementById('context-overlay').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))); await settle(600); };
     await settle(600);
     fs.mkdirSync(SHOTS, { recursive: true });
-    await shoot(`s26-${SHOT_TAG}-full.png`);
+    await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-full.png`);
     let o = await ov(); await settle(300); o = await ov();
     const dur = await page.evaluate(() => { const c = window.Chart.getChart(document.getElementById('session-chart')); return c.scales.x.max - c.scales.x.min; });
     await drag(line(o.bx + o.bw - 2, o.bx + Math.max(4, o.w * 10 / dur), o.y, 20)); await settle(600);
-    await page.mouse.move(1, 1); await settle(300);
+    if (!PHONE) await page.mouse.move(1, 1); await settle(300);
     console.log('10 min range', JSON.stringify(await chartRange()));
-    await shoot(`s26-${SHOT_TAG}-10min.png`);
+    await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-10min.png`);
+    await reset();
+    if (PHONE) { const btn = page.locator('#markers-open').first(); if (await btn.count()) { await btn.click().catch(() => {}); await settle(600); } }
     const it = page.locator('#marker-list .marker-item').nth(5);
-    await it.scrollIntoViewIfNeeded(); await it.click(); await settle(800); await page.mouse.move(1, 1); await settle(300);
-    await shoot(`s26-${SHOT_TAG}-marker.png`);
+    await it.scrollIntoViewIfNeeded(); await it.click(); await settle(800);
+    if (PHONE) { await page.keyboard.press('Escape').catch(() => {}); await settle(600); } else { await page.mouse.move(1, 1); await settle(300); }
+    console.log('marker range', JSON.stringify(await chartRange()));
+    await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-marker.png`);
+    if (!PHONE) {
+      // Hover inside the first mark's label (row 0, 10 px right of its line).
+      await reset();
+      const p = await page.evaluate(() => {
+        const c = window.Chart.getChart(document.getElementById('session-chart'));
+        const ts = [...document.querySelectorAll('#marker-list .marker-item.type-event')].map((e) => Number(e.dataset.t)).filter((t) => t >= c.scales.x.min && t <= c.scales.x.max).sort((a, b) => a - b);
+        c.canvas.scrollIntoView({ block: 'center' });
+        const r = c.canvas.getBoundingClientRect();
+        return { x: r.left + c.scales.x.getPixelForValue(ts[0]) + 10, y: r.top + c.chartArea.top + 4 + 11.2 + 18, t: ts[0] };
+      });
+      await page.mouse.move(p.x - 30, p.y); await settle(100); await page.mouse.move(p.x, p.y); await settle(400);
+      const tip = await page.evaluate(() => { const e = document.getElementById('anno-tip'); return e && e.style.display !== 'none' ? e.textContent : null; });
+      const hl = await page.evaluate(() => window.Chart.getChart(document.getElementById('session-chart')).$hlT);
+      const row = await page.evaluate(() => { const e = document.querySelector('#marker-list .marker-item.chart-hover'); return e ? e.textContent.trim().slice(0, 40) : null; });
+      console.log('hover', JSON.stringify({ at: p, tip, hl, listRow: row }));
+      await shoot(`${SHOT_PREFIX}-${SHOT_TAG}-${W}-hover.png`);
+    }
+    if (errors.length) console.log('page errors', JSON.stringify(errors.slice(0, 5)));
     await ctx.close();
     return;
   }
@@ -330,6 +390,8 @@ async function runConfig(name, W, CPU) {
 
   if (want('idle') && !MUTANT) await measure('8-idle-10s', async () => { await page.waitForTimeout(10000); return null; });
 
+  // After the timed actions: the check allocates enough to put a GC inside them.
+  if (!MUTANT) { results.decimation = await decimationParity(); console.log('  decimation parity', JSON.stringify(results.decimation)); }
   results.errors = errors.slice(0, 10);
   fs.mkdirSync(OUTDIR, { recursive: true });
   const out = path.join(OUTDIR, `result-${name}-${W}-cpu${CPU}${MUTANT ? '-mut-' + MUTANT : ''}${COUNTS ? '-counts' : ''}.json`);
@@ -369,6 +431,8 @@ function budgetRows(res) {
     const r = A[a]; if (!r) continue;
     add('floor', r.longTasks === 0 && (r.counts['update:main'] || 0) === 0, `${a} 0 long tasks and 0 chart updates (${r.longTasks}, ${r.counts['update:main'] || 0})`);
   }
+  const dp = res.decimation;
+  if (dp) add('decimation', dp.ok, `decimation matches Chart.js min-max on ${dp.cases} random ranges (${dp.bad} differ${dp.why ? ': ' + dp.why : ''})`);
   add('errors', !res.errors.length, `no page errors ${res.errors.join(' | ')}`);
   return rowsOut;
 }

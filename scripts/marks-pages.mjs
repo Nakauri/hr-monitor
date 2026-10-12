@@ -131,7 +131,7 @@ async function seed(page, files, records, dev = 'zzzzzz') {
 async function dayView(page, day) {
   const got = await page.evaluate(() => {
     const ch = window.Chart && Chart.getChart(document.getElementById('session-chart'));
-    const ann = ch ? Object.entries(ch.$marks || (ch.options.plugins.annotation || {}).annotations || {}).filter(([k]) => k.startsWith('ev_')).map(([, a]) => a.label && a.label.content) : null;
+    const ann = ch ? Object.entries(ch.$marks || {}).filter(([k]) => k.startsWith('ev_')).map(([, a]) => a.label && a.label.content) : null;
     const list = [...document.querySelectorAll('#marker-list .marker-item.type-event .marker-label')].map((e) => e.textContent.trim());
     const sleep = document.querySelectorAll('#marker-list .marker-item.type-sleep').length;
     return { ann, list, sleep };
