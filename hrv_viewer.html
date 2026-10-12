@@ -8672,7 +8672,7 @@
         datasets: [
           { label: 'HR', data: hr, hidden: activeFilters.hr === false, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
           { label: 'RMSSD', data: rmssd, hidden: activeFilters.rmssd === false, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
-          { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: palpDots.map(p => Math.min(3 + p._count, 10)), pointHoverRadius: 12, pointStyle: 'circle' },
+          { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: (c) => Math.min(3 + ((c.raw && c.raw._count) || 0), 10), pointHoverRadius: 12, pointStyle: 'circle' },
         ],
       },
       options: {
@@ -8736,13 +8736,12 @@
             padding: 10,
             boxPadding: 4,
           },
-          annotation: { annotations },
+          annotation: { annotations: nearMarks(annotations, brushMin !== null ? brushMin : 0, brushMax !== null ? brushMax : s.duration, canvasEl.clientWidth) },
           hrOverlays: { overlays: hrOverlays },
-          // Chart.js built-in decimation. Day-stitched sessions can hold
-          // 47k+ points (1 Hz × 13h+); rendering all of them on a Galaxy
-          // S8 chokes pan/zoom. min-max keeps the visual envelope intact
-          // (peaks/troughs preserved) while capping render at ~2k points.
-          decimation: { enabled: true, algorithm: 'min-max', threshold: 2000, samples: 2000 },
+          // min-max keeps every point when a pixel column holds one, and the envelope when it holds more.
+          // Threshold 1 keeps it on at every zoom: the decimated set covers only the visible range, and a
+          // range change otherwise re-lays all of a day's points (Chart.js updates every element then).
+          decimation: { enabled: true, algorithm: 'min-max', threshold: 1 },
         },
         scales: {
           x: {
@@ -8778,6 +8777,28 @@
       },
       plugins: markLayout ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN],
     });
+    currentChart.$marks = annotations;
+  }
+
+  // The annotation plugin re-resolves every entry on each update, so it gets only the marks within 200 px of the
+  // visible range (wider than any label); entries keep their order, which is the draw order.
+  function nearMarks(all, lo, hi, width) {
+    const pad = (hi - lo) * 200 / Math.max(1, width);
+    const out = {};
+    for (const k of Object.keys(all)) {
+      const a = all[k];
+      const x = k.startsWith('ev_') ? a.xMin : k.startsWith('mk_') ? a.xValue : null;
+      if (x == null || (x >= lo - pad && x <= hi + pad)) out[k] = a;
+    }
+    return out;
+  }
+  function syncNearMarks(chart, lo, hi) {
+    if (!chart.$marks) return;
+    const plug = chart.config.options.plugins.annotation;
+    const next = nearMarks(chart.$marks, lo, hi, chart.width);
+    const a = Object.keys(next), b = Object.keys(plug.annotations);
+    if (a.length === b.length && a.every((k, i) => k === b[i])) return;
+    plug.annotations = next;
   }
 
   // Zone strip under the chart: HR coloured by zone per pixel column, recording gaps hatched.
@@ -8994,6 +9015,7 @@
     xo.min = brushMin;
     xo.max = brushMax;
     if (so) { so.min = brushMin; so.max = brushMax; }
+    syncNearMarks(currentChart, brushMin, brushMax);
     currentChart.update('none');
   }
 

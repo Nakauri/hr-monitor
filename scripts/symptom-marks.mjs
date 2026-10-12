@@ -96,7 +96,7 @@ for (const c of CASES) {
   await page.waitForTimeout(1200);
   const got = await page.evaluate(() => {
     const ch = window.Chart && Chart.getChart(document.getElementById('session-chart'));
-    const ann = ch ? Object.entries((ch.options.plugins.annotation || {}).annotations || {}).filter(([k]) => k.startsWith('ev_')).map(([, a]) => a) : [];
+    const ann = ch ? Object.entries(ch.$marks || (ch.options.plugins.annotation || {}).annotations || {}).filter(([k]) => k.startsWith('ev_')).map(([, a]) => a) : [];
     const list = [...document.querySelectorAll('#marker-list .marker-item.type-event .marker-label')].map((e) => e.textContent.trim());
     return ann.map((a) => ({ kind: a.markKind, label: a.label && a.label.content, colour: a.borderColor, width: a.borderWidth, dash: (a.borderDash || []).join(' '), at: Math.round(a.xMin * 100) / 100 })).concat(list.length ? [{ list }] : []);
   });
@@ -104,7 +104,7 @@ for (const c of CASES) {
   seen[c.name] = got;
   if (SHOTS) { await page.evaluate(() => document.getElementById('session-layout').scrollIntoView()); await page.screenshot({ path: path.join(SHOTS, 'mark-' + c.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.png') }); }
   if (c === CASES[0]) {
-    const count = () => page.evaluate(() => Object.keys((Chart.getChart(document.getElementById('session-chart')).options.plugins.annotation || {}).annotations || {}).filter((k) => k.startsWith('ev_')).length);
+    const count = () => page.evaluate(() => Object.keys((c => c.$marks || (c.options.plugins.annotation || {}).annotations || {})(Chart.getChart(document.getElementById('session-chart')))).filter((k) => k.startsWith('ev_')).length);
     const n0 = await count();
     await page.click('#layer-chips .chip[data-layer="event"]'); await page.waitForTimeout(200);
     const n1 = await count();
