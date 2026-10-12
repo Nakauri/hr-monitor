@@ -174,18 +174,19 @@
 .menu > :is(button, a, label, [role^="menuitem"]):hover, .menu > :focus-visible { background: var(--selected-fill); }
 .menu > .danger { color: var(--warn-high); }
 .menu > label { display: flex; align-items: center; gap: var(--s3); min-height: var(--target); padding: var(--s1) var(--s3); border-radius: var(--r-ctl); color: var(--text); font-size: var(--t14); cursor: pointer; user-select: none; }
-.menu > label input[type="checkbox"] {
+/* The one checkbox for every page: drawn, never the browser's tinted box (unreadable on light --action). Toggle switches keep their own input. */
+input[type="checkbox"]:not(.toggle-switch > input) {
   -webkit-appearance: none; appearance: none; display: inline-grid; place-content: center;
   width: 18px; height: 18px; margin: 0; flex: 0 0 auto;
   background: transparent; border: 2px solid var(--text-dim); border-radius: 3px; cursor: pointer;
 }
-.menu > label input[type="checkbox"]::after {
+input[type="checkbox"]:not(.toggle-switch > input)::after {
   content: ""; width: 12px; height: 12px; background: var(--on-fill); visibility: hidden;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
 }
-.menu > label input[type="checkbox"]:checked { background: var(--action); border-color: var(--action); }
-.menu > label input[type="checkbox"]:checked::after { visibility: visible; }
+input[type="checkbox"]:not(.toggle-switch > input):checked { background: var(--action); border-color: var(--action); }
+input[type="checkbox"]:not(.toggle-switch > input):checked::after { visibility: visible; }
 /* A capped menu scrolls; its rows keep their height when text wraps. */
 .menu > * { flex-shrink: 0; }
 .menu > [role="separator"] { flex: 0 0 1px; height: 1px; margin: var(--s1) 0; background: var(--border); }

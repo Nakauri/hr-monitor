@@ -936,7 +936,6 @@
     outline: none;
     border-color: var(--action);
   }
-  input[type="checkbox"] { accent-color: var(--action); }
 
   .thresh-grid input[type="number"] { width: 70px; text-align: center; }
   .thresh-grid .unit { color: var(--text-dim); font-size: 11px; }
@@ -1026,10 +1025,7 @@
   }
   .widget-toggles select:hover { border-color: var(--border-control); }
   .widget-toggles select:focus { outline: 1px solid var(--hrv); }
-  .widget-toggles input[type="checkbox"] {
-    width: auto;
-    accent-color: var(--action);
-  }
+  .widget-toggles input[type="checkbox"] { width: 18px; }
   .streaming-row {
     display: flex;
     align-items: center;
@@ -1758,7 +1754,7 @@
         <div class="tab-panel" data-tabpanel="audio">
           <div class="audio-grid">
             <label>Audio alerts</label>
-            <input type="checkbox" id="audio-on" checked style="width: auto; justify-self: start;" />
+            <input type="checkbox" id="audio-on" checked style="justify-self: start;" />
             <span></span><span></span>
 
             <label>High HR alert</label>
