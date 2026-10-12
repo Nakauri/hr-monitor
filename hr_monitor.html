@@ -849,7 +849,6 @@
 
 
   .audio-panel { display: flex; flex-direction: column; gap: var(--s3); }
-  .audio-on-row { display: flex; align-items: center; gap: var(--s3); min-height: 44px; cursor: pointer; }
   .audio-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s2); }
   .audio-row .field { flex: 1 1 12em; }
   .audio-actions { display: flex; gap: var(--s2); }
@@ -1461,7 +1460,10 @@
 
         <div class="tab-panel" data-tabpanel="audio">
           <div class="audio-panel">
-          <label class="audio-on-row"><input type="checkbox" id="audio-on" checked /> Audio alerts</label>
+          <button type="button" class="toggle" role="switch" id="audio-on" aria-checked="true">
+            <span class="txt"><span class="t">Audio alerts</span></span>
+            <span class="track" aria-hidden="true"></span>
+          </button>
           <div class="audio-row">
             <div class="field"><label for="audio-high">High HR alert</label><span class="select"><select id="audio-high"></select></span></div>
             <div class="audio-actions">
@@ -6397,7 +6399,7 @@
         set(v) { el.setAttribute('aria-checked', v ? 'true' : 'false'); } });
       el.addEventListener('click', () => { el.checked = !el.checked; el.dispatchEvent(new Event('change')); });
     }
-    ['toggle-broadcast'].forEach((id) => wireSwitch($(id)));
+    ['toggle-broadcast', 'audio-on'].forEach((id) => wireSwitch($(id)));
     document.querySelectorAll('.save-check').forEach((s) => { s.innerHTML = UI.icon('check'); });
     loadWidgetStyle();
     loadWidgetPrefs();
