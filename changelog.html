@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0a0a">
+<title>Changelog · aorti.ca</title>
+<meta name="description" content="What changed in aorti.ca, the free heart rate overlay for OBS and day-and-night recorder, newest first.">
+<link rel="canonical" href="https://aorti.ca/changelog">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="./assets/fonts/WorkSans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./ui.css">
+<style>
+  /* Static, crawlable changelog. Entries between the CHANGELOG markers are written from
+     changelog.json by `node scripts/landing.mjs --write-changelog`; never edit them by hand. */
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--ui-face);
+    font-size: var(--t16);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-left: var(--s6); padding-right: var(--s6); }
+  .nav { position: sticky; top: 0; z-index: var(--z-sticky); background: rgba(10,10,10,0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+  .nav-inner { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2) var(--s5); min-height: 64px; padding-top: var(--s2); padding-bottom: var(--s2); }
+  .brand { display: inline-flex; align-items: center; gap: var(--s3); font-weight: 600; letter-spacing: -0.01em; font-size: var(--t20); }
+  .brand-mark { width: 32px; height: 30px; flex: none; }
+  .brand-dot { color: var(--brand); font-weight: 700; }
+  .brand-ca { color: var(--text-dim); font-weight: 500; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 var(--s4); margin-left: auto; border-radius: var(--r-ctl); border: 1px solid var(--action); background: var(--action); color: var(--on-fill); font: 600 var(--t14)/1.2 var(--ui-face); }
+  .btn:hover { background: #ffffff; }
+  main { padding-top: var(--s7); padding-bottom: var(--s8); }
+  h1 { font-size: clamp(36px, 4.6vw, 56px); line-height: 1.06; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 var(--s4); }
+  .lede { font-size: var(--t20); color: var(--text-dim); margin: 0 0 var(--s7); max-width: 36em; }
+  .day { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 9fr); gap: var(--s5); padding: var(--s5) 0; border-top: 1px solid var(--border); }
+  .day h2 { margin: 0; font-size: var(--t16); font-weight: 600; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .entry { scroll-margin-top: 80px; }
+  .entry + .entry { margin-top: var(--s5); }
+  .entry h3 { margin: 0 0 var(--s1); font-size: var(--t20); font-weight: 600; line-height: 1.3; }
+  .entry h3 a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .entry p { margin: 0; color: var(--text-dim); max-width: 40em; }
+
+  /* ===== Footer: identical on index, changelog and legal (scripts/landing.mjs compares them) ===== */
+  .site-footer { border-top: 1px solid var(--border); }
+  .footer-inner { padding-top: var(--s6); padding-bottom: var(--s7); font-size: var(--t14); color: var(--text-dim); }
+  .footer-line { margin: 0 0 var(--s3); }
+  .footer-links { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); }
+  .footer-links a { display: inline-flex; align-items: center; gap: var(--s2); min-height: 44px; color: var(--text); text-decoration: none; }
+  .footer-links a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .gh-mark { width: 16px; height: 16px; flex: none; }
+
+  @media (max-width: 760px) {
+    .wrap { padding-left: var(--s4); padding-right: var(--s4); }
+    .day { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+    .lede { font-size: var(--t16); }
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/">
+      <svg class="brand-mark" viewBox="0 0 1779 1642" aria-hidden="true">
+      <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
+      <path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="url(#navEkg)"/>
+      <defs>
+      <linearGradient id="navEkg" x1="66" y1="424" x2="1644" y2="1610" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#AC6F6C"/>
+      <stop offset="0.32" stop-color="#EB3D3C"/>
+      <stop offset="0.54" stop-color="#EE2A29"/>
+      <stop offset="0.76" stop-color="#EB3D3C"/>
+      <stop offset="1" stop-color="#AC6F6C"/>
+      </linearGradient>
+      </defs>
+      </svg>
+      <span>aorti<span class="brand-dot">.</span><span class="brand-ca">ca</span></span>
+    </a>
+    <a class="btn" href="./hr_monitor.html">Open monitor</a>
+  </div>
+</nav>
+
+<main class="wrap">
+  <h1>Changelog</h1>
+  <p class="lede">What changed in aorti.ca, newest first.</p>
+<!-- CHANGELOG:BEGIN -->
+  <section class="day">
+    <h2><time datetime="2026-10-10">October 10, 2026</time></h2>
+    <div>
+    <article class="entry" id="2026-10-10-recording-comes-back-on-its-own">
+      <h3><a href="#2026-10-10-recording-comes-back-on-its-own">Recording comes back on its own</a></h3>
+      <p>If Android closes the app while you record, Aorti picks the session back up by itself, in the same file, usually within a few seconds.</p>
+    </article>
+    <article class="entry" id="2026-10-10-reconnects-when-you-are-back-in-range">
+      <h3><a href="#2026-10-10-reconnects-when-you-are-back-in-range">Reconnects when you are back in range</a></h3>
+      <p>Walk away from your phone and the notification says the strap is reconnecting. Come back and recording picks up again by itself, with no need to open the app.</p>
+    </article>
+    <article class="entry" id="2026-10-10-hourly-files-on-drive">
+      <h3><a href="#2026-10-10-hourly-files-on-drive">Hourly files on Drive</a></h3>
+      <p>Sessions now also save as small hourly files in a folder for each month on your Drive. Each finished hour uploads once, so syncing is faster.</p>
+    </article>
+    </div>
+  </section>
+  <section class="day">
+    <h2><time datetime="2026-10-09">October 9, 2026</time></h2>
+    <div>
+    <article class="entry" id="2026-10-09-faster-sync-no-duplicate-files">
+      <h3><a href="#2026-10-09-faster-sync-no-duplicate-files">Faster sync, no duplicate files</a></h3>
+      <p>Sync no longer reads every saved session again, and a resumed session no longer leaves a second copy on Drive.</p>
+    </article>
+    <article class="entry" id="2026-10-09-no-more-stuck-restore-screen">
+      <h3><a href="#2026-10-09-no-more-stuck-restore-screen">No more stuck restore screen</a></h3>
+      <p>Coming back to the app no longer shows a spinner for up to a minute, and Stop responds right away, even on a weak connection. Long sessions ask before stopping.</p>
+    </article>
+    </div>
+  </section>
+  <section class="day">
+    <h2><time datetime="2026-04-26">April 26, 2026</time></h2>
+    <div>
+    <article class="entry" id="2026-04-26-try-the-viewer-with-sample-data">
+      <h3><a href="#2026-04-26-try-the-viewer-with-sample-data">Try the viewer with sample data</a></h3>
+      <p>Open Sample data in the menu to see what the viewer looks like with two weeks of fake sessions. No sign-in needed.</p>
+    </article>
+    <article class="entry" id="2026-04-26-plays-nicely-with-sleep-as-android">
+      <h3><a href="#2026-04-26-plays-nicely-with-sleep-as-android">Plays nicely with Sleep As Android</a></h3>
+      <p>Aorti can share your strap with sleep-tracking apps. No need to disconnect one to use the other.</p>
+    </article>
+    <article class="entry" id="2026-04-26-mobile-reliability-fixes">
+      <h3><a href="#2026-04-26-mobile-reliability-fixes">Mobile reliability fixes</a></h3>
+      <p>Recovers better from brief strap drops, including overnight. Long sessions use less battery.</p>
+    </article>
+    <article class="entry" id="2026-04-26-viewer-tweaks">
+      <h3><a href="#2026-04-26-viewer-tweaks">Viewer tweaks</a></h3>
+      <p>Chills sensitivity slider filters events properly. Sundays open in the week view. HR shifts show in purple so they don't look like chills.</p>
+    </article>
+    </div>
+  </section>
+  <section class="day">
+    <h2><time datetime="2026-04-25">April 25, 2026</time></h2>
+    <div>
+    <article class="entry" id="2026-04-25-save-csv-anywhere">
+      <h3><a href="#2026-04-25-save-csv-anywhere">Save CSV anywhere</a></h3>
+      <p>Tapping Export CSV opens a save dialog, so the file goes wherever you pick.</p>
+    </article>
+    </div>
+  </section>
+<!-- CHANGELOG:END -->
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p class="footer-line">Free, no ads, no account needed. Not a medical tool.</p>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="https://github.com/Nakauri/hr-monitor" rel="noopener"><svg class="gh-mark" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Source on GitHub</a>
+      <a href="./changelog.html">Changelog</a>
+      <a href="./legal.html#privacy">Privacy and terms</a>
+      <a href="/#contact">Contact</a>
+      <a href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">Android APK</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

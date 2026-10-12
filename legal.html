@@ -4,14 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0a0a0a">
-<title>aorti.ca · legal and disclaimers</title>
-<meta name="description" content="Beta disclaimers, privacy notice, and data-handling for aorti.ca. Not a medical device.">
+<title>Privacy and terms · aorti.ca</title>
+<meta name="description" content="What aorti.ca does with your data, what it is for, and the terms of use. Not a medical device.">
 <link rel="canonical" href="https://aorti.ca/legal">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="preload" href="./assets/fonts/WorkSans-latin.woff2" as="font" type="font/woff2" crossorigin>
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <link rel="stylesheet" href="./ui.css">
@@ -22,207 +20,146 @@
     padding: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: var(--ui-face);
+    font-size: var(--t16);
     line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
   }
-  a { color: inherit; }
-  a:hover { color: var(--brand); }
-  .nav {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    backdrop-filter: blur(12px);
-    background: rgba(10,10,10,0.72);
-    border-bottom: 1px solid var(--border);
-  }
-  .nav-inner {
-    max-width: 780px;
-    margin: 0 auto;
-    padding: 14px 28px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-family: 'Space Grotesk', 'Inter', sans-serif;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    font-size: 20px;
-    color: var(--text);
-    text-decoration: none;
-  }
-  .brand-mark {
-    width: 28px;
-    height: 26px;
-    filter: drop-shadow(0 0 8px rgba(232,72,56,0.4));
-  }
-  .brand-dot { color: var(--brand); font-weight: 700; }
-  .brand-ca { color: var(--text-dim); font-weight: 500; }
-  .nav-back {
-    margin-left: auto;
-    font-size: 13px;
-    color: var(--text-dim);
-    text-decoration: none;
-    border-bottom: 1px solid transparent;
-    padding: 4px 0;
-  }
-  .nav-back:hover { color: var(--text); border-bottom-color: var(--text); }
-
-  main {
-    max-width: 780px;
-    margin: 0 auto;
-    padding: 48px 28px 64px;
-  }
-  h1 {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 32px;
-    font-weight: 700;
-    letter-spacing: -0.015em;
-    margin: 0 0 8px;
-  }
-  .subtitle {
-    color: var(--text-dim);
-    font-size: 14px;
-    margin: 0 0 40px;
-  }
-  h2 {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 20px;
-    font-weight: 600;
-    margin: 44px 0 14px;
-    color: var(--text);
-  }
-  h2:first-of-type { margin-top: 0; }
-  h3 {
-    font-size: 15px;
-    font-weight: 600;
-    margin: 22px 0 8px;
-    color: var(--text);
-  }
-  p {
-    color: var(--text-dim);
-    margin: 0 0 14px;
-    font-size: 15px;
-  }
-  ul { color: var(--text-dim); padding-left: 22px; margin: 0 0 16px; }
-  li { margin-bottom: 8px; }
-
-  .callout {
-    padding: 18px 22px;
-    background: rgba(232,72,56,0.07);
-    border: 1px solid rgba(232,72,56,0.28);
-    border-radius: 10px;
-    margin: 24px 0 32px;
-  }
-  .callout p { color: var(--text); font-size: 14px; margin: 0 0 6px; }
+  a { color: var(--text); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-left: var(--s6); padding-right: var(--s6); }
+  .ui.app-bar { position: sticky; top: 0; z-index: var(--z-sticky); }
+  .back-link svg { width: var(--icon); height: var(--icon); }
+  main { max-width: 780px; margin: 0 auto; padding: var(--s7) var(--s6) var(--s8); }
+  h1 { font-size: clamp(32px, 4vw, 44px); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 var(--s6); }
+  h2 { font-size: var(--t24); line-height: 1.2; font-weight: 700; margin: var(--s7) 0 var(--s4); scroll-margin-top: 72px; }
+  h3 { font-size: var(--t16); font-weight: 600; margin: var(--s5) 0 var(--s2); }
+  p { color: var(--text-dim); margin: 0 0 var(--s3); }
+  ul { color: var(--text-dim); padding-left: var(--s5); margin: 0 0 var(--s4); }
+  li { margin-bottom: var(--s2); }
+  strong { color: var(--text); font-weight: 600; }
+  code { font-family: var(--mono); font-size: var(--t14); color: var(--text); }
+  .callout { padding: var(--s4) var(--s5); background: var(--bg-raised); border: 1px solid var(--border-control); border-radius: var(--r-card); margin: 0 0 var(--s5); }
+  .callout p { color: var(--text); }
   .callout p:last-child { margin: 0; }
-  .callout strong { color: #fff; }
+  .last-updated { margin-top: var(--s7); padding-top: var(--s4); border-top: 1px solid var(--border); font-size: var(--t14); }
 
-  .last-updated {
-    margin-top: 52px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--text-dim);
+  /* ===== Footer: identical on index, changelog and legal (scripts/landing.mjs compares them) ===== */
+  .site-footer { border-top: 1px solid var(--border); }
+  .footer-inner { padding-top: var(--s6); padding-bottom: var(--s7); font-size: var(--t14); color: var(--text-dim); }
+  .footer-line { margin: 0 0 var(--s3); }
+  .footer-links { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); }
+  .footer-links a { display: inline-flex; align-items: center; gap: var(--s2); min-height: 44px; color: var(--text); text-decoration: none; }
+  .footer-links a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .gh-mark { width: 16px; height: 16px; flex: none; }
+
+  @media (max-width: 760px) {
+    .wrap { padding-left: var(--s4); padding-right: var(--s4); }
+    main { padding: var(--s6) var(--s4) var(--s7); }
   }
-
 </style>
 </head>
 <body>
 
-<div class="ui notice warning bar" role="note">
-  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-  <div class="msg">Draft document. Review with a lawyer before treating anything here as final.</div>
-</div>
-
-<nav class="nav">
-  <div class="nav-inner">
-    <a class="brand" href="/">
-      <svg class="brand-mark" viewBox="0 0 1779 1642" aria-hidden="true">
-        <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
-      </svg>
-      <span>aorti<span class="brand-dot">.</span><span class="brand-ca">ca</span></span>
-    </a>
-    <a class="nav-back" href="/">← Home</a>
-  </div>
-</nav>
+<header class="ui app-bar">
+  <a class="back-link" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Home</a>
+</header>
 
 <main>
-  <h1>Legal and disclaimers</h1>
-  <p class="subtitle">Plain-language summary followed by the full text. Read the full text for the actual terms.</p>
+  <h1>Privacy and terms</h1>
 
-  <h2>Not a medical device</h2>
-
+  <h2 id="medical">Not a medical device</h2>
   <div class="callout">
-    <p><strong>aorti.ca is not a medical device.</strong> It is a personal-use tool for heart rate and heart-rate-variability (HRV) tracking. It does not diagnose, monitor for disease, treat, or prevent any condition.</p>
-    <p>Nothing shown in the live monitor, the session viewer, or any exported report is a medical interpretation or medical advice. Patterns, summaries, and autonomic descriptions are estimated from consumer-grade chest-strap data and are for personal context only.</p>
+    <p><strong>aorti.ca is not a medical device.</strong> It is a personal-use tool for tracking heart rate and heart rate variability (HRV). It has no role in diagnosing, treating, preventing or monitoring any condition.</p>
+    <p>Nothing shown in the live monitor, the session viewer, or any exported report is a medical interpretation or medical advice. Summaries are estimates from a consumer chest strap and are for personal context only.</p>
     <p>If you have symptoms that concern you, talk to a qualified healthcare professional. Do not make health decisions based on what this app shows you.</p>
   </div>
 
   <h3>What the app is for</h3>
   <ul>
     <li>Recording your own heart rate and RR-interval data from a Bluetooth chest strap.</li>
-    <li>Showing that data live in a widget, optionally broadcasting it to an OBS stream or to viewers you have given a link to.</li>
+    <li>Showing that data live in a widget and, if you turn it on, sharing it to an OBS stream or to people you give your broadcast key to.</li>
     <li>Storing the recordings as CSV files on your device or in your own Google Drive, at your choice.</li>
-    <li>Producing descriptive summaries (trends, shifts, clusters, flushes, chills, sleep windows) so you can look back at your own data with more context than a raw chart.</li>
+    <li>Summaries so you can look back at your own data with more context than a raw chart.</li>
   </ul>
 
   <h3>What the app is not for</h3>
   <ul>
-    <li>Diagnosing, ruling out, or managing any health condition, including arrhythmia, POTS, anxiety disorders, or any cardiovascular condition.</li>
-    <li>Detecting medical emergencies. Do not rely on it to notify you of dangerous heart-rate events.</li>
+    <li>Diagnosing, ruling out or managing any health condition.</li>
+    <li>Detecting medical emergencies. Do not rely on it to tell you about a dangerous heart rate.</li>
     <li>Replacing medical-grade ECG, Holter, or clinical HRV measurement.</li>
-    <li>Giving medical advice. The labels shown ("rest", "sympathetic stress", "fatigue", etc.) are pattern descriptors, not diagnoses.</li>
+    <li>Giving medical advice. Labels in the viewer describe patterns in your data. They are not diagnoses.</li>
   </ul>
 
-  <h2>Data and privacy</h2>
+  <h2 id="privacy">Privacy</h2>
 
-  <h3>What we collect</h3>
-  <p>The app runs entirely on your device and, if you sign in, in your own Google Drive. We do not operate a backend database of user data. The project author does not receive, store, or have access to your heart-rate recordings.</p>
+  <h3>Your heart data</h3>
+  <p>Recordings stay on your device. If you sign in with Google, the app also saves them to a folder named "HR Monitor Sessions" in your own Google Drive. The app asks only for Drive's <code>drive.file</code> permission, so it can see the files it created and nothing else in your Drive.</p>
+  <p>I do not run a database of user data, and I never receive your recordings.</p>
 
-  <h3>Where data goes</h3>
+  <h3>Google sign-in</h3>
+  <p>Sign-in is only for Drive. It asks for your email address and access to the app's own Drive files. To keep you signed in, the aorti.ca sign-in service swaps Google's one-time code for tokens. The long-lived token stays in an HttpOnly cookie in your browser, or in the Android Keystore in the app; the service does not store it. Signing out clears the access token.</p>
+
+  <h3>Live sharing</h3>
+  <p>Share live HR is off until you turn it on. While it is on, the widget's live readings pass through a relay at <code>hr-relay.nakauri.partykit.dev</code> to your OBS overlay or anyone with your broadcast key. The relay keeps each message in memory only long enough to pass it on, and stores nothing.</p>
+
+  <h3>Analytics</h3>
+  <p>The web pages use Vercel Web Analytics, which counts page views. It never receives heart data. The Android app leaves it out.</p>
+
+  <h3>Nothing is sold</h3>
+  <p>I do not sell or share your data, and there are no ads.</p>
+
+  <h3>Other services</h3>
   <ul>
-    <li><strong>Your device.</strong> CSVs are written locally first, either to browser storage or to a folder you pick.</li>
-    <li><strong>Your Google Drive</strong> (optional). If you sign in, the app uploads session CSVs to a folder named "HR Monitor Sessions" in your own Drive. You own that folder and can revoke access at any time in your Google account.</li>
-    <li><strong>The PartyKit relay</strong> (optional). If broadcasting is on, live HR ticks pass through a public relay at <code>hr-relay.nakauri.partykit.dev</code> so an OBS overlay or a watcher URL can read them. The relay does not persist messages: they fan out to connected listeners and are gone.</li>
-    <li><strong>Vercel Web Analytics.</strong> The web pages include Vercel's first-party analytics script, which records aggregate page-view data. It does not collect personal information or heart-rate data. The Android app bundle strips this script.</li>
+    <li><strong>Google</strong> for sign-in and the Drive API, under Google's privacy policy.</li>
+    <li><strong>Google Fonts</strong> on the monitor and viewer pages. The font request carries normal browser headers.</li>
+    <li><strong>PartyKit</strong> (Cloudflare Workers) runs the relay for Share live HR.</li>
+    <li><strong>GitHub</strong> hosts the source code and the Android APK. The home page asks GitHub for the latest APK version.</li>
+    <li><strong>Vercel</strong> hosts aorti.ca and the sign-in service.</li>
+    <li><strong>Web3Forms</strong> delivers the contact form to my inbox.</li>
+    <li><strong>api.qrserver.com</strong> draws the PayPal QR code on the home page from the public PayPal link.</li>
   </ul>
 
-  <h3>Third-party services</h3>
+  <h3>Deleting your data</h3>
   <ul>
-    <li><strong>Google Drive API</strong> (OAuth sign-in, <code>drive.file</code> scope). Governed by Google's privacy policy.</li>
-    <li><strong>Google Fonts</strong> for web typography. Fonts load from Google's CDN; the request includes normal HTTP headers.</li>
-    <li><strong>PartyKit</strong> (Cloudflare Workers) as a transient relay for live broadcasts.</li>
-    <li><strong>GitHub</strong> for the Android APK distribution and release notes API.</li>
-    <li><strong>Vercel</strong> as the hosting provider for aorti.ca.</li>
+    <li><strong>Google Drive.</strong> Delete the "HR Monitor Sessions" folder, then remove aorti.ca's access in your Google account settings.</li>
+    <li><strong>Android.</strong> Clear cache, under Local session cache in the app's diagnostics, deletes the recordings stored on the phone, including any not yet on Drive.</li>
+    <li><strong>Browser.</strong> Clearing this site's data in your browser removes recordings kept in browser storage. Files saved to a folder you picked stay there until you delete them.</li>
+    <li><strong>Messages.</strong> Ask through the contact form and I will delete your message.</li>
   </ul>
 
-  <h3>Your control</h3>
-  <ul>
-    <li>You can use the app in offline mode and share nothing.</li>
-    <li>You can delete local CSVs from your folder or browser storage any time.</li>
-    <li>You can revoke Drive access from your Google account settings.</li>
-    <li>You can sign out of the app, which clears the access token.</li>
-  </ul>
+  <h3>Check it yourself</h3>
+  <p>The source code is public on <a href="https://github.com/Nakauri/hr-monitor" rel="noopener">GitHub</a>, so you can read exactly what the app does with your data.</p>
 
-  <h2>Use at your own risk</h2>
-  <p>The app is provided as-is, with no warranty, express or implied. It is a personal project in active development. Bugs, data loss, and unexpected behaviour are possible.</p>
-  <p>The project author is not liable for any direct, indirect, incidental, or consequential damages arising from the use of the app, including but not limited to lost recordings, incorrect summaries, misinterpretation of data, device battery drain, or any decision you make based on what the app shows.</p>
+  <h2 id="terms">Terms</h2>
 
-  <h2>Feedback and reports</h2>
-  <p>If you use the in-app contact form or email the author, your email address and message are sent to the author's inbox. They are not published or shared. You can ask for your message to be deleted at any time.</p>
+  <h3>Use at your own risk</h3>
+  <p>The app is provided as-is, with no warranty, express or implied. It is a personal project still changing. Bugs, data loss, and unexpected behaviour are possible.</p>
+  <p>I accept no liability for direct, indirect, incidental or consequential damages from using the app, including lost recordings, incorrect summaries, misreading of data, battery drain, or any decision you make based on what the app shows.</p>
 
-  <h2>Changes to these terms</h2>
-  <p>These terms may be updated as the app evolves. The "last updated" date below reflects the most recent change. Continued use after an update means you accept the new terms.</p>
+  <h3>Feedback and reports</h3>
+  <p>If you use the contact form, your email address and message go to my inbox. They are not published or shared.</p>
 
-  <h2>Contact</h2>
-  <p>Questions about this page or the app can be sent through the contact form on the home page, or to the email address linked from the site footer.</p>
+  <h3>Changes to these terms</h3>
+  <p>These terms may change as the app does. The date below shows the most recent change. Using the app after an update means you accept the new terms.</p>
 
-  <p class="last-updated">Last updated: 2026-04-21. Jurisdiction: Canada. This page is not legal advice and has not been reviewed by a lawyer.</p>
+  <h3>Contact</h3>
+  <p>Send questions about these terms or the app through the <a href="/#contact">contact form</a> on the home page.</p>
+
+  <p class="last-updated">Last updated: 2026-10-12. Jurisdiction: Canada. This page is not legal advice.</p>
 </main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p class="footer-line">Free, no ads, no account needed. Not a medical tool.</p>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="https://github.com/Nakauri/hr-monitor" rel="noopener"><svg class="gh-mark" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Source on GitHub</a>
+      <a href="./changelog.html">Changelog</a>
+      <a href="./legal.html#privacy">Privacy and terms</a>
+      <a href="/#contact">Contact</a>
+      <a href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">Android APK</a>
+    </nav>
+  </div>
+</footer>
 
 </body>
 </html>
