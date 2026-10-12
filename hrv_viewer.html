@@ -8812,15 +8812,10 @@
       if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
       if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
       if (currentChart && (brushMin !== lastAppliedMin || brushMax !== lastAppliedMax)) {
-        currentChart.options.scales.x.min = brushMin;
-        currentChart.options.scales.x.max = brushMax;
-        if (currentChart.scales && currentChart.scales.x) {
-          currentChart.scales.x.options.min = brushMin;
-          currentChart.scales.x.options.max = brushMax;
-        }
-        currentChart.update('none');
         lastAppliedMin = brushMin;
         lastAppliedMax = brushMax;
+        // Pointer moves can outpace frames: the chart follows once per frame, at the latest bounds.
+        scheduleChartRange();
       }
       updateResetZoomVisibility();
     }
@@ -8915,6 +8910,26 @@
   // keep up (each chart.update() walks all overlays + downsamples). The
   // visual brush still feels live because CSS layout is cheap; only the
   // chart redraw is rate-limited.
+  let _chartRangeRaf = 0;
+  function scheduleChartRange() {
+    if (_chartRangeRaf) return;
+    _chartRangeRaf = requestAnimationFrame(() => {
+      _chartRangeRaf = 0;
+      applyChartRange();
+    });
+  }
+  // Axis bounds go to both option objects or the rendered axis can stay stale; unchanged bounds skip the update.
+  function applyChartRange() {
+    if (!currentChart) return;
+    const xo = currentChart.options.scales.x;
+    const so = currentChart.scales && currentChart.scales.x ? currentChart.scales.x.options : null;
+    if (xo.min === brushMin && xo.max === brushMax && (!so || (so.min === brushMin && so.max === brushMax))) return;
+    xo.min = brushMin;
+    xo.max = brushMax;
+    if (so) { so.min = brushMin; so.max = brushMax; }
+    currentChart.update('none');
+  }
+
   let _paintBrushRafId = 0;
   function paintBrush() {
     if (_paintBrushRafId) return;
@@ -8938,18 +8953,7 @@
     brush.style.width = (hi - lo) + 'px';
     if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
     if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
-    if (currentChart) {
-      currentChart.options.scales.x.min = brushMin;
-      currentChart.options.scales.x.max = brushMax;
-      if (currentChart.scales && currentChart.scales.x) {
-        currentChart.scales.x.options.min = brushMin;
-        currentChart.scales.x.options.max = brushMax;
-      }
-      // Default mode (no arg) — full re-layout so the scale picks up the
-      // new bounds. 'none' was sometimes leaving the rendered axis range
-      // stale on the day-timeline view.
-      currentChart.update();
-    }
+    applyChartRange();
     updateResetZoomVisibility();
   }
 
