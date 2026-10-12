@@ -8306,29 +8306,49 @@
 
   // Mark labels left to right: a label that would run into the one before drops a row; past three rows it hides.
   function markLabelRows(marks) {
-    let key = '', rows = [];
+    let key = '', rows = [], halves = null;
+    const order = marks.map((m, i) => i).sort((i, j) => marks[i].t - marks[j].t);
     return (chart) => {
       const x = chart.scales.x, a = chart.chartArea;
       const k = x.min + '|' + x.max + '|' + a.left + '|' + a.right;
       if (k === key) return rows;
       key = k;
-      const ctx = chart.ctx;
-      ctx.save();
-      ctx.font = '600 12px ' + Chart.defaults.font.family;
+      if (!halves) {
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.font = '600 12px ' + Chart.defaults.font.family;
+        halves = marks.map((m) => (ctx.measureText(m.text).width + 8) / 2);
+        ctx.restore();
+      }
       const ends = [-Infinity, -Infinity, -Infinity];
-      const order = marks.map((m, i) => i).sort((i, j) => marks[i].t - marks[j].t);
       rows = new Array(marks.length).fill(0);
       for (const i of order) {
         const px = x.getPixelForValue(marks[i].t);
-        const half = (ctx.measureText(marks[i].text).width + 8) / 2;
+        const half = halves[i];
         if (px + half < a.left || px - half > a.right) continue;
         let r = ends.findIndex((end) => px - half > end + 4);
         if (r < 0) r = 3;
         else ends[r] = px + half;
         rows[i] = r;
       }
-      ctx.restore();
       return rows;
+    };
+  }
+  // Mark label rows and diamond heights as plain option values, set after layout and before the annotation
+  // plugin resolves them, so an update resolves no per-label functions.
+  function markLayoutPlugin(rowsOf, labels, handles) {
+    return {
+      id: 'markLayout',
+      afterLayout(chart) {
+        const rows = rowsOf(chart);
+        for (let i = 0; i < labels.length; i++) {
+          const r = rows[i];
+          labels[i].display = r < 3;
+          labels[i].yAdjust = 18 + 20 * r;
+        }
+        const top = chart.scales.y ? chart.scales.y.max : 0;
+        for (const h of handles) h.yValue = top;
+      },
     };
   }
 
@@ -8375,6 +8395,7 @@
     const hrOverlays = [];
     const annotations = {};
     let idCounter = 0;
+    let markLayout = null;
 
     if (currentQuadRanges) {
       const QUAD_LABELS = {
@@ -8447,12 +8468,17 @@
       const markColour = rootStyle.getPropertyValue('--text').trim() || 'white';
       const bgColour = rootStyle.getPropertyValue('--bg').trim() || 'black';
       const labelRows = markLabelRows(viewMarks(s).events.map((e) => ({ t: e.t, text: parseMark(e.label).label })));
-      viewMarks(s).events.forEach((e, li) => {
+      const markLabels = [], markHandles = [];
+      markLayout = markLayoutPlugin(labelRows, markLabels, markHandles);
+      viewMarks(s).events.forEach((e) => {
         const mark = parseMark(e.label);
         const eLabel = mark.label;
         const eTime = formatDuration(e.t);
         const tick = mark.kind === 'context';
-        const row = (c) => labelRows(c.chart)[li];
+        const label = tick
+          ? { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: tickColour, font: { size: 12, weight: '500' }, padding: 4 }
+          : { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: markColour, font: { size: 12, weight: '600' }, padding: 4 };
+        markLabels.push(label);
         annotations['ev_' + idCounter++] = {
           type: 'line',
           xScaleID: 'x',
@@ -8461,25 +8487,28 @@
           borderColor: tick ? tickColour : markColour,
           borderWidth: tick ? 1 : 1.25,
           borderDash: tick ? [4, 4] : undefined,
-          label: tick
-            ? { display: (c) => row(c) < 3, content: eLabel, position: 'end', yAdjust: (c) => 18 + 20 * row(c), backgroundColor: bgColour, color: tickColour, font: { size: 12, weight: '500' }, padding: 4 }
-            : { display: (c) => row(c) < 3, content: eLabel, position: 'end', yAdjust: (c) => 18 + 20 * row(c), backgroundColor: bgColour, color: markColour, font: { size: 12, weight: '600' }, padding: 4 },
+          label,
           enter: (ctx, evt) => annoEnter(e.t, `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`, evt),
           leave: annoLeave,
         };
-        // Diamond handle at the top of a user mark.
-        if (!tick) annotations['mk_' + idCounter++] = {
-          type: 'point',
-          xScaleID: 'x', yScaleID: 'y',
-          xValue: e.t,
-          yValue: (c) => c.chart.scales.y.max,
-          yAdjust: 7,
-          pointStyle: 'rectRot',
-          radius: 6,
-          backgroundColor: markColour,
-          borderColor: bgColour,
-          borderWidth: 1.5,
-        };
+        // Diamond handle at the top of a user mark; the top follows the y axis, so it never widens it.
+        if (!tick) {
+          const handle = {
+            type: 'point',
+            xScaleID: 'x', yScaleID: 'y',
+            xValue: e.t,
+            yValue: 0,
+            adjustScaleRange: false,
+            yAdjust: 7,
+            pointStyle: 'rectRot',
+            radius: 6,
+            backgroundColor: markColour,
+            borderColor: bgColour,
+            borderWidth: 1.5,
+          };
+          markHandles.push(handle);
+          annotations['mk_' + idCounter++] = handle;
+        }
       });
     }
     if (activeFilters.flush && s.flushes) {
@@ -8709,7 +8738,7 @@
           }
         },
       },
-      plugins: [HR_OVERLAY_PLUGIN],
+      plugins: markLayout ? [HR_OVERLAY_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN],
     });
   }
 

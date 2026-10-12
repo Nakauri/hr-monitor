@@ -142,7 +142,9 @@ function selfTimes(profile, top = 8) {
     const k = (cf.functionName || '(anon)') + ' ' + lineOf(cf);
     self.set(k, (self.get(k) || 0) + (dts[i + 1] || dts[i] || 0) / 1000);
   }
-  return [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, v]) => [k, +v.toFixed(1)]);
+  const byFile = {};
+  for (const [k, v] of self) { const f = k.split(' ')[1].split(':')[0]; byFile[f] = +((byFile[f] || 0) + v).toFixed(1); }
+  return { top: [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, v]) => [k, +v.toFixed(1)]), byFile };
 }
 
 let fails = 0, passes = 0;
@@ -214,7 +216,7 @@ async function runConfig(name, W, CPU) {
     const cnt = Object.fromEntries(Object.entries(p.cnt).map(([k, v]) => [k, typeof v === 'number' && !Number.isInteger(v) ? +v.toFixed(1) : v]));
     const upd = cnt['update:main'] || 0;
     const r = { wallMs: wall, longTasks: lts.length, longestMs: Math.round(Math.max(0, ...lts)), tbtMs: Math.round(lts.reduce((a, d) => a + Math.max(0, d - 50), 0)),
-      frames: fr, counts: cnt, msPerUpdate: upd ? +(cnt['updateMs:main'] / upd).toFixed(1) : null, topSelf: selfTimes(profile), extra };
+      frames: fr, counts: cnt, msPerUpdate: upd ? +(cnt['updateMs:main'] / upd).toFixed(1) : null, topSelf: selfTimes(profile, 12), extra };
     if (COUNTS) r.calls = await coverage();
     results.actions[aname] = r;
     console.log(`  ${name} ${aname}`, JSON.stringify({ lt: r.longTasks, longest: r.longestMs, tbt: r.tbtMs, worstFrame: fr && fr.worst, upd, perUpd: r.msPerUpdate, inInput: cnt['updateInInput:main'] || 0, maxPerFrame: fr && fr.maxPerFrame, draw: cnt['draw:main'] || 0 }));
