@@ -8846,7 +8846,7 @@
         // palp cluster or event nearby — instead of separate popups per line.
         interaction: { mode: 'index', intersect: false, axis: 'x' },
         plugins: {
-          legend: { display: false },
+          legend: false,
           tooltip: {
             mode: 'index',
             intersect: false,
@@ -8929,7 +8929,7 @@
           }
         },
       },
-      plugins: [DECIMATION_PLUGIN, HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer, maxMin].filter(Boolean),
+      plugins: [DECIMATION_PLUGIN, TICK_FONT_PLUGIN, HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, RESET_POS_PLUGIN, markLayer, maxMin].filter(Boolean),
     });
   }
 
@@ -9054,6 +9054,23 @@
         // The walk is cheaper below about 32 points per column.
         dataset._decimated = ix && count > 32 * W ? decimateMinMax(data, ix, start, count, W) : minMaxWalk(data, start, count, W);
       });
+    },
+  };
+  // Tick fonts here are plain options, the same for every tick: Chart.js 4.4.0 resolves them once per tick
+  // (Scale._resolveTickFontOptions); this resolves them once per scale per update.
+  const TICK_FONT_PLUGIN = {
+    id: 'hrTickFont',
+    beforeLayout(chart) {
+      for (const sc of Object.values(chart.scales)) {
+        if (sc.$tickFont) continue;
+        const orig = sc._resolveTickFontOptions;
+        if (typeof orig !== 'function') continue;
+        sc.$tickFont = true;
+        sc._resolveTickFontOptions = function (i) {
+          if (this.$tfFor !== this.options) { this.$tfFor = this.options; this.$tf = orig.call(this, i); }
+          return this.$tf;
+        };
+      }
     },
   };
   // The original walk, for data the block index does not cover.
