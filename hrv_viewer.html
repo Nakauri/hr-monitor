@@ -3661,14 +3661,17 @@
     const stds = new Array(hr.length).fill(null);
     const winMeans = new Array(hr.length).fill(null);
     for (let i = 0; i < hr.length; i++) {
-      const samples = [];
-      for (let j = i; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) {
-        if (hr[j].v != null) samples.push(hr[j].v);
+      let n = 0, sum = 0, j = i;
+      for (; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) {
+        if (hr[j].v != null) { sum += hr[j].v; n++; }
       }
-      if (samples.length < 10) continue;
-      const m = samples.reduce((a, b) => a + b, 0) / samples.length;
-      const variance = samples.reduce((s, v) => s + (v - m) * (v - m), 0) / samples.length;
-      stds[i] = Math.sqrt(variance);
+      if (n < 10) continue;
+      const m = sum / n;
+      let sq = 0;
+      for (let q = i; q > j; q--) {
+        if (hr[q].v != null) { const d = hr[q].v - m; sq += d * d; }
+      }
+      stds[i] = Math.sqrt(sq / n);
       winMeans[i] = m;
     }
     const nonNull = stds.filter(v => v != null).sort((a, b) => a - b);
@@ -4329,21 +4332,29 @@
     return out.sort((a, b) => a.start - b.start);
   }
 
+  // A day rebuilds only when a recording's summary or data object, the thresholds or the marks change.
+  const _dayMemo = new Map();
   async function buildDaySession(iso) {
     const files = (sessionsByDate[iso] || []).slice();
     if (!files.length) return null;
     const { start: startOfDay, end: dayEndMs } = dayWindow(iso);
     const DAY_MAX = (dayEndMs - startOfDay) / 60000;
 
-    const loaded = await Promise.all(files.map(async fn => {
-      try {
-        const d = await loadFullSession(fn);
-        return { fn, hr: d.hr || [], rmssd: d.rmssd || [], sdnnMatch: d.sdnnMatch || [], sdnn5min: d.sdnn5min || [] };
-      } catch (e) {
-        console.warn('[buildDaySession] load failed', fn, e);
-        return { fn, hr: [], rmssd: [], sdnnMatch: [], sdnn5min: [] };
-      }
+    const raw = await Promise.all(files.map(async fn => {
+      try { return await loadFullSession(fn); }
+      catch (e) { console.warn('[buildDaySession] load failed', fn, e); return null; }
     }));
+    const memoKey = [JSON.stringify(QUADRANT_THRESH), marksVersion];
+    for (let i = 0; i < files.length; i++) memoKey.push(files[i], sessionsIndex[files[i]], raw[i]);
+    const memo = _dayMemo.get(iso);
+    if (memo && memo.key.length === memoKey.length && memo.key.every((k, i) => k === memoKey[i]) && virtualSessions['day:' + iso] === memo.entry) {
+      return memo.entry.summary;
+    }
+    const loaded = files.map((fn, i) => {
+      const d = raw[i];
+      return d ? { fn, hr: d.hr || [], rmssd: d.rmssd || [], sdnnMatch: d.sdnnMatch || [], sdnn5min: d.sdnn5min || [] }
+        : { fn, hr: [], rmssd: [], sdnnMatch: [], sdnn5min: [] };
+    });
 
     // Match the shape loadFullSession returns: {x, y, ep}. The chart code and
     // several downstream helpers read .x / .y directly; using {t, v} silently
@@ -4552,42 +4563,10 @@
       __virtualDay: iso,
       __sourceFiles: files.slice(),
     };
-    virtualSessions['day:' + iso] = { summary, data: { hr, rmssd } };
+    const entry = { summary, data: { hr, rmssd } };
+    virtualSessions['day:' + iso] = entry;
+    _dayMemo.set(iso, { key: memoKey, entry });
     return summary;
-  }
-
-  function downsample(series, target) {
-    if (series.length <= target) return series;
-    // Min/max-preserving bucket downsample. For each bucket we emit both
-    // the minimum and the maximum (in time order) so brief dips and spikes
-    // survive into the rendered line. A naive strided pick hides genuine
-    // extremes — e.g. a 58 bpm dip between two 67 bpm samples vanishes
-    // and the summary card disagrees with the chart. Null gap-markers
-    // pass through unchanged so chart breaks stay at their real times.
-    const buckets = Math.max(1, Math.floor(target / 2));
-    const step = series.length / buckets;
-    const out = [];
-    for (let i = 0; i < buckets; i++) {
-      const lo = Math.floor(i * step);
-      const hi = Math.min(series.length, Math.floor((i + 1) * step));
-      let minP = null, maxP = null;
-      const nulls = [];
-      for (let j = lo; j < hi; j++) {
-        const p = series[j];
-        if (!p) continue;
-        if (p.v == null) { nulls.push(p); continue; }
-        if (minP == null || p.v < minP.v) minP = p;
-        if (maxP == null || p.v > maxP.v) maxP = p;
-      }
-      const bucketOut = [];
-      if (minP && maxP && minP !== maxP) { bucketOut.push(minP, maxP); }
-      else if (minP) { bucketOut.push(minP); }
-      for (const n of nulls) bucketOut.push(n);
-      bucketOut.sort((a, b) => a.t - b.t);
-      for (const p of bucketOut) out.push(p);
-    }
-    if (series.length > 0) out.push(series[series.length - 1]);
-    return out;
   }
 
   // ===== Router =====
@@ -5930,12 +5909,12 @@
     const data = await loadFullSession(filename);
     currentData = data;
     currentQuadRanges = computeQuadrantRanges(data);
-    // Sleep detection needs full data — only run here (not indexed for all sessions).
-    s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
-    // Noteworthy windows: sustained HR / HRV departures from the session median.
-    // Runs once per session view; results are attached to the summary for
-    // renderInsight to consume.
-    s.noteworthy = detectNoteworthyMoments(data.hr, data.rmssd);
+    // Sleep and noteworthy windows need the full data; a summary reopened on the same data keeps them.
+    if (s.__detectedFor !== data) {
+      s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
+      s.noteworthy = detectNoteworthyMoments(data.hr, data.rmssd);
+      s.__detectedFor = data;
+    }
     // Reset toggles + brush state on every new session open so prior values don't
     // carry across (previously caused out-of-range zoom glitches on short sessions).
     activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
@@ -6508,6 +6487,10 @@
     return n % 2 ? s[(n - 1) >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2;
   }
 
+  function sameWindows(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    return a.every((w, i) => w === b[i] || JSON.stringify(w) === JSON.stringify(b[i]));
+  }
   function wireChillsSlider() {
     const slider = document.getElementById('chills-tune-slider');
     const label = document.getElementById('chills-tune-value');
@@ -6525,14 +6508,18 @@
     slider.value = saved;
     label.textContent = saved.toFixed(1) + '×';
     if (currentData && currentSummary) {
-      // Detect candidate pool ONCE per session. The slider filters this pool.
-      // The detector's `ratioThreshold` arg only affects the per-sample stdOk
-      // gate; we pass 1.0 to be maximally permissive at the gate level.
-      currentSummary._chillsAll = detectChillsWindows(toDetectorShape(currentData.hr), 1.0, toDetectorShape(currentData.rmssd));
+      // One candidate pool per data object; the slider filters it. Ratio 1.0 keeps the gate permissive.
+      if (currentSummary._chillsFor !== currentData) {
+        currentSummary._chillsAll = detectChillsWindows(toDetectorShape(currentData.hr), 1.0, toDetectorShape(currentData.rmssd));
+        currentSummary._chillsFor = currentData;
+      }
+      const shown = currentSummary.chillsWindows;
       currentSummary.chillsWindows = filterByRatio(currentSummary._chillsAll, saved);
-      renderInsight(currentSummary);
-      renderMarkerList(currentSummary);
-      drawSessionChart(currentSummary, currentData);
+      if (!sameWindows(shown, currentSummary.chillsWindows)) {
+        renderInsight(currentSummary);
+        renderMarkerList(currentSummary);
+        drawSessionChart(currentSummary, currentData);
+      }
     }
     let debounce;
     slider.addEventListener('input', () => {
@@ -8394,16 +8381,22 @@
     };
   }
 
+  const _gapBroken = new WeakMap();
   function drawSessionChart(s, data) {
     const ctx = document.getElementById('session-chart').getContext('2d');
     if (currentChart) currentChart.destroy();
 
     // On the Day view the lines break inside each gap between and within recordings.
-    const breakAtGaps = (arr) => s.__virtualDay && (s.connGaps || []).length
-      ? arr.concat(s.connGaps.map(g => ({ x: (g.start + g.end) / 2, y: null }))).sort((a, b) => a.x - b.x)
-      : arr;
-    const hr = breakAtGaps(downsample(data.hr, 2000));
-    const rmssd = breakAtGaps(downsample(data.rmssd, 2000));
+    const breakAtGaps = (arr) => {
+      if (!s.__virtualDay || !(s.connGaps || []).length) return arr;
+      const hit = _gapBroken.get(arr);
+      if (hit && hit.gaps === s.connGaps) return hit.out;
+      const out = arr.concat(s.connGaps.map(g => ({ x: (g.start + g.end) / 2, y: null }))).sort((a, b) => a.x - b.x);
+      _gapBroken.set(arr, { gaps: s.connGaps, out });
+      return out;
+    };
+    const hr = breakAtGaps(data.hr);
+    const rmssd = breakAtGaps(data.rmssd);
     // Session start epoch — lets the x-axis flip between MM:SS duration and
     // absolute wall-clock time. Prefer the CSV's epoch_ms column (s.startEpoch)
     // since the filename string is UTC for web-recorded sessions but LOCAL
@@ -8810,10 +8803,14 @@
     const dur = s.duration || 1;
     const pts = (data.hr || []).filter(p => p && p.y != null && isFinite(p.x));
     const gaps = s.connGaps || [];
+    let drawn = '';
     const draw = () => {
       const w = canvas.clientWidth, h = canvas.clientHeight;
       if (!w || !h) return;
       const dpr = window.devicePixelRatio || 1;
+      // The observer's first callback and same-size resizes repaint nothing new.
+      if (drawn === w + 'x' + h + '@' + dpr) return;
+      drawn = w + 'x' + h + '@' + dpr;
       canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
       const ctx = canvas.getContext('2d');
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
