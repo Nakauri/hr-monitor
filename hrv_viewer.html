@@ -240,8 +240,8 @@
     position: relative;
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px 20px;
+    border-radius: 14px;
+    padding: var(--card-pad);
     cursor: pointer;
     transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
   }
@@ -457,11 +457,11 @@
   .datenav-open { color: var(--text-dim); }
   .day-title .t-short, .month-title .t-short { display: none; }
   /* Jump picker: a month of days, or a year of months. A bottom sheet on the phone, a popover under the title on a laptop. */
-  .sheet-root.date-pop { align-items: flex-start; justify-content: flex-start; padding: 0; }
-  .date-pop .sheet-scrim { background: transparent; }
-  .date-pop .sheet { position: absolute; width: 340px; max-width: calc(100vw - 16px); border-radius: var(--r-menu); box-shadow: var(--shadow-2); }
-  .date-pop .sheet-head { display: none; }
-  .date-pop .sheet-body { padding: var(--s3); }
+  .sheet-root:is(.date-pop, .layers-pop) { align-items: flex-start; justify-content: flex-start; padding: 0; }
+  :is(.date-pop, .layers-pop) .sheet-scrim { background: transparent; }
+  :is(.date-pop, .layers-pop) .sheet { position: absolute; width: 340px; max-width: calc(100vw - 16px); border-radius: var(--r-menu); box-shadow: var(--shadow-2); }
+  :is(.date-pop, .layers-pop) .sheet-head { display: none; }
+  :is(.date-pop, .layers-pop) .sheet-body { padding: var(--s3); }
   .dp-head { display: flex; align-items: center; gap: var(--s1); margin-bottom: var(--s1); }
   .dp-label { flex: 1 1 auto; text-align: center; font-size: var(--t16); font-weight: 600; color: var(--text); }
   .dp-dow, .dp-grid { display: grid; grid-template-columns: repeat(7, minmax(44px, 1fr)); }
@@ -575,44 +575,12 @@
   }
 
   /* SESSION DETAIL VIEW */
-  .session-layout {
-    display: grid;
-    grid-template-columns: 1fr 340px;
-    gap: 22px;
-    position: relative;
-  }
-  .session-layout.sidebar-collapsed {
-    grid-template-columns: 1fr 0px;
-    gap: 0;
-  }
-  .session-layout.sidebar-collapsed .session-sidebar {
-    padding-left: 0;
-    padding-right: 0;
-    border-width: 0;
-    overflow: hidden;
-    opacity: 0;
-    pointer-events: none;
-  }
-  /* Toggle sits on the boundary between the chart and the markers panel.
-     Acts as a visible "divider handle" — moves to the right edge when sidebar collapses. */
-  .sidebar-toggle {
-    position: absolute;
-    top: 14px;
-    right: calc(340px + 11px); /* centred in the 22 px gap so the 44 px button clears the sidebar text */
-    transform: translateX(50%);
-    z-index: 15;
-    background: var(--bg-raised);
-    transition: right 0.22s ease;
-  }
-  .sidebar-toggle .ico { transition: transform 0.2s; }
-  /* Rotate icon to signal direction the sidebar will move */
-  .session-layout.sidebar-collapsed .sidebar-toggle {
-    right: 0;
-    transform: translateX(0);
-  }
-  .session-layout.sidebar-collapsed .sidebar-toggle .ico {
-    transform: rotate(180deg);
-  }
+  /* Day cards: one padding and one gap. */
+  :root { --card-pad: var(--s4); --card-gap: var(--s4); --drawer-w: 340px; }
+  #view-day:not(.hidden) { display: flex; flex-direction: column; gap: var(--card-gap); }
+  #view-day > * { margin-block: 0; }
+  #view-day .sessions-grid { gap: var(--card-gap); margin: 0; }
+  .session-layout { position: relative; }
   .session-main {
     display: flex;
     flex-direction: column;
@@ -623,14 +591,26 @@
     background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 18px;
+    padding: var(--s3) var(--card-pad) var(--card-pad);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     min-height: 0;
   }
   /* The row takes the chart column's height; the markers panel fills it and its list scrolls. */
-  .session-layout > .session-sidebar { contain: size; }
+  /* Laptop: the markers panel is a drawer over the chart card's right edge, under the tools row; the chart keeps its width. */
+  .session-layout > .session-sidebar {
+    position: absolute; z-index: 5; right: var(--card-pad); bottom: var(--card-pad); width: var(--drawer-w);
+    top: calc(var(--card-pad) + var(--target) + var(--s3));
+    border-color: var(--border-control); box-shadow: var(--shadow-2); visibility: hidden;
+  }
+  .session-layout.markers-on > .session-sidebar { visibility: visible; }
+  .session-layout.markers-on .chart-wrap .reset-zoom { right: max(var(--plot-right, 8px), calc(var(--drawer-w) + var(--s2))); }
+  .sidebar-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-bottom: var(--s2); }
+  .sidebar-top .sidebar-head { margin: 0; }
+  .session-sidebar:focus { outline: none; }
+  .markers-sheet .sidebar-top { display: none; }
+  .chart-tools .markers-toggle { gap: var(--s2); }
   .session-layout > .session-sidebar .marker-list { flex: 1 1 0; max-height: none; }
 
   /* Summary header: a fixed grid of stats, neutral values, kebab top right. */
@@ -638,7 +618,7 @@
     background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 16px 64px 16px 20px;
+    padding: var(--card-pad) calc(var(--card-pad) + 48px) var(--card-pad) var(--card-pad);
     position: relative;
   }
   /* Every column is as wide as the widest visible stat (--kpi-col, set by fitSummaryStats), so one gap token sits between every pair. */
@@ -657,7 +637,7 @@
     font-weight: 600;
     color: var(--text);
   }
-  .summary-bar-kebab { position: absolute; top: 8px; right: 8px; z-index: 2; color: var(--text-dim); }
+  .summary-bar-kebab { position: absolute; top: calc(var(--card-pad) - var(--s2)); right: calc(var(--card-pad) - var(--s2)); z-index: 2; color: var(--text-dim); }
   .summary-bar-kebab:hover, .summary-bar-kebab[aria-expanded="true"] { color: var(--text); background: var(--selected-fill); }
   .summary-bar-menu {
     position: absolute;
@@ -712,7 +692,7 @@
     background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 20px 22px;
+    padding: var(--card-pad);
     display: flex;
     flex-direction: column;
     position: relative;
@@ -778,20 +758,14 @@
   .chart-wrap .reset-zoom.hidden { display: none; }
   .markers-open { gap: var(--s2); }
 
-  /* Layer chips under the strip: on = ring and fill, off = dim outline. */
-  /* Columns sized in em so larger text gives fewer, equal columns. */
-  /* Column counts divide the chip count, so a wrap never leaves one chip alone on a row. */
-  .layer-toggles { --lc: 2; grid-template-columns: repeat(var(--lc), minmax(0, 1fr)); font-size: var(--t14); margin-top: var(--s3); }
-  @container (min-width: 28em) { .layer-toggles { --lc: 3; } }
-  @container (min-width: 38em) { .layer-toggles { --lc: 4; } }
-  @container (min-width: 57em) { .layer-toggles { --lc: 6; } }
-  @container (min-width: 114em) { .layer-toggles { --lc: 12; } }
-  @container (min-width: 48em) { body.no-autonomic .layer-toggles { --lc: 5; } }
-  @container (min-width: 95em) { body.no-autonomic .layer-toggles { --lc: 10; } }
-  .layer-toggles .chip { justify-content: flex-start; gap: var(--s2); min-width: 0; padding: 0 var(--s3); }
-  .layer-toggles .chip[aria-pressed="false"] { color: var(--text-dim); border-color: var(--border); }
-  .layer-toggles .chip:disabled { opacity: .4; cursor: not-allowed; }
-  .layer-toggles .chip .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chart-tools .markers-open { margin-left: auto; }
+  .layer-rows { display: flex; flex-direction: column; gap: var(--s3); font-size: var(--t14); }
+  .layer-group { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+  .layer-group-head { margin: 0; padding: 0 var(--s3); font-size: var(--t14); font-weight: 600; color: var(--text-dim); }
+  .layers-pop .layer-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3) var(--s4); }
+  .layers-pop .layer-group:nth-child(2) { grid-column: 2; grid-row: 1 / span 2; }
+  .layers-pop .sheet { width: 560px; }
+  .layer-rows .chip .none { white-space: nowrap; }
   .sw { flex: 0 0 auto; width: 14px; height: 14px; border-radius: 3px; border: 2px solid currentColor; }
   .sw-hr { color: var(--stage-4); }
   .sw-rmssd { color: var(--hrv); height: 0; border-width: 2px 0 0; border-style: dashed; border-radius: 0; }
@@ -869,13 +843,13 @@
   .interp-panel {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px 18px;
+    border-radius: 14px;
     font-size: 13px;
     line-height: 1.55;
   }
-  .interp-head { justify-content: space-between; font: 600 var(--t14)/1.3 var(--ui-face); color: var(--text); }
-  .interp-body { margin-top: 8px; }
+  .interp-head, .insight-master-head { min-height: 44px; padding: var(--card-pad); font: 600 var(--t14)/1.3 var(--ui-face); letter-spacing: normal; color: var(--text); }
+  .interp-head { justify-content: space-between; }
+  .interp-body { padding: 0 var(--card-pad) var(--card-pad); }
   .interp-panel.collapsed .interp-body { display: none; }
   .interp-caret { width: 16px; height: 16px; transition: transform 0.2s; }
   .interp-panel.collapsed .interp-caret { transform: rotate(-90deg); }
@@ -972,20 +946,15 @@
   .insight-box {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 14px;
     overflow: hidden;
   }
   .insight-master-head {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 16px 20px;
     cursor: pointer;
     user-select: none;
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: var(--text);
     transition: background 0.12s;
   }
   .insight-master-head:hover { background: rgba(255,255,255,0.02); }
@@ -1018,7 +987,7 @@
     font-weight: 700;
     letter-spacing: 0.03em;
     color: var(--text);
-    padding: 12px 20px;
+    padding: 12px var(--card-pad);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1139,10 +1108,6 @@
 
   /* Sidebar */
   .sidebar-head { margin: 0 0 12px; font-size: var(--t14); font-weight: 600; color: var(--text); }
-  .filter-chips { grid-template-columns: repeat(auto-fill, minmax(6.5em, 1fr)); margin-bottom: 14px; }
-  .filter-chips .chip { min-width: 0; padding: 0 var(--s2); }
-  .filter-chips .chip[aria-pressed="false"] { color: var(--text-dim); border-color: var(--border); }
-  .filter-chips .chip:disabled { opacity: .4; cursor: not-allowed; }
   .marker-list {
     overflow-y: auto;
     /* Bounded height so the sidebar doesn't stretch down indefinitely when a
@@ -1158,13 +1123,16 @@
     gap: 10px;
     min-height: 44px;
     padding: 0 4px 0 12px;
-    border-radius: 8px;
+    border-radius: 4px 8px 8px 4px;
     cursor: pointer;
     font-size: var(--t14);
     transition: background 0.12s, transform 0.1s, padding 0.1s;
-    border-left: 3px solid transparent;
+    position: relative;
+    padding-left: 16px;
     line-height: 1.4;
   }
+  /* Left corners match the 4 px strip, so its inner edge is straight from top to bottom. */
+  .marker-item::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(to right, var(--strip, transparent) 4px, transparent 4px); }
   /* Selected by a click: white ring plus the selected fill. */
   .marker-item[aria-current="true"] { background: var(--selected-fill); box-shadow: inset 0 0 0 1px var(--action); }
   .mk-go { gap: 10px; flex: 1 1 auto; min-width: 0; }
@@ -1182,53 +1150,53 @@
   .mark-editor .field input { min-height: 44px; }
   .mark-editor .segmented > button { flex: 1 1 auto; }
   .mark-editor .err { margin: 0; font-size: var(--t12); color: var(--warn-high); }
-  .markers-open { display: none; }
   .markers-sheet .session-sidebar { background: none; border: 0; padding: 0; overflow: visible; }
   .markers-sheet .sidebar-head { margin: var(--s4) 0 var(--s2); font-size: var(--t16); font-weight: 600; color: var(--text); }
-  .markers-sheet .filter-chips { display: none; }
   .markers-sheet .marker-list { max-height: none; min-height: 0; }
-  /* Layer toggles in the sheet: full-width rows. */
-  .markers-sheet .layer-toggles { grid-template-columns: 1fr; margin-top: 0; }
   .layer-chip .none { display: none; }
-  .markers-sheet .layer-toggles .chip,
-  .markers-sheet .layer-toggles .chip[aria-pressed] {
+  .layer-rows .chip,
+  .layer-rows .chip[aria-pressed] {
     position: relative; min-height: 44px; padding: 0 var(--s3); color: var(--text); font-weight: 500;
-    background: transparent; border-color: var(--border); box-shadow: none; opacity: 1;
+    justify-content: flex-start; gap: var(--s2); min-width: 0;
+    background: transparent; border-color: transparent; box-shadow: none; opacity: 1;
   }
-  .markers-sheet .layer-toggles .chip .lbl { flex: 1 1 auto; text-align: left; }
-  .markers-sheet .layer-toggles .chip:disabled .none { display: inline; font-size: var(--t12); color: var(--text-dim); }
-  .markers-sheet .layer-toggles .chip::after {
+  .layer-rows .chip .lbl { flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .layer-rows .chip:hover { background: var(--selected-fill); }
+  .layer-rows .chip:disabled .none { display: inline; font-size: var(--t12); color: var(--text-dim); }
+  .layer-rows .chip::after {
     content: ""; flex: 0 0 auto; width: 18px; height: 18px; box-sizing: border-box;
     border: 2px solid var(--text-dim); border-radius: 3px;
   }
-  .markers-sheet .layer-toggles .chip[aria-pressed="true"]::after { background: var(--action); border-color: var(--action); }
-  .markers-sheet .layer-toggles .chip[aria-pressed="true"]::before {
+  .layer-rows .chip[aria-pressed="true"]::after { background: var(--action); border-color: var(--action); }
+  .layer-rows .chip[aria-pressed="true"]::before {
     content: ""; position: absolute; right: calc(var(--s3) + 3px); top: 50%; width: 12px; height: 12px; margin-top: -6px;
     background: var(--on-fill);
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
   }
-  /* Narrow tools row (200% text): Layers keeps its icon and name for screen readers only. */
-  @container (max-width: 18em) {
-    .chart-tools .markers-open { width: 44px; padding: 0; }
-    .chart-tools .markers-open .lbl { display: none; }
+  /* Narrow tools row (phone, 200% text): Layers and Markers keep their icons, names for screen readers only. */
+  @container (max-width: 30em) {
+    .chart-tools :is(.markers-open, .markers-toggle) { width: 44px; padding: 0; }
+    .chart-tools :is(.markers-open, .markers-toggle) .lbl { display: none; }
+    .chart-panel .chart-tools .axis-mode { gap: var(--s1); }
+    .chart-panel .chart-tools .axis-mode > button { padding: 0 var(--s1); }
   }
   .marker-item:hover,
   .marker-item.chart-hover {
     background: var(--bg-input);
     transform: translateX(2px);
-    padding-left: 14px;
+    padding-left: 18px;
   }
   /* Distinct outline when the highlight is driven by chart hover (bidirectional
      sync) — makes it obvious which row the annotation corresponds to. */
   .marker-item.chart-hover {
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
   }
-  .marker-item.type-event { border-left-color: var(--text); }
-  .marker-item.type-warning { border-left-color: var(--warn-crash); }
-  .marker-item.type-palp { border-left-color: var(--warn-palp); }
-  .marker-item.type-delta { border-left-color: #B48CFF; }
-  .marker-item.type-disconnect { border-left-color: var(--text-dim); }
+  .marker-item.type-event { --strip: var(--text); }
+  .marker-item.type-warning { --strip: var(--warn-crash); }
+  .marker-item.type-palp { --strip: var(--warn-palp); }
+  .marker-item.type-delta { --strip: #B48CFF; }
+  .marker-item.type-disconnect { --strip: var(--text-dim); }
   .marker-time {
     color: var(--text-dim);
     font-family: var(--mono);
@@ -1278,10 +1246,10 @@
   .session-top-row .back-link { margin: 0; }
 
   /* Auto-detected autonomic-event markers (chills-like volatility, sympathetic flush) */
-  .marker-item.type-flush { border-left-color: #E8A858; }
-  .marker-item.type-chills { border-left-color: #85B7EB; }
-  .marker-item.type-posture { border-left-color: #c8a8e6; }
-  .marker-item.type-sleep { border-left-color: #6E8CC8; }
+  .marker-item.type-flush { --strip: #E8A858; }
+  .marker-item.type-chills { --strip: #85B7EB; }
+  .marker-item.type-posture { --strip: #c8a8e6; }
+  .marker-item.type-sleep { --strip: #6E8CC8; }
   /* Chills sensitivity slider (session view sidebar) */
   .chills-tune {
     margin-top: 10px;
@@ -1410,40 +1378,34 @@
     .drive-pop { right: var(--s2); }
     main { height: auto; min-height: calc(100vh - 110px); }
     .view { padding: 16px 14px; }
-    .session-layout {
-      grid-template-columns: 1fr !important;
-      max-height: none !important;
-      gap: 14px;
-    }
-    .session-layout.sidebar-collapsed { grid-template-columns: 1fr !important; }
+    :root { --card-pad: var(--s3); --card-gap: var(--s3); }
     /* Let the sidebar breathe on mobile — the whole page scrolls so there's
        no benefit to capping the sidebar. Cap only the marker list internally
        so it doesn't run longer than the viewport if a session has hundreds
        of markers. */
     .session-layout > .session-sidebar { display: none; }
-    .markers-open { display: inline-flex; }
-    .sidebar-toggle { display: none; }
-    .summary-bar { padding: 8px 56px 14px 14px; cursor: pointer; min-height: 60px; }
+    .summary-bar { padding: var(--card-pad) calc(var(--card-pad) + 44px) var(--card-pad) var(--card-pad); cursor: pointer; min-height: 60px; }
+    .summary-bar-kebab { top: var(--card-pad); }
     .summary-grid { row-gap: var(--s3); margin-top: 4px; }
     .summary-stat-value { font-size: 22px; }
     .summary-bar-title { display: flex; }
     /* Collapsed: the key numbers stay, without their sub-lines. */
-    .summary-bar.collapsed { padding: 0 56px 12px 14px; min-height: 56px; }
+    .summary-bar.collapsed { min-height: 56px; }
     .summary-bar.collapsed .summary-grid { grid-template-columns: repeat(auto-fit, minmax(min(var(--kpi-col, 3.75em), 100%), 1fr)); row-gap: var(--s2); margin-top: 0; }
     .summary-bar.collapsed .summary-stat:not([data-stat="hrAvg"], [data-stat="hrMax"], [data-stat="hrMin"], [data-stat="rmssdAvg"]),
     .summary-bar.collapsed .summary-stat-unit { display: none; }
     .chart-wrap { min-height: 260px; }
     /* One tools row: Clock and Duration, then Layers; Reset zoom sits on the chart's top corner while zoomed. */
-    .chart-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--s3); }
+    .chart-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--s3) var(--s1); }
     .chart-panel > * { grid-column: 1 / -1; }
     .chart-tools { display: contents; }
     .chart-tools .axis-mode { grid-row: 1; grid-column: 1; justify-self: start; flex-wrap: nowrap; }
     .chart-tools .axis-mode > button { padding: 0 var(--s2); }
     .chart-tools .markers-open { grid-row: 1; grid-column: 2; justify-self: end; }
+    .chart-tools .markers-toggle { grid-row: 1; grid-column: 3; }
     .chart-panel > .chart-wrap { grid-row: 2; }
     .chart-panel > .context-wrap { grid-row: 3; margin-top: 0; }
     .chart-panel > .gaps-note { grid-row: 4; margin: 0; }
-    .chart-panel > .layer-toggles { display: none; }
     .datenav .day-title .t-long { display: none; }
     .datenav .day-title .t-short { display: inline; }
     .datenav .month-title .t-long { display: none; }
@@ -1497,7 +1459,6 @@
     .view { padding: 12px 10px; }
     .summary-stat-value { font-size: 20px; }
     .session-top-row { flex-direction: column; align-items: flex-start; gap: 8px; }
-    .chart-panel { padding: 12px 14px; }
     .week-grid { grid-template-columns: 1fr; }
     .cal-cell { padding: 4px; border-radius: 6px; }
     .cal-cell .cal-hr { font-size: 14px; }
@@ -4663,6 +4624,7 @@
     // restarts it if the next view is also an explorer.
     if (view !== 'session' && view !== 'day' && typeof clearAutoPoll === 'function') clearAutoPoll();
     if (view !== 'session' && view !== 'day' && markersSheet && !markersSheet.closed) markersSheet.close('route');
+    if (view !== 'session' && view !== 'day' && layersSheet && !layersSheet.closed) layersSheet.close('route');
     switch (view) {
       case 'index': renderIndex(); showOnly('view-index'); break;
       case 'session': await renderSession(arg); showOnly('view-session'); break;
@@ -5358,6 +5320,7 @@
     const head = headHtml((s && s.recGaps) || []);
     if (!s) {
       if (markersSheet && !markersSheet.closed) markersSheet.close('route');
+      if (layersSheet && !layersSheet.closed) layersSheet.close('route');
       clearExplorer();
       el.innerHTML = head + `<div class="stub-panel">No recordings on this day</div>`;
       wireNav();
@@ -6250,7 +6213,8 @@
                 <button type="button" data-mode="clock">Clock</button>
                 <button type="button" data-mode="duration">Duration</button>
               </div>
-              <button class="btn markers-open" id="markers-open" type="button" aria-haspopup="dialog" aria-label="Layers"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 3 21 8 12 13 3 8 12 3"/><polyline points="3 12 12 17 21 12"/><polyline points="3 16 12 21 21 16"/></svg><span class="lbl">Layers</span></button>
+              <button class="btn markers-open" id="markers-open" type="button" aria-haspopup="dialog" aria-label="Layers"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 3 21 8 12 13 3 8 12 3"/><polyline points="3 12 12 17 21 12"/><polyline points="3 16 12 21 21 16"/></svg><span class="lbl">Layers<span class="n"></span></span></button>
+              <button class="btn markers-toggle" id="markers-toggle" type="button" aria-expanded="false" aria-controls="markers-panel" aria-label="Markers"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span class="lbl">Markers<span class="n"></span></span></button>
             </div>
             <div class="chart-wrap">
               <canvas id="session-chart" role="img" aria-label="Heart rate and HRV"></canvas>
@@ -6263,25 +6227,13 @@
               <div class="context-brush" id="context-brush"></div>
               <div class="context-overlay" id="context-overlay" role="slider" aria-label="Zoom window" tabindex="-1"></div>
             </div>
-            <div class="chip-row layer-toggles ui" id="layer-chips" role="group" aria-label="Layers">${layerChipsHTML()}</div>
             ${opts.chartNote || ''}
           </div>
         </div>
-        <button class="ui btn icon sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Markers panel">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
-        </button>
-        <div class="session-sidebar ui">
-          <h2 class="sidebar-head">Markers</h2>
-          <div class="filter-chips chip-row" data-wrap-group>
-            <button type="button" class="chip filter-chip" data-type="event">Marks</button>
-            <button type="button" class="chip filter-chip" data-type="warning">Warnings</button>
-            <button type="button" class="chip filter-chip" data-type="palp">Palps</button>
-            <button type="button" class="chip filter-chip" data-type="delta">HR shifts</button>
-            <button type="button" class="chip filter-chip" data-type="flush">Flushes</button>
-            <button type="button" class="chip filter-chip" data-type="chills">Chills</button>
-            <button type="button" class="chip filter-chip" data-type="posture">Posture</button>
-            <button type="button" class="chip filter-chip" data-type="sleep">Sleep</button>
-            <button type="button" class="chip filter-chip" data-type="disconnect">Gaps</button>
+        <div class="session-sidebar ui" id="markers-panel" role="region" aria-labelledby="markers-head" tabindex="-1">
+          <div class="sidebar-top">
+            <h2 class="sidebar-head" id="markers-head">Markers</h2>
+            <button class="btn icon drawer-close" id="markers-close" type="button" aria-label="Close markers">${UI.icon('close')}</button>
           </div>
           <div class="markers-actions" id="markers-actions" hidden>
             <button class="btn" id="add-sleep" type="button">Add sleep</button>
@@ -6322,15 +6274,15 @@
     `;
 
     pinnedMarkT = null;
-    // An open phone markers sheet keeps showing the panel after a re-render.
+    // An open Layers or phone Markers surface keeps showing after a re-render.
     if (markersSheet && !markersSheet.closed) {
       const fresh = el.querySelector('#session-layout > .session-sidebar');
-      const freshChips = el.querySelector('.chart-panel > #layer-chips');
       if (fresh) {
-        markersSheet.body.replaceChildren(...(freshChips ? [freshChips, fresh] : [fresh]));
+        markersSheet.body.replaceChildren(fresh);
         try { markersSheet.sheet.focus({ preventScroll: true }); } catch (e) {}
       }
     }
+    if (layersSheet && !layersSheet.closed) layersSheet.body.replaceChildren(layerRowsEl());
 
     // Apply persisted summary-bar collapse state (mobile-only behaviour but
     // the class is harmless on desktop where stats stay visible).
@@ -6349,29 +6301,38 @@
     drawSessionChart(s, data);
     drawContextChart(s, data);
     wireBrush(s);
-    wireFilterChips();
+    syncFilterUI();
     wireInterpToggle();
-    wireSidebarToggle();
     wireQuadrantToggles();
     wireTags(filename);
     wireChillsSlider();
     wireMarkersPanel();
+    wireMarkersDrawer();
     document.getElementById('reset-zoom').addEventListener('click', resetZoom);
     updateResetZoomVisibility();
     wireTimelineModeToggle();
     startAutoPoll();
   }
 
-  // Layer chips under the chart: one per dataset or overlay family, on the same filters as the markers panel.
-  const LAYERS = [
-    ['hr', 'HR'], ['rmssd', 'HRV'], ['maxmin', 'Max and min'], ['event', 'Marks'],
-    ['warning', 'Warnings'], ['disconnect', 'Gaps'], ['palp', 'Palpitations'], ['delta', 'HR shifts'],
-    ['flush', 'Flushes'], ['chills', 'Chills'], ['posture', 'Posture'], ['sleep', 'Sleep'],
+  // Layers: one row per dataset or overlay family, grouped; they filter the chart and the markers list.
+  const LAYER_GROUPS = [
+    ['Lines', [['hr', 'HR'], ['rmssd', 'HRV'], ['maxmin', 'Max and min']]],
+    ['Events', [['event', 'Marks'], ['warning', 'Warnings'], ['palp', 'Palpitations'], ['delta', 'HR shifts'], ['flush', 'Flushes'], ['chills', 'Chills']]],
+    ['Context', [['disconnect', 'Gaps'], ['posture', 'Posture'], ['sleep', 'Sleep']]],
   ];
-  function layerChipsHTML() {
-    return LAYERS.map(([t, label]) =>
-      `<button type="button" class="chip layer-chip" data-layer="${t}" aria-pressed="false"><span class="sw sw-${t}" aria-hidden="true"></span><span class="lbl">${label}</span><span class="none">None here</span></button>`
-    ).join('');
+  function layerRowsEl() {
+    const box = document.createElement('div');
+    box.className = 'layer-rows ui';
+    box.id = 'layer-chips';
+    box.innerHTML = LAYER_GROUPS.map(([name, rows], g) =>
+      `<div class="layer-group" role="group" aria-labelledby="lg-${g}"><h3 class="layer-group-head" id="lg-${g}">${name}</h3>` +
+      rows.map(([t, label]) => `<button type="button" class="chip layer-chip" data-layer="${t}" aria-pressed="false"><span class="sw sw-${t}" aria-hidden="true"></span><span class="lbl">${label}</span><span class="none">None here</span></button>`).join('') +
+      '</div>').join('');
+    box.addEventListener('click', (e) => {
+      const c = e.target.closest('.layer-chip[data-layer]');
+      if (c && !c.disabled) setFilter(c.dataset.layer, !activeFilters[c.dataset.layer]);
+    });
+    return box;
   }
 
   function wireTimelineModeToggle() {
@@ -7490,6 +7451,8 @@
     items.sort((a, b) => a.t - b.t);
     const el = document.getElementById('marker-list');
     _markerListByT.length = 0;
+    const mn = document.querySelector('#markers-toggle .n');
+    if (mn) mn.textContent = ' · ' + items.length;
     if (!items.length) { el.innerHTML = '<div style="color: var(--text-dim); font-size: 12px; padding: 8px;">No markers to show.</div>'; return; }
     el.innerHTML = items.map((i, n) => `
       <div class="marker-item type-${i.type}${i.user ? ' mine' : ''}" data-t="${i.t}"${i.end != null ? ` data-end="${i.end}"` : ''} data-i="${n}">
@@ -7523,7 +7486,7 @@
 
   // ---- Markers panel (S10b): select, ease, edit, delete with Undo, sleep marks ----
   let pinnedMarkT = null;
-  let markersSheet = null;
+  let markersSheet = null, layersSheet = null;
   let _easeRaf = 0;
   function marksEditable() {
     return !!(marksPage && !isDemoMode() && !marksPage.drive.status().blocked);
@@ -7592,25 +7555,71 @@
     const add = document.getElementById('add-sleep');
     if (add) add.addEventListener('click', () => openSleepEditor(null));
   }
-  // Phone: the layer chips and the markers panel move into the Layers sheet and back.
+  // Layers holds only the layer rows: a popover under its button on a laptop, a sheet on the phone.
+  const phoneTools = () => !window.matchMedia('(min-width: 769px)').matches;
   function openMarkersSheet() {
+    if (layersSheet && !layersSheet.closed) return;
+    const anchor = document.getElementById('markers-open');
+    const phone = phoneTools();
+    const sheet = UI.sheet({
+      title: 'Layers', className: phone ? 'layers-sheet' : 'layers-pop', body: layerRowsEl(),
+      onClose: () => {
+        if (anchor) anchor.setAttribute('aria-expanded', 'false');
+        if (layersSheet === sheet) layersSheet = null;
+      },
+    });
+    layersSheet = sheet;
+    syncFilterUI();
+    if (anchor) anchor.setAttribute('aria-expanded', 'true');
+    if (!phone && anchor) {
+      const r = anchor.getBoundingClientRect(), w = sheet.sheet.offsetWidth;
+      sheet.sheet.style.left = Math.round(Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)) + 'px';
+      sheet.sheet.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - sheet.sheet.offsetHeight - 8))) + 'px';
+      const first = sheet.body.querySelector('.layer-chip:not(:disabled)');
+      try { if (first) first.focus({ preventScroll: true }); } catch (e) {}
+    }
+  }
+  // Phone: the markers panel moves into its own sheet and back; picking a marker closes it (focusMarker).
+  function openPhoneMarkers() {
     const sb = document.querySelector('#session-layout > .session-sidebar');
     if (!sb || (markersSheet && !markersSheet.closed)) return;
-    const chips = document.querySelector('.chart-panel > #layer-chips');
     const sheet = UI.sheet({
-      title: 'Layers', className: 'markers-sheet', body: chips ? [chips, sb] : sb,
+      title: 'Markers', className: 'markers-sheet', body: sb,
       onClose: () => {
         const back = sheet.body.querySelector('.session-sidebar');
         const layout = document.getElementById('session-layout');
         if (back && layout) layout.appendChild(back);
-        const backChips = sheet.body.querySelector('#layer-chips');
-        const strip = document.querySelector('.chart-panel > .context-wrap');
-        if (backChips && strip) strip.after(backChips);
         if (markersSheet === sheet) markersSheet = null;
       },
     });
     markersSheet = sheet;
   }
+  // Laptop markers drawer: it lies over the chart card's right edge, so the chart never resizes.
+  let markersDrawerOpen = false;
+  function setMarkersDrawer(open, refocus) {
+    markersDrawerOpen = !!open;
+    const layout = document.getElementById('session-layout');
+    const btn = document.getElementById('markers-toggle');
+    if (layout) layout.classList.toggle('markers-on', markersDrawerOpen);
+    if (btn && !phoneTools()) btn.setAttribute('aria-expanded', String(markersDrawerOpen));
+    const panel = document.getElementById('markers-panel');
+    if (markersDrawerOpen && refocus && panel) { try { panel.focus({ preventScroll: true }); } catch (e) {} }
+    if (!markersDrawerOpen && refocus && btn) { try { btn.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function wireMarkersDrawer() {
+    const btn = document.getElementById('markers-toggle');
+    if (btn) btn.addEventListener('click', () => { if (phoneTools()) openPhoneMarkers(); else setMarkersDrawer(!markersDrawerOpen, true); });
+    const x = document.getElementById('markers-close');
+    if (x) x.addEventListener('click', () => setMarkersDrawer(false, true));
+    setMarkersDrawer(markersDrawerOpen, false);
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !markersDrawerOpen || document.querySelector('.sheet-root')) return;
+    const layout = document.getElementById('session-layout');
+    if (!layout || !layout.offsetParent) return;
+    e.preventDefault();
+    setMarkersDrawer(false, true);
+  });
 
   const pad2 = (n) => String(n).padStart(2, '0');
   function toLocalInput(ep) {
@@ -8253,16 +8262,6 @@
     });
   }
 
-  function wireSidebarToggle() {
-    const layout = document.getElementById('session-layout');
-    const btn = document.getElementById('sidebar-toggle');
-    const saved = localStorage.getItem('hrv_viewer_sidebar_collapsed') === 'true';
-    layout.classList.toggle('sidebar-collapsed', saved);
-    btn.addEventListener('click', () => {
-      layout.classList.toggle('sidebar-collapsed');
-      localStorage.setItem('hrv_viewer_sidebar_collapsed', layout.classList.contains('sidebar-collapsed'));
-    });
-  }
 
   // Summary-bar KPI customization. localStorage stores the set of HIDDEN
   // stat keys. When nothing's saved we fall back to SUMMARY_DEFAULTS_HIDDEN
@@ -8445,6 +8444,8 @@
       if (!avail) chip.title = 'None here';
       else chip.removeAttribute('title');
     });
+    const n = document.querySelector('#markers-open .n');
+    if (n) n.textContent = ' · ' + Object.keys(activeFilters).filter((t) => activeFilters[t] && filterAvailability[t]).length;
   }
 
   function setFilter(type, on) {
@@ -8458,14 +8459,6 @@
     }
   }
 
-  function wireFilterChips() {
-    // Markers panel chips and the layer chips under the chart drive the same filters.
-    document.querySelectorAll('.filter-chip[data-type], .layer-chip[data-layer]').forEach(chip => {
-      const t = chip.dataset.type || chip.dataset.layer;
-      chip.addEventListener('click', () => setFilter(t, !activeFilters[t]));
-    });
-    syncFilterUI();
-  }
 
   // Custom batching plugin for box overlays. Replaces the per-overlay walk
   // in chartjs-plugin-annotation for the bulk static set (warning bands,

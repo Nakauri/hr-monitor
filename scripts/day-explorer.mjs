@@ -1,4 +1,4 @@
-// Guards: v2 day Duration reading 0:00 (S10a), stats drifting from f7cbb1a, mark edits writing twice (S10b HIGH), S27 layout (AUDIT-NOTES 2026-10-11 items 7, 8, 11, 14 to 18). Files: hrv_viewer.html Day view. Runtime: about 50 s per --part; run when hrv_viewer.html changes.
+// Guards: v2 day Duration reading 0:00 (S10a), stats drifting from f7cbb1a, mark edits writing twice (S10b HIGH), S27 layout (AUDIT-NOTES 2026-10-11 items 7, 8, 11, 14 to 18); S31 moved layer rows into Layers (items 23, 24). Files: hrv_viewer.html Day view. Runtime: about 50 s per --part; run when hrv_viewer.html changes.
 // S10a Day explorer checks, headless.
 // 1. Stats parity: the stats bar on a real legacy day and a real v2 day equals the pre-step build
 //    (--ref, default f7cbb1a, read through `git show`, opened at its old #/session/day: route).
@@ -706,7 +706,7 @@ const sheetRows = (page) => page.evaluate(() => {
   const ratio = (x, y) => { const p = lum(x), q = lum(y); return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); };
   const bgOf = (el) => { const chain = []; for (let n = el; n; n = n.parentElement) { const c = parse(getComputedStyle(n).backgroundColor); if (c && c[3] > 0) { chain.push(c); if (c[3] >= 1) break; } } let bg = [10, 10, 10]; for (let i = chain.length - 1; i >= 0; i--) { const c = chain[i]; bg = [0, 1, 2].map((k) => c[k] * c[3] + bg[k] * (1 - c[3])); } return bg; };
   const opa = (el) => { let o = 1; for (let n = el; n; n = n.parentElement) o *= +getComputedStyle(n).opacity; return o; };
-  return [...document.querySelectorAll('.markers-sheet #layer-chips .chip')].filter((c) => c.getBoundingClientRect().height > 0).map((c) => {
+  return [...document.querySelectorAll('.layers-sheet #layer-chips .chip')].filter((c) => c.getBoundingClientRect().height > 0).map((c) => {
     const lbl = c.querySelector('.lbl'), bg = bgOf(c), o = opa(lbl), fg = parse(getComputedStyle(lbl).color);
     const seen = [0, 1, 2].map((k) => fg[k] * o * fg[3] + bg[k] * (1 - o * fg[3]));
     const box = getComputedStyle(c, '::after'), tick = getComputedStyle(c, '::before');
@@ -741,17 +741,16 @@ const LAYOUT = {
       }
       const lb = await labelBoxes(page);
       rows.push([lb.length === 2 && lb.every((b) => b.inside), `${tag}: Max and Min labels inside the plot ${JSON.stringify(lb.map((b) => [b.name, b.box, b.area]))}`]);
-      // Layers sheet: full-width 44 px layer rows, then the markers list.
+      // Layers sheet (S31): full-width 44 px layer rows only; the markers list has its own sheet.
       await tap(page, '#markers-open'); await page.waitForTimeout(400);
       const sh = await page.evaluate(() => {
-        const s = document.querySelector('.markers-sheet .sheet-body');
+        const s = document.querySelector('.layers-sheet .sheet-body');
         if (!s) return null;
         const cs = getComputedStyle(s), inner = s.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
         const chips = [...s.querySelectorAll('#layer-chips .chip')].filter((c) => c.getBoundingClientRect().height > 0);
-        const list = s.querySelector('#marker-list'), lastChip = chips[chips.length - 1];
-        return { title: document.querySelector('.markers-sheet .sheet-head h2').textContent.trim(), n: chips.length, full: chips.every((c) => c.getBoundingClientRect().width >= inner - 1), tall: chips.every((c) => c.getBoundingClientRect().height >= 43.5), listBelow: !!list && !!lastChip && list.getBoundingClientRect().top >= lastChip.getBoundingClientRect().bottom };
+        return { title: document.querySelector('.layers-sheet .sheet-head h2').textContent.trim(), n: chips.length, full: chips.every((c) => c.getBoundingClientRect().width >= inner - 1), tall: chips.every((c) => c.getBoundingClientRect().height >= 43.5), noList: !s.querySelector('#marker-list, .marker-item') };
       });
-      rows.push([!!sh && sh.title === 'Layers' && sh.n >= 10 && sh.full && sh.tall && sh.listBelow, `${tag}: Layers sheet holds full-width 44 px layer rows, then the markers list ${JSON.stringify(sh)}`]);
+      rows.push([!!sh && sh.title === 'Layers' && sh.n >= 10 && sh.full && sh.tall && sh.noList, `${tag}: Layers sheet holds full-width 44 px layer rows and no markers ${JSON.stringify(sh)}`]);
       const sr = await sheetRows(page);
       const onBoxes = new Set(sr.filter((r) => r.on).map((r) => r.boxFill + r.boxBorder)), offBoxes = new Set(sr.filter((r) => !r.on).map((r) => r.boxFill + r.boxBorder));
       const lowText = sr.filter((r) => r.text < 4.5).map((r) => r.t + ' ' + r.text);
@@ -759,8 +758,8 @@ const LAYOUT = {
       rows.push([sr.every((r) => r.boxW >= 17) && onBoxes.size === 1 && offBoxes.size === 1 && [...onBoxes][0] !== [...offBoxes][0] && sr.every((r) => r.tick === r.on) && new Set(sr.map((r) => r.frame)).size === 1 && sr.some((r) => r.on) && sr.some((r) => !r.on && !r.disabled) && sr.some((r) => r.disabled),
         `${tag}: Layers rows have two states, read from the box (on ${sr.filter((r) => r.on).length}, off ${sr.filter((r) => !r.on).length}, box styles on ${onBoxes.size} off ${offBoxes.size}, row frames ${new Set(sr.map((r) => r.frame)).size})`]);
       await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-      const back = await page.evaluate(() => !!document.querySelector('.chart-panel > #layer-chips') && !!document.querySelector('#session-layout > .session-sidebar'));
-      rows.push([back, `${tag}: closing the sheet puts the chips and the panel back`]);
+      const back = await page.evaluate(() => !document.querySelector('.layers-sheet') && !document.querySelector('#view-day .layer-chip') && !!document.querySelector('#session-layout > .session-sidebar'));
+      rows.push([back, `${tag}: closing the sheet removes the layer rows and leaves the markers panel in place`]);
       // Zoomed: Reset zoom on the chart's top corner.
       await dragStrip(page, 0.3);
       await page.evaluate(() => document.querySelector('.chart-panel').scrollIntoView({ block: 'start' }));
@@ -790,14 +789,14 @@ const LAYOUT = {
     const rows = [];
     for (const width of [1440, 1767]) {
       const { ctx, page } = await openDemo(base, width);
-      for (const collapsed of [false, true]) {
-        if (collapsed) { await page.click('#sidebar-toggle'); await page.waitForTimeout(500); }
-        const tag = `${width}${collapsed ? ' panel closed' : ''}`;
+      for (const open of [true, false]) {
+        if (open) { await page.click('#markers-toggle'); await page.waitForTimeout(500); }
+        else { await page.click('#markers-close'); await page.waitForTimeout(500); }
+        const tag = `${width}${open ? ' markers open' : ''}`;
         const band = await page.evaluate(() => { const c = document.querySelector('.chart-panel').getBoundingClientRect(), n = document.getElementById('interp-panel').getBoundingClientRect(); return Math.round(n.top - c.bottom); });
         rows.push([band >= 0 && band <= 32, `${tag}: next card ${band} px below the chart card (32 at most)`]);
-        const chipRows = await page.$$eval('#layer-chips .chip', (cs) => { const shown = cs.filter((c) => c.getBoundingClientRect().height > 0); const tops = new Map(); for (const c of shown) { const t = Math.round(c.getBoundingClientRect().top); tops.set(t, (tops.get(t) || 0) + 1); } return [...tops.values()]; });
-        const last = chipRows[chipRows.length - 1];
-        rows.push([chipRows.length === 1 || (last >= 2 && chipRows.every((n, i) => i === chipRows.length - 1 || n === chipRows[0])), `${tag}: layer chips in full rows, never one alone (${chipRows.join(' + ')})`]);
+        const chips = await page.$$eval('#view-day .chip', (cs) => cs.filter((c) => c.getBoundingClientRect().height > 0).length);
+        rows.push([chips === 0, `${tag}: no layer chips on the Day page; Layers is a popover (S31) (${chips})`]);
       }
       const gaps = await rect(page, '#view-day .gaps-note'), chart = await rect(page, '.chart-wrap');
       rows.push([!!gaps && gaps.t >= chart.b, `${width}: gaps line below the chart (${gaps ? Math.round(gaps.t) : 'none'} vs ${Math.round(chart.b)})`]);
@@ -808,10 +807,11 @@ const LAYOUT = {
     // A long markers list (the fixture day with every layer on) never sizes the row.
     {
       const { ctx, page } = await openFixture(base, 1440);
-      for (const t of ['disconnect', 'delta']) await tap(page, `#layer-chips .chip[data-layer="${t}"][aria-pressed="false"]:not([disabled])`);
-      await page.waitForTimeout(300);
+      await tap(page, '#markers-open'); await page.waitForTimeout(300);
+      for (const t of ['disconnect', 'delta']) await tap(page, `.layers-pop #layer-chips .chip[data-layer="${t}"][aria-pressed="false"]:not([disabled])`);
+      await page.keyboard.press('Escape'); await page.waitForTimeout(300);
       for (const collapsed of [false, true]) {
-        if (collapsed) { await page.click('#sidebar-toggle'); await page.waitForTimeout(500); }
+        await page.click(collapsed ? '#markers-close' : '#markers-toggle'); await page.waitForTimeout(500);
         const m = await page.evaluate(() => ({ band: Math.round(document.getElementById('interp-panel').getBoundingClientRect().top - document.querySelector('.chart-panel').getBoundingClientRect().bottom), items: document.querySelectorAll('#marker-list .marker-item').length }));
         rows.push([m.band >= 0 && m.band <= 32, `1440 fixture day, ${m.items} markers${collapsed ? ', panel closed' : ''}: next card ${m.band} px below the chart card (32 at most)`]);
       }
@@ -829,7 +829,9 @@ const LAYOUT = {
     const { ctx, page } = await openDemo(base, 1440);
     await page.click('#axis-mode button[data-mode="clock"]'); await page.waitForTimeout(250);
     const mk = page.locator('#marker-list .marker-item .mk-go').first();
+    await page.click('#markers-toggle'); await page.waitForTimeout(300);
     await mk.click({ timeout: 4000 }).catch(() => {}); await page.waitForTimeout(900);
+    await page.click('#markers-close'); await page.waitForTimeout(300);
     await page.evaluate(() => document.querySelector('.chart-wrap').scrollIntoView({ block: 'center' }));
     const geo = await page.evaluate(() => { const c = Chart.getChart(document.getElementById('session-chart')); const r = c.canvas.getBoundingClientRect(); return { l: r.left, t: r.top, a: c.chartArea, pin: c.$hlT == null ? null : c.scales.x.getPixelForValue(c.$hlT) }; });
     const seen = [];
