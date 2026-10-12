@@ -8334,8 +8334,10 @@
   // Each overlay: { xMin, xMax, fill, border, borderWidth, borderDash, t, html }.
   const HR_OVERLAY_PLUGIN = {
     id: 'hrOverlays',
-    afterUpdate(chart, args, opts) {
-      const overlays = (opts && opts.overlays) || [];
+    afterUpdate(chart) {
+      // The raw config: the resolved plugin options wrap every overlay in an option proxy.
+      const raw = chart.config.options.plugins.hrOverlays;
+      const overlays = (raw && raw.overlays) || [];
       if (!overlays.length) {
         chart._hrOvCache = null;
         chart._hrOvCacheKey = null;
@@ -8510,15 +8512,18 @@
       const items = this._layout(chart);
       if (!items.length) return;
       const H = Chart.helpers, ctx = chart.ctx, a = chart.chartArea;
+      // One save for the pass; each item sets every state it draws with.
       H.clipArea(ctx, a);
+      ctx.lineDashOffset = 0;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      let dash = null;
       for (const it of items) {
         const m = it.m;
         if (it.kind === 'dia') {
           const r = m.radius, x = it.px, y = it.py;
-          ctx.save();
+          if (dash !== '') { ctx.setLineDash([]); dash = ''; }
           ctx.fillStyle = m.backgroundColor;
-          ctx.setLineDash([]);
-          ctx.lineDashOffset = 0;
           ctx.lineWidth = m.borderWidth;
           ctx.strokeStyle = m.borderColor;
           ctx.beginPath();
@@ -8529,37 +8534,28 @@
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
-          ctx.restore();
           continue;
         }
-        ctx.save();
-        ctx.setLineDash(m.borderDash || []);
-        ctx.lineDashOffset = 0;
+        const d = m.borderDash ? m.borderDash.join(',') : '';
+        if (d !== dash) { ctx.setLineDash(m.borderDash || []); dash = d; }
         ctx.lineWidth = m.borderWidth;
         ctx.strokeStyle = m.borderColor;
-        ctx.translate(it.px, a.bottom);
-        ctx.rotate(Math.atan2(a.top - a.bottom, 0));
         ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(a.bottom - a.top, 0);
+        ctx.moveTo(it.px, a.bottom);
+        ctx.lineTo(it.px, a.top);
         ctx.stroke();
-        ctx.restore();
         const L = it.lab;
         if (!L) continue;
         const lo = m.label, pad = lo.padding;
-        ctx.save();
         ctx.fillStyle = lo.backgroundColor;
         ctx.beginPath();
         const rad = Math.min(6, Math.min(L.w, L.h) / 2);
         H.addRoundedRectPath(ctx, { x: L.x, y: L.y, w: L.w, h: L.h, radius: { topLeft: rad, topRight: rad, bottomLeft: rad, bottomRight: rad } });
         ctx.closePath();
         ctx.fill();
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'center';
         ctx.font = m._font.string;
         ctx.fillStyle = lo.color;
         ctx.fillText(lo.content, L.x + pad + (L.w - 2 * pad) / 2, L.y + pad + m._font.lineHeight / 2);
-        ctx.restore();
       }
       H.unclipArea(ctx);
     },
