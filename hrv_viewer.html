@@ -3661,14 +3661,17 @@
     const stds = new Array(hr.length).fill(null);
     const winMeans = new Array(hr.length).fill(null);
     for (let i = 0; i < hr.length; i++) {
-      const samples = [];
-      for (let j = i; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) {
-        if (hr[j].v != null) samples.push(hr[j].v);
+      let n = 0, sum = 0, j = i;
+      for (; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) {
+        if (hr[j].v != null) { sum += hr[j].v; n++; }
       }
-      if (samples.length < 10) continue;
-      const m = samples.reduce((a, b) => a + b, 0) / samples.length;
-      const variance = samples.reduce((s, v) => s + (v - m) * (v - m), 0) / samples.length;
-      stds[i] = Math.sqrt(variance);
+      if (n < 10) continue;
+      const m = sum / n;
+      let sq = 0;
+      for (let q = i; q > j; q--) {
+        if (hr[q].v != null) { const d = hr[q].v - m; sq += d * d; }
+      }
+      stds[i] = Math.sqrt(sq / n);
       winMeans[i] = m;
     }
     const nonNull = stds.filter(v => v != null).sort((a, b) => a - b);
@@ -4329,21 +4332,29 @@
     return out.sort((a, b) => a.start - b.start);
   }
 
+  // A day rebuilds only when a recording's summary or data object, the thresholds or the marks change.
+  const _dayMemo = new Map();
   async function buildDaySession(iso) {
     const files = (sessionsByDate[iso] || []).slice();
     if (!files.length) return null;
     const { start: startOfDay, end: dayEndMs } = dayWindow(iso);
     const DAY_MAX = (dayEndMs - startOfDay) / 60000;
 
-    const loaded = await Promise.all(files.map(async fn => {
-      try {
-        const d = await loadFullSession(fn);
-        return { fn, hr: d.hr || [], rmssd: d.rmssd || [], sdnnMatch: d.sdnnMatch || [], sdnn5min: d.sdnn5min || [] };
-      } catch (e) {
-        console.warn('[buildDaySession] load failed', fn, e);
-        return { fn, hr: [], rmssd: [], sdnnMatch: [], sdnn5min: [] };
-      }
+    const raw = await Promise.all(files.map(async fn => {
+      try { return await loadFullSession(fn); }
+      catch (e) { console.warn('[buildDaySession] load failed', fn, e); return null; }
     }));
+    const memoKey = [JSON.stringify(QUADRANT_THRESH), marksVersion];
+    for (let i = 0; i < files.length; i++) memoKey.push(files[i], sessionsIndex[files[i]], raw[i]);
+    const memo = _dayMemo.get(iso);
+    if (memo && memo.key.length === memoKey.length && memo.key.every((k, i) => k === memoKey[i]) && virtualSessions['day:' + iso] === memo.entry) {
+      return memo.entry.summary;
+    }
+    const loaded = files.map((fn, i) => {
+      const d = raw[i];
+      return d ? { fn, hr: d.hr || [], rmssd: d.rmssd || [], sdnnMatch: d.sdnnMatch || [], sdnn5min: d.sdnn5min || [] }
+        : { fn, hr: [], rmssd: [], sdnnMatch: [], sdnn5min: [] };
+    });
 
     // Match the shape loadFullSession returns: {x, y, ep}. The chart code and
     // several downstream helpers read .x / .y directly; using {t, v} silently
@@ -4552,42 +4563,10 @@
       __virtualDay: iso,
       __sourceFiles: files.slice(),
     };
-    virtualSessions['day:' + iso] = { summary, data: { hr, rmssd } };
+    const entry = { summary, data: { hr, rmssd } };
+    virtualSessions['day:' + iso] = entry;
+    _dayMemo.set(iso, { key: memoKey, entry });
     return summary;
-  }
-
-  function downsample(series, target) {
-    if (series.length <= target) return series;
-    // Min/max-preserving bucket downsample. For each bucket we emit both
-    // the minimum and the maximum (in time order) so brief dips and spikes
-    // survive into the rendered line. A naive strided pick hides genuine
-    // extremes — e.g. a 58 bpm dip between two 67 bpm samples vanishes
-    // and the summary card disagrees with the chart. Null gap-markers
-    // pass through unchanged so chart breaks stay at their real times.
-    const buckets = Math.max(1, Math.floor(target / 2));
-    const step = series.length / buckets;
-    const out = [];
-    for (let i = 0; i < buckets; i++) {
-      const lo = Math.floor(i * step);
-      const hi = Math.min(series.length, Math.floor((i + 1) * step));
-      let minP = null, maxP = null;
-      const nulls = [];
-      for (let j = lo; j < hi; j++) {
-        const p = series[j];
-        if (!p) continue;
-        if (p.v == null) { nulls.push(p); continue; }
-        if (minP == null || p.v < minP.v) minP = p;
-        if (maxP == null || p.v > maxP.v) maxP = p;
-      }
-      const bucketOut = [];
-      if (minP && maxP && minP !== maxP) { bucketOut.push(minP, maxP); }
-      else if (minP) { bucketOut.push(minP); }
-      for (const n of nulls) bucketOut.push(n);
-      bucketOut.sort((a, b) => a.t - b.t);
-      for (const p of bucketOut) out.push(p);
-    }
-    if (series.length > 0) out.push(series[series.length - 1]);
-    return out;
   }
 
   // ===== Router =====
@@ -5930,12 +5909,12 @@
     const data = await loadFullSession(filename);
     currentData = data;
     currentQuadRanges = computeQuadrantRanges(data);
-    // Sleep detection needs full data — only run here (not indexed for all sessions).
-    s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
-    // Noteworthy windows: sustained HR / HRV departures from the session median.
-    // Runs once per session view; results are attached to the summary for
-    // renderInsight to consume.
-    s.noteworthy = detectNoteworthyMoments(data.hr, data.rmssd);
+    // Sleep and noteworthy windows need the full data; a summary reopened on the same data keeps them.
+    if (s.__detectedFor !== data) {
+      s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
+      s.noteworthy = detectNoteworthyMoments(data.hr, data.rmssd);
+      s.__detectedFor = data;
+    }
     // Reset toggles + brush state on every new session open so prior values don't
     // carry across (previously caused out-of-range zoom glitches on short sessions).
     activeQuadrants = { 'low-high': false, 'high-high': false, 'low-low': false, 'high-low': false };
@@ -6508,6 +6487,10 @@
     return n % 2 ? s[(n - 1) >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2;
   }
 
+  function sameWindows(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    return a.every((w, i) => w === b[i] || JSON.stringify(w) === JSON.stringify(b[i]));
+  }
   function wireChillsSlider() {
     const slider = document.getElementById('chills-tune-slider');
     const label = document.getElementById('chills-tune-value');
@@ -6525,14 +6508,18 @@
     slider.value = saved;
     label.textContent = saved.toFixed(1) + '×';
     if (currentData && currentSummary) {
-      // Detect candidate pool ONCE per session. The slider filters this pool.
-      // The detector's `ratioThreshold` arg only affects the per-sample stdOk
-      // gate; we pass 1.0 to be maximally permissive at the gate level.
-      currentSummary._chillsAll = detectChillsWindows(toDetectorShape(currentData.hr), 1.0, toDetectorShape(currentData.rmssd));
+      // One candidate pool per data object; the slider filters it. Ratio 1.0 keeps the gate permissive.
+      if (currentSummary._chillsFor !== currentData) {
+        currentSummary._chillsAll = detectChillsWindows(toDetectorShape(currentData.hr), 1.0, toDetectorShape(currentData.rmssd));
+        currentSummary._chillsFor = currentData;
+      }
+      const shown = currentSummary.chillsWindows;
       currentSummary.chillsWindows = filterByRatio(currentSummary._chillsAll, saved);
-      renderInsight(currentSummary);
-      renderMarkerList(currentSummary);
-      drawSessionChart(currentSummary, currentData);
+      if (!sameWindows(shown, currentSummary.chillsWindows)) {
+        renderInsight(currentSummary);
+        renderMarkerList(currentSummary);
+        drawSessionChart(currentSummary, currentData);
+      }
     }
     let debounce;
     slider.addEventListener('input', () => {
@@ -7612,27 +7599,65 @@
   // Used by both marker-list hovers (from the sidebar) and annotation hovers
   // (from the chart itself) — unified so the visual feedback is consistent.
   function highlightAtTime(t) {
-    if (!currentChart) return;
-    const yScale = currentChart.scales.y;
-    const yTop = yScale ? yScale.max : 200;
-    const yBottom = yScale ? yScale.min : 0;
-    const yHR = nearestY(currentData && currentData.hr, t);
-    const ds = currentChart.data.datasets;
-    for (let i = 0; i < ds.length; i++) {
-      if (ds[i].label === '_HL_LINE') ds[i].data = [{ x: t, y: yBottom }, { x: t, y: yTop }];
-      if (ds[i].label === '_HL_POINT') ds[i].data = [{ x: t, y: yHR }];
-    }
-    currentChart.update('none');
+    const chart = currentChart;
+    if (!chart) return;
+    chart.$hlT = t;
+    chart.$hlY = nearestY(currentData && currentData.hr, t);
+    requestChartDraw(chart);
   }
   function unhighlightAtTime() {
     if (!currentChart) return;
     if (pinnedMarkT != null) { highlightAtTime(pinnedMarkT); return; }
-    const ds = currentChart.data.datasets;
-    for (let i = 0; i < ds.length; i++) {
-      if (ds[i].label === '_HL_LINE' || ds[i].label === '_HL_POINT') ds[i].data = [];
-    }
-    currentChart.update('none');
+    if (currentChart.$hlT == null) return;
+    currentChart.$hlT = null;
+    requestChartDraw(currentChart);
   }
+  // A redraw without an update: the highlight and the scales are already laid out.
+  let _chartDrawRaf = 0;
+  function requestChartDraw(chart) {
+    if (_chartDrawRaf) return;
+    _chartDrawRaf = requestAnimationFrame(() => {
+      _chartDrawRaf = 0;
+      if (chart === currentChart) chart.draw();
+    });
+  }
+  // The highlight line and dot at chart.$hlT: after the last dataset, before the annotations.
+  const HIGHLIGHT_PLUGIN = {
+    id: 'hrHighlight',
+    afterDatasetDraw(chart, args) {
+      const t = chart.$hlT;
+      if (t == null) return;
+      const metas = chart.getSortedVisibleDatasetMetas();
+      if (!metas.length || args.meta !== metas[0]) return;
+      const xs = chart.scales.x, ys = chart.scales.y, a = chart.chartArea;
+      const px = xs.getPixelForValue(t);
+      if (!(px >= a.left - 1 && px <= a.right + 1)) return;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top);
+      ctx.clip();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(px, a.top);
+      ctx.lineTo(px, a.bottom);
+      ctx.stroke();
+      ctx.restore();
+      const py = ys && chart.$hlY != null ? ys.getPixelForValue(chart.$hlY) : NaN;
+      if (!(py >= a.top - 6 && py <= a.bottom + 6)) return;
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    },
+  };
 
   // Bidirectional-sync: find the marker-list row whose data-t is closest to t
   // (within a small tolerance) and pulse it. Binary search on the cached
@@ -7703,13 +7728,17 @@
     clearMarkerItemHighlight();
   }
 
+  // series is sorted by x; a tie goes to the earlier point.
   function nearestY(series, t) {
     if (!series || !series.length) return 0;
-    let best = series[0];
-    for (const p of series) {
-      if (Math.abs(p.x - t) < Math.abs(best.x - t)) best = p;
+    let lo = 0, hi = series.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (series[mid].x < t) lo = mid + 1;
+      else hi = mid;
     }
-    return best.y;
+    const prev = lo > 0 ? series[lo - 1] : null;
+    return prev && Math.abs(prev.x - t) <= Math.abs(series[lo].x - t) ? prev.y : series[lo].y;
   }
 
   function warnLabel(type) {
@@ -8306,42 +8335,68 @@
 
   // Mark labels left to right: a label that would run into the one before drops a row; past three rows it hides.
   function markLabelRows(marks) {
-    let key = '', rows = [];
+    let key = '', rows = [], halves = null;
+    const order = marks.map((m, i) => i).sort((i, j) => marks[i].t - marks[j].t);
     return (chart) => {
       const x = chart.scales.x, a = chart.chartArea;
       const k = x.min + '|' + x.max + '|' + a.left + '|' + a.right;
       if (k === key) return rows;
       key = k;
-      const ctx = chart.ctx;
-      ctx.save();
-      ctx.font = '600 12px ' + Chart.defaults.font.family;
+      if (!halves) {
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.font = '600 12px ' + Chart.defaults.font.family;
+        halves = marks.map((m) => (ctx.measureText(m.text).width + 8) / 2);
+        ctx.restore();
+      }
       const ends = [-Infinity, -Infinity, -Infinity];
-      const order = marks.map((m, i) => i).sort((i, j) => marks[i].t - marks[j].t);
       rows = new Array(marks.length).fill(0);
       for (const i of order) {
         const px = x.getPixelForValue(marks[i].t);
-        const half = (ctx.measureText(marks[i].text).width + 8) / 2;
+        const half = halves[i];
         if (px + half < a.left || px - half > a.right) continue;
         let r = ends.findIndex((end) => px - half > end + 4);
         if (r < 0) r = 3;
         else ends[r] = px + half;
         rows[i] = r;
       }
-      ctx.restore();
       return rows;
     };
   }
+  // Mark label rows and diamond heights as plain option values, set after layout and before the annotation
+  // plugin resolves them, so an update resolves no per-label functions.
+  function markLayoutPlugin(rowsOf, labels, handles) {
+    return {
+      id: 'markLayout',
+      afterLayout(chart) {
+        const rows = rowsOf(chart);
+        for (let i = 0; i < labels.length; i++) {
+          const r = rows[i];
+          labels[i].display = r < 3;
+          labels[i].yAdjust = 18 + 20 * r;
+        }
+        const top = chart.scales.y ? chart.scales.y.max : 0;
+        for (const h of handles) h.yValue = top;
+      },
+    };
+  }
 
+  const _gapBroken = new WeakMap();
   function drawSessionChart(s, data) {
     const ctx = document.getElementById('session-chart').getContext('2d');
     if (currentChart) currentChart.destroy();
 
     // On the Day view the lines break inside each gap between and within recordings.
-    const breakAtGaps = (arr) => s.__virtualDay && (s.connGaps || []).length
-      ? arr.concat(s.connGaps.map(g => ({ x: (g.start + g.end) / 2, y: null }))).sort((a, b) => a.x - b.x)
-      : arr;
-    const hr = breakAtGaps(downsample(data.hr, 2000));
-    const rmssd = breakAtGaps(downsample(data.rmssd, 2000));
+    const breakAtGaps = (arr) => {
+      if (!s.__virtualDay || !(s.connGaps || []).length) return arr;
+      const hit = _gapBroken.get(arr);
+      if (hit && hit.gaps === s.connGaps) return hit.out;
+      const out = arr.concat(s.connGaps.map(g => ({ x: (g.start + g.end) / 2, y: null }))).sort((a, b) => a.x - b.x);
+      _gapBroken.set(arr, { gaps: s.connGaps, out });
+      return out;
+    };
+    const hr = breakAtGaps(data.hr);
+    const rmssd = breakAtGaps(data.rmssd);
     // Session start epoch — lets the x-axis flip between MM:SS duration and
     // absolute wall-clock time. Prefer the CSV's epoch_ms column (s.startEpoch)
     // since the filename string is UTC for web-recorded sessions but LOCAL
@@ -8375,6 +8430,7 @@
     const hrOverlays = [];
     const annotations = {};
     let idCounter = 0;
+    let markLayout = null;
 
     if (currentQuadRanges) {
       const QUAD_LABELS = {
@@ -8447,12 +8503,17 @@
       const markColour = rootStyle.getPropertyValue('--text').trim() || 'white';
       const bgColour = rootStyle.getPropertyValue('--bg').trim() || 'black';
       const labelRows = markLabelRows(viewMarks(s).events.map((e) => ({ t: e.t, text: parseMark(e.label).label })));
-      viewMarks(s).events.forEach((e, li) => {
+      const markLabels = [], markHandles = [];
+      markLayout = markLayoutPlugin(labelRows, markLabels, markHandles);
+      viewMarks(s).events.forEach((e) => {
         const mark = parseMark(e.label);
         const eLabel = mark.label;
         const eTime = formatDuration(e.t);
         const tick = mark.kind === 'context';
-        const row = (c) => labelRows(c.chart)[li];
+        const label = tick
+          ? { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: tickColour, font: { size: 12, weight: '500' }, padding: 4 }
+          : { display: true, content: eLabel, position: 'end', yAdjust: 18, backgroundColor: bgColour, color: markColour, font: { size: 12, weight: '600' }, padding: 4 };
+        markLabels.push(label);
         annotations['ev_' + idCounter++] = {
           type: 'line',
           xScaleID: 'x',
@@ -8461,25 +8522,28 @@
           borderColor: tick ? tickColour : markColour,
           borderWidth: tick ? 1 : 1.25,
           borderDash: tick ? [4, 4] : undefined,
-          label: tick
-            ? { display: (c) => row(c) < 3, content: eLabel, position: 'end', yAdjust: (c) => 18 + 20 * row(c), backgroundColor: bgColour, color: tickColour, font: { size: 12, weight: '500' }, padding: 4 }
-            : { display: (c) => row(c) < 3, content: eLabel, position: 'end', yAdjust: (c) => 18 + 20 * row(c), backgroundColor: bgColour, color: markColour, font: { size: 12, weight: '600' }, padding: 4 },
+          label,
           enter: (ctx, evt) => annoEnter(e.t, `<b>${tick ? 'Context' : mark.kind === 'symptom' ? 'Symptom' : 'Note'}</b><br/>${escape(eLabel)} at ${eTime}`, evt),
           leave: annoLeave,
         };
-        // Diamond handle at the top of a user mark.
-        if (!tick) annotations['mk_' + idCounter++] = {
-          type: 'point',
-          xScaleID: 'x', yScaleID: 'y',
-          xValue: e.t,
-          yValue: (c) => c.chart.scales.y.max,
-          yAdjust: 7,
-          pointStyle: 'rectRot',
-          radius: 6,
-          backgroundColor: markColour,
-          borderColor: bgColour,
-          borderWidth: 1.5,
-        };
+        // Diamond handle at the top of a user mark; the top follows the y axis, so it never widens it.
+        if (!tick) {
+          const handle = {
+            type: 'point',
+            xScaleID: 'x', yScaleID: 'y',
+            xValue: e.t,
+            yValue: 0,
+            adjustScaleRange: false,
+            yAdjust: 7,
+            pointStyle: 'rectRot',
+            radius: 6,
+            backgroundColor: markColour,
+            borderColor: bgColour,
+            borderWidth: 1.5,
+          };
+          markHandles.push(handle);
+          annotations['mk_' + idCounter++] = handle;
+        }
       });
     }
     if (activeFilters.flush && s.flushes) {
@@ -8599,12 +8663,9 @@
       type: 'line',
       data: {
         datasets: [
-          { label: 'HR', data: hr, hidden: activeFilters.hr === false, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
-          { label: 'RMSSD', data: rmssd, hidden: activeFilters.rmssd === false, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, cubicInterpolationMode: 'monotone', pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
-          { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: palpDots.map(p => Math.min(3 + p._count, 10)), pointHoverRadius: 12, pointStyle: 'circle' },
-          // Highlight overlay datasets for marker-list hover (populated on demand)
-          { label: '_HL_LINE', data: [], borderColor: '#ffffff', backgroundColor: 'transparent', yAxisID: 'y', showLine: true, pointRadius: 0, borderWidth: 2, fill: false, order: -1 },
-          { label: '_HL_POINT', data: [], borderColor: '#000', backgroundColor: '#ffffff', yAxisID: 'y', showLine: false, pointRadius: 6, pointStyle: 'circle', pointBorderWidth: 2, order: -2 },
+          { label: 'HR', data: hr, hidden: activeFilters.hr === false, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
+          { label: 'RMSSD', data: rmssd, hidden: activeFilters.rmssd === false, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
+          { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: (c) => Math.min(3 + ((c.raw && c.raw._count) || 0), 10), pointHoverRadius: 12, pointStyle: 'circle' },
         ],
       },
       options: {
@@ -8629,7 +8690,6 @@
             callbacks: {
               title: (items) => items.length ? formatDuration(items[0].parsed.x) : '',
               label: (ctx) => {
-                if (ctx.dataset.label && ctx.dataset.label.startsWith('_HL')) return '';
                 if (ctx.dataset.label === 'Palp') {
                   const p = ctx.raw;
                   return p._count === 1 ? `Ectopic beat` : `${p._count} palps in ${formatDuration(p._end - p._start)}`;
@@ -8669,13 +8729,12 @@
             padding: 10,
             boxPadding: 4,
           },
-          annotation: { annotations },
+          annotation: { annotations: nearMarks(annotations, brushMin !== null ? brushMin : 0, brushMax !== null ? brushMax : s.duration, canvasEl.clientWidth) },
           hrOverlays: { overlays: hrOverlays },
-          // Chart.js built-in decimation. Day-stitched sessions can hold
-          // 47k+ points (1 Hz × 13h+); rendering all of them on a Galaxy
-          // S8 chokes pan/zoom. min-max keeps the visual envelope intact
-          // (peaks/troughs preserved) while capping render at ~2k points.
-          decimation: { enabled: true, algorithm: 'min-max', threshold: 2000, samples: 2000 },
+          // min-max keeps every point when a pixel column holds one, and the envelope when it holds more.
+          // Threshold 1 keeps it on at every zoom: the decimated set covers only the visible range, and a
+          // range change otherwise re-lays all of a day's points (Chart.js updates every element then).
+          decimation: { enabled: true, algorithm: 'min-max', threshold: 1 },
         },
         scales: {
           x: {
@@ -8709,8 +8768,30 @@
           }
         },
       },
-      plugins: [HR_OVERLAY_PLUGIN],
+      plugins: markLayout ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN],
     });
+    currentChart.$marks = annotations;
+  }
+
+  // The annotation plugin re-resolves every entry on each update, so it gets only the marks within 200 px of the
+  // visible range (wider than any label); entries keep their order, which is the draw order.
+  function nearMarks(all, lo, hi, width) {
+    const pad = (hi - lo) * 200 / Math.max(1, width);
+    const out = {};
+    for (const k of Object.keys(all)) {
+      const a = all[k];
+      const x = k.startsWith('ev_') ? a.xMin : k.startsWith('mk_') ? a.xValue : null;
+      if (x == null || (x >= lo - pad && x <= hi + pad)) out[k] = a;
+    }
+    return out;
+  }
+  function syncNearMarks(chart, lo, hi) {
+    if (!chart.$marks) return;
+    const plug = chart.config.options.plugins.annotation;
+    const next = nearMarks(chart.$marks, lo, hi, chart.width);
+    const a = Object.keys(next), b = Object.keys(plug.annotations);
+    if (a.length === b.length && a.every((k, i) => k === b[i])) return;
+    plug.annotations = next;
   }
 
   // Zone strip under the chart: HR coloured by zone per pixel column, recording gaps hatched.
@@ -8722,10 +8803,14 @@
     const dur = s.duration || 1;
     const pts = (data.hr || []).filter(p => p && p.y != null && isFinite(p.x));
     const gaps = s.connGaps || [];
+    let drawn = '';
     const draw = () => {
       const w = canvas.clientWidth, h = canvas.clientHeight;
       if (!w || !h) return;
       const dpr = window.devicePixelRatio || 1;
+      // The observer's first callback and same-size resizes repaint nothing new.
+      if (drawn === w + 'x' + h + '@' + dpr) return;
+      drawn = w + 'x' + h + '@' + dpr;
       canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
       const ctx = canvas.getContext('2d');
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -8812,15 +8897,10 @@
       if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
       if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
       if (currentChart && (brushMin !== lastAppliedMin || brushMax !== lastAppliedMax)) {
-        currentChart.options.scales.x.min = brushMin;
-        currentChart.options.scales.x.max = brushMax;
-        if (currentChart.scales && currentChart.scales.x) {
-          currentChart.scales.x.options.min = brushMin;
-          currentChart.scales.x.options.max = brushMax;
-        }
-        currentChart.update('none');
         lastAppliedMin = brushMin;
         lastAppliedMax = brushMax;
+        // Pointer moves can outpace frames: the chart follows once per frame, at the latest bounds.
+        scheduleChartRange();
       }
       updateResetZoomVisibility();
     }
@@ -8915,6 +8995,27 @@
   // keep up (each chart.update() walks all overlays + downsamples). The
   // visual brush still feels live because CSS layout is cheap; only the
   // chart redraw is rate-limited.
+  let _chartRangeRaf = 0;
+  function scheduleChartRange() {
+    if (_chartRangeRaf) return;
+    _chartRangeRaf = requestAnimationFrame(() => {
+      _chartRangeRaf = 0;
+      applyChartRange();
+    });
+  }
+  // Axis bounds go to both option objects or the rendered axis can stay stale; unchanged bounds skip the update.
+  function applyChartRange() {
+    if (!currentChart) return;
+    const xo = currentChart.options.scales.x;
+    const so = currentChart.scales && currentChart.scales.x ? currentChart.scales.x.options : null;
+    if (xo.min === brushMin && xo.max === brushMax && (!so || (so.min === brushMin && so.max === brushMax))) return;
+    xo.min = brushMin;
+    xo.max = brushMax;
+    if (so) { so.min = brushMin; so.max = brushMax; }
+    syncNearMarks(currentChart, brushMin, brushMax);
+    currentChart.update('none');
+  }
+
   let _paintBrushRafId = 0;
   function paintBrush() {
     if (_paintBrushRafId) return;
@@ -8938,18 +9039,7 @@
     brush.style.width = (hi - lo) + 'px';
     if (dimLeft) { dimLeft.style.left = '0px'; dimLeft.style.width = lo + 'px'; }
     if (dimRight) { dimRight.style.left = hi + 'px'; dimRight.style.width = (w - hi) + 'px'; }
-    if (currentChart) {
-      currentChart.options.scales.x.min = brushMin;
-      currentChart.options.scales.x.max = brushMax;
-      if (currentChart.scales && currentChart.scales.x) {
-        currentChart.scales.x.options.min = brushMin;
-        currentChart.scales.x.options.max = brushMax;
-      }
-      // Default mode (no arg) — full re-layout so the scale picks up the
-      // new bounds. 'none' was sometimes leaving the rendered axis range
-      // stale on the day-timeline view.
-      currentChart.update();
-    }
+    applyChartRange();
     updateResetZoomVisibility();
   }
 
