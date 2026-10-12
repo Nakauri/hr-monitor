@@ -452,8 +452,9 @@
   /* Date nav for Day, Week and Month: carets pinned at the row ends, the title centred in a fixed track so a long weekday never moves them. */
   .datenav { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--s1); }
   .datenav .btn.icon { flex: 0 0 44px; }
-  .datenav-h { flex: 0 0 auto; width: 16.5em; margin: 0; font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
-  .datenav .datenav-title { width: 100%; min-height: 44px; padding: var(--s1) var(--s2); font: inherit; letter-spacing: inherit; font-variant-numeric: tabular-nums; text-wrap: balance; }
+  /* The h1 keeps a fixed track so the carets never move; the title button inside hugs its text. */
+  .datenav-h { flex: 0 0 auto; width: 16.5em; display: flex; justify-content: center; margin: 0; font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
+  .datenav .datenav-title { width: auto; max-width: 100%; min-height: 44px; padding: var(--s1) var(--s2); font: inherit; letter-spacing: inherit; font-variant-numeric: tabular-nums; text-wrap: balance; }
   .datenav .datenav-title[aria-expanded="true"] { background: var(--selected-fill); }
   .datenav-open { color: var(--text-dim); }
   .day-title .t-short, .month-title .t-short { display: none; }
@@ -914,7 +915,7 @@
   .interp-cell {
     padding: 12px 52px 12px 14px;
     border: 1px solid var(--border);
-    border-left: 4px solid var(--text-dim);
+    --strip-c: var(--text-dim);
     background: transparent;
     border-radius: var(--r-menu);
     cursor: pointer;
@@ -941,11 +942,12 @@
     font-weight: 500;
   }
   .interp-empty-badge.has { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .interp-cell.on { color: var(--text); background: var(--selected-fill); border-color: var(--action); border-left-width: 6px; }
-  .interp-cell.good.on { border-left-color: #B8D97E; }
-  .interp-cell.warn.on { border-left-color: #E89858; }
-  .interp-cell.bad.on { border-left-color: #E24B4A; }
-  .interp-cell.ok.on { border-left-color: var(--hrv); }
+  .interp-cell.on { color: var(--text); background: var(--selected-fill); border-color: var(--action); --strip-w: 6px; }
+  .interp-cell.good.on { --strip-c: #B8D97E; }
+  .interp-cell.warn.on { --strip-c: #E89858; }
+  .interp-cell.bad.on { --strip-c: #E24B4A; }
+  .interp-cell.ok.on { --strip-c: var(--hrv); }
+  .interp-cell.on.strip { border-left-color: var(--strip-c); }
   .interp-cell.empty { opacity: 0.5; cursor: default; pointer-events: none; }
   .interp-kebab { position: absolute; top: 0; right: 0; color: var(--text-dim); }
   .interp-kebab:hover { color: var(--text); }
@@ -1475,7 +1477,7 @@
       order: 10;
     }
     .cal-grid { gap: 4px; }
-    .cal-cell { padding: 6px; border-radius: 8px; border-width: 1px !important; border-left-width: 3px !important; }
+    .cal-cell { padding: 6px; border-radius: 8px; --strip-w: 3px; }
     .cal-cell .cal-hr { font-size: 18px; }
     .cal-day-num { font-size: 12px; }
     .cal-hr-unit { font-size: 9px; }
@@ -5317,7 +5319,7 @@
       const flushBadge = stats.flushCount > 0 ? `<span class="cal-badge flush" title="${stats.flushCount} sympathetic flush events"><span class="cal-badge-dot"></span>${stats.flushCount}</span>` : '';
       const chillsBadge = stats.chillsCount > 0 ? `<span class="cal-badge chills" title="${stats.chillsCount} chills / volatility windows"><span class="cal-badge-dot"></span>${stats.chillsCount}</span>` : '';
       cells += `
-        <div class="cal-cell has-sessions ${isToday ? 'today' : ''}" data-date="${iso}" style="border-left: 4px solid ${headline.color};">
+        <div class="cal-cell strip has-sessions ${isToday ? 'today' : ''}" data-date="${iso}" style="--strip-c: ${headline.color};">
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <span class="cal-day-num">${d}</span>
             <span class="cal-session-count">${stats.sessionCount} session${stats.sessionCount === 1 ? '' : 's'}</span>
@@ -5588,7 +5590,7 @@
           const headline = computeHeadline(headlineMetric, c.files, c.iso);
           const isToday = c.iso === todayStr;
           return `
-            <div class="week-col ${hasData ? 'has-sessions' : 'empty'} ${isToday ? 'today' : ''}" data-date="${c.iso}" style="${hasData ? `border-left: 4px solid ${headline.color};` : ''}">
+            <div class="week-col ${hasData ? 'has-sessions strip' : 'empty'} ${isToday ? 'today' : ''}" data-date="${c.iso}" style="${hasData ? `--strip-c: ${headline.color};` : ''}">
               <div class="week-col-head">
                 <span class="week-dow">${c.dow}</span>
                 <span class="week-date">${c.date.getDate()}</span>
@@ -6523,10 +6525,10 @@
         <div class="interp-body">
           <div class="interp-current" id="interp-current"></div>
           <div class="interp-grid">
-            <div class="interp-cell good" data-quad="low-high"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
-            <div class="interp-cell ok" data-quad="high-high"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
-            <div class="interp-cell warn" data-quad="low-low"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · Low HRV</div>Commonly seen with fatigue, under-recovery, overtraining, or when you're feeling run down. Worth noticing if it lingers for days.</div>
-            <div class="interp-cell bad" data-quad="high-low"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · Low HRV</div>Commonly seen with stress, pain, dehydration, strong emotion, or after standing up quickly. A pattern, not a diagnosis.</div>
+            <div class="interp-cell strip good" data-quad="low-high"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · High HRV</div>Rest, recovery, deep breathing, parasympathetic dominance. Usually good. This is what sleep or vagal training looks like.</div>
+            <div class="interp-cell strip ok" data-quad="high-high"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · High HRV</div>Post-exertion rebound or excited-but-regulated state. Common after cardio or emotional arousal with good recovery capacity.</div>
+            <div class="interp-cell strip warn" data-quad="low-low"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">Low HR · Low HRV</div>Commonly seen with fatigue, under-recovery, overtraining, or when you're feeling run down. Worth noticing if it lingers for days.</div>
+            <div class="interp-cell strip bad" data-quad="high-low"><button class="btn icon interp-kebab" type="button" aria-label="Edit thresholds">${UI.icon('kebab')}</button><div class="interp-title">High HR · Low HRV</div>Commonly seen with stress, pain, dehydration, strong emotion, or after standing up quickly. A pattern, not a diagnosis.</div>
           </div>
         </div>
       </div>

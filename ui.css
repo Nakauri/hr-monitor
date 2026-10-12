@@ -258,3 +258,8 @@ html.ui-locked, html.ui-locked body { overflow: hidden; }
 .ui .empty-panel h2 { margin: 0 0 var(--s2); font-size: var(--t20); }
 .ui .empty-panel p { margin: 0 0 var(--s4); color: var(--text-dim); }
 .beta-pill { display: inline-flex; align-items: center; min-height: 20px; padding: 0 var(--s2); border: 1px solid var(--border-control); border-radius: var(--r-pill); background: transparent; color: var(--text-dim); font: 600 var(--t12)/1 var(--ui-face); letter-spacing: 0; white-space: nowrap; }
+
+/* Colour strip on a rounded card: the outer edge follows the card's corner, the inner edge is straight.
+   Set --strip-c (and optionally --strip-w) on the element. */
+.strip { position: relative; overflow: hidden; border-left-color: var(--strip-c, var(--border)); }
+.strip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--strip-w, 4px) - 1px); background: var(--strip-c, var(--border)); pointer-events: none; }
