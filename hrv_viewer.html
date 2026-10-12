@@ -314,6 +314,8 @@
     gap: 14px;
     margin-bottom: 18px;
   }
+  .segmented.metric-switch { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+  .metric-switch > button { white-space: nowrap; }
   .cal-title {
     font-size: 22px;
     font-weight: 700;
@@ -466,7 +468,8 @@
   .datenav .day-title { margin: 0 var(--s1); font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
   .datenav .btn.icon .ico { width: 20px; height: 20px; }
   .datenav .btn.icon { flex: 0 0 44px; }
-  .gaps-note { font-size: var(--t14); color: var(--text-dim); }
+  .day-title .t-short { display: none; }
+  .gaps-note { margin: var(--s3) 0 0; font-size: var(--t14); color: var(--text-dim); }
   .day-sessions-head {
     display: flex;
     align-items: center;
@@ -621,6 +624,9 @@
     flex-direction: column;
     min-height: 0;
   }
+  /* The row takes the chart column's height; the markers panel fills it and its list scrolls. */
+  .session-layout > .session-sidebar { contain: size; }
+  .session-layout > .session-sidebar .marker-list { flex: 1 1 0; max-height: none; }
 
   /* Summary header: a fixed grid of stats, neutral values, kebab top right. */
   .summary-bar {
@@ -704,6 +710,7 @@
     display: flex;
     flex-direction: column;
     position: relative;
+    container-type: inline-size;
   }
   .chart-wrap {
     height: min(420px, 50vh);
@@ -762,10 +769,18 @@
   .chart-tools .axis-mode > button { flex: 0 0 auto; }
   .chart-tools .reset-zoom { margin-left: auto; }
   .chart-tools .reset-zoom.hidden { visibility: hidden; }
+  .markers-open { gap: var(--s2); }
 
   /* Layer chips under the strip: on = ring and fill, off = dim outline. */
   /* Columns sized in em so larger text gives fewer, equal columns. */
-  .layer-toggles { grid-template-columns: repeat(auto-fill, minmax(10em, 1fr)); font-size: var(--t14); margin-top: var(--s3); }
+  /* Column counts divide the chip count, so a wrap never leaves one chip alone on a row. */
+  .layer-toggles { --lc: 2; grid-template-columns: repeat(var(--lc), minmax(0, 1fr)); font-size: var(--t14); margin-top: var(--s3); }
+  @container (min-width: 28em) { .layer-toggles { --lc: 3; } }
+  @container (min-width: 38em) { .layer-toggles { --lc: 4; } }
+  @container (min-width: 57em) { .layer-toggles { --lc: 6; } }
+  @container (min-width: 114em) { .layer-toggles { --lc: 12; } }
+  @container (min-width: 48em) { body.no-autonomic .layer-toggles { --lc: 5; } }
+  @container (min-width: 95em) { body.no-autonomic .layer-toggles { --lc: 10; } }
   .layer-toggles .chip { justify-content: flex-start; gap: var(--s2); min-width: 0; padding: 0 var(--s3); }
   .layer-toggles .chip[aria-pressed="false"] { color: var(--text-dim); border-color: var(--border); }
   .layer-toggles .chip:disabled { opacity: .4; cursor: not-allowed; }
@@ -1162,8 +1177,17 @@
   .mark-editor .err { margin: 0; font-size: var(--t12); color: var(--warn-high); }
   .markers-open { display: none; }
   .markers-sheet .session-sidebar { background: none; border: 0; padding: 0; overflow: visible; }
-  .markers-sheet .sidebar-head { display: none; }
+  .markers-sheet .sidebar-head { margin: var(--s4) 0 var(--s2); font-size: var(--t16); font-weight: 600; color: var(--text); }
+  .markers-sheet .filter-chips { display: none; }
   .markers-sheet .marker-list { max-height: none; min-height: 0; }
+  /* Layer toggles in the sheet: full-width rows. */
+  .markers-sheet .layer-toggles { grid-template-columns: 1fr; margin-top: 0; }
+  .markers-sheet .layer-toggles .chip { min-height: 44px; }
+  /* Narrow tools row (200% text): Layers keeps its icon and name for screen readers only. */
+  @container (max-width: 18em) {
+    .chart-tools .markers-open { width: 44px; padding: 0; }
+    .chart-tools .markers-open .lbl { display: none; }
+  }
   .marker-item:hover,
   .marker-item.chart-hover {
     background: var(--bg-input);
@@ -1378,12 +1402,30 @@
     .summary-grid { gap: 12px 16px; margin-top: 4px; }
     .summary-stat-value { font-size: 22px; }
     .summary-bar-title { display: flex; }
-    /* When collapsed: hide every stat (not just non-first). The Summary
-       title carries the bar; the user expands to see the data. */
-    .summary-bar.collapsed { padding: 0 56px 0 14px; min-height: 56px; }
-    .summary-bar.collapsed .summary-grid { display: none; }
+    /* Collapsed: the key numbers stay, without their sub-lines. */
+    .summary-bar.collapsed { padding: 0 56px 12px 14px; min-height: 56px; }
+    .summary-bar.collapsed .summary-grid { grid-template-columns: repeat(auto-fit, minmax(3.75em, 1fr)); gap: 8px 12px; margin-top: 0; }
+    .summary-bar.collapsed .summary-stat:not([data-stat="hrAvg"], [data-stat="hrMax"], [data-stat="hrMin"], [data-stat="rmssdAvg"]),
+    .summary-bar.collapsed .summary-stat-unit { display: none; }
     .chart-wrap { min-height: 260px; }
-    .chart-tools { flex-wrap: wrap; }
+    /* One tools row: Clock and Duration, then Layers; Reset zoom sits on the chart's top corner while zoomed. */
+    .chart-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--s3); }
+    .chart-panel > * { grid-column: 1 / -1; }
+    .chart-tools { display: contents; }
+    .chart-tools .axis-mode { grid-row: 1; grid-column: 1; justify-self: start; flex-wrap: nowrap; }
+    .chart-tools .axis-mode > button { padding: 0 var(--s2); }
+    .chart-tools .markers-open { grid-row: 1; grid-column: 2; justify-self: end; }
+    .chart-panel > .chart-wrap { grid-row: 2; }
+    /* Spans both columns so its width never widens the Layers column. */
+    .chart-tools .reset-zoom { grid-row: 2; grid-column: 1 / -1; align-self: start; justify-self: end; z-index: 2; margin: var(--s1); background: var(--bg-raised); }
+    .chart-tools .reset-zoom.hidden { display: none; }
+    .chart-panel > .context-wrap { grid-row: 3; margin-top: 0; }
+    .chart-panel > .gaps-note { grid-row: 4; margin: 0; }
+    .chart-panel > .layer-toggles { display: none; }
+    .datenav .day-title .t-long { display: none; }
+    .datenav .day-title .t-short { display: inline; }
+    .segmented.metric-switch { display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(5.5em, 1fr)); }
+    .metric-switch > button { padding: 0 var(--s2); }
     .interp-grid { grid-template-columns: 1fr; }
     .sessions-grid { grid-template-columns: 1fr; }
     .all-grid { grid-template-columns: 1fr; }
@@ -5128,6 +5170,7 @@
     }
     const date = new Date(iso + 'T00:00:00'); // date-label
     const title = date.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const titleShort = date.toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
     const files = sessionsByDate[iso] || [];
     // Arrows stop only on dates with recordings.
     const dateKeys = Object.keys(sessionsByDate).sort();
@@ -5137,21 +5180,21 @@
       else if (k > iso) { nextDate = k; break; }
     }
     shownDay = iso;
-    const headHtml = (gaps) => {
+    // The gaps line sits under the chart.
+    const gapsNoteHtml = (gaps) => {
       const gapMin = gaps.reduce((a, g) => a + Math.max(0, g.end - g.start), 0);
-      const gapsNote = gaps.length
-        ? `<span class="gaps-note">${gaps.length} gap${gaps.length === 1 ? '' : 's'} · ${formatMinutesShort(gapMin)} missing</span>`
+      return gaps.length
+        ? `<p class="gaps-note">${gaps.length} gap${gaps.length === 1 ? '' : 's'} · ${formatMinutesShort(gapMin)} missing</p>`
         : '';
-      return `
+    };
+    const headHtml = (gaps) => `
       <div class="day-header" data-gaps="${gaps.length}">
         <div class="datenav ui">
           <button class="btn icon" id="day-prev" type="button" aria-label="Previous day"${prevDate ? '' : ' disabled'}>${UI.icon('prev')}</button>
-          <h1 class="day-title">${title}</h1>
+          <h1 class="day-title"><span class="t-long">${title}</span><span class="t-short">${titleShort}</span></h1>
           <button class="btn icon" id="day-next" type="button" aria-label="Next day"${nextDate ? '' : ' disabled'}>${UI.icon('next')}</button>
         </div>
-        ${gapsNote}
       </div>`;
-    };
     const wireNav = () => {
       document.getElementById('day-prev').addEventListener('click', () => { if (prevDate) setHash('day/' + prevDate); });
       document.getElementById('day-next').addEventListener('click', () => { if (nextDate) setHash('day/' + nextDate); });
@@ -5217,7 +5260,7 @@
       <div class="day-sessions-head"><h2 class="day-sessions-title">Sessions · ${files.length}</h2></div>
       <div class="sessions-grid">${cardsHtml}</div>`;
 
-    await renderSession(encodeURIComponent('day:' + iso), { host: el, head, foot });
+    await renderSession(encodeURIComponent('day:' + iso), { host: el, head, foot, chartNote: gapsNoteHtml((s && s.recGaps) || []) });
     if (tok !== renderDayToken) return;
     wireNav();
     el.querySelectorAll('.session-card').forEach(c => {
@@ -6073,7 +6116,7 @@
                 <button type="button" data-mode="duration">Duration</button>
               </div>
               <button class="btn reset-zoom hidden" id="reset-zoom" type="button">Reset zoom</button>
-              <button class="btn markers-open" id="markers-open" type="button" aria-haspopup="dialog">Markers</button>
+              <button class="btn markers-open" id="markers-open" type="button" aria-haspopup="dialog" aria-label="Layers"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 3 21 8 12 13 3 8 12 3"/><polyline points="3 12 12 17 21 12"/><polyline points="3 16 12 21 21 16"/></svg><span class="lbl">Layers</span></button>
             </div>
             <div class="chart-wrap">
               <canvas id="session-chart" role="img" aria-label="Heart rate and HRV"></canvas>
@@ -6086,6 +6129,7 @@
               <div class="context-overlay" id="context-overlay" role="slider" aria-label="Zoom window" tabindex="-1"></div>
             </div>
             <div class="chip-row layer-toggles ui" id="layer-chips" role="group" aria-label="Layers">${layerChipsHTML()}</div>
+            ${opts.chartNote || ''}
           </div>
         </div>
         <button class="ui btn icon sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Markers panel">
@@ -6146,8 +6190,9 @@
     // An open phone markers sheet keeps showing the panel after a re-render.
     if (markersSheet && !markersSheet.closed) {
       const fresh = el.querySelector('#session-layout > .session-sidebar');
+      const freshChips = el.querySelector('.chart-panel > #layer-chips');
       if (fresh) {
-        markersSheet.body.replaceChildren(fresh);
+        markersSheet.body.replaceChildren(...(freshChips ? [freshChips, fresh] : [fresh]));
         try { markersSheet.sheet.focus({ preventScroll: true }); } catch (e) {}
       }
     }
@@ -7390,6 +7435,8 @@
     if (fromSheet) markersSheet.close('select');
     const [lo, hi] = markWindow(item, currentSummary.duration);
     pinnedMarkT = item.t;
+    // A tooltip left by a tap would draw the hover line in place of the pinned one.
+    if (currentChart && currentChart.tooltip) { currentChart.tooltip.setActiveElements([], { x: 0, y: 0 }); currentChart.setActiveElements([]); }
     if (fromSheet) {
       const chart = document.querySelector('.chart-wrap');
       if (chart) chart.scrollIntoView({ block: 'start' });
@@ -7409,16 +7456,20 @@
     const add = document.getElementById('add-sleep');
     if (add) add.addEventListener('click', () => openSleepEditor(null));
   }
-  // Phone: the markers panel moves into a sheet and back.
+  // Phone: the layer chips and the markers panel move into the Layers sheet and back.
   function openMarkersSheet() {
     const sb = document.querySelector('#session-layout > .session-sidebar');
     if (!sb || (markersSheet && !markersSheet.closed)) return;
+    const chips = document.querySelector('.chart-panel > #layer-chips');
     const sheet = UI.sheet({
-      title: 'Markers', className: 'markers-sheet', body: sb,
+      title: 'Layers', className: 'markers-sheet', body: chips ? [chips, sb] : sb,
       onClose: () => {
         const back = sheet.body.querySelector('.session-sidebar');
         const layout = document.getElementById('session-layout');
         if (back && layout) layout.appendChild(back);
+        const backChips = sheet.body.querySelector('#layer-chips');
+        const strip = document.querySelector('.chart-panel > .context-wrap');
+        if (backChips && strip) strip.after(backChips);
         if (markersSheet === sheet) markersSheet = null;
       },
     });
@@ -7625,10 +7676,12 @@
   const HIGHLIGHT_PLUGIN = {
     id: 'hrHighlight',
     afterDatasetDraw(chart, args) {
-      const t = chart.$hlT;
-      if (t == null) return;
       const metas = chart.getSortedVisibleDatasetMetas();
       if (!metas.length || args.meta !== metas[0]) return;
+      const act = chart.tooltip ? chart.tooltip.getActiveElements() : [];
+      const hov = act.length ? (act.find((e) => e.datasetIndex === 0) || act[0]) : null;
+      const t = hov ? chart.data.datasets[hov.datasetIndex].data[hov.index].x : chart.$hlT;
+      if (t == null) return;
       const xs = chart.scales.x, ys = chart.scales.y, a = chart.chartArea;
       const px = xs.getPixelForValue(t);
       if (!(px >= a.left - 1 && px <= a.right + 1)) return;
@@ -7644,7 +7697,8 @@
       ctx.lineTo(px, a.bottom);
       ctx.stroke();
       ctx.restore();
-      const py = ys && chart.$hlY != null ? ys.getPixelForValue(chart.$hlY) : NaN;
+      const hy = hov ? (hov.datasetIndex === 0 ? chart.data.datasets[0].data[hov.index].y : null) : chart.$hlY;
+      const py = ys && hy != null ? ys.getPixelForValue(hy) : NaN;
       if (!(py >= a.top - 6 && py <= a.bottom + 6)) return;
       ctx.save();
       ctx.fillStyle = '#ffffff';
@@ -8629,8 +8683,7 @@
       content: [`Max ${s.hrMax.v}`],
       color: STAGE_COLORS[getHRStage(s.hrMax.v)],
       font: { size: 12, weight: 'bold' },
-      position: { x: 'center', y: 'start' },
-      yAdjust: -14,
+      ...labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false),
       backgroundColor: 'rgba(10,10,10,0.8)',
       padding: 3,
     };
@@ -8648,7 +8701,7 @@
       content: [`Min ${s.hrMin.v}`],
       color: STAGE_COLORS[getHRStage(s.hrMin.v)],
       font: { size: 12, weight: 'bold' },
-      yAdjust: 14,
+      ...labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true),
       backgroundColor: 'rgba(10,10,10,0.8)',
       padding: 3,
     };
@@ -8688,7 +8741,7 @@
             mode: 'index',
             intersect: false,
             callbacks: {
-              title: (items) => items.length ? formatDuration(items[0].parsed.x) : '',
+              title: (items) => items.length ? makeTimeTickFormatter(sessionStartEpochMs)(items[0].parsed.x) : '',
               label: (ctx) => {
                 if (ctx.dataset.label === 'Palp') {
                   const p = ctx.raw;
@@ -8771,6 +8824,31 @@
       plugins: markLayout ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN],
     });
     currentChart.$marks = annotations;
+  }
+
+  // A point label kept inside the plot: clamped sideways, flipped to the other side of its point at the top or bottom.
+  // Hidden while its point is outside the shown range.
+  function labelInPlot(xv, yv, text, below) {
+    let wCache = 0;
+    const place = (chart) => {
+      const a = chart.chartArea, px = chart.scales.x.getPixelForValue(xv), py = chart.scales.y.getPixelForValue(yv);
+      if (!wCache) {
+        const c = chart.ctx;
+        c.save(); c.font = 'bold 12px ' + Chart.defaults.font.family; wCache = c.measureText(text).width + 6; c.restore();
+      }
+      const w = wCache, h = 12 * 1.2 + 6, gap = 10;
+      const cx = Math.min(Math.max(px, a.left + w / 2 + 2), a.right - w / 2 - 2);
+      let cy = below ? py + gap + h / 2 : py - gap - h / 2;
+      if (cy - h / 2 < a.top + 2) cy = py + gap + h / 2;
+      if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;
+      return { dx: cx - px, dy: cy - py };
+    };
+    return {
+      position: 'center',
+      display: (ctx) => { const x = ctx.chart.scales.x; return xv >= x.min && xv <= x.max; },
+      xAdjust: (ctx) => place(ctx.chart).dx,
+      yAdjust: (ctx) => place(ctx.chart).dy,
+    };
   }
 
   // The annotation plugin re-resolves every entry on each update, so it gets only the marks within 200 px of the
