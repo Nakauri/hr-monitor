@@ -645,6 +645,39 @@ const whiteAt = (page, x) => page.evaluate((x) => {
   return n ? w / n : 0;
 }, x);
 
+// Reset zoom box against the plot area and both y-axis label columns (page px). S27 follow-up (Khal 10-12 via the main
+// session: the button covered the right axis 45 and 40).
+const resetClear = (page) => page.evaluate(() => {
+  const c = Chart.getChart(document.getElementById('session-chart'));
+  const cr = c.canvas.getBoundingClientRect(), a = c.chartArea;
+  const b = document.getElementById('reset-zoom').getBoundingClientRect();
+  const col = (s) => s && s.options.display !== false ? [cr.left + s.left, cr.left + s.right] : null;
+  const hit = (x) => x && b.left < x[1] && b.right > x[0];
+  return {
+    shown: b.width > 0, w: Math.round(b.width), h: Math.round(b.height),
+    inPlot: b.left >= cr.left + a.left - 0.5 && b.right <= cr.left + a.right + 0.5 && b.top >= cr.top + a.top - 0.5 && b.bottom <= cr.top + a.bottom + 0.5,
+    nearTopRight: cr.left + a.right - b.right <= 12 && b.top - (cr.top + a.top) <= 12,
+    hitsY: hit(col(c.scales.y)), hitsY1: hit(col(c.scales.y1)),
+    bg: getComputedStyle(document.getElementById('reset-zoom')).backgroundColor,
+  };
+});
+// Layers sheet rows: label and swatch contrast against the row (opacity included) and the drawn box per state.
+const sheetRows = (page) => page.evaluate(() => {
+  const parse = (c) => { const m = /rgba?\(([^)]+)\)/.exec(c || ''); if (!m) return null; const p = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat); return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1]; };
+  const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+  const ratio = (x, y) => { const p = lum(x), q = lum(y); return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); };
+  const bgOf = (el) => { const chain = []; for (let n = el; n; n = n.parentElement) { const c = parse(getComputedStyle(n).backgroundColor); if (c && c[3] > 0) { chain.push(c); if (c[3] >= 1) break; } } let bg = [10, 10, 10]; for (let i = chain.length - 1; i >= 0; i--) { const c = chain[i]; bg = [0, 1, 2].map((k) => c[k] * c[3] + bg[k] * (1 - c[3])); } return bg; };
+  const opa = (el) => { let o = 1; for (let n = el; n; n = n.parentElement) o *= +getComputedStyle(n).opacity; return o; };
+  return [...document.querySelectorAll('.markers-sheet #layer-chips .chip')].filter((c) => c.getBoundingClientRect().height > 0).map((c) => {
+    const lbl = c.querySelector('.lbl'), bg = bgOf(c), o = opa(lbl), fg = parse(getComputedStyle(lbl).color);
+    const seen = [0, 1, 2].map((k) => fg[k] * o * fg[3] + bg[k] * (1 - o * fg[3]));
+    const box = getComputedStyle(c, '::after'), tick = getComputedStyle(c, '::before');
+    return { t: c.dataset.layer, on: c.getAttribute('aria-pressed') === 'true', disabled: c.disabled, text: +ratio(seen, bg).toFixed(2),
+      boxFill: box.backgroundColor, boxBorder: box.borderTopColor, boxW: parseFloat(box.width), tick: tick.content !== 'none' && tick.content !== 'normal',
+      frame: getComputedStyle(c).borderTopColor + ' ' + getComputedStyle(c).boxShadow + ' ' + getComputedStyle(c).backgroundColor };
+  });
+});
+
 const LAYOUT = {
   async phone(base) {
     const rows = [];
@@ -681,6 +714,12 @@ const LAYOUT = {
         return { title: document.querySelector('.markers-sheet .sheet-head h2').textContent.trim(), n: chips.length, full: chips.every((c) => c.getBoundingClientRect().width >= inner - 1), tall: chips.every((c) => c.getBoundingClientRect().height >= 43.5), listBelow: !!list && !!lastChip && list.getBoundingClientRect().top >= lastChip.getBoundingClientRect().bottom };
       });
       rows.push([!!sh && sh.title === 'Layers' && sh.n >= 10 && sh.full && sh.tall && sh.listBelow, `${tag}: Layers sheet holds full-width 44 px layer rows, then the markers list ${JSON.stringify(sh)}`]);
+      const sr = await sheetRows(page);
+      const onBoxes = new Set(sr.filter((r) => r.on).map((r) => r.boxFill + r.boxBorder)), offBoxes = new Set(sr.filter((r) => !r.on).map((r) => r.boxFill + r.boxBorder));
+      const lowText = sr.filter((r) => r.text < 4.5).map((r) => r.t + ' ' + r.text);
+      rows.push([sr.length >= 10 && !lowText.length, `${tag}: every Layers row label reads at 4.5:1, on or off (lowest ${Math.min(...sr.map((r) => r.text))}${lowText.length ? '; under: ' + lowText.join(', ') : ''})`]);
+      rows.push([sr.every((r) => r.boxW >= 17) && onBoxes.size === 1 && offBoxes.size === 1 && [...onBoxes][0] !== [...offBoxes][0] && sr.every((r) => r.tick === r.on) && new Set(sr.map((r) => r.frame)).size === 1 && sr.some((r) => r.on) && sr.some((r) => !r.on && !r.disabled) && sr.some((r) => r.disabled),
+        `${tag}: Layers rows have two states, read from the box (on ${sr.filter((r) => r.on).length}, off ${sr.filter((r) => !r.on).length}, box styles on ${onBoxes.size} off ${offBoxes.size}, row frames ${new Set(sr.map((r) => r.frame)).size})`]);
       await page.keyboard.press('Escape'); await page.waitForTimeout(300);
       const back = await page.evaluate(() => !!document.querySelector('.chart-panel > #layer-chips') && !!document.querySelector('#session-layout > .session-sidebar'));
       rows.push([back, `${tag}: closing the sheet puts the chips and the panel back`]);
@@ -689,7 +728,8 @@ const LAYOUT = {
       await page.evaluate(() => document.querySelector('.chart-panel').scrollIntoView({ block: 'start' }));
       const rz = await rect(page, '#reset-zoom'), cw = await rect(page, '.chart-wrap'), lay2 = await rect(page, '#markers-open');
       const segRight2 = await page.$$eval('#axis-mode > button', (bs) => Math.max(...bs.map((b) => b.getBoundingClientRect().right)));
-      rows.push([rz && rz.shown && rz.t >= cw.t - 0.5 && rz.t - cw.t <= 12 && cw.r - rz.r <= 12 && rz.r <= cw.r + 0.5 && Math.abs(lay2.t - lay.t) < 2 && segRight2 <= lay2.l + 0.5 && Math.abs(lay2.r - lay.r) < 1, `${tag}: zoomed, Reset zoom shows on the chart's top corner and the tools row keeps its places (reset ${rz && [Math.round(rz.t - cw.t), Math.round(cw.r - rz.r)]}, segmented right ${Math.round(segRight2)}, Layers ${Math.round(lay2.l)}..${Math.round(lay2.r)})`]);
+      const rc = await resetClear(page);
+      rows.push([rz && rz.shown && rc.inPlot && rc.nearTopRight && !rc.hitsY && !rc.hitsY1 && rc.w <= 44.5 && rc.h <= 44.5 && Math.abs(lay2.t - lay.t) < 2 && segRight2 <= lay2.l + 0.5 && Math.abs(lay2.r - lay.r) < 1, `${tag}: zoomed, Reset zoom is a 44 px button in the plot's top right, clear of both axis label columns, and the tools row keeps its places (${JSON.stringify(rc)})`]);
       const lbz = await labelBoxes(page);
       rows.push([lbz.every((b) => b.inside), `${tag}: zoomed, shown Max and Min labels inside the plot ${JSON.stringify(lbz.map((b) => [b.name, b.box, b.area]))}`]);
       rows.push([!page.errors.length, `${tag}: no page errors ` + page.errors.join(' | ')]);
@@ -739,6 +779,14 @@ const LAYOUT = {
       }
       await ctx.close();
     }
+    {
+      const { ctx, page } = await openDemo(base, 1440);
+      await dragStrip(page, 0.3);
+      await page.evaluate(() => document.querySelector('.chart-wrap').scrollIntoView({ block: 'center' }));
+      const rc = await resetClear(page);
+      rows.push([rc.shown && rc.inPlot && rc.nearTopRight && !rc.hitsY && !rc.hitsY1 && rc.w <= 44.5, `1440: zoomed, Reset zoom sits in the plot's top right, clear of both axis label columns (${JSON.stringify(rc)})`]);
+      await ctx.close();
+    }
     // Hover line follows the pointer while a mark is pinned; the pinned line returns on leave.
     const { ctx, page } = await openDemo(base, 1440);
     await page.click('#axis-mode button[data-mode="clock"]'); await page.waitForTimeout(250);
@@ -779,15 +827,18 @@ if (want('layout')) {
 }
 if (want('layout-mutants')) {
   const real = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+  // Retired 10-12: 'tools row wraps as before' (a flex row without Reset zoom no longer wraps at 360; the 200% overflow
+  // mutant guards the one-row rule).
   const L_MUTANTS = [
     ['phone', 'gaps line back above the chart', "chartNote: gapsNoteHtml((s && s.recGaps) || []) });", "});"],
     ['phone', 'Layers keeps its name at 200% text (row overflows)', '  @container (max-width: 18em) {\n    .chart-tools .markers-open { width: 44px; padding: 0; }\n    .chart-tools .markers-open .lbl { display: none; }\n  }\n', ''],
-    ['phone', 'tools row wraps as before', '    .chart-tools { display: contents; }\n', '    .chart-tools { flex-wrap: wrap; }\n'],
     ['phone', 'long date title on the phone', '    .datenav .day-title .t-long { display: none; }\n', ''],
     ['phone', 'collapsed Summary hides every stat', '    .summary-bar.collapsed .summary-grid { grid-template-columns:', '    .summary-bar.collapsed .summary-grid { display: none; grid-template-columns:'],
     ['phone', 'Layers sheet without the layer rows', 'body: chips ? [chips, sb] : sb,', 'body: sb,'],
-    ['phone', 'Reset zoom stays in the tools row', '    .chart-tools .reset-zoom { grid-row: 2; grid-column: 1 / -1;', '    .chart-tools .reset-zoom { grid-row: 1; grid-column: 2;'],
-    ['phone', 'Reset zoom widens the Layers column (Layers over Duration)', '    .chart-tools .markers-open { grid-row: 1; grid-column: 2; justify-self: end; }\n    .chart-panel > .chart-wrap { grid-row: 2; }\n    /* Spans both columns so its width never widens the Layers column. */\n    .chart-tools .reset-zoom { grid-row: 2; grid-column: 1 / -1;', '    .chart-tools .markers-open { grid-row: 1; grid-column: 2; }\n    .chart-panel > .chart-wrap { grid-row: 2; }\n    .chart-tools .reset-zoom { grid-row: 2; grid-column: 2;'],
+    ['phone', 'Reset zoom at the canvas corner over the right axis', '  .chart-wrap .reset-zoom { position: absolute; top: var(--plot-top, 8px); right: var(--plot-right, 8px);', '  .chart-wrap .reset-zoom { position: absolute; top: 4px; right: 4px;'],
+    ['laptop', 'Reset zoom at the canvas corner over the right axis (1440)', '  .chart-wrap .reset-zoom { position: absolute; top: var(--plot-top, 8px); right: var(--plot-right, 8px);', '  .chart-wrap .reset-zoom { position: absolute; top: 4px; right: 4px;'],
+    ['phone', 'Layers rows faded as before (off dim, no data at 40%)', '    background: transparent; border-color: var(--border); box-shadow: none; opacity: 1;\n  }\n', '  }\n  .markers-sheet .layer-toggles .chip[aria-pressed="false"] { color: var(--text-dim); }\n  .markers-sheet .layer-toggles .chip:disabled { opacity: .4; }\n'],
+    ['phone', 'Layers rows without the drawn box (on read from the ring)', '  .markers-sheet .layer-toggles .chip[aria-pressed="true"]::after { background: var(--action); border-color: var(--action); }\n', ''],
     ['phone', 'Max and Min labels unclamped', "      ...labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true),", '      yAdjust: 14,'],
     ['laptop', 'Max label unclamped', "      ...labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false),", "      position: { x: 'center', y: 'start' },\n      yAdjust: -14,"],
     ['laptop', 'panel content sizes the row (empty band)', '  .session-layout > .session-sidebar { contain: size; }\n', ''],
