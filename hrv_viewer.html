@@ -315,16 +315,6 @@
   }
   .segmented.metric-switch { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
   .metric-switch > button { white-space: nowrap; }
-  .cal-title {
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    min-width: 220px;
-  }
-  .cal-nav {
-    display: flex;
-    gap: var(--s1);
-  }
   .cal-legend-strip {
     display: flex;
     gap: 16px;
@@ -458,16 +448,32 @@
     margin-bottom: 18px;
     flex-wrap: wrap;
   }
-  .day-title {
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-  .datenav { display: inline-flex; align-items: center; gap: var(--s1); }
-  .datenav .day-title { margin: 0 var(--s1); font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
-  .datenav .btn.icon .ico { width: 20px; height: 20px; }
+  /* Date nav for Day, Week and Month: carets pinned at the row ends, the title centred in a fixed track so a long weekday never moves them. */
+  .datenav { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--s1); }
   .datenav .btn.icon { flex: 0 0 44px; }
-  .day-title .t-short { display: none; }
+  .datenav-h { flex: 0 0 auto; width: 16.5em; margin: 0; font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
+  .datenav .datenav-title { width: 100%; min-height: 44px; padding: var(--s1) var(--s2); font: inherit; letter-spacing: inherit; font-variant-numeric: tabular-nums; text-wrap: balance; }
+  .datenav .datenav-title[aria-expanded="true"] { background: var(--selected-fill); }
+  .datenav-open { color: var(--text-dim); }
+  .day-title .t-short, .month-title .t-short { display: none; }
+  /* Jump picker: a month of days, or a year of months. A bottom sheet on the phone, a popover under the title on a laptop. */
+  .sheet-root.date-pop { align-items: flex-start; justify-content: flex-start; padding: 0; }
+  .date-pop .sheet-scrim { background: transparent; }
+  .date-pop .sheet { position: absolute; width: 340px; max-width: calc(100vw - 16px); border-radius: var(--r-menu); box-shadow: var(--shadow-2); }
+  .date-pop .sheet-head { display: none; }
+  .date-pop .sheet-body { padding: var(--s3); }
+  .dp-head { display: flex; align-items: center; gap: var(--s1); margin-bottom: var(--s1); }
+  .dp-label { flex: 1 1 auto; text-align: center; font-size: var(--t16); font-weight: 600; color: var(--text); }
+  .dp-dow, .dp-grid { display: grid; grid-template-columns: repeat(7, minmax(44px, 1fr)); }
+  .dp-dow span { display: flex; align-items: center; justify-content: center; min-height: 32px; font-size: var(--t12); color: var(--text-dim); }
+  .dp-grid.dp-months { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s1); }
+  .dp-grid .dp-cell { position: relative; min-height: 44px; padding: 0; font-weight: 500; color: var(--text-dim); }
+  .dp-grid .dp-cell.has { color: var(--text); font-weight: 600; }
+  .dp-grid .dp-cell.has::after { content: ''; position: absolute; left: calc(50% - 2px); bottom: 6px; width: 4px; height: 4px; border-radius: 2px; background: var(--hrv); }
+  .dp-grid .dp-cell.today { border-color: var(--border-control); }
+  .dp-grid .dp-cell.shown { color: var(--on-fill); }
+  .dp-grid .dp-cell.shown::after { background: var(--on-fill); }
+  .dp-grid .dp-cell.inweek { background: var(--selected-fill); border-radius: 0; }
   .gaps-note { margin: var(--s3) 0 0; font-size: var(--t14); color: var(--text-dim); }
   .day-sessions-head {
     display: flex;
@@ -635,11 +641,12 @@
     padding: 16px 64px 16px 20px;
     position: relative;
   }
-  /* Columns in em so larger text gives fewer columns. */
+  /* Every column is as wide as the widest visible stat (--kpi-col, set by fitSummaryStats), so one gap token sits between every pair. */
   .summary-grid {
+    --kpi-gap: var(--s5);
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(7.5em, 1fr));
-    gap: 16px 24px;
+    grid-template-columns: repeat(auto-fill, minmax(min(var(--kpi-col, 7.5em), 100%), 1fr));
+    gap: var(--s4) var(--kpi-gap);
     font-size: var(--t14);
   }
   .summary-bar-title {
@@ -1417,12 +1424,12 @@
     .markers-open { display: inline-flex; }
     .sidebar-toggle { display: none; }
     .summary-bar { padding: 8px 56px 14px 14px; cursor: pointer; min-height: 60px; }
-    .summary-grid { gap: 12px 16px; margin-top: 4px; }
+    .summary-grid { row-gap: var(--s3); margin-top: 4px; }
     .summary-stat-value { font-size: 22px; }
     .summary-bar-title { display: flex; }
     /* Collapsed: the key numbers stay, without their sub-lines. */
     .summary-bar.collapsed { padding: 0 56px 12px 14px; min-height: 56px; }
-    .summary-bar.collapsed .summary-grid { grid-template-columns: repeat(auto-fit, minmax(3.75em, 1fr)); gap: 8px 12px; margin-top: 0; }
+    .summary-bar.collapsed .summary-grid { grid-template-columns: repeat(auto-fit, minmax(min(var(--kpi-col, 3.75em), 100%), 1fr)); row-gap: var(--s2); margin-top: 0; }
     .summary-bar.collapsed .summary-stat:not([data-stat="hrAvg"], [data-stat="hrMax"], [data-stat="hrMin"], [data-stat="rmssdAvg"]),
     .summary-bar.collapsed .summary-stat-unit { display: none; }
     .chart-wrap { min-height: 260px; }
@@ -1439,6 +1446,8 @@
     .chart-panel > .layer-toggles { display: none; }
     .datenav .day-title .t-long { display: none; }
     .datenav .day-title .t-short { display: inline; }
+    .datenav .month-title .t-long { display: none; }
+    .datenav .month-title .t-short { display: inline; }
     .segmented.metric-switch { display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(5.5em, 1fr)); }
     .metric-switch > button { padding: 0 var(--s2); }
     .interp-grid { grid-template-columns: 1fr; }
@@ -1454,15 +1463,8 @@
       row-gap: 10px;
       align-items: center;
     }
-    .cal-title, .day-title {
-      font-size: 15px;
-      min-width: 0;
-      flex: 1 1 auto;
-      letter-spacing: 0.01em;
-    }
-    .day-header .datenav { flex: 1 1 100%; justify-content: space-between; }
-    .datenav .day-title { flex: 1 1 auto; font-size: var(--t20); white-space: normal; text-align: center; text-wrap: balance; }
-    .cal-nav { flex: 0 0 auto; }
+    .datenav { flex: 1 1 100%; }
+    .datenav .datenav-h { flex: 1 1 0; width: auto; min-width: 0; font-size: var(--t20); }
     /* Force metric switch + legend + any extra action onto their own row. */
     .cal-header .metric-switch,
     .cal-header .chart-legend,
@@ -5017,6 +5019,149 @@
     });
   }
 
+  // ===== Date nav: one component for Day, Week and Month =====
+  // Carets sit at the row ends around a fixed title track; the title opens a jump picker.
+  function dateNavHTML(view, o) {
+    const off = (b) => b ? ' disabled' : '';
+    return `
+        <div class="datenav ui" data-view="${view}">
+          <button class="btn icon" id="${view}-prev" type="button" aria-label="${o.prevLabel}"${off(o.prevOff)}>${UI.icon('prev')}</button>
+          <h1 class="datenav-h${o.cls ? ' ' + o.cls : ''}"><button class="btn ghost datenav-title" id="${view}-pick" type="button" aria-haspopup="dialog">${o.title}${UI.icon('chevron').replace('class="ico"', 'class="ico datenav-open" aria-hidden="true"')}</button></h1>
+          <button class="btn icon" id="${view}-next" type="button" aria-label="${o.nextLabel}"${off(o.nextOff)}>${UI.icon('next')}</button>
+        </div>`;
+  }
+  // A re-render replaces the nav; the control that had focus gets it back.
+  let dateNavFocus = null;
+  document.addEventListener('focusin', (e) => { dateNavFocus = e.target && e.target.closest && e.target.closest('.datenav') ? e.target.id : null; });
+  function wireDateNav(view, o) {
+    const g = (s) => document.getElementById(view + s);
+    g('-prev').addEventListener('click', o.prev);
+    g('-next').addEventListener('click', o.next);
+    g('-pick').addEventListener('click', (e) => openDatePick(view, e.currentTarget, o.shown));
+    const back = dateNavFocus && dateNavFocus.startsWith(view + '-') && document.getElementById(dateNavFocus);
+    if (back && !back.disabled && (document.activeElement === document.body || !document.activeElement)) {
+      try { back.focus({ preventScroll: true }); } catch (e) {}
+    }
+  }
+
+  const DP_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const dpIso = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  let datePick = null;
+  // view 'day' or 'week': a month of days; 'month': the year's months. shown is the iso day or YYYY-MM in view.
+  function openDatePick(view, anchor, shown) {
+    if (datePick && !datePick.closed) datePick.close('reopen');
+    const byMonth = view === 'month';
+    const today = localDateKeyToday();
+    const shownIso = byMonth ? shown + '-01' : shown;
+    let y = +shownIso.slice(0, 4), m = +shownIso.slice(5, 7) - 1;
+    const weekOf = (iso) => { const d = new Date(iso + 'T12:00:00'); return isoAddDays(iso, -d.getDay()); }; // date-label
+    const shownWeek = view === 'week' ? weekOf(shownIso) : null;
+    const monthDays = {};
+    for (const k of Object.keys(sessionsByDate)) monthDays[k.slice(0, 7)] = (monthDays[k.slice(0, 7)] || 0) + 1;
+    const body = document.createElement('div');
+    body.className = 'dp';
+    const unit = byMonth ? 'year' : 'month';
+    body.innerHTML = `
+      <div class="dp-head">
+        <button class="btn icon dp-step" type="button" data-step="-1" aria-label="Previous ${unit}">${UI.icon('prev')}</button>
+        <span class="dp-label" aria-live="polite"></span>
+        <button class="btn icon dp-step" type="button" data-step="1" aria-label="Next ${unit}">${UI.icon('next')}</button>
+      </div>
+      ${byMonth ? '' : `<div class="dp-dow" aria-hidden="true">${['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<span>${d}</span>`).join('')}</div>`}
+      <div class="dp-grid${byMonth ? ' dp-months' : ''}"></div>`;
+    const label = body.querySelector('.dp-label');
+    const grid = body.querySelector('.dp-grid');
+    const draw = (focusKey) => {
+      let html = '';
+      if (byMonth) {
+        label.textContent = String(y);
+        for (let i = 0; i < 12; i++) {
+          const key = `${y}-${String(i + 1).padStart(2, '0')}`;
+          const n = monthDays[key] || 0;
+          const cls = ['btn', key === shown ? 'primary' : 'ghost', 'dp-cell', n ? 'has' : '', key === today.slice(0, 7) ? 'today' : '', key === shown ? 'shown' : ''].filter(Boolean).join(' ');
+          html += `<button class="${cls}" type="button" data-key="${key}" tabindex="-1" aria-label="${DP_MONTHS[i]} ${y}${n ? `, ${n} day${n === 1 ? '' : 's'} recorded` : ''}"${key === shown ? ' aria-current="true"' : ''}>${DP_MONTHS[i].slice(0, 3)}</button>`;
+        }
+      } else {
+        label.textContent = `${DP_MONTHS[m]} ${y}`;
+        const first = new Date(y, m, 1);
+        for (let i = 0; i < 42; i++) {
+          const d = new Date(y, m, 1 - first.getDay() + i, 12);
+          const key = dpIso(d.getFullYear(), d.getMonth(), d.getDate());
+          const n = (sessionsByDate[key] || []).length;
+          const inWeek = shownWeek && weekOf(key) === shownWeek;
+          const isShown = view === 'day' && key === shown;
+          if (d.getMonth() !== m) { html += '<span class="dp-cell out" aria-hidden="true"></span>'; continue; }
+          const cls = ['btn', isShown ? 'primary' : 'ghost', 'dp-cell', n ? 'has' : '', key === today ? 'today' : '', isShown ? 'shown' : '', inWeek ? 'inweek' : ''].filter(Boolean).join(' ');
+          const name = d.toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+          html += `<button class="${cls}" type="button" data-key="${key}" tabindex="-1" aria-label="${name}${n ? `, ${n} recording${n === 1 ? '' : 's'}` : ''}"${isShown || inWeek ? ' aria-current="true"' : ''}>${d.getDate()}</button>`;
+        }
+      }
+      grid.innerHTML = html;
+      const cells = [...grid.querySelectorAll('button.dp-cell')];
+      const target = cells.find((c) => c.dataset.key === focusKey)
+        || cells.find((c) => c.classList.contains('shown') || c.classList.contains('inweek'))
+        || cells.find((c) => c.classList.contains('today'))
+        || cells[0];
+      target.tabIndex = 0;
+      return target;
+    };
+    const step = (n) => {
+      if (byMonth) y += n;
+      else { const d = new Date(y, m + n, 1); y = d.getFullYear(); m = d.getMonth(); }
+    };
+    // Moves focus by days (or months), turning the page when it leaves the one shown.
+    const move = (from, by) => {
+      let key;
+      if (byMonth) {
+        const d = new Date(+from.slice(0, 4), +from.slice(5, 7) - 1 + by, 1);
+        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        y = d.getFullYear();
+      } else {
+        key = isoAddDays(from, by);
+        y = +key.slice(0, 4); m = +key.slice(5, 7) - 1;
+      }
+      draw(key).focus();
+    };
+    const pick = (key) => {
+      sheet.close('pick');
+      if (key === shown) return;
+      if (view === 'month') setHash('month/' + key);
+      else setHash(view + '/' + key);
+    };
+    body.addEventListener('click', (e) => {
+      const st = e.target.closest('.dp-step');
+      if (st) { step(+st.dataset.step); draw(); return; }
+      const c = e.target.closest('.dp-cell');
+      if (c) pick(c.dataset.key);
+    });
+    body.addEventListener('keydown', (e) => {
+      const c = e.target.closest && e.target.closest('.dp-cell');
+      const keys = byMonth ? { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 } : { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.stopPropagation();
+      if (c && keys[e.key]) { e.preventDefault(); move(c.dataset.key, keys[e.key]); return; }
+      if (c && (e.key === 'PageUp' || e.key === 'PageDown')) {
+        e.preventDefault();
+        const by = e.key === 'PageUp' ? -1 : 1;
+        if (byMonth) move(c.dataset.key, by * 12);
+        else { const day = +c.dataset.key.slice(8); step(by); draw(dpIso(y, m, Math.min(day, new Date(y, m + 1, 0).getDate()))).focus(); }
+      }
+    });
+    const phone = !window.matchMedia('(min-width: 600px)').matches;
+    try { anchor.focus({ preventScroll: true }); } catch (e) {}
+    const title = byMonth ? 'Jump to a month' : view === 'week' ? 'Jump to a week' : 'Jump to a day';
+    const sheet = UI.sheet({ title, body, className: 'date-pick' + (phone ? '' : ' date-pop'), onClose: () => anchor.setAttribute('aria-expanded', 'false') });
+    anchor.setAttribute('aria-expanded', 'true');
+    datePick = sheet;
+    const first = draw();
+    if (!phone) {
+      const r = anchor.getBoundingClientRect();
+      const w = sheet.sheet.offsetWidth;
+      sheet.sheet.style.left = Math.round(Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8)) + 'px';
+      sheet.sheet.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - sheet.sheet.offsetHeight - 8))) + 'px';
+    }
+    try { first.focus({ preventScroll: true }); } catch (e) {}
+  }
+
   // ===== Month calendar =====
   function renderMonth(ymArg) {
     const el = document.getElementById('view-month');
@@ -5130,11 +5275,7 @@
 
     el.innerHTML = `
       <div class="cal-header ui">
-        <div class="cal-title">${monthName}</div>
-        <div class="cal-nav">
-          <button class="btn icon" id="cal-prev" type="button" aria-label="Previous month">${UI.icon('prev')}</button>
-          <button class="btn icon" id="cal-next" type="button" aria-label="Next month">${UI.icon('next')}</button>
-        </div>
+        ${dateNavHTML('month', { title: `<span class="t-long">${monthName}</span><span class="t-short">${first.toLocaleString(undefined, { month: 'short', year: 'numeric' })}</span>`, cls: 'month-title', prevLabel: 'Previous month', nextLabel: 'Next month' })}
         <button class="btn cal-today-btn" id="cal-today" type="button">Today</button>
         ${metricSwitchHTML()}
         ${legend}
@@ -5147,14 +5288,8 @@
     wireMetricSwitch(el, () => renderMonth(ymArg));
 
     // Nav handlers
-    document.getElementById('cal-prev').addEventListener('click', () => {
-      const d = new Date(year, month - 1, 1);
-      setHash(`month/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    });
-    document.getElementById('cal-next').addEventListener('click', () => {
-      const d = new Date(year, month + 1, 1);
-      setHash(`month/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    });
+    const monthHash = (n) => { const d = new Date(year, month + n, 1); setHash(`month/${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); };
+    wireDateNav('month', { prev: () => monthHash(-1), next: () => monthHash(1), shown: `${year}-${String(month + 1).padStart(2, '0')}` });
     document.getElementById('cal-today').addEventListener('click', () => {
       const n = new Date();
       setHash(`month/${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`);
@@ -5204,16 +5339,9 @@
     };
     const headHtml = (gaps) => `
       <div class="day-header" data-gaps="${gaps.length}">
-        <div class="datenav ui">
-          <button class="btn icon" id="day-prev" type="button" aria-label="Previous day"${prevDate ? '' : ' disabled'}>${UI.icon('prev')}</button>
-          <h1 class="day-title"><span class="t-long">${title}</span><span class="t-short">${titleShort}</span></h1>
-          <button class="btn icon" id="day-next" type="button" aria-label="Next day"${nextDate ? '' : ' disabled'}>${UI.icon('next')}</button>
-        </div>
+        ${dateNavHTML('day', { title: `<span class="t-long">${title}</span><span class="t-short">${titleShort}</span>`, cls: 'day-title', prevLabel: 'Previous day', nextLabel: 'Next day', prevOff: !prevDate, nextOff: !nextDate })}
       </div>`;
-    const wireNav = () => {
-      document.getElementById('day-prev').addEventListener('click', () => { if (prevDate) setHash('day/' + prevDate); });
-      document.getElementById('day-next').addEventListener('click', () => { if (nextDate) setHash('day/' + nextDate); });
-    };
+    const wireNav = () => wireDateNav('day', { prev: () => { if (prevDate) setHash('day/' + prevDate); }, next: () => { if (nextDate) setHash('day/' + nextDate); }, shown: iso });
     // A different day shows its date at once while its recordings load; a reload of the same day keeps the page.
     if (el.dataset.iso !== iso) {
       clearExplorer();
@@ -5360,16 +5488,13 @@
       cols.push({ iso, date: d, dow: dowNames[i], files, avgHR, totalPalp, totalWarn, totalShifts, totalFlush, totalChills, totalDur });
     }
 
-    const weekTitle = `Week of ${weekStart.toLocaleString(undefined, { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const sameMonth = weekStart.getMonth() === weekEnd.getMonth();
+    const weekTitle = `${weekStart.toLocaleString(undefined, { month: 'short', day: 'numeric' })} to ${sameMonth ? weekEnd.getDate() : weekEnd.toLocaleString(undefined, { month: 'short', day: 'numeric' })}, ${weekEnd.getFullYear()}`;
     const weekFiles = cols.reduce((acc, c) => acc.concat(c.files), []);
 
     el.innerHTML = `
       <div class="cal-header ui">
-        <div class="cal-title">${weekTitle}</div>
-        <div class="cal-nav">
-          <button class="btn icon" id="week-prev" type="button" aria-label="Previous week">${UI.icon('prev')}</button>
-          <button class="btn icon" id="week-next" type="button" aria-label="Next week">${UI.icon('next')}</button>
-        </div>
+        ${dateNavHTML('week', { title: weekTitle, prevLabel: 'Previous week', nextLabel: 'Next week' })}
         <button class="btn cal-today-btn" id="week-today" type="button">This week</button>
         ${metricSwitchHTML()}
         <div class="cal-legend-strip">
@@ -5414,12 +5539,7 @@
     wireMetricSwitch(el, () => renderWeek(weekArg));
 
     // Wire nav
-    document.getElementById('week-prev').addEventListener('click', () => {
-      setHash('week/' + isoAddDays(weekStartStr, -7));
-    });
-    document.getElementById('week-next').addEventListener('click', () => {
-      setHash('week/' + isoAddDays(weekStartStr, 7));
-    });
+    wireDateNav('week', { prev: () => setHash('week/' + isoAddDays(weekStartStr, -7)), next: () => setHash('week/' + isoAddDays(weekStartStr, 7)), shown: weekStartStr });
     document.getElementById('week-today').addEventListener('click', () => {
       setHash('week/' + todayStr);
     });
@@ -8165,7 +8285,32 @@
     document.querySelectorAll('#summary-bar .summary-stat[data-stat]').forEach(el => {
       el.style.display = hidden.has(el.getAttribute('data-stat')) ? 'none' : '';
     });
+    fitSummaryStats();
   }
+  // Sizes the stat columns to the widest visible stat, so a long Duration never runs into its neighbour.
+  function fitSummaryStats() {
+    const grid = document.querySelector('#summary-bar .summary-grid');
+    if (!grid) return;
+    const stats = [...grid.children].filter((e) => e.offsetParent !== null);
+    stats.forEach((e) => { e.style.width = 'max-content'; });
+    const w = stats.reduce((a, e) => Math.max(a, e.getBoundingClientRect().width), 0);
+    stats.forEach((e) => { e.style.width = ''; });
+    if (!w) return;
+    const col = Math.ceil(w);
+    grid.style.setProperty('--kpi-col', col + 'px');
+    // Balanced rows: 10 stats that fit 8 across become 5 and 5, never 8 and 2.
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+    const fit = Math.max(1, Math.floor((grid.clientWidth + gap) / (col + gap)));
+    const cols = Math.ceil(stats.length / Math.ceil(stats.length / fit));
+    grid.style.gridTemplateColumns = `repeat(${cols}, minmax(min(${col}px, 100%), 1fr))`;
+  }
+  let fitStatsQueued = false;
+  window.addEventListener('resize', () => {
+    if (fitStatsQueued) return;
+    fitStatsQueued = true;
+    requestAnimationFrame(() => { fitStatsQueued = false; fitSummaryStats(); });
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSummaryStats);
   function wireSummaryBarKebab() {
     const btn = document.getElementById('summary-bar-kebab');
     const menu = document.getElementById('summary-bar-menu');
@@ -9748,6 +9893,7 @@
       if (e.target.closest('#summary-bar-kebab')) return;
       if (e.target.closest('#summary-bar-menu')) return;
       const collapsed = bar.classList.toggle('collapsed');
+      fitSummaryStats();
       try { localStorage.setItem('hrv_summary_collapsed', collapsed ? '1' : '0'); } catch (err) {}
     });
     setupKeyboardNav();
