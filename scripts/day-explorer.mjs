@@ -753,8 +753,11 @@ const LAYOUT = {
       rows.push([!!sh && sh.title === 'Layers' && sh.n >= 10 && sh.full && sh.tall && sh.noList, `${tag}: Layers sheet holds full-width 44 px layer rows and no markers ${JSON.stringify(sh)}`]);
       const sr = await sheetRows(page);
       const onBoxes = new Set(sr.filter((r) => r.on).map((r) => r.boxFill + r.boxBorder)), offBoxes = new Set(sr.filter((r) => !r.on).map((r) => r.boxFill + r.boxBorder));
-      const lowText = sr.filter((r) => r.text < 4.5).map((r) => r.t + ' ' + r.text);
-      rows.push([sr.length >= 10 && !lowText.length, `${tag}: every Layers row label reads at 4.5:1, on or off (lowest ${Math.min(...sr.map((r) => r.text))}${lowText.length ? '; under: ' + lowText.join(', ') : ''})`]);
+      const lowText = sr.filter((r) => r.text < (r.disabled ? 3 : 4.5)).map((r) => r.t + ' ' + r.text);
+      rows.push([sr.length >= 10 && !lowText.length, `${tag}: every Layers row label reads at 4.5:1 on or off, 3:1 when there is none here (lowest ${Math.min(...sr.map((r) => r.text))}${lowText.length ? '; under: ' + lowText.join(', ') : ''})`]);
+      // Khal 2026-10-12: rows with none here are dimmed a little so they read as not clickable.
+      const live = sr.filter((r) => !r.disabled).map((r) => r.text), dead = sr.filter((r) => r.disabled).map((r) => r.text);
+      rows.push([dead.length > 0 && Math.max(...dead) < Math.min(...live), `${tag}: none-here rows are dimmer than every live row (dimmest live ${Math.min(...live)}, brightest none-here ${Math.max(...dead)})`]);
       rows.push([sr.every((r) => r.boxW >= 17) && onBoxes.size === 1 && offBoxes.size === 1 && [...onBoxes][0] !== [...offBoxes][0] && sr.every((r) => r.tick === r.on) && new Set(sr.map((r) => r.frame)).size === 1 && sr.some((r) => r.on) && sr.some((r) => !r.on && !r.disabled) && sr.some((r) => r.disabled),
         `${tag}: Layers rows have two states, read from the box (on ${sr.filter((r) => r.on).length}, off ${sr.filter((r) => !r.on).length}, box styles on ${onBoxes.size} off ${offBoxes.size}, row frames ${new Set(sr.map((r) => r.frame)).size})`]);
       await page.keyboard.press('Escape'); await page.waitForTimeout(300);
