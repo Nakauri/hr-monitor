@@ -1,4 +1,4 @@
-// Guards: AUDIT-NOTES 2026-10-11 item 28 (Khal 2026-10-12, Galaxy S8: zooming into data on the phone is still hard; the strip brush was the only zoom) and the missed left brush handle on the first grab (Khal 2026-10-12, laptop and phone). Files: hrv_viewer.html chart gestures (wireChartGestures, doubleTapZoom, the brush handle hit test (brushModeAt, the overlay grab zone past the strip ends), #session-chart touch-action). Runtime about 40 s; --mutants about 60 s more.
+// Guards: AUDIT-NOTES 2026-10-11 item 28 (Khal 2026-10-12, Galaxy S8: zooming into data on the phone is still hard; the strip brush was the only zoom) and the missed left brush handle on the first grab (Khal 2026-10-12, laptop and phone). Files: hrv_viewer.html chart gestures (wireChartGestures, doubleTapZoom, the brush handle hit test (brushModeAt, the overlay grab zone past the strip ends), #session-chart touch-action, wireMouseDragZoom and .drag-band, the gear popover #viewer-open-diagnostics). Runtime about 25 s; --mutants about 135 s.
 // S32 touch zoom on the Day chart, headless, CDP touch (Input.dispatchTouchEvent) on ?demo=1 Day.
 // 360: one pinch takes the range from the full day to under 1 h and keeps the time under the pinch centre there;
 //      a one-finger sideways drag pans the zoomed range; a vertical swipe scrolls the page and leaves the range;
@@ -9,8 +9,13 @@
 // 1440 brush: the left handle at the strip start grabbed by its outer half; each handle grabbed 10 px off its drawn centre;
 //      a click 18 px outside a handle keeps the zoom; cursors ew-resize on a handle, grab inside, crosshair elsewhere.
 // 1440: ctrl+wheel zooms around the pointer and leaves the page; a plain wheel scrolls the page and leaves the range.
+// 1440 S37 mouse drag-to-zoom (AUDIT-NOTES item 33, Khal 2026-10-12: "I'd rather have good performance than that feature"):
+//      a mouse drag across the plot zooms to the band within 1 min, with 0 chart updates during the drag and the band
+//      drawn while dragging; a 3 px drag is a click (range kept, the click reaches the chart); Escape mid-drag cancels;
+//      crosshair over the plot.
+// 1440 S37 diagnostics: no DIAG chip (.hrm-user-chip) in the viewer; gear then Diagnostics opens the sheet by real clicks.
 // --mutants: the pinch calling chart.update per touchmove, touch-action none on the canvas, 12 px touch handle targets,
-// and a 6 px mouse handle zone;
+// a 6 px mouse handle zone, the drag updating the chart per mousemove and the drag ignored;
 // each named row must FAIL.
 // Usage: node scripts/touch-zoom.mjs [--mutants] [--ux <ux-audit dir>]
 import http from 'node:http';
@@ -215,6 +220,46 @@ async function run(html) {
     const cur = async (x) => { await page.mouse.move(x, st.y); await page.waitForTimeout(80); return page.evaluate(() => getComputedStyle(document.getElementById('context-overlay')).cursor); };
     const cs = [await cur(st.cl), await cur((st.cl + st.cr) / 2), await cur(st.l + 3)];
     add('cursor', cs.join() === 'ew-resize,grab,crosshair', `strip cursors on a handle, inside the window, elsewhere: ${cs.join(', ')}`);
+    // S37 mouse drag-to-zoom on the plot.
+    await reset(page);
+    if (await page.evaluate(() => !document.getElementById('reset-zoom').classList.contains('hidden'))) { await page.click('#reset-zoom'); await page.waitForTimeout(700); }
+    p = await plot(page); await page.waitForTimeout(300); p = await plot(page);
+    const z0 = await state(page);
+    const zx0 = Math.round(p.l + (p.r - p.l) * 0.3), zx1 = Math.round(p.l + (p.r - p.l) * 0.6);
+    const wantLo = timeAt(z0, p, zx0), wantHi = timeAt(z0, p, zx1);
+    await page.evaluate(() => { const c = document.getElementById('session-chart'); window.__clicks = 0; c.addEventListener('click', () => window.__clicks++); });
+    await page.mouse.move(zx0, p.y);
+    const hoverCur = await page.evaluate(() => getComputedStyle(document.getElementById('session-chart')).cursor);
+    await page.evaluate(() => window.__tz.start());
+    await page.mouse.down();
+    await page.mouse.move(zx1, p.y, { steps: 20 });
+    const bandOn = await page.evaluate(() => { const b = document.querySelector('.drag-band'); return !!b && getComputedStyle(b).display !== 'none' && b.getBoundingClientRect().width > 50; });
+    const dz = await page.evaluate(() => window.__tz.stop());
+    await page.mouse.up(); await page.waitForTimeout(600);
+    const z1 = await state(page);
+    add('dragzoom', Math.abs(z1.lo - wantLo) < 1 && Math.abs(z1.hi - wantHi) < 1, `a mouse drag zooms to the band ([${z1.lo.toFixed(1)}, ${z1.hi.toFixed(1)}] against [${wantLo.toFixed(1)}, ${wantHi.toFixed(1)}])`);
+    add('dragperf', dz.updates === 0 && bandOn, `0 chart updates during the drag (${dz.updates}), band drawn ${bandOn}`);
+    add('dragzoom', hoverCur === 'crosshair', `cursor over the plot: ${hoverCur}`);
+    const c0 = await page.evaluate(() => window.__clicks);
+    const cxm = Math.round(p.l + (p.r - p.l) * 0.5);
+    await page.mouse.move(cxm, p.y); await page.mouse.down(); await page.mouse.move(cxm + 3, p.y, { steps: 3 }); await page.mouse.up(); await page.waitForTimeout(500);
+    const z2 = await state(page), c1 = await page.evaluate(() => window.__clicks);
+    add('dragclick', Math.abs(z2.lo - z1.lo) < 0.01 && Math.abs(z2.hi - z1.hi) < 0.01 && c1 === c0 + 1 && c0 === 0, `a 3 px drag is a click: range kept ([${z2.lo.toFixed(1)}, ${z2.hi.toFixed(1)}]), the click reaches the chart (${c1 - c0}), none after the real drag (${c0})`);
+    await page.mouse.move(Math.round(p.l + (p.r - p.l) * 0.2), p.y); await page.mouse.down(); await page.mouse.move(Math.round(p.l + (p.r - p.l) * 0.8), p.y, { steps: 10 });
+    await page.keyboard.press('Escape');
+    const bandAfterEsc = await page.evaluate(() => getComputedStyle(document.querySelector('.drag-band')).display);
+    await page.mouse.up(); await page.waitForTimeout(500);
+    const z3 = await state(page);
+    add('dragesc', Math.abs(z3.lo - z2.lo) < 0.01 && Math.abs(z3.hi - z2.hi) < 0.01 && bandAfterEsc === 'none', `Escape mid-drag cancels (range [${z3.lo.toFixed(1)}, ${z3.hi.toFixed(1)}] kept, band ${bandAfterEsc})`);
+    // S37 diagnostics: chip gone from the bar, reachable from the gear.
+    const chips = await page.evaluate(() => document.querySelectorAll('.hrm-user-chip, #hrm-version-chip-slot').length);
+    add('diag', chips === 0, `no DIAG chip in the viewer bar (${chips} found)`);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.click('#viewer-settings-btn'); await page.waitForTimeout(300);
+    const rowTxt = await page.evaluate(() => { const b = document.getElementById('viewer-open-diagnostics'); return b ? b.textContent.trim() : ''; });
+    await page.click('#viewer-open-diagnostics'); await page.waitForTimeout(600);
+    const sheetOn = await page.evaluate(() => { const o = document.getElementById('hrm-diag-overlay'); if (!o) return false; const r = o.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(o).visibility !== 'hidden'; });
+    add('diag', /Diagnostics/.test(rowTxt) && /Version 0\.5/.test(rowTxt) && sheetOn, `gear then Diagnostics ("${rowTxt}") opens the diagnostics sheet (${sheetOn})`);
     add('errors', !page.errors.length, `no page errors at 1440 ${page.errors.join(' | ')}`);
     await ctx.close();
   } finally { server.close(); }
@@ -229,6 +274,8 @@ const MUTANTS = [
   ['vscroll', 'touch-action none on the chart canvas', '#session-chart { touch-action: pan-y; }', '#session-chart { touch-action: none; }'],
   ['handle', 'brush handles back to a 12 px touch target', 'const hit = touch ? 22 : 12;', 'const hit = touch ? 12 : 12;'],
   ['brushgrab', 'mouse handle zone back to 6 px', 'const hit = touch ? 22 : 12;', 'const hit = touch ? 22 : 6;'],
+  ['dragperf', 'the mouse drag updating the chart per mousemove', "      band.style.width = (hi - lo) + 'px';\n", "      band.style.width = (hi - lo) + 'px';\n      currentChart.update('none');\n"],
+  ['dragzoom', 'the mouse drag ignored', "if (e.pointerType !== 'mouse' || e.button !== 0 || drag", "if (true || e.pointerType !== 'mouse' || e.button !== 0 || drag"],
 ];
 
 let fails = 0, passes = 0;
