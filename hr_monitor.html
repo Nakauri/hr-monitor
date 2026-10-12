@@ -489,48 +489,12 @@
      data-state="unset" is the empty state (call to action); data-state
      ="set" flips the styling to an active/filled look and the click
      asks for confirmation before clearing. */
-  .big-toggle-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    width: 100%;
-    padding: 14px 18px;
-    margin-top: 10px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-control);
-    border-radius: 10px;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font-family: inherit;
-    transition: background 0.15s, border-color 0.15s, transform 0.12s;
-  }
-  .big-toggle-btn:hover { background: #1f1f22; border-color: #3a3a3f; }
-  .big-toggle-btn:active { transform: scale(0.995); }
-  .big-toggle-btn[data-state="set"] {
-    background: rgba(93,202,165,0.08);
-    border-color: rgba(93,202,165,0.45);
-  }
-  .big-toggle-btn[data-state="set"]:hover {
-    background: rgba(93,202,165,0.14);
-    border-color: rgba(93,202,165,0.7);
-  }
-  .big-toggle-btn[data-state="working"] {
-    opacity: 0.7;
-    cursor: wait;
-  }
-  .big-toggle-title {
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    color: var(--text);
-  }
-  .big-toggle-btn[data-state="set"] .big-toggle-title::before {
-    content: '✓  ';
-    color: var(--hrv);
-    font-weight: 700;
-  }
+  .btn.save-target { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: var(--s3) var(--s4); margin-top: var(--s3); text-align: left; font-weight: 400; }
+  .btn.save-target[data-state="set"] { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); background: var(--selected-fill); }
+  .btn.save-target[data-state="working"] { opacity: .7; cursor: wait; }
+  .big-toggle-title { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--t14); font-weight: 600; color: var(--text); }
+  .save-check { display: none; color: var(--action); }
+  .save-target[data-state="set"] .save-check { display: inline-flex; }
   .big-toggle-sub {
     font-size: 12px;
     color: var(--text-dim);
@@ -552,22 +516,7 @@
     word-break: break-all;
   }
   .big-toggle-email:empty { display: none; }
-  .drive-signout-link {
-    align-self: flex-start;
-    margin: 6px 0 0 2px;
-    padding: 4px 8px;
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    cursor: pointer;
-    font-family: inherit;
-    border-radius: 4px;
-    transition: color 0.12s, background 0.12s;
-  }
-  .drive-signout-link:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+  .drive-signout { align-self: flex-start; margin-top: var(--s1); }
   .autosave-label {
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -1385,8 +1334,8 @@
         <code id="broadcast-key-display" hidden>—</code>
         <!-- Single big toggle per save target. Label reflects current
              state; clicking in the "set" state confirms before clearing. -->
-        <button type="button" id="autosave-toggle" class="big-toggle-btn" data-state="unset">
-          <span class="big-toggle-title">Save to local folder</span>
+        <button type="button" id="autosave-toggle" class="btn save-target" data-state="unset">
+          <span class="big-toggle-title"><span class="save-check" aria-hidden="true"></span>Save to local folder</span>
           <span class="big-toggle-sub" id="autosave-folder-name">Tap to pick a folder</span>
           <span class="big-toggle-meta" id="autosave-status"></span>
         </button>
@@ -1397,12 +1346,12 @@
           </button>
         </div>
         <div class="drive-backup-row">
-          <button type="button" id="drive-signin" class="big-toggle-btn" data-state="unset">
-            <span class="big-toggle-title">Save to Google Drive</span>
+          <button type="button" id="drive-signin" class="btn save-target" data-state="unset">
+            <span class="big-toggle-title"><span class="save-check" aria-hidden="true"></span>Save to Google Drive</span>
             <span class="big-toggle-sub" id="drive-status">Tap to sign in</span>
             <span class="big-toggle-email" id="drive-email"></span>
           </button>
-          <button type="button" id="drive-signout" class="drive-signout-link" style="display: none;">Sign out</button>
+          <button type="button" id="drive-signout" class="btn ghost drive-signout" style="display: none;">Sign out</button>
         </div>
         <div class="toggle-row battopt-row" id="battopt-row" hidden>
           <div class="toggle-text">
@@ -2304,7 +2253,8 @@
       const entry = all[t];
       if (entry) {
         btn.classList.add('has-file');
-        btn.textContent = '✓ ' + (entry.name.length > 14 ? entry.name.slice(0, 12) + '…' : entry.name);
+        btn.innerHTML = UI.icon('check');
+        btn.appendChild(document.createTextNode(entry.name.length > 14 ? entry.name.slice(0, 12) + '…' : entry.name));
         btn.title = 'Click to replace the uploaded custom audio.';
       } else {
         btn.classList.remove('has-file');
@@ -6314,7 +6264,8 @@
         const url = buildObsSourceUrl();
         try {
           await navigator.clipboard.writeText(url);
-          copyObsBtn.textContent = '✓ Copied — paste into OBS';
+          copyObsBtn.innerHTML = UI.icon('check');
+          copyObsBtn.appendChild(document.createTextNode('Copied, paste into OBS'));
           setTimeout(() => { copyObsBtn.textContent = 'Copy OBS Browser Source URL'; }, 2500);
         } catch (e) {
           UI.copySheet(url, { title: 'OBS URL', label: 'Browser source URL' });
@@ -6333,10 +6284,10 @@
         const val = target.value;
         try {
           await navigator.clipboard.writeText(val);
-          btn.classList.add('copied');
           const original = btn.textContent;
-          btn.textContent = '✓ ' + val;
-          setTimeout(() => { btn.classList.remove('copied'); btn.textContent = original; }, 1500);
+          btn.innerHTML = UI.icon('check');
+          btn.appendChild(document.createTextNode(val));
+          setTimeout(() => { btn.textContent = original; }, 1500);
         } catch (e) {
           UI.copySheet(val, { title: btn.dataset.copy === 'obs-size-h' ? 'Height' : 'Width', label: 'Pixels' });
         }
@@ -6447,6 +6398,7 @@
       el.addEventListener('click', () => { el.checked = !el.checked; el.dispatchEvent(new Event('change')); });
     }
     ['toggle-broadcast'].forEach((id) => wireSwitch($(id)));
+    document.querySelectorAll('.save-check').forEach((s) => { s.innerHTML = UI.icon('check'); });
     loadWidgetStyle();
     loadWidgetPrefs();
     wireAudioControls();
