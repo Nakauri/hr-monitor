@@ -48,7 +48,8 @@
   font: 600 var(--t14)/1.2 var(--ui-face); text-decoration: none; text-align: center;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
-.btn:hover:not(:disabled) { background: var(--selected-fill); }
+/* A filled button keeps its fill on hover; the 8% tint would leave dark text on the page background. */
+.btn:not(.primary, .danger):hover:not(:disabled) { background: var(--selected-fill); }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 .btn.primary { background: var(--action); border-color: var(--action); color: var(--on-fill); }
 .btn.danger { background: var(--warn-high); border-color: var(--warn-high); color: var(--on-fill); }
@@ -154,12 +155,12 @@
 .chip {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--s1);
   min-height: var(--target); padding: 0 var(--s3); margin: 0;
-  background: transparent; border: 1px solid var(--border-control); border-radius: var(--r-pill);
+  background: transparent; border: 1px solid var(--border-control); border-radius: var(--r-ctl);
   color: var(--text); font: 500 var(--t14)/1.2 var(--ui-face); cursor: pointer;
 }
 .chip[aria-pressed="true"] { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); background: var(--selected-fill); font-weight: 600; }
-.chip-removable { display: inline-flex; align-items: center; min-height: var(--target); padding-left: var(--s3); border: 1px solid var(--border-control); border-radius: var(--r-pill); color: var(--text); font-size: var(--t14); }
-.chip-removable > button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 100%; min-height: inherit; padding: 0; margin: 0; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; border-radius: var(--r-pill); }
+.chip-removable { display: inline-flex; align-items: center; min-height: var(--target); padding-left: var(--s3); border: 1px solid var(--border-control); border-radius: var(--r-ctl); color: var(--text); font-size: var(--t14); }
+.chip-removable > button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 100%; min-height: inherit; padding: 0; margin: 0; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; border-radius: var(--r-ctl); }
 .chip-row { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: var(--s2); }
 
 /* Menu and popover */
@@ -172,8 +173,21 @@
 /* Items only: a group label or a field group inside a menu does not tint on hover. */
 .menu > :is(button, a, label, [role^="menuitem"]):hover, .menu > :focus-visible { background: var(--selected-fill); }
 .menu > .danger { color: var(--warn-high); }
-.menu > label { display: flex; align-items: center; gap: var(--s3); min-height: var(--target); padding: 0 var(--s3); border-radius: var(--r-ctl); color: var(--text); font-size: var(--t14); cursor: pointer; user-select: none; }
-.menu > label input[type="checkbox"] { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; accent-color: var(--action); }
+.menu > label { display: flex; align-items: center; gap: var(--s3); min-height: var(--target); padding: var(--s1) var(--s3); border-radius: var(--r-ctl); color: var(--text); font-size: var(--t14); cursor: pointer; user-select: none; }
+.menu > label input[type="checkbox"] {
+  -webkit-appearance: none; appearance: none; display: inline-grid; place-content: center;
+  width: 18px; height: 18px; margin: 0; flex: 0 0 auto;
+  background: transparent; border: 2px solid var(--text-dim); border-radius: 3px; cursor: pointer;
+}
+.menu > label input[type="checkbox"]::after {
+  content: ""; width: 12px; height: 12px; background: var(--on-fill); visibility: hidden;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.menu > label input[type="checkbox"]:checked { background: var(--action); border-color: var(--action); }
+.menu > label input[type="checkbox"]:checked::after { visibility: visible; }
+/* A capped menu scrolls; its rows keep their height when text wraps. */
+.menu > * { flex-shrink: 0; }
 .menu > [role="separator"] { flex: 0 0 1px; height: 1px; margin: var(--s1) 0; background: var(--border); }
 .popover { position: absolute; z-index: var(--z-menu); padding: var(--s4); background: var(--bg-raised); border: 1px solid var(--border-control); border-radius: var(--r-menu); box-shadow: var(--shadow-2); }
 
