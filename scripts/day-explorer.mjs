@@ -7,7 +7,7 @@
 //    micro-labels; a marker click zooms; a single recording still opens its explorer; no page errors.
 // 4. Phone: no horizontal scroll, 44 px controls, at 360 and 360 with 200% text.
 // 5. Marks (S10b), on a seeded fixture day that also gives Marks, Warnings, Palps, Posture and Sleep data, so
-//    the chip loop exercises all 12 chips: diamonds; a marker click eases to its window within 1 px and
+//    the chip loop exercises all 12 chips: diamonds; a mark label hover (S28); a marker click eases to its window within 1 px and
 //    highlights it; edit, delete then Undo for a viewer tap, a recorded mark and a sleep mark; Add sleep;
 //    the phone sheet. Each mutant of the viewer must FAIL its sub-check.
 // --shots <dir> shoots Day at 1440, 360 and 360 with 200% text, zoomed, a marker selected, layers toggled,
@@ -447,6 +447,43 @@ const SUBCHECKS = {
     return rows;
   },
 
+  // S28: marks hover through the marks plugin, not chartjs-plugin-annotation. Pointer on a mark's label, 2 px
+  // right of its line, clear of other marks (box overlays off): the chart highlight, the list row and the tip follow
+  // it, with no chart update; off the canvas all clear.
+  async hover(base) {
+    const { ctx, page } = await openFixture(base);
+    const rows = [];
+    const p = await page.evaluate(() => {
+      const c = Chart.getChart(document.getElementById('session-chart'));
+      c.canvas.scrollIntoView({ block: 'center' });
+      const lines = (c._hrMk || []).filter((i) => i.kind === 'line');
+      // Box overlays hover after the marks and would take the highlight; this check is about the marks alone.
+      c._hrOvCache = [];
+      const free = (i) => lines.every((o) => o === i || Math.abs(o.px - i.px) > 12);
+      const it = lines.filter((i) => i.lab && free(i)).sort((a, b) => a.px - b.px)[0];
+      if (!it) return null;
+      window.__upd = 0; const u = c.update; c.update = function (...a) { window.__upd++; return u.apply(this, a); };
+      const r = c.canvas.getBoundingClientRect();
+      return { x: r.left + it.px + 2, y: r.top + it.lab.y + it.lab.h / 2, t: it.m.t, label: it.m.label.content };
+    });
+    if (!p) { await ctx.close(); return [[false, 'hover: no mark label clear of other marks']]; }
+    await page.mouse.move(p.x - 40, p.y + 120); await settle(page, 200);
+    await page.mouse.move(p.x, p.y); await settle(page, 300);
+    const on = await page.evaluate(() => {
+      const c = Chart.getChart(document.getElementById('session-chart'));
+      const row = document.querySelector('#marker-list .marker-item.chart-hover');
+      const tip = document.getElementById('anno-tip');
+      return { hl: c.$hlT, row: row ? Number(row.dataset.t) : null, upd: window.__upd, tip: tip && tip.style.display !== 'none' ? tip.textContent : null };
+    });
+    rows.push([on.hl === p.t && on.row === p.t && on.upd === 0 && !!on.tip && on.tip.includes(p.label), `hover on the "${p.label}" label highlights the mark on the chart and in the list with no chart update (${JSON.stringify(on)}, mark at ${p.t})`]);
+    await page.mouse.move(2, 2); await settle(page, 300);
+    const off = await page.evaluate(() => ({ hl: Chart.getChart(document.getElementById('session-chart')).$hlT, rows: document.querySelectorAll('#marker-list .marker-item.chart-hover').length, tip: (document.getElementById('anno-tip') || { style: {} }).style.display }));
+    rows.push([off.hl == null && off.rows === 0 && off.tip === 'none', `pointer off the chart clears the highlight, the list row and the tip (${JSON.stringify(off)})`]);
+    rows.push([!page.errors.length, 'hover: no page errors ' + page.errors.join(' | ')]);
+    await ctx.close();
+    return rows;
+  },
+
   // A viewer tap: edit, delete (Cancel keeps it), delete then Undo.
   async tap(base) {
     const { ctx, page } = await openFixture(base);
@@ -574,7 +611,7 @@ async function runSub(name, base) {
 }
 const report5 = (rows) => { for (const [c, m] of rows) ok(c, m); };
 if (want('marks')) {
-  for (const name of ['diamonds', 'focus', 'tap', 'recorded', 'sleep', 'phone']) report5(await runSub(name, cur.base));
+  for (const name of ['diamonds', 'hover', 'focus', 'tap', 'recorded', 'sleep', 'phone']) report5(await runSub(name, cur.base));
 }
 if (want('mutants')) {
   const real = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
@@ -591,6 +628,7 @@ if (want('mutants')) {
     ['recorded', 'Save with nothing changed still writes', "      if (cls === cls0 && text === (label || '').trim() && timeInput.value === timeInput.defaultValue) { closeEditor(box); return; }\n", ''],
     ['sleep', 'a sleep edit keeps the old window', '    marksWrite(() => rec ? store.edit(rec.id, { from: a, to: b }) : store.createSleep({ from: a, to: b }), box);', '    marksWrite(() => rec ? store.edit(rec.id, {}) : store.createSleep({ from: a, to: b }), box);'],
     ['phone', 'no markers sheet', "    if (!sb || (markersSheet && !markersSheet.closed)) return;", "    return;"],
+    ['hover', 'marks hover enters nothing', '      if (hit) annoEnter(hit.t, hit.html, e);', '      void hit;'],
   ];
   // --only <n,n> runs those mutants by index, so the set can run in parts.
   const onlyM = argVal('--only') ? argVal('--only').split(',').map(Number) : null;
@@ -839,7 +877,7 @@ if (want('layout-mutants')) {
     ['laptop', 'Reset zoom at the canvas corner over the right axis (1440)', '  .chart-wrap .reset-zoom { position: absolute; top: var(--plot-top, 8px); right: var(--plot-right, 8px);', '  .chart-wrap .reset-zoom { position: absolute; top: 4px; right: 4px;'],
     ['phone', 'Layers rows faded as before (off dim, no data at 40%)', '    background: transparent; border-color: var(--border); box-shadow: none; opacity: 1;\n  }\n', '  }\n  .markers-sheet .layer-toggles .chip[aria-pressed="false"] { color: var(--text-dim); }\n  .markers-sheet .layer-toggles .chip:disabled { opacity: .4; }\n'],
     ['phone', 'Layers rows without the drawn box (on read from the ring)', '  .markers-sheet .layer-toggles .chip[aria-pressed="true"]::after { background: var(--action); border-color: var(--action); }\n', ''],
-    ['phone', 'Max and Min labels unclamped', "        place: labelInPlot(s.hrMin.t, s.hrMin.v, `Min ${s.hrMin.v}`, true) },", '        place: () => ({ dx: 0, dy: 14 }) },'],
+    ['phone', 'Max and Min labels unclamped', '      const cx = Math.min(Math.max(px, a.left + w / 2 + 2), a.right - w / 2 - 2);\n      let cy = below ? py + gap + h / 2 : py - gap - h / 2;\n      if (cy - h / 2 < a.top + 2) cy = py + gap + h / 2;\n      if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;\n', '      const cx = px;\n      const cy = below ? py + gap + h / 2 : py - gap - h / 2;\n'],
     ['laptop', 'Max label unclamped', "        place: labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false) },", '        place: () => ({ dx: 0, dy: -4 }) },'],
     ['laptop', 'panel content sizes the row (empty band)', '  .session-layout > .session-sidebar { contain: size; }\n', ''],
     ['laptop', 'chips auto-fill (11 plus 1)', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(var(--lc), minmax(0, 1fr));', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));'],
