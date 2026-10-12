@@ -2,7 +2,7 @@
 // S32 touch zoom on the Day chart, headless, CDP touch (Input.dispatchTouchEvent) on ?demo=1 Day.
 // 360: one pinch takes the range from the full day to under 1 h and keeps the time under the pinch centre there;
 //      a one-finger sideways drag pans the zoomed range; a vertical swipe scrolls the page and leaves the range;
-//      a single tap leaves the range; double-tap zooms 4x, repeated double-taps reach the 2 min floor, one more resets;
+//      a single tap leaves the range; double-tap on the full range zooms 4x, double-tap when zoomed resets (a toggle, main session call 2026-10-12);
 //      at most one chart update per animation frame during the pinch and none from inside a touch handler;
 //      a touch 18 px outside a brush handle (inside its 44 px target) drags that handle; the left handle at the strip start
 //      is grabbed by touch on its outer half.
@@ -152,17 +152,15 @@ async function run(html) {
 
     await reset(page);
     p = await plot(page); await page.waitForTimeout(300); p = await plot(page);
+    if (await page.evaluate(() => !document.getElementById('reset-zoom').classList.contains('hidden'))) { await page.click('#reset-zoom'); await page.waitForTimeout(700); }
     const d0 = await state(page);
     await doubleTap(page, cdp, cx, p.y);
     const d1 = await state(page);
-    add('dtap', Math.abs(d1.span - d0.span / 4) < d0.span * 0.02, `double-tap zooms 4x (${d0.span.toFixed(1)} to ${d1.span.toFixed(1)} min)`);
-    let n = 0, dk = d1;
-    while (dk.span > 2.001 && n < 8) { await doubleTap(page, cdp, cx, p.y); dk = await state(page); n++; }
-    add('dtap', Math.abs(dk.span - 2) < 0.01, `repeated double-taps stop at the 2 min floor (${dk.span.toFixed(2)} min after ${n} more)`);
+    add('dtap', Math.abs(d1.span - d0.span / 4) < d0.span * 0.02, `double-tap on the full range zooms 4x (${d0.span.toFixed(1)} to ${d1.span.toFixed(1)} min)`);
     await doubleTap(page, cdp, cx, p.y);
     const d2 = await state(page);
     const hidden = await page.evaluate(() => document.getElementById('reset-zoom').classList.contains('hidden'));
-    add('dtap', Math.abs(d2.span - s0.span) < 0.5 && hidden, `double-tap at the floor resets to the data range (${d2.span.toFixed(1)} min against ${s0.span.toFixed(1)}, Reset zoom hidden ${hidden})`);
+    add('dtap', Math.abs(d2.span - s0.span) < 0.5 && hidden, `double-tap when zoomed returns to the full range (${d2.span.toFixed(1)} min against ${s0.span.toFixed(1)}, Reset zoom hidden ${hidden})`);
     // Brush handle: a touch 18 px outside the right handle (inside its 44 px target) moves that handle only.
     await page.evaluate(() => document.getElementById('context-overlay').scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(300);

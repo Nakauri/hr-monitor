@@ -9895,7 +9895,9 @@
   // Double-tap zooms 4x around the tap; at the minimum window it resets.
   function doubleTapZoom(clientX) {
     const span = brushMax - brushMin;
-    if (span <= Math.min(MIN_ZOOM_SPAN, currentSummary.duration) + 0.001) { resetZoom(); return; }
+    // Toggle: double-tap on the full range zooms 4x, double-tap when zoomed returns to the full range.
+    const full = getDataRange();
+    if (span < (full.end - full.start) * 0.99) { resetZoom(); return; }
     const { f, t } = chartPointAt(clientX), ns = span / 4;
     const [lo, hi] = clampZoomRange(t - f * ns, t + (1 - f) * ns);
     easeBrushTo(lo, hi);
