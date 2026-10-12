@@ -1989,20 +1989,46 @@
   // can't fire concurrently — without the guard their progress callbacks
   // race and the banner alternates labels rapid-fire.
   let _ensureRunning = false;
+  // S38 (AUDIT-NOTES item 32): true once sessions are on screen. The sync then runs behind them and
+  // re-renders only when it changed something, so a reopen with nothing new never repaints.
+  let sessionsPainted = false;
   async function ensureFolderSyncAndRender() {
     if (_ensureRunning) return;
     _ensureRunning = true;
     try {
       await driveEnsureFolder();
       driveUpdateUI();
-      await driveSync({ onProgress: showSyncLoader });
-      await loadSessions({ onProgress: showSyncLoader });
-      route();
+      const res = await driveSync({ onProgress: showSyncLoader, deferReload: true });
+      if (sessionsPainted) {
+        if (res && res.changed) { await loadSessions(); await routeKeepScroll(); }
+      } else {
+        await loadSessions({ onProgress: showSyncLoader });
+        await route();
+        sessionsPainted = Object.keys(sessionsIndex).length > 0;
+      }
       marksSyncPass().then((moved) => { if (moved) routeUnlessEditing(); });
     } finally {
       _ensureRunning = false;
       hideLoader();
     }
+  }
+
+  // A background re-render keeps the reader's place; an open mark editor defers it as before.
+  async function routeKeepScroll() {
+    if (document.querySelector('.mark-editor')) { routeUnlessEditing(); return; }
+    const y = window.scrollY;
+    await route();
+    if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);
+  }
+
+  // S38: the saved index, the Drive file cache and the v2 seg-index store are all local, so the last
+  // seen sessions paint before any Drive call. False when nothing is saved: the loader path runs as before.
+  async function paintFromCache() {
+    await loadSessions();
+    if (!Object.keys(sessionsIndex).length) return false;
+    await route();
+    sessionsPainted = true;
+    return true;
   }
 
   function initDriveUI() {
@@ -10383,6 +10409,8 @@
     });
     const demo = isDemoMode();
     bindUiHandlers(demo);
+    if (!location.hash) setHash('day');
+    let painted = false;
     if (demo) {
       const es = document.getElementById('empty-state');
       if (es) es.style.display = 'none';
@@ -10393,14 +10421,18 @@
       driveUpdateUI();
       updateWatchLiveUI();
       marksInit();
+      if (!dirHandle && await paintFromCache()) painted = true;
       initDriveUI();
     }
-    if (!location.hash) setHash('day');
-    // Initial paint — empty-state if nothing's loaded yet.
-    route();
+    // Initial paint, empty-state if nothing's loaded yet.
+    if (!painted) route();
     try {
       if (demo) {
         await loadDemoSessions();
+      } else if (painted) {
+        // initDriveUI started the sync when a token is cached; the guard makes this call a no-op then.
+        const signedIn = !!(window.aortiAuth && typeof window.aortiAuth.isSignedIn === 'function' && window.aortiAuth.isSignedIn());
+        if (signedIn) ensureFolderSyncAndRender().catch(e => console.error('[init] drive sync failed:', e));
       } else if (dirHandle) {
         const perm = await dirHandle.queryPermission({ mode: 'read' });
         if (perm === 'granted') await loadSessions({ onProgress: showLoader });
@@ -10426,7 +10458,7 @@
       hideLoader();
     }
     // Re-render now that data is in.
-    route();
+    if (!painted) route();
   }
   init();
 })();
