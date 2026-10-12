@@ -241,7 +241,8 @@
     letter-spacing: 0.01em;
   }
   body.watch-mode .section-watch-empty { display: block; }
-  body.watch-mode .posture-sticky { display: none; }
+  body.watch-mode .posture-block { display: none; }
+  body.watch-mode #overlay-zone .popout-hint { display: none; }
   body.watch-mode [data-section="stats"] .stats-grid,
   body.watch-mode [data-section="chart"] .main-chart-wrap,
   body.watch-mode [data-section="events"] .events,
@@ -1176,21 +1177,20 @@
     display: block;
   }
 
-  /* Sticky posture bar at the top of the control panel. Stays visible while
-     the user scrolls through sections, so "change posture during a flush"
-     is always a one-tap operation. */
-  .posture-sticky {
-    position: sticky;
-    top: 0;
-    z-index: var(--z-sticky);
-    background: var(--bg);
-    padding: var(--s4) var(--cp-pad) var(--s3);
-    container-type: inline-size;
-  }
+  /* Controls: Stop, posture, Log and sharing sit behind one closed header so a pocket tap cannot reach them. */
+  .section[data-section="controls"] { margin-top: var(--s3); }
+  #sec-controls-body > * + * { margin-top: var(--s4); }
+  #broadcast-toggle-row .toggle-desc, #broadcast-toggle-row .streaming-status { font-size: var(--t12); }
+  #sec-controls-body .session-ctl { padding: 0; }
+  .posture-block { container-type: inline-size; }
+  .popout-hint { margin: var(--s2) 0 0; font-size: var(--t12); color: var(--text-dim); text-align: center; }
+  .popout-hint[hidden] { display: none; }
+  #open-diagnostics { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); width: 100%; min-height: 44px; margin-top: var(--s4); }
+  #open-diagnostics .sub { color: var(--text-dim); font-size: var(--t12); }
   .row-label { margin: 0 0 var(--s2); font-size: var(--t12); font-weight: 500; color: var(--text-dim); }
   .posture-row.segmented > button { flex: 1 1 0; min-width: 0; }
   @container (max-width: 22em) { .posture-row.segmented { flex-direction: column; } }
-  .log-block { padding: 0 var(--cp-pad) var(--s3); container-type: inline-size; }
+  .log-block { container-type: inline-size; }
   .log-row { display: flex; gap: var(--s2); }
   .log-row > .btn-log { flex: 1 1 0; min-width: 0; }
   @container (max-width: 22em) { .log-row { flex-direction: column; } }
@@ -1403,11 +1403,9 @@
   <a class="app-nav-link nav-preview" id="nav-open-overlay" href="#" title="Open a preview popup (for Window Capture)">Preview popup</a>
   <a class="app-nav-link nav-copy" id="nav-copy-obs-url" href="#" title="Copy the URL to paste into OBS → Browser Source">Copy OBS URL</a>
   <span id="hrm-tips-slot" style="margin-left: auto;"></span>
-  <span id="hrm-version-chip-slot"></span>
 </nav>
 <script src="./diagnostics.js"></script>
 <script src="./settings.js"></script>
-<script>HRMDiagnostics.mountChip('#hrm-version-chip-slot');</script>
 <div id="browser-compat-banner" hidden>
   Strap pairing needs Web Bluetooth, which this browser doesn't support. Connect and record from a supported browser. You CAN still watch a stream here from another device. <a href="https://caniuse.com/web-bluetooth" target="_blank" rel="noopener">See supported browsers</a>.
 </div>
@@ -1485,6 +1483,7 @@
       </div>
     </div>
     </div><!-- /.widget-row -->
+    <p class="popout-hint" id="popout-hint" hidden>Hold the widget to pop it out</p>
 
     <div class="overlay-status" id="overlay-status" hidden></div>
     <div class="overlay-spacer"></div>
@@ -1523,20 +1522,38 @@
       </div>
     </div>
 
-    <div class="ui posture-sticky">
-      <p class="row-label" id="posture-label">Posture</p>
-      <div class="posture-row segmented" role="group" aria-labelledby="posture-label">
-        <button class="posture-btn" data-posture="lying" aria-pressed="false">Lying</button>
-        <button class="posture-btn" data-posture="sitting" aria-pressed="false">Sitting</button>
-        <button class="posture-btn" data-posture="standing" aria-pressed="false">Standing</button>
-      </div>
-    </div>
-
-    <div class="ui log-block" id="log-block" hidden>
-      <p class="row-label" id="log-label">Log</p>
-      <div class="log-row" role="group" aria-labelledby="log-label">
-        <button type="button" class="btn btn-log" id="log-symptom"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Symptom</button>
-        <button type="button" class="btn btn-log" id="log-note"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>Note</button>
+    <div class="section collapsed" data-section="controls">
+      <button type="button" class="section-header" aria-expanded="false" aria-controls="sec-controls-body">
+        <span class="section-title">Controls</span><span class="section-meta" id="controls-meta">No posture</span>
+        <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="section-body" id="sec-controls-body" inert>
+        <div class="ui posture-block">
+          <p class="row-label" id="posture-label">Posture</p>
+          <div class="posture-row segmented" role="group" aria-labelledby="posture-label">
+            <button class="posture-btn" data-posture="lying" aria-pressed="false">Lying</button>
+            <button class="posture-btn" data-posture="sitting" aria-pressed="false">Sitting</button>
+            <button class="posture-btn" data-posture="standing" aria-pressed="false">Standing</button>
+          </div>
+        </div>
+        <div class="ui log-block" id="log-block" hidden>
+          <p class="row-label" id="log-label">Log</p>
+          <div class="log-row" role="group" aria-labelledby="log-label">
+            <button type="button" class="btn btn-log" id="log-symptom"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Symptom</button>
+            <button type="button" class="btn btn-log" id="log-note"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>Note</button>
+          </div>
+        </div>
+        <div class="toggle-row" id="broadcast-toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-broadcast" />
+            <span class="toggle-slider" aria-hidden="true"></span>
+          </label>
+          <div class="toggle-text">
+            <div class="toggle-label">Share live HR</div>
+            <div class="toggle-desc" id="broadcast-toggle-desc">Publish live HR so other monitors and OBS can read it.</div>
+          </div>
+          <span class="streaming-status" id="relay-status">offline</span>
+        </div>
       </div>
     </div>
 
@@ -1595,20 +1612,6 @@
       </button>
       <div class="section-body" id="sec-connection-body">
         <div class="battery-display" id="battery-display" hidden>Battery: —</div>
-        <!-- Broadcast toggle lives here now (was buried in Settings → Widgets)
-             — session-level choice belongs next to the Active broadcasts
-             panel so users see publishing + listening state in one place. -->
-        <div class="toggle-row" id="broadcast-toggle-row">
-          <label class="toggle-switch">
-            <input type="checkbox" id="toggle-broadcast" />
-            <span class="toggle-slider" aria-hidden="true"></span>
-          </label>
-          <div class="toggle-text">
-            <div class="toggle-label">Broadcast to relay</div>
-            <div class="toggle-desc" id="broadcast-toggle-desc">Publish live HR so other monitors and OBS can read it.</div>
-          </div>
-          <span class="streaming-status" id="relay-status">offline</span>
-        </div>
         <!-- Broadcast key itself is intentionally invisible. Cross-device
              sync is handled by Drive: sign in on both devices and they end
              up on the same relay room automatically. OBS still works from
@@ -1783,6 +1786,9 @@
             <span class="unit" id="volume-label">15%</span>
             <span></span>
           </div>
+        </div>
+        <div class="ui">
+          <button type="button" class="btn" id="open-diagnostics"><span>Diagnostics</span><span class="sub">Version 0.5</span></button>
         </div>
       </div>
     </div>
@@ -2038,6 +2044,12 @@
   }
   function updateSectionMeta() {
     try {
+      const cm = document.getElementById('controls-meta');
+      if (cm) {
+        const p = postureChosen && state.currentPosture;
+        const t = (p ? p.charAt(0).toUpperCase() + p.slice(1) : 'No posture') + (widgetPrefs.broadcast ? ' · Live' : '');
+        if (cm.textContent !== t) cm.textContent = t;
+      }
       const sm = document.getElementById('stats-meta');
       if (sm) {
         const hr = ($('avg-hr') || {}).textContent || '';
@@ -2069,6 +2081,7 @@
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
+    updateSectionMeta();
   }
 
   function parseHR(value) {
@@ -3801,6 +3814,7 @@
     const logBlock = document.getElementById('log-block');
     if (logBlock && logBlock.hidden === sessionOn) logBlock.hidden = !sessionOn;
     if (sessionOn) hideAfterStop();
+    placeSessionCtl(btn, sessionOn);
     updateUnsavedNotice();
     if (!sessionOn) hideStopConfirm();
     if (btn.disabled) {
@@ -3831,6 +3845,16 @@
       const last = getLastStrap();
       btn.textContent = last && last.name ? 'Reconnect to ' + last.name : 'Start session';
     }
+  }
+
+  // Start sits in the open; once a session runs, Stop moves behind the closed Controls header.
+  function placeSessionCtl(btn, sessionOn) {
+    const ctl = btn.closest('.session-ctl');
+    const body = document.getElementById('sec-controls-body');
+    if (!ctl || !body) return;
+    const inside = ctl.parentElement === body;
+    if (sessionOn && !inside) body.insertBefore(ctl, body.firstChild);
+    else if (!sessionOn && inside) body.closest('.section').before(ctl);
   }
 
   // Single handler for the Start/Stop button. Idle → connect(). Recording
@@ -4389,6 +4413,16 @@
     return true;
   }
 
+  // The hold gesture has no other cue, so the app shows one line under the widget until the bubble has opened once.
+  const POPOUT_SEEN_KEY = 'hr_monitor_popout_seen';
+  function syncPopoutHint() {
+    const h = document.getElementById('popout-hint');
+    if (!h) return;
+    let seen = false;
+    try { seen = localStorage.getItem(POPOUT_SEEN_KEY) === '1'; } catch (e) {}
+    h.hidden = !NATIVE || seen;
+  }
+
   function tryFloatingOverlay() {
     const ns = window.HRMNativeHrSession;
     if (ns && ns.isAvailable && typeof ns.startFloatingOverlay === 'function') {
@@ -4397,7 +4431,10 @@
           ns.startFloatingOverlay().then(function (res) {
             if (!res || !res.ok) {
               if (typeof showToast === 'function') showToast('Could not start overlay: ' + (res && res.reason || 'unknown'), 4000);
+              return;
             }
+            try { localStorage.setItem(POPOUT_SEEN_KEY, '1'); } catch (e) {}
+            syncPopoutHint();
           });
         } else {
           if (typeof showToast === 'function') showToast('Floating overlay needs the "Display over other apps" permission. Opening Settings...', 5000);
@@ -4414,6 +4451,7 @@
   // more than 10 px to trigger. Cancels on pointerup / pointercancel /
   // material drag. Same gesture across mobile and desktop.
   (function wireLongPress() {
+    syncPopoutHint();
     const widget = document.getElementById('hr-widget');
     if (!widget) return;
     const HOLD_MS = 600;
@@ -6276,6 +6314,7 @@
     applyOverlaySize();
     resizeAllCharts();
     if (typeof updateObsSizeDisplay === 'function') updateObsSizeDisplay();
+    updateSectionMeta();
   }
 
   function saveWidgetPrefs() {
@@ -6691,6 +6730,8 @@
       });
     });
     document.querySelectorAll('.section[data-section]').forEach(syncSectionA11y);
+    const diag = document.getElementById('open-diagnostics');
+    if (diag) diag.addEventListener('click', () => { if (window.HRMDiagnostics) window.HRMDiagnostics.open(); });
     // App home's gear opens here.
     if (location.hash === '#settings') {
       const sec = document.querySelector('.section[data-section="settings"]');
@@ -6767,12 +6808,15 @@
   function saveSectionStates() {
     const states = {};
     document.querySelectorAll('.section[data-section]').forEach(s => {
+      if (s.dataset.section === 'controls') return;
       states[s.dataset.section] = s.classList.contains('collapsed');
     });
     try { localStorage.setItem('hr_monitor_sections', JSON.stringify(states)); } catch(e) {}
   }
 
   function loadSectionStates() {
+    const controls = document.querySelector('.section[data-section="controls"]');
+    if (controls) controls.classList.add('collapsed');
     try {
       const raw = localStorage.getItem('hr_monitor_sections');
       if (raw) {

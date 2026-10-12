@@ -106,6 +106,14 @@ const FAKE_WEB = (o) => `(() => {
   Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { getDevices: async () => [], requestDevice: async () => device, getAvailability: async () => true } });
 })();`;
 
+// S24: while a session runs, Stop sits behind the Controls header, closed on every load.
+async function tapToggle(page) {
+  if (await page.evaluate(() => { const s = document.getElementById('session-toggle').closest('.section'); return !!s && s.classList.contains('collapsed'); })) {
+    await page.click('[data-section="controls"] .section-header');
+    await page.waitForTimeout(300);
+  }
+  await page.click('#session-toggle');
+}
 async function textScale(page, f) {
   await page.evaluate((f) => {
     const els = [...document.querySelectorAll('body, body *')].filter((e) => !e.dataset.uxFs && !(e instanceof SVGElement));
@@ -148,7 +156,7 @@ const shot = async (page, name, full = true) => { if (/text200/.test(name)) awai
 
 async function startWeb(page, { folder = true } = {}) {
   if (folder) { await page.evaluate(() => document.getElementById('autosave-toggle').click()); await page.waitForTimeout(300); }
-  await page.click('#session-toggle');
+  await tapToggle(page);
   await page.waitForFunction(() => document.getElementById('session-toggle').textContent.trim() === 'Stop session', null, { timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(800);
 }
@@ -220,14 +228,14 @@ try {
     check(!notice, 'sync on with a folder: no unsaved notice');
     check(!(await unload(page)), 'sync on with a folder: leaving the page does not ask');
     // Stop: folder line, then the Drive result.
-    await page.click('#session-toggle');
+    await tapToggle(page);
     await page.waitForFunction(() => /Saved to Drive|failed/.test(document.getElementById('after-stop-drive').textContent), null, { timeout: 8000 }).catch(() => {});
     const a = await afterStop(page);
     check(a.shown && /^Saved to Sessions · \d+:\d\d$/.test(a.saved) && a.drive === 'Saved to Drive' && a.view === './hrv_viewer.html#/day/' + today() && a.viewH >= 36 && !a.exp,
       'web Stop, sync on: "Saved to Sessions · m:ss", Drive line "Saved to Drive", View session opens today', JSON.stringify(a));
     await shot(page, 'web-after-stop-sync-on-1440', false);
     // Start again: the block leaves.
-    await page.click('#session-toggle');
+    await tapToggle(page);
     await page.waitForTimeout(1200);
     check(!(await afterStop(page)).shown, 'web: the after-Stop block leaves when a new session starts');
     // Toggle off from the UI.
@@ -257,7 +265,7 @@ try {
     const u0 = await sessionUploads(page);
     await page.evaluate(() => window.__tick());
     await page.waitForTimeout(100);
-    await page.click('#session-toggle');
+    await tapToggle(page);
     await page.waitForTimeout(300);
     const label = await page.evaluate(() => document.getElementById('session-toggle').textContent.trim());
     check(label === 'Saving', 'web Stop during an upload: the button reads Saving while it waits', label);
@@ -274,7 +282,7 @@ try {
     await startWeb(page);
     await settle(page);
     await page.evaluate(() => { window.__uploadFail = true; });
-    await page.click('#session-toggle');
+    await tapToggle(page);
     await page.waitForFunction(() => /Saved to Drive|failed/.test(document.getElementById('after-stop-drive').textContent), null, { timeout: 8000 }).catch(() => {});
     const a = await afterStop(page);
     check(/^Saved to Sessions · /.test(a.saved) && a.drive === 'Drive upload failed', 'web Stop with a failing upload: "Drive upload failed"', JSON.stringify(a));
@@ -288,7 +296,7 @@ try {
   for (const size of ['360', '360-text200', '1440']) {
     const { ctx, page, errs } = await newPage({ size, web: { signedIn: true, seed: { hr_monitor_drive_sync: '0' } }, url: '/hr_monitor.html' });
     await startWeb(page);
-    await page.click('#session-toggle');
+    await tapToggle(page);
     await page.waitForTimeout(1200);
     const a = await afterStop(page);
     check(a.shown && /^Saved to Sessions · /.test(a.saved) && a.drive === null && !!a.view && !a.overflow, `web ${size} Stop, sync off: folder line, no Drive line, View session, no sideways scroll`, JSON.stringify(a));
@@ -333,7 +341,7 @@ try {
     check(n && n.text === 'Not saved to a folder or Drive' && n.btn.length === 1 && /^Export CSV:(4[4-9]|[5-9]\d)/.test(n.btn[0]), `web ${size} unsaved: notice with Export CSV, 44 px`, JSON.stringify(n));
     check(await unload(page), `web ${size} unsaved: leaving the page asks first`);
     await shot(page, `web-unsaved-${size}`, size !== '1440');
-    await page.click('#session-toggle');
+    await tapToggle(page);
     await page.waitForTimeout(1200);
     const a = await afterStop(page);
     check(a.shown && /^Not saved · /.test(a.saved) && a.exp && a.view === null && a.drive === null && !(await page.$('#unsaved-notice')), `web ${size} Stop unsaved: "Not saved", Export CSV, no View session, notice gone`, JSON.stringify(a));
@@ -358,7 +366,7 @@ try {
     const g = await page.evaluate(() => ({ wrap: document.getElementById('drive-sync-wrap').hidden }));
     check(g.wrap, `native ${size}: no Drive sync toggle on the phone`);
     if (size === '360-text200') await textScale(page, 2);
-    await page.click('#session-toggle');
+    await tapToggle(page);
     await page.waitForTimeout(1500);
     const a = await afterStop(page);
     check(a.shown && /^Saved on this phone · 5:\d\d$/.test(a.saved) && a.drive === 'Queued for Drive' && a.view === './hrv_viewer.html#/day/' + (await page.evaluate(() => { const d = new Date(Date.now() - 5 * 60000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })) && !a.exp,

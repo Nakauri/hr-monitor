@@ -1,7 +1,7 @@
 // Guards: LIVE shown while reconnecting; a snap missing fields breaking syncFromEngine (S4a). Files: hr_monitor.html status line. Runtime: about 35 s.
 // S4a monitor checks on the fake phone bridge: the status line text per engine state (live, reconnecting,
-// not found, resuming, idle), "LIVE" never shown outside the live state, Stop in the viewport with every
-// section collapsed, no posture preselected until the first tap, a snapshot with missing fields leaves
+// not found, resuming, idle), "LIVE" never shown outside the live state, Stop behind the closed Controls
+// header (S24 replaced S4a's "Stop in the viewport") with every section collapsed, no posture preselected until the first tap, a snapshot with missing fields leaves
 // the status line as it was and refreshFromEngine still resolves, and no page errors or sideways scroll.
 // Page errors and console errors fail every case. --shots <dir> also shoots each state at 360, 360 with 200% text and 1440.
 // Usage: node scripts/monitor-status.mjs [--shots <dir>] [--ux <ux-audit dir>]
@@ -119,7 +119,7 @@ function readState(page) {
     const sections = [...document.querySelectorAll('.section[data-section]')];
     const S = (e) => (e ? e.getBoundingClientRect() : null);
     // Phone rules on the parts this step built: 44 px targets, 12 px text, 14 px icons.
-    const scope = [sl, btn.parentElement, document.querySelector('.posture-sticky'), ...sections.map((s) => s.querySelector('.section-header'))].filter(Boolean);
+    const scope = [sl, btn.parentElement, document.querySelector('.posture-block'), document.querySelector('[data-section="controls"] .section-header'), ...sections.map((s) => s.querySelector('.section-header'))].filter(Boolean);
     const tiny = [], small = [];
     for (const root of scope) {
       const targets = root.matches('button') ? [root] : [...root.querySelectorAll('button')];
@@ -135,6 +135,8 @@ function readState(page) {
       zoneText: document.getElementById('overlay-zone').innerText,
       bodyText: document.body.innerText,
       stopText: btn.textContent.trim(), stopVisible: vis(btn) && b.top >= 0 && b.bottom <= innerHeight,
+      stopInControls: !!btn.closest('#sec-controls-body'),
+      controlsHeadInView: (() => { const h = document.querySelector('[data-section="controls"] .section-header'); if (!vis(h)) return false; const r = h.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })(),
       collapsed: sections.every((s) => s.classList.contains('collapsed')),
       inert: sections.every((s) => s.querySelector('.section-body').hasAttribute('inert') && s.querySelector('.section-header').getAttribute('aria-expanded') === 'false'),
       pressed: [...document.querySelectorAll('.posture-btn[aria-pressed="true"]')].map((x) => x.dataset.posture),
@@ -157,7 +159,7 @@ function checkState(name, cfg, s, tag) {
   if (/\bLIVE\b/.test(s.bodyText)) fail(`${t}: "LIVE" in the page text`);
   if (cfg.kind !== 'live' && (/\blive\b/i.test(s.head + ' ' + s.sub) || /\blive\b/i.test(s.zoneText))) fail(`${t}: "live" outside the live state: ${s.head}`);
   if (s.legacy) fail(`${t}: the old overlay status still holds "${s.legacy}"`);
-  if (cfg.stop && (s.stopText !== 'Stop session' || !s.stopVisible)) fail(`${t}: Stop "${s.stopText}" visible=${s.stopVisible}`);
+  if (cfg.stop && (s.stopText !== 'Stop session' || s.stopVisible || !s.stopInControls || !s.controlsHeadInView)) fail(`${t}: Stop "${s.stopText}" visible=${s.stopVisible} inControls=${s.stopInControls} controlsHeader=${s.controlsHeadInView}`);
   if (!s.collapsed || !s.inert) fail(`${t}: sections collapsed=${s.collapsed} inert+aria=${s.inert}`);
   if (s.pressed.length) fail(`${t}: posture preselected ${s.pressed}`);
   if (s.overflow) fail(`${t}: horizontal overflow`);
@@ -206,6 +208,7 @@ try {
       else pass(`drive ${kind}: "${s.head}"${s.sub ? ' / "' + s.sub + '"' : ''}`);
     }
     // Posture: first tap on the default marks it without a duplicate fact; a change writes one.
+    await page.click('[data-section="controls"] .section-header');
     await page.click('.posture-btn[data-posture="sitting"]');
     const after1 = await page.evaluate(() => ({ p: [...document.querySelectorAll('.posture-btn[aria-pressed="true"]')].map((x) => x.dataset.posture), n: window.__fake.calls.filter((c) => c === 'logFact:posture').length }));
     await page.click('.posture-btn[data-posture="standing"]');
