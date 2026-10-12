@@ -874,16 +874,15 @@
   html.restoring #overlay-zone #hr-widget :is(.big-number, .compact-hrv-value),
   body.status-dim #overlay-zone #hr-widget :is(.big-number, .compact-hrv-value) { color: var(--text-dim); }
 
-  .thresh-grid {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 8px 10px;
-    align-items: center;
-    font-size: 12px;
-  }
-  .thresh-grid label {
-    color: var(--text-dim);
-  }
+  .thresh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s3) var(--s4); }
+  .unit-row { display: flex; align-items: center; gap: var(--s2); }
+  .field .unit-row input { flex: 0 0 auto; width: 10ch; text-align: center; }
+  .unit { color: var(--text-dim); font-size: var(--t12); font-weight: 400; }
+  .settings-note { margin: var(--s2) 0 0; font-size: var(--t12); line-height: 1.4; color: var(--text-dim); }
+  .row-label.settings-gap { margin-top: var(--s5); }
+  #sec-settings-body .tabs { margin-bottom: var(--s4); }
+  #sec-settings-body .tab-panel .field + .field, #sec-settings-body .tab-panel .settings-note + .thresh-grid { margin-top: var(--s3); }
+  .stats-foot { display: flex; justify-content: flex-end; margin-top: var(--s3); }
   input:is([type="number"], [type="text"], [type="password"]):where(:not(.ui *)) {
     background: var(--bg-input);
     color: var(--text);
@@ -899,95 +898,19 @@
     border-color: var(--action);
   }
 
-  .thresh-grid input[type="number"] { width: 70px; text-align: center; }
-  .thresh-grid .unit { color: var(--text-dim); font-size: 11px; }
 
-  .audio-grid {
-    display: grid;
-    grid-template-columns: auto 1fr auto auto;
-    gap: 8px 8px;
-    align-items: center;
-    font-size: 12px;
-  }
-  .audio-grid .audio-upload {
-    padding: 5px 8px;
-    font-size: 10px;
-    border-radius: 6px;
-    background: transparent;
-    border: 1px dashed var(--border-control);
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .audio-grid .audio-upload:hover { color: var(--text); border-color: var(--text-dim); border-style: solid; }
-  .audio-grid .audio-upload.has-file { border-style: solid; border-color: var(--hrv); color: var(--hrv); }
-  /* Custom audio upload pair: "Custom" button + small × remove button. The
-     remove button only appears when a custom file is loaded (toggled in JS). */
-  .audio-upload-pair { display: inline-flex; gap: 4px; align-items: stretch; }
-  .audio-remove {
-    padding: 0 8px;
-    background: transparent;
-    border: 1px dashed var(--border);
-    border-radius: 4px;
-    color: var(--text-dim);
-    font-size: 16px;
-    line-height: 1;
-    cursor: pointer;
-    display: none;
-  }
-  .audio-remove:hover { color: var(--warn-high); border-color: var(--warn-high); border-style: solid; }
-  .audio-grid label {
-    color: var(--text-dim);
-  }
-  .audio-grid select {
-    background: var(--bg-input);
-    color: var(--text);
-    border: 1px solid var(--border-control);
-    padding: 6px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-family: inherit;
-    width: 100%;
-  }
-  .audio-grid select:focus {
-    outline: none;
-    border-color: var(--action);
-  }
-  .audio-grid .audio-test {
-    padding: 5px 10px;
-    font-size: 11px;
-  }
-  .audio-grid input[type="range"] {
-    accent-color: var(--action);
-    width: 100%;
-  }
+  .audio-panel { display: flex; flex-direction: column; gap: var(--s3); }
+  .audio-on-row { display: flex; align-items: center; gap: var(--s3); min-height: 44px; cursor: pointer; }
+  .audio-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s2); }
+  .audio-row .field { flex: 1 1 12em; }
+  .audio-actions { display: flex; gap: var(--s2); }
+  .audio-upload-pair { display: inline-flex; gap: var(--s1); }
+  .audio-upload.has-file { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); }
+  .audio-remove { display: none; }
 
-  .widget-toggles {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .widget-toggles label {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    color: var(--text);
-    cursor: pointer;
-    user-select: none;
-  }
-  .widget-toggles select {
-    background: var(--bg-input);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 3px 8px;
-    font-size: 11px;
-    font-family: inherit;
-    cursor: pointer;
-  }
-  .widget-toggles select:hover { border-color: var(--border-control); }
-  .widget-toggles select:focus { outline: 1px solid var(--hrv); }
-  .widget-toggles input[type="checkbox"] { width: 18px; }
+  .widget-toggles { display: flex; flex-direction: column; }
+  .widget-toggles > label { display: flex; align-items: center; gap: var(--s3); min-height: 44px; color: var(--text); cursor: pointer; user-select: none; }
+  .widget-toggles .sub-option { padding-left: 30px; margin-bottom: var(--s2); }
   .streaming-row {
     display: flex;
     align-items: center;
@@ -1006,72 +929,14 @@
   /* OBS size fields — two stacked (label-on-top) pairs side by side. Value and
      Copy button live in an inner flex row so the copy button is always flush
      to the right edge of each field group. */
-  .obs-size-fields {
-    display: flex;
-    gap: 12px;
-    flex: 1;
-    flex-wrap: wrap;
-  }
-  .obs-size-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1 1 140px;
-    min-width: 140px;
-  }
-  .obs-size-label {
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 700;
-  }
-  .obs-size-row {
-    display: flex;
-    align-items: stretch;
-    gap: 6px;
-  }
-  .obs-size-value {
-    font-family: 'Consolas', 'Monaco', monospace;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    padding: 8px 10px;
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 18px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-    flex: 1;
-    min-width: 0;
-  }
-  .obs-size-value:focus { outline: 1px solid var(--hrv); }
-  /* Size fields are always computed from the live widget; dim to read-only. */
-  .obs-size-value.obs-size-locked {
-    color: var(--text-dim);
-    background: #0c0c0c;
-    cursor: not-allowed;
-  }
-  /* Hide the native number-input spinner arrows in both Chromium and Firefox;
-     the box is narrow and the arrows clip into the text. Users use keyboard. */
+  .obs-size-fields { display: flex; flex-wrap: wrap; gap: var(--s3); margin-top: var(--s3); }
+  .obs-size-field { flex: 1 1 140px; min-width: 140px; }
+  .obs-size-row { display: flex; align-items: stretch; gap: var(--s2); }
+  .field .obs-size-value { flex: 1; min-width: 0; font-family: var(--mono); font-weight: 600; text-align: center; }
+  .field .obs-size-value.obs-size-locked { color: var(--text-dim); cursor: not-allowed; }
   .obs-size-value::-webkit-outer-spin-button,
   .obs-size-value::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .obs-size-value[type=number] { -moz-appearance: textfield; }
-  .obs-size-copy {
-    padding: 6px 10px;
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 700;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: color 0.12s, border-color 0.12s, background 0.12s;
-  }
-  .obs-size-copy:hover { color: var(--text); border-color: var(--border-control); }
-  .obs-size-copy.copied { color: var(--hrv); border-color: var(--hrv); }
   .streaming-key {
     font-family: 'Consolas', 'Monaco', monospace;
     background: var(--bg-input);
@@ -1099,35 +964,6 @@
   .streaming-status.listening { color: var(--text-dim); background: rgba(255,255,255,0.04); }
   .streaming-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
 
-  .tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 14px;
-  }
-  .tab {
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 8px 14px;
-    font-size: 12px;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-family: inherit;
-    border-radius: 0;
-    margin-bottom: -1px;
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .tab:hover {
-    color: var(--text);
-    background: transparent;
-    border-color: transparent;
-    border-bottom-color: var(--border-control);
-  }
-  .tab.active {
-    color: var(--action);
-    border-bottom-color: var(--action);
-  }
   .tab-panel {
     display: none;
   }
@@ -1528,8 +1364,8 @@
           <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="warn-count">0</div></div>
           <div class="stat" title="Fraction of the session where the strap was connected. Drops whenever the strap disconnects and auto-reconnect is in flight."><div class="stat-label">Uptime</div><div class="stat-value" id="uptime-pct">—</div></div>
         </div>
-        <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
-          <button id="btn-export" title="Download the current session as CSV">Export CSV</button>
+        <div class="ui stats-foot">
+          <button type="button" class="btn" id="btn-export" title="Download the current session as CSV">Export CSV</button>
         </div>
       </div>
     </div>
@@ -1564,7 +1400,7 @@
         <span class="section-title">Connection</span>
         <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
       </button>
-      <div class="section-body" id="sec-connection-body">
+      <div class="section-body ui" id="sec-connection-body">
         <div class="battery-display" id="battery-display" hidden>Battery: —</div>
         <!-- Broadcast key itself is intentionally invisible. Cross-device
              sync is handled by Drive: sign in on both devices and they end
@@ -1598,14 +1434,14 @@
             <div class="toggle-desc" id="battopt-desc">Allow this app to keep recording with the screen off. Without this, Android pauses your session after a few minutes.</div>
           </div>
           <span class="streaming-status" id="battopt-status">checking</span>
-          <button id="battopt-allow" style="display: none;">Allow</button>
+          <button type="button" class="btn" id="battopt-allow" style="display: none;">Allow</button>
         </div>
         <div class="toggle-row oem-row" id="oem-row" hidden>
           <div class="toggle-text">
             <div class="toggle-label" id="oem-label">Manufacturer settings</div>
             <div class="toggle-desc" id="oem-desc">Your phone has its own background-app killer on top of Android. Tap Open, then add HR Monitor to the never-sleeping list.</div>
           </div>
-          <button id="oem-open">Open</button>
+          <button type="button" class="btn" id="oem-open">Open</button>
         </div>
         <div class="broadcasters-panel" hidden>
           <div class="broadcasters-head">Active broadcasts</div>
@@ -1620,16 +1456,16 @@
         <span class="section-title">Settings</span>
         <svg class="section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
       </button>
-      <div class="section-body" id="sec-settings-body">
+      <div class="section-body ui" id="sec-settings-body">
         <div class="section-watch-empty">Only available on the broadcasting device.</div>
-        <div class="tabs">
-          <button class="tab active" data-tab="widgets">Widgets</button>
-          <button class="tab" data-tab="thresholds">Thresholds</button>
-          <button class="tab" data-tab="audio">Audio</button>
+        <div class="tabs" role="tablist" aria-label="Settings">
+          <button type="button" class="tab" role="tab" aria-selected="true" data-tab="widgets">Widgets</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="thresholds">Thresholds</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="audio">Audio</button>
         </div>
 
         <div class="tab-panel active" data-tabpanel="widgets">
-          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Show widgets</div>
+          <p class="row-label">Show widgets</p>
           <div class="widget-toggles">
             <label><input type="checkbox" id="toggle-hr" checked /> Heart rate</label>
             <label><input type="checkbox" id="toggle-live-hr" checked /> Live HR trace</label>
@@ -1637,108 +1473,102 @@
             <label><input type="checkbox" id="toggle-inline-trends" checked /> Inline mini trends</label>
             <label><input type="checkbox" id="toggle-palp-chip" checked /> Palpitation chip</label>
             <label><input type="checkbox" id="toggle-warning" checked /> Warning banner</label>
-            <label class="sub-option" title="Inside: banner sits inside the widget card and only appears when a warning fires. Above: banner has a reserved slot above the widget so the widget itself never reflows."><span style="padding-left: 18px; color: var(--text-dim); font-size: 11px;">Placement</span>
-              <select id="warning-placement" style="margin-left: 8px;">
+            <div class="field sub-option" title="Inside: banner sits inside the widget card and only appears when a warning fires. Above: banner has a reserved slot above the widget so the widget itself never reflows.">
+              <label for="warning-placement">Placement</label>
+              <span class="select"><select id="warning-placement">
                 <option value="inside">Inside card</option>
                 <option value="above">Above card (reserved slot)</option>
-              </select>
-            </label>
+              </select></span>
+            </div>
           </div>
           <div data-obs-only>
-            <div style="height: 18px;"></div>
-            <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">OBS Browser Source</div>
-            <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.4;">
-              The URL already embeds your broadcast key.
-            </div>
-            <div class="streaming-row" style="margin-top: 8px;">
-              <button class="primary" id="copy-obs-url" style="flex: 1;">Copy OBS Browser Source URL</button>
-            </div>
-            <div class="streaming-row" style="margin-top: 10px; align-items: flex-start;">
-              <div class="obs-size-fields">
-                <div class="obs-size-field">
-                  <span class="obs-size-label">Width</span>
-                  <div class="obs-size-row">
-                    <input type="number" min="160" max="2000" step="1" class="obs-size-value" id="obs-size-w" />
-                    <button class="obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
-                  </div>
+            <p class="row-label settings-gap">OBS Browser Source</p>
+            <p class="settings-note">The URL already embeds your broadcast key.</p>
+            <button type="button" class="btn primary block" id="copy-obs-url">Copy OBS Browser Source URL</button>
+            <div class="obs-size-fields">
+              <div class="field obs-size-field">
+                <label for="obs-size-w">Width</label>
+                <div class="obs-size-row">
+                  <input type="number" min="160" max="2000" step="1" class="obs-size-value" id="obs-size-w" />
+                  <button type="button" class="btn obs-size-copy" data-copy="obs-size-w" title="Copy width">Copy</button>
                 </div>
-                <div class="obs-size-field">
-                  <span class="obs-size-label">Height</span>
-                  <div class="obs-size-row">
-                    <input type="number" min="80" max="2000" step="1" class="obs-size-value" id="obs-size-h" />
-                    <button class="obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
-                  </div>
+              </div>
+              <div class="field obs-size-field">
+                <label for="obs-size-h">Height</label>
+                <div class="obs-size-row">
+                  <input type="number" min="80" max="2000" step="1" class="obs-size-value" id="obs-size-h" />
+                  <button type="button" class="btn obs-size-copy" data-copy="obs-size-h" title="Copy height">Copy</button>
                 </div>
               </div>
             </div>
-            <div style="font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.4;">
+            <p class="settings-note">
               Paste the URL into OBS → Sources → <b>+</b> → Browser Source → URL field.
               Paste the <b>Width</b> and <b>Height</b> numbers into OBS's matching fields to avoid empty space.
               Dimensions auto-update as you change widget toggles.
-            </div>
+            </p>
           </div>
         </div>
 
         <div class="tab-panel" data-tabpanel="thresholds">
           <div class="thresh-grid">
-            <label>High HR</label><input type="number" id="thresh-high" value="130" /><span class="unit">bpm</span>
-            <label>Low HR</label><input type="number" id="thresh-low" value="55" /><span class="unit">bpm</span>
-            <label>Low RMSSD</label><input type="number" id="thresh-rmssd" value="15" /><span class="unit">ms</span>
-            <label>Palpitations</label><input type="number" id="thresh-palp" value="5" /><span class="unit">/min</span>
+            <div class="field"><label for="thresh-high">High HR</label><div class="unit-row"><input type="number" id="thresh-high" value="130" /><span class="unit">bpm</span></div></div>
+            <div class="field"><label for="thresh-low">Low HR</label><div class="unit-row"><input type="number" id="thresh-low" value="55" /><span class="unit">bpm</span></div></div>
+            <div class="field"><label for="thresh-rmssd">Low RMSSD</label><div class="unit-row"><input type="number" id="thresh-rmssd" value="15" /><span class="unit">ms</span></div></div>
+            <div class="field"><label for="thresh-palp">Palpitations</label><div class="unit-row"><input type="number" id="thresh-palp" value="5" /><span class="unit">/min</span></div></div>
           </div>
-          <div style="height: 14px;"></div>
-          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Ectopic detection sensitivity</div>
-          <div class="thresh-grid">
-            <label>Sensitivity</label>
+          <p class="row-label settings-gap">Ectopic detection sensitivity</p>
+          <div class="field">
+            <label for="ectopic-sensitivity">Sensitivity <span class="unit" id="ectopic-sensitivity-label">3</span></label>
             <input type="range" id="ectopic-sensitivity" min="1" max="5" step="1" value="3" />
-            <span class="unit" id="ectopic-sensitivity-label">3</span>
           </div>
-          <div style="font-size: 11px; color: var(--text-dim); line-height: 1.4; margin-top: 6px;">
+          <p class="settings-note">
             Higher flags more subtle RR swings. Lower suppresses respiratory-sinus-arrhythmia false alarms during rest / exhale.
             Detection also requires a compensatory pause and skips when HR is trending down.
-          </div>
-          <div style="height: 14px;"></div>
-          <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Text colour stages</div>
-          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 8px;">
-            The red (critical) stage matches your High HR alert above.
-          </div>
+          </p>
+          <p class="row-label settings-gap">Text colour stages</p>
+          <p class="settings-note">The red (critical) stage matches your High HR alert above.</p>
           <div class="thresh-grid">
-            <label>Low zone ceiling</label><input type="number" id="color-low" value="70" /><span class="unit">bpm</span>
-            <label>Normal ceiling</label><input type="number" id="color-normal" value="90" /><span class="unit">bpm</span>
-            <label>Elevated ceiling</label><input type="number" id="color-elevated" value="110" /><span class="unit">bpm</span>
+            <div class="field"><label for="color-low">Low zone ceiling</label><div class="unit-row"><input type="number" id="color-low" value="70" /><span class="unit">bpm</span></div></div>
+            <div class="field"><label for="color-normal">Normal ceiling</label><div class="unit-row"><input type="number" id="color-normal" value="90" /><span class="unit">bpm</span></div></div>
+            <div class="field"><label for="color-elevated">Elevated ceiling</label><div class="unit-row"><input type="number" id="color-elevated" value="110" /><span class="unit">bpm</span></div></div>
           </div>
         </div>
 
         <div class="tab-panel" data-tabpanel="audio">
-          <div class="audio-grid">
-            <label>Audio alerts</label>
-            <input type="checkbox" id="audio-on" checked style="justify-self: start;" />
-            <span></span><span></span>
-
-            <label>High HR alert</label>
-            <select id="audio-high"></select>
-            <button class="audio-test" data-type="high">Test</button>
-            <span class="audio-upload-pair"><button class="audio-upload" data-type="high" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="high" title="Remove custom audio and revert to the preset">×</button></span>
-
-            <label>Low HR alert</label>
-            <select id="audio-low"></select>
-            <button class="audio-test" data-type="low">Test</button>
-            <span class="audio-upload-pair"><button class="audio-upload" data-type="low" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="low" title="Remove custom audio and revert to the preset">×</button></span>
-
-            <label>HRV crash</label>
-            <select id="audio-crash"></select>
-            <button class="audio-test" data-type="crash">Test</button>
-            <span class="audio-upload-pair"><button class="audio-upload" data-type="crash" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="crash" title="Remove custom audio and revert to the preset">×</button></span>
-
-            <label>Palpitations</label>
-            <select id="audio-palp"></select>
-            <button class="audio-test" data-type="palp">Test</button>
-            <span class="audio-upload-pair"><button class="audio-upload" data-type="palp" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button class="audio-remove" data-type="palp" title="Remove custom audio and revert to the preset">×</button></span>
-
-            <label>Volume</label>
+          <div class="audio-panel">
+          <label class="audio-on-row"><input type="checkbox" id="audio-on" checked /> Audio alerts</label>
+          <div class="audio-row">
+            <div class="field"><label for="audio-high">High HR alert</label><span class="select"><select id="audio-high"></select></span></div>
+            <div class="audio-actions">
+              <button type="button" class="btn audio-test" data-type="high">Test</button>
+              <span class="audio-upload-pair"><button type="button" class="btn audio-upload" data-type="high" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button type="button" class="btn icon audio-remove" data-type="high" title="Remove custom audio and revert to the preset" aria-label="Remove custom audio"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span>
+            </div>
+          </div>
+          <div class="audio-row">
+            <div class="field"><label for="audio-low">Low HR alert</label><span class="select"><select id="audio-low"></select></span></div>
+            <div class="audio-actions">
+              <button type="button" class="btn audio-test" data-type="low">Test</button>
+              <span class="audio-upload-pair"><button type="button" class="btn audio-upload" data-type="low" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button type="button" class="btn icon audio-remove" data-type="low" title="Remove custom audio and revert to the preset" aria-label="Remove custom audio"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span>
+            </div>
+          </div>
+          <div class="audio-row">
+            <div class="field"><label for="audio-crash">HRV crash</label><span class="select"><select id="audio-crash"></select></span></div>
+            <div class="audio-actions">
+              <button type="button" class="btn audio-test" data-type="crash">Test</button>
+              <span class="audio-upload-pair"><button type="button" class="btn audio-upload" data-type="crash" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button type="button" class="btn icon audio-remove" data-type="crash" title="Remove custom audio and revert to the preset" aria-label="Remove custom audio"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span>
+            </div>
+          </div>
+          <div class="audio-row">
+            <div class="field"><label for="audio-palp">Palpitations</label><span class="select"><select id="audio-palp"></select></span></div>
+            <div class="audio-actions">
+              <button type="button" class="btn audio-test" data-type="palp">Test</button>
+              <span class="audio-upload-pair"><button type="button" class="btn audio-upload" data-type="palp" title="Upload a custom audio file (mp3, wav, ogg)">Custom</button><button type="button" class="btn icon audio-remove" data-type="palp" title="Remove custom audio and revert to the preset" aria-label="Remove custom audio"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="audio-volume">Volume <span class="unit" id="volume-label">15%</span></label>
             <input type="range" id="audio-volume" min="0" max="100" value="15" />
-            <span class="unit" id="volume-label">15%</span>
-            <span></span>
+          </div>
           </div>
         </div>
         <div class="ui">
@@ -6715,8 +6545,7 @@
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
         const tabName = tab.dataset.tab;
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
+        document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelector('.tab-panel[data-tabpanel="' + tabName + '"]').classList.add('active');
       });
