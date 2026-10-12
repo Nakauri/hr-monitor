@@ -4138,6 +4138,8 @@
       // hrSeries from a prior session (e.g. one that died via FGS kill so
       // resetSession never ran) gets dumped into the new file by autosave.
       resetLiveDataBuffers();
+      // setSessionStart keeps an existing start, so clear the one a dead session left behind.
+      state.startTime = null;
       setSessionStart(Date.now());
       state.lastDataTime = Date.now();
       await attachConnection();
