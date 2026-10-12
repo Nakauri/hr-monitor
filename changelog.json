@@ -1,54 +1,280 @@
 {
   "items": [
     {
-      "date": "2026-10-10",
-      "title": "Recording comes back on its own",
-      "body": "If Android closes the app while you record, Aorti picks the session back up by itself, in the same file, usually within a few seconds."
+      "date": "2026-10-12",
+      "area": "Site",
+      "title": "New home page and changelog",
+      "body": "The home page has a cleaner layout, newer screenshots and a stream preview at true size. Every update since launch now has its own page you can filter, and the privacy page is finished."
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Monitor",
+      "title": "Tidier monitor controls",
+      "body": "Stop, posture, the Log row and live sharing now sit in one Controls section, closed until you need it, and its header still shows your posture and whether you are live. Switches, buttons and fields match the rest of aorti."
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Viewer",
+      "title": "Saved sessions show first",
+      "body": "The viewer opens straight to what you saw last, then checks Drive quietly in the background. It only redraws if something actually changed."
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Viewer",
+      "title": "Correct session lengths",
+      "body": "Some sessions showed impossible lengths, like 70 hours. Times now come from the real clock in each file, and a new web session always starts its own clock."
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Viewer",
+      "title": "Arrange your Trends",
+      "body": "Pick which Trends cards show and drag them into your own order. Each one can be half or full width."
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Viewer",
+      "title": "Smoother zooming",
+      "body": "Scrolling and zooming the Day chart is much lighter on phones and laptops. On touch, pinch or double-tap to zoom; on a laptop, drag across the chart to zoom to that stretch."
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Viewer",
+      "title": "Tidier Day view",
+      "body": "The date now opens a calendar for picking another day, and one Layers list turns chart lines on or off. Markers open in a drawer that no longer squeezes the chart."
+    },
+    {
+      "date": "2026-10-12",
+      "area": "Android app",
+      "title": "Bubble stays on screen",
+      "body": "The floating bubble can no longer be dragged or rotated partly off the edge of the screen."
+    },
+    {
+      "date": "2026-10-11",
+      "area": "Viewer",
+      "title": "Day view explorer",
+      "body": "The Day view now shows the whole day on one chart you can explore. Marks show as diamonds you can edit or delete, and sleep start and end can be marked by hand."
+    },
+    {
+      "date": "2026-10-11",
+      "area": "Viewer",
+      "title": "Phone viewer shows your data",
+      "body": "The viewer in the app could open empty on some phones. It now shows your saved summaries right away and refreshes them in the background."
+    },
+    {
+      "date": "2026-10-11",
+      "area": "Monitor",
+      "title": "Log a symptom or a note",
+      "body": "A Log row lets you mark a symptom or jot a quick note during a session. Both show on the Day view at that minute."
+    },
+    {
+      "date": "2026-10-11",
+      "area": "Android app",
+      "title": "Symptom from the notification",
+      "body": "The recording notification has a Symptom button, so you can mark a moment without opening the app. Its status now reads in hours and minutes."
+    },
+    {
+      "date": "2026-10-11",
+      "area": "Monitor",
+      "title": "Choose when to sync",
+      "body": "On the web, Drive sync is now a setting you can turn off. After you stop, the monitor says where the session was saved and links straight to it."
+    },
+    {
+      "date": "2026-10-11",
+      "area": "Android app",
+      "title": "Bubble closes with the session",
+      "body": "The floating bubble closes by itself once no session is running. Its stop icon is easier to see."
     },
     {
       "date": "2026-10-10",
-      "title": "Reconnects when you are back in range",
+      "area": "Android app",
+      "title": "Recording comes back on its own",
+      "body": "If Android closes the app while you record, the session picks back up by itself, in the same file, usually within a few seconds."
+    },
+    {
+      "date": "2026-10-10",
+      "area": "Android app",
+      "title": "Reconnects when back in range",
       "body": "Walk away from your phone and the notification says the strap is reconnecting. Come back and recording picks up again by itself, with no need to open the app."
     },
     {
       "date": "2026-10-10",
+      "area": "Android app",
       "title": "Hourly files on Drive",
       "body": "Sessions now also save as small hourly files in a folder for each month on your Drive. Each finished hour uploads once, so syncing is faster."
     },
     {
+      "date": "2026-10-10",
+      "area": "Stream overlay",
+      "title": "Refreshed stream widget",
+      "body": "The widget has a new font and clearer warning colours, and a warning keeps flashing until it clears. The OBS source now matches the monitor preview at the same size."
+    },
+    {
       "date": "2026-10-09",
+      "area": "Android app",
       "title": "Faster sync, no duplicate files",
       "body": "Sync no longer reads every saved session again, and a resumed session no longer leaves a second copy on Drive."
     },
     {
       "date": "2026-10-09",
+      "area": "Android app",
       "title": "No more stuck restore screen",
       "body": "Coming back to the app no longer shows a spinner for up to a minute, and Stop responds right away, even on a weak connection. Long sessions ask before stopping."
     },
     {
+      "date": "2026-09-13",
+      "area": "Android app",
+      "title": "No more hanging on restore",
+      "body": "In rare cases the app could sit on Restoring session until you force-closed it. It now finishes or gives up within about a minute."
+    },
+    {
+      "date": "2026-08-25",
+      "area": "Stream overlay",
+      "title": "Overlay stays live all session",
+      "body": "Late in long sessions the stream overlay and Watch live could stop updating. They now keep going for the whole session."
+    },
+    {
+      "date": "2026-07-05",
+      "area": "Android app",
+      "title": "Security tightening",
+      "body": "Sign-in details are stored more securely on the phone, and live data from other devices is checked before it shows. A few stop and restart edge cases were fixed along the way."
+    },
+    {
+      "date": "2026-05-23",
+      "area": "Android app",
+      "title": "No double stream on reopen",
+      "body": "Reopening the app while you share live no longer starts a second copy of your stream."
+    },
+    {
+      "date": "2026-05-21",
+      "area": "Viewer",
+      "title": "More dependable Drive sync",
+      "body": "Sync now waits for an upload to land before it says it is done, and new data shows in the viewer right after. Sync messages are plainer too."
+    },
+    {
+      "date": "2026-05-17",
+      "area": "Android app",
+      "title": "Floating heart rate bubble",
+      "body": "A long press on the widget pops your heart rate into a bubble that floats over other apps. A tap switches it between a compact view and a card with HRV."
+    },
+    {
+      "date": "2026-05-15",
+      "area": "Viewer",
+      "title": "Markers on the right day",
+      "body": "Markers from sessions that cross midnight now land on the correct day."
+    },
+    {
+      "date": "2026-05-09",
+      "area": "Viewer",
+      "title": "Full 24-hour day chart",
+      "body": "The Day chart now runs midnight to midnight, and sessions longer than a day show on every day they cover. Early-morning sessions no longer slip to the day before."
+    },
+    {
+      "date": "2026-05-03",
+      "area": "Android app",
+      "title": "Keeps recording overnight",
+      "body": "Android is much less likely to stop a recording overnight. If it does, the app brings it back on its own."
+    },
+    {
+      "date": "2026-04-29",
+      "area": "Viewer",
+      "title": "Choose your summary stats",
+      "body": "Pick which numbers show in a session summary from its menu. SDNN is now one of the options."
+    },
+    {
+      "date": "2026-04-27",
+      "area": "Viewer",
+      "title": "Faster charts",
+      "body": "The viewer redraws far less, so charts scroll and resize smoothly. Zoomed-out charts keep their highs and lows, so they match the summary numbers."
+    },
+    {
       "date": "2026-04-26",
+      "area": "Viewer",
       "title": "Try the viewer with sample data",
-      "body": "Open Sample data in the menu to see what the viewer looks like with two weeks of fake sessions. No sign-in needed."
+      "body": "Open Sample data in the menu to see what the viewer looks like with two weeks of sample sessions. No sign-in needed."
     },
     {
       "date": "2026-04-26",
+      "area": "Android app",
       "title": "Plays nicely with Sleep As Android",
-      "body": "Aorti can share your strap with sleep-tracking apps. No need to disconnect one to use the other."
+      "body": "aorti can share your strap with sleep-tracking apps. No need to disconnect one to use the other."
     },
     {
       "date": "2026-04-26",
+      "area": "Android app",
       "title": "Mobile reliability fixes",
       "body": "Recovers better from brief strap drops, including overnight. Long sessions use less battery."
     },
     {
       "date": "2026-04-26",
+      "area": "Viewer",
       "title": "Viewer tweaks",
-      "body": "Chills sensitivity slider filters events properly. Sundays open in the week view. HR shifts show in purple so they don't look like chills."
+      "body": "The chills sensitivity slider filters events properly. Sundays open in the week view, and HR shifts show in purple so they do not look like chills."
     },
     {
       "date": "2026-04-25",
+      "area": "Android app",
       "title": "Save CSV anywhere",
       "body": "Tapping Export CSV opens a save dialog, so the file goes wherever you pick."
+    },
+    {
+      "date": "2026-04-25",
+      "area": "Android app",
+      "title": "Record without signing in",
+      "body": "You can record without a Google account; sessions stay on the phone. Old ones are cleared before storage runs low, and you can clear them yourself."
+    },
+    {
+      "date": "2026-04-24",
+      "area": "Android app",
+      "title": "Swipe to stop",
+      "body": "Ending a session is now a swipe, so a stray tap will not stop it. Stop in the notification works again."
+    },
+    {
+      "date": "2026-04-23",
+      "area": "Monitor",
+      "title": "Fewer false alerts",
+      "body": "Chills and flushing alerts were rewritten and fire far less often on ordinary changes in heart rate."
+    },
+    {
+      "date": "2026-04-23",
+      "area": "Viewer",
+      "title": "Late-night sessions split by day",
+      "body": "A session that runs past midnight now shows its part on each day instead of all on the day it started."
+    },
+    {
+      "date": "2026-04-21",
+      "area": "Site",
+      "title": "Now called aorti",
+      "body": "The app has a new name and a home at aorti.ca. You can sign in right from the home page."
+    },
+    {
+      "date": "2026-04-21",
+      "area": "Android app",
+      "title": "Steadier strap connection",
+      "body": "The Android app was rebuilt to hold a steadier connection to your strap, so readings no longer go quiet mid-session."
+    },
+    {
+      "date": "2026-04-19",
+      "area": "Android app",
+      "title": "Record in the background",
+      "body": "Start a session on Android and it keeps recording with the screen off. A settings shortcut helps stop your phone from closing it to save battery."
+    },
+    {
+      "date": "2026-04-19",
+      "area": "Monitor",
+      "title": "Skipped-beat detection",
+      "body": "The monitor flags beats that look skipped or early, with a slider to set how sensitive it is."
+    },
+    {
+      "date": "2026-04-18",
+      "area": "Viewer",
+      "title": "Reports by day, week and month",
+      "body": "The viewer turns your sessions into plain-English reports with noteworthy moments called out. It syncs both ways with Google Drive."
+    },
+    {
+      "date": "2026-04-18",
+      "area": "Stream overlay",
+      "title": "Heart rate on your stream",
+      "body": "Add the overlay as a browser source in OBS and it mirrors the widget on your monitor as you change its settings. Watch live shows the same view on any other screen."
     }
   ]
 }
