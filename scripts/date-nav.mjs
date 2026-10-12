@@ -9,7 +9,7 @@
 // month: the Month title opens a 12-month grid with year carets; a click and the keyboard pick a month.
 // kpi: with Duration forced to 24:00:00, every pair of stats on a row is one gap token apart (within 2 px), no value
 //   leaves its column, values use tabular figures; at 1440, 360 (open and collapsed) and 360 with 200% text.
-// --mutants: a title-sized caret track, the KPI gap removed, the KPI fit removed and a calendar that never opens each
+// --mutants: a title-sized caret track, the KPI gap removed, the KPI fit removed, unbalanced KPI rows and a calendar that never opens each
 //   must FAIL their part. --shots <dir> shoots the headers, the picker and the KPI strip.
 // Usage: node scripts/date-nav.mjs [--part carets,picker,week,month,kpi] [--mutants] [--shots <dir>] [--ux <ux-audit dir>]
 import http from 'node:http';
@@ -290,7 +290,8 @@ async function partKpi() {
         gaps.push({ pair: stats[i - 1].key + '|' + stats[i].key, gap: stats[i].left - stats[i - 1].right });
         overlaps.push(stats[i].left - stats[i - 1].vright);
       }
-      return { token, n: stats.length, gaps, minClear: overlaps.length ? Math.min(...overlaps) : null, outside: stats.filter((s) => !s.inside).map((s) => s.key), tab: stats.every((s) => s.tab), scroll: document.documentElement.scrollWidth <= window.innerWidth };
+      const rows = Object.values(stats.reduce((a, x) => { a[x.top] = (a[x.top] || 0) + 1; return a; }, {}));
+      return { token, n: stats.length, gaps, rows, minClear: overlaps.length ? Math.min(...overlaps) : null, outside: stats.filter((s) => !s.inside).map((s) => s.key), tab: stats.every((s) => s.tab), scroll: document.documentElement.scrollWidth <= window.innerWidth };
     });
     const tag = `${w}${scale !== 1 ? ' at 200% text' : ''}${collapsed ? ' collapsed' : ''}`;
     if (!r) { ok(false, `${tag}: the KPI strip renders`); await ctx.close(); continue; }
@@ -298,6 +299,8 @@ async function partKpi() {
     ok(r.n > 0 && !bad.length, `${tag}: ${r.gaps.length ? r.gaps.length + ' stat pairs, each ' + r.token + ' px apart within 2 px' : r.n + ' stats in one column'}`, bad.map((g) => `${g.pair} ${g.gap.toFixed(1)}`).join(', '));
     ok(!r.outside.length && (r.minClear == null || r.minClear >= r.token - 2), `${tag}: 24:00:00 and every other value stay inside their column (closest ${r.minClear == null ? 'n/a' : r.minClear.toFixed(1)} px)`, r.outside.join(', '));
     ok(r.tab && r.scroll, `${tag}: tabular figures, no sideways scroll`);
+    // Khal 2026-10-12: 10 stats wrapped 8 and 2 at 1440, the same lopsided wrap as the 11 plus 1 chips (item 7).
+    ok(Math.max(...r.rows) - Math.min(...r.rows) <= 1, `${tag}: rows balanced (${r.rows.join(' + ')})`);
     if (SHOTS && w === 360 && scale === 1 && !collapsed) await page.locator('#summary-bar').screenshot({ path: path.join(SHOTS, 's30-kpi-360.png') });
     if (SHOTS && w === 360 && scale === 2) await page.locator('#summary-bar').screenshot({ path: path.join(SHOTS, 's30-kpi-360-200.png') });
     if (SHOTS && w === 1440) await page.locator('#summary-bar').screenshot({ path: path.join(SHOTS, 's30-kpi-1440.png') });
@@ -311,7 +314,8 @@ if (MUTANTS) {
   const M = [
     ['title-sized caret track', 'carets', ['.datenav-h { flex: 0 0 auto; width: 16.5em;', '.datenav-h { flex: 0 0 auto; width: auto;']],
     ['KPI gap removed', 'kpi', ['gap: var(--s4) var(--kpi-gap);', 'gap: var(--s4) 0;']],
-    ['KPI fit removed', 'kpi', ["if (w) grid.style.setProperty('--kpi-col'", "if (false) grid.style.setProperty('--kpi-col'"]],
+    ['KPI fit removed', 'kpi', ["    if (!w) return;\n    const col", "    return;\n    const col"]],
+    ['KPI rows unbalanced', 'kpi', ["const cols = Math.ceil(stats.length / Math.ceil(stats.length / fit));", "const cols = fit;"]],
     ['calendar never opens', 'picker', ["g('-pick').addEventListener('click',", "g('-pick').addEventListener('dblclick',"]],
   ];
   const results = [];
