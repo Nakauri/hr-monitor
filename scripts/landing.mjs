@@ -25,7 +25,8 @@ const ROOT = path.resolve(argVal('--root') || path.join(here, '..'));
 const SHOTS = argVal('--shots');
 const PREFIX = argVal('--prefix') || 's20-';
 const SHOTS_ONLY = args.includes('--shots-only');
-const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
+// Compare on LF: Windows checkouts (core.autocrlf) hold CRLF while the commits are LF.
+const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 
 const STORY = 'I was dealing with heart rate swings, high and low, that nobody seemed to take seriously. I wanted a quiet 24/7 way to record HR and HRV, then look back at the patterns myself over weeks and months.';
 const CONDITION_WORDS = /\b(POTS|tachy\w*|orthostatic|flare|symptom\w*|arrhythm\w*|anxiety|abnormal|diagnos\w*|doctor|dysautonomia|palpitation\w*)\b/i;
@@ -68,8 +69,9 @@ function withChangelog(html, json) {
 }
 
 if (args.includes('--write-changelog')) {
+  const crlf = fs.readFileSync(path.join(ROOT, 'changelog.html'), 'utf8').includes('\r\n');
   const out = withChangelog(read('changelog.html'), JSON.parse(read('changelog.json')));
-  fs.writeFileSync(path.join(ROOT, 'changelog.html'), out);
+  fs.writeFileSync(path.join(ROOT, 'changelog.html'), crlf ? out.replace(/\n/g, '\r\n') : out);
   console.log('changelog.html entries rewritten from changelog.json');
   process.exit(0);
 }
