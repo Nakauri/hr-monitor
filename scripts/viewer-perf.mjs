@@ -1,4 +1,4 @@
-// Guards: the Day chart lagging on drag, zoom, hover and marker ease (ux-audit/redesign/perf-2026-10-12/REPORT.md, Khal 2026-10-11 "barely scroll"). Files: hrv_viewer.html chart, brush, hover, marker ease, Day route. Runtime: about 70 s per --config; run when the Day chart or its route changes.
+// Guards: the Day chart lagging on drag, zoom, hover and marker ease (ux-audit/redesign/perf-2026-10-12/REPORT.md, Khal 2026-10-11 "barely scroll"). Files: hrv_viewer.html chart, brush, pinch (S32), hover, marker ease, Day route. Runtime: about 70 s per --config; run when the Day chart or its route changes.
 // Seeds one realistic 16.5 h day (3 recordings at 1 Hz, gaps, events, palps, warnings, posture, marks)
 // into the viewer's Drive cache, opens the Day view headless, runs the REPORT actions with long-task,
 // frame and Chart.update counters, then checks the REPORT budgets as PASS/FAIL rows.
@@ -358,6 +358,20 @@ async function runConfig(name, W, CPU) {
     await settle(500);
   }
 
+  // S32: a two-finger pinch on the chart at 360 (AUDIT-NOTES item 28), through the frame path.
+  if (want('pinch') && PHONE && !MUTANT) {
+    const p = await page.evaluate(() => { const c = window.Chart.getChart(document.getElementById('session-chart')); c.canvas.scrollIntoView({ block: 'center' }); const r = c.canvas.getBoundingClientRect(), a = c.chartArea; return { x: Math.round(r.left + (a.left + a.right) / 2), y: Math.round(r.top + (a.top + a.bottom) / 2) }; });
+    await settle(300);
+    const tp = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], id) => ({ x: Math.round(x), y: Math.round(y), id })) });
+    await measure('4-pinch', async () => {
+      await tp('touchStart', [[p.x - 15, p.y], [p.x + 15, p.y]]);
+      for (let i = 1; i <= 20; i++) { const d = 15 + 150 * i / 20; await tp('touchMove', [[p.x - d, p.y], [p.x + d, p.y]]); await page.waitForTimeout(16); }
+      await tp('touchEnd', []); await settle(300);
+      return { range: await chartRange() };
+    });
+    await page.evaluate(() => document.getElementById('context-overlay').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))); await settle(500);
+  }
+
   if (want('marker') && !MUTANT) {
     if (PHONE) { const btn = page.locator('#markers-open').first(); if (await btn.count()) { await btn.click().catch(() => {}); await settle(600); } }
     await measure('5-marker-click', async () => {
@@ -423,6 +437,8 @@ function budgetRows(res) {
     const d = A['7-to-day'];
     if (d) add('route', d.longestMs < 200, `Month to Day longest task under 200 ms (${d.longestMs} ms)`);
   }
+  const pz = A['4-pinch'];
+  if (pz) add('pinch', pz.longestMs <= 50 && pz.frames && pz.frames.maxPerFrame <= 1 && !(pz.counts['updateInInput:main'] || 0), `4-pinch no task over 50 ms, at most 1 chart update per frame (${pz.longestMs} ms, ${pz.frames && pz.frames.maxPerFrame} max per frame, ${pz.counts['update:main'] || 0} updates)`);
   const h = A['6-hover-sweep'];
   if (h) add('hover', (h.counts['update:main'] || 0) === 0 && h.extra && h.extra.highlightedMoves > 0, `hover sweep runs 0 chart updates (${h.counts['update:main'] || 0} over 61 moves, highlight moved ${h.extra && h.extra.highlightedMoves} times)`);
   const m = A['5-marker-click'];
