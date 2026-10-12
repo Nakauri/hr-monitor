@@ -132,12 +132,18 @@ function eventCells(csv) {
   const ei = head.indexOf('event');
   return { cols: head.length, rows: lines.slice(1).map((l) => l.split(',')).filter((r) => r[ei]).map((r) => ({ n: r.length, ep: Number(r[1]), ev: r[ei] })), bad: lines.slice(1).filter((l) => l && l.split(',').length !== head.length).length };
 }
+// S24: the Log row and Stop sit behind the Controls header, closed on every load.
+async function openControls(page) {
+  if (await page.evaluate(() => document.querySelector('[data-section="controls"]').classList.contains('collapsed'))) await page.click('[data-section="controls"] .section-header');
+  await page.waitForTimeout(300);
+}
 async function startWeb(page) {
   await page.evaluate(() => document.getElementById('autosave-toggle').click());
   await page.waitForTimeout(300);
   await page.click('#session-toggle');
   await page.waitForFunction(() => document.getElementById('session-toggle').textContent.trim() === 'Stop session', null, { timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(1500);
+  await openControls(page);
 }
 async function toast(page) {
   return page.evaluate(() => { const t = document.querySelector('.toast-host .toast'); return t ? { text: t.querySelector('.grow').textContent, undo: !!t.querySelector('.undo') } : null; });
@@ -244,6 +250,7 @@ try {
     const { ctx, page, errs } = await newPage({ phone: size !== '1440', native: true });
     await page.waitForFunction(() => document.getElementById('session-toggle').textContent.trim() === 'Stop session', null, { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(800);
+    await openControls(page);
     if (size === '360-text200') { await textScale(page, 2); await page.waitForTimeout(300); }
     check(await logShown(page), `native ${size}: Log row shown while recording`);
     const lay = await page.evaluate(() => {
