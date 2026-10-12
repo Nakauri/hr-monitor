@@ -5862,13 +5862,13 @@
       pop.id = 'viewer-settings-popover';
       pop.className = 'ui popover thresh-pop';
       pop.innerHTML = `
-        <h4>Autonomic analysis</h4>
-        <div class="thresh-blurb">When ON: pattern callouts for sympathetic and parasympathetic activity, useful context if you track dysautonomia or stress response. When OFF: plain descriptive numbers, no interpretive overlays.</div>
+        <h4>Pattern notes</h4>
+        <div class="thresh-blurb">Adds the flush and chills layers and the HR and HRV panel.</div>
         <button class="toggle" type="button" role="switch" id="autonomic-toggle" aria-checked="false">
-          <span class="txt"><span class="t">Show autonomic pattern callouts</span></span><span class="track" aria-hidden="true"></span>
+          <span class="txt"><span class="t">Show pattern notes</span></span><span class="track" aria-hidden="true"></span>
         </button>
-        <h4>HR shift detector</h4>
-        <div class="thresh-blurb">A shift is flagged when HR rises or drops by at least this many bpm within the window. POTS clinical criterion is 30 bpm within 10 min of standing; a smaller threshold surfaces more everyday jumps.</div>
+        <h4>HR shifts</h4>
+        <div class="thresh-blurb">A rise or drop of at least this many bpm within the window. Lower numbers show more shifts.</div>
         <div class="thresh-row">
           <label for="hrshift-thresh">Threshold<span class="thresh-hint">bpm change</span></label>
           <span class="field"><input type="number" id="hrshift-thresh" min="10" max="80" step="1" /></span>
@@ -5877,7 +5877,7 @@
           <label for="hrshift-win">Window<span class="thresh-hint">minutes</span></label>
           <span class="field"><input type="number" id="hrshift-win" min="2" max="30" step="1" /></span>
         </div>
-        <div class="thresh-default-hint">Default: 30 bpm / 10 min (POTS clinical criterion).</div>
+        <div class="thresh-default-hint">Default: 30 bpm in 10 minutes, the POTS standing rise.</div>
         <div class="action-row">
           <button class="btn ghost thresh-reset" id="hrshift-reset" type="button">Reset</button>
           <span class="pair"><button class="btn" id="hrshift-cancel" type="button">Cancel</button><button class="btn primary" id="hrshift-save" type="button">Save</button></span>
