@@ -4,13 +4,15 @@
 // frame and Chart.update counters, then checks the REPORT budgets as PASS/FAIL rows.
 // --config desk (1440 at 4x CPU) | phone (360 at 6x) | all (both, about 140 s). --w/--cpu measure any other
 // cell without budgets. --mutants drag|hover serves a broken viewer whose budget rows must FAIL.
-// --shots <dir> --tag <name> shoots the chart at 1440, full day and a 10 min window. --counts adds V8 call counts.
+// --shots <dir> --tag <name> shoots the chart at 1440: full day, a 10 min window, a marker clicked. --ref <commit>
+// serves that commit's viewer instead of the working file (before and after pairs). --counts adds V8 call counts.
 // Usage: node scripts/viewer-perf.mjs [--config desk|phone|all] [--mutants drag|hover] [--only a,b] [--ux <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { uxDir } from './ux-dir.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -33,7 +35,8 @@ else if (args.includes('--w') || args.includes('--cpu')) runs = [['adhoc', +argV
 else if (MUTANT) runs = [['desk', ...CONFIGS.desk]];
 else { const c = argVal('--config', 'all'); runs = (c === 'all' ? ['desk', 'phone'] : [c]).map((k) => [k, ...CONFIGS[k]]); }
 
-const REAL = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+const REF = argVal('--ref', null);
+const REAL = (REF ? execFileSync('git', ['-C', ROOT, 'show', REF + ':hrv_viewer.html'], { encoding: 'utf8', maxBuffer: 64 << 20 }) : fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8')).replace(/\r\n/g, '\n');
 // Each mutant breaks one path; the rows it names must FAIL.
 const MUTANTS = {
   drag: { rows: ['brush'], a: '      scheduleChartRange();\n', b: '      applyChartRange();\n', why: 'brush drag calls the chart update from pointermove' },
@@ -264,6 +267,9 @@ async function runConfig(name, W, CPU) {
     await page.mouse.move(1, 1); await settle(300);
     console.log('10 min range', JSON.stringify(await chartRange()));
     await shoot(`s26-${SHOT_TAG}-10min.png`);
+    const it = page.locator('#marker-list .marker-item').nth(5);
+    await it.scrollIntoViewIfNeeded(); await it.click(); await settle(800); await page.mouse.move(1, 1); await settle(300);
+    await shoot(`s26-${SHOT_TAG}-marker.png`);
     await ctx.close();
     return;
   }
@@ -306,10 +312,13 @@ async function runConfig(name, W, CPU) {
 
   if (want('hover') && !PHONE) await measure('6-hover-sweep', async () => {
     const r = await page.evaluate(() => { const c = document.getElementById('session-chart'); c.scrollIntoView({ block: 'center' }); const b = c.getBoundingClientRect(); return { x: b.x, y: b.y + b.height / 2, w: b.width }; });
-    let lit = 0;
+    // Highlight moves: how often the highlight time changed under the sweep (it follows the hovered marks).
+    let lit = 0, last;
     for (let i = 0; i <= 60; i++) {
       await page.mouse.move(r.x + 40 + (r.w - 80) * i / 60, r.y); await page.waitForTimeout(16);
-      if (await page.evaluate(() => { const c = window.Chart.getChart(document.getElementById('session-chart')); return c && c.$hlT != null; })) lit++;
+      const t = await page.evaluate(() => { const c = window.Chart.getChart(document.getElementById('session-chart')); return c ? c.$hlT : undefined; });
+      if (i && t !== last) lit++;
+      last = t;
     }
     await settle(200); return { moves: 61, highlightedMoves: lit };
   });
@@ -353,7 +362,7 @@ function budgetRows(res) {
     if (d) add('route', d.longestMs < 200, `Month to Day longest task under 200 ms (${d.longestMs} ms)`);
   }
   const h = A['6-hover-sweep'];
-  if (h) add('hover', (h.counts['update:main'] || 0) === 0 && h.extra && h.extra.highlightedMoves > 0, `hover sweep runs 0 chart updates (${h.counts['update:main'] || 0} over 61 moves, highlight shown on ${h.extra && h.extra.highlightedMoves} moves)`);
+  if (h) add('hover', (h.counts['update:main'] || 0) === 0 && h.extra && h.extra.highlightedMoves > 0, `hover sweep runs 0 chart updates (${h.counts['update:main'] || 0} over 61 moves, highlight moved ${h.extra && h.extra.highlightedMoves} times)`);
   const m = A['5-marker-click'];
   if (m && name === 'desk') add('marker', m.frames.worst < 50, `marker ease worst frame under 50 ms (${m.frames.worst} ms, ${m.counts['update:main'] || 0} updates)`);
   for (const a of ['2-scroll', '8-idle-10s']) {

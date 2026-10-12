@@ -367,11 +367,10 @@ async function clickAndMeasure(page, row, dur) {
   return page.evaluate(({ t, end, w }) => {
     const c = Chart.getChart(document.getElementById('session-chart'));
     const x = c.scales.x, a = c.chartArea;
-    const hl = c.data.datasets.find((d) => d.label === '_HL_LINE');
     const sel = document.querySelector('#marker-list .marker-item[aria-current="true"]');
     return {
       t, dLeft: Math.abs(x.getPixelForValue(w[0]) - a.left), dRight: Math.abs(x.getPixelForValue(w[1]) - a.right),
-      hlAt: hl && hl.data.length ? hl.data[0].x : null, selected: sel ? Number(sel.dataset.t) : null, min: x.min, max: x.max,
+      hlAt: c.$hlT == null ? null : c.$hlT, selected: sel ? Number(sel.dataset.t) : null, min: x.min, max: x.max,
     };
   }, { t, end, w: expectWindow(t, end, dur) });
 }
@@ -433,10 +432,10 @@ const SUBCHECKS = {
       const w = await clickAndMeasure(page, page.locator('#marker-list .marker-item.type-warning').first(), dur);
       rows.push([w.dLeft <= 1 && w.dRight <= 1 && w.hlAt === w.t, `${width}: a span click eases to the span plus margins (edges off by ${w.dLeft.toFixed(2)} and ${w.dRight.toFixed(2)} px)`]);
       await page.mouse.move(5, 5);
-      const kept = await page.evaluate(() => { const hl = Chart.getChart(document.getElementById('session-chart')).data.datasets.find((d) => d.label === '_HL_LINE'); return hl.data.length ? hl.data[0].x : null; });
+      const kept = await page.evaluate(() => { const c = Chart.getChart(document.getElementById('session-chart')); return c.$hlT == null ? null : c.$hlT; });
       rows.push([kept === w.t, `${width}: the highlight stays after the pointer leaves (${kept})`]);
       await tap(page, '#reset-zoom'); await settle(page, 400);
-      const cleared = await page.evaluate(() => ({ sel: document.querySelectorAll('#marker-list .marker-item[aria-current]').length, hl: Chart.getChart(document.getElementById('session-chart')).data.datasets.find((d) => d.label === '_HL_LINE').data.length }));
+      const cleared = await page.evaluate(() => ({ sel: document.querySelectorAll('#marker-list .marker-item[aria-current]').length, hl: Chart.getChart(document.getElementById('session-chart')).$hlT == null ? 0 : 1 }));
       rows.push([cleared.sel === 0 && cleared.hl === 0, `${width}: Reset zoom clears the selection (${JSON.stringify(cleared)})`]);
     }
     rows.push([!page.errors.length, `focus ${width}: no page errors ` + page.errors.join(' | ')]);
@@ -576,7 +575,7 @@ if (want('marks')) {
 if (want('mutants')) {
   const real = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
   const MUTANTS = [
-    ['diamonds', 'no diamond handles', "        if (!tick) annotations['mk_' + idCounter++] = {", "        if (false) annotations['mk_' + idCounter++] = {"],
+    ['diamonds', 'no diamond handles', "          annotations['mk_' + idCounter++] = handle;", "          void handle;"],
     ['focus', 'marker click jumps with the old zoom, no highlight', '    easeBrushTo(lo, hi, () => { if (pinnedMarkT === item.t) highlightAtTime(item.t); });', '    zoomTo(item.t);'],
     ['focus', 'marker click without the highlight', '    pinnedMarkT = item.t;\n    if (fromSheet) {', '    if (fromSheet) {'],
     ['tap', 'delete skips the confirm', "    if (!ok) return;\n    const id = item.edit.markId;", "    const id = item.edit.markId;"],

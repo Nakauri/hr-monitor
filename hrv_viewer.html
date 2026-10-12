@@ -7612,27 +7612,65 @@
   // Used by both marker-list hovers (from the sidebar) and annotation hovers
   // (from the chart itself) — unified so the visual feedback is consistent.
   function highlightAtTime(t) {
-    if (!currentChart) return;
-    const yScale = currentChart.scales.y;
-    const yTop = yScale ? yScale.max : 200;
-    const yBottom = yScale ? yScale.min : 0;
-    const yHR = nearestY(currentData && currentData.hr, t);
-    const ds = currentChart.data.datasets;
-    for (let i = 0; i < ds.length; i++) {
-      if (ds[i].label === '_HL_LINE') ds[i].data = [{ x: t, y: yBottom }, { x: t, y: yTop }];
-      if (ds[i].label === '_HL_POINT') ds[i].data = [{ x: t, y: yHR }];
-    }
-    currentChart.update('none');
+    const chart = currentChart;
+    if (!chart) return;
+    chart.$hlT = t;
+    chart.$hlY = nearestY(currentData && currentData.hr, t);
+    requestChartDraw(chart);
   }
   function unhighlightAtTime() {
     if (!currentChart) return;
     if (pinnedMarkT != null) { highlightAtTime(pinnedMarkT); return; }
-    const ds = currentChart.data.datasets;
-    for (let i = 0; i < ds.length; i++) {
-      if (ds[i].label === '_HL_LINE' || ds[i].label === '_HL_POINT') ds[i].data = [];
-    }
-    currentChart.update('none');
+    if (currentChart.$hlT == null) return;
+    currentChart.$hlT = null;
+    requestChartDraw(currentChart);
   }
+  // A redraw without an update: the highlight and the scales are already laid out.
+  let _chartDrawRaf = 0;
+  function requestChartDraw(chart) {
+    if (_chartDrawRaf) return;
+    _chartDrawRaf = requestAnimationFrame(() => {
+      _chartDrawRaf = 0;
+      if (chart === currentChart) chart.draw();
+    });
+  }
+  // The highlight line and dot at chart.$hlT: after the last dataset, before the annotations.
+  const HIGHLIGHT_PLUGIN = {
+    id: 'hrHighlight',
+    afterDatasetDraw(chart, args) {
+      const t = chart.$hlT;
+      if (t == null) return;
+      const metas = chart.getSortedVisibleDatasetMetas();
+      if (!metas.length || args.meta !== metas[0]) return;
+      const xs = chart.scales.x, ys = chart.scales.y, a = chart.chartArea;
+      const px = xs.getPixelForValue(t);
+      if (!(px >= a.left - 1 && px <= a.right + 1)) return;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top);
+      ctx.clip();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(px, a.top);
+      ctx.lineTo(px, a.bottom);
+      ctx.stroke();
+      ctx.restore();
+      const py = ys && chart.$hlY != null ? ys.getPixelForValue(chart.$hlY) : NaN;
+      if (!(py >= a.top - 6 && py <= a.bottom + 6)) return;
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    },
+  };
 
   // Bidirectional-sync: find the marker-list row whose data-t is closest to t
   // (within a small tolerance) and pulse it. Binary search on the cached
@@ -7703,13 +7741,17 @@
     clearMarkerItemHighlight();
   }
 
+  // series is sorted by x; a tie goes to the earlier point.
   function nearestY(series, t) {
     if (!series || !series.length) return 0;
-    let best = series[0];
-    for (const p of series) {
-      if (Math.abs(p.x - t) < Math.abs(best.x - t)) best = p;
+    let lo = 0, hi = series.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (series[mid].x < t) lo = mid + 1;
+      else hi = mid;
     }
-    return best.y;
+    const prev = lo > 0 ? series[lo - 1] : null;
+    return prev && Math.abs(prev.x - t) <= Math.abs(series[lo].x - t) ? prev.y : series[lo].y;
   }
 
   function warnLabel(type) {
@@ -8631,9 +8673,6 @@
           { label: 'HR', data: hr, hidden: activeFilters.hr === false, borderColor: '#E89858', backgroundColor: 'rgba(232,152,88,0.06)', yAxisID: 'y', tension: 0, pointRadius: 0, borderWidth: 1.5, fill: true, spanGaps: false },
           { label: 'RMSSD', data: rmssd, hidden: activeFilters.rmssd === false, borderColor: '#5DCAA5', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0, pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], spanGaps: false },
           { label: 'Palp', data: palpDots, borderColor: 'transparent', backgroundColor: '#D76CBA', yAxisID: 'y', showLine: false, pointRadius: palpDots.map(p => Math.min(3 + p._count, 10)), pointHoverRadius: 12, pointStyle: 'circle' },
-          // Highlight overlay datasets for marker-list hover (populated on demand)
-          { label: '_HL_LINE', data: [], borderColor: '#ffffff', backgroundColor: 'transparent', yAxisID: 'y', showLine: true, pointRadius: 0, borderWidth: 2, fill: false, order: -1 },
-          { label: '_HL_POINT', data: [], borderColor: '#000', backgroundColor: '#ffffff', yAxisID: 'y', showLine: false, pointRadius: 6, pointStyle: 'circle', pointBorderWidth: 2, order: -2 },
         ],
       },
       options: {
@@ -8658,7 +8697,6 @@
             callbacks: {
               title: (items) => items.length ? formatDuration(items[0].parsed.x) : '',
               label: (ctx) => {
-                if (ctx.dataset.label && ctx.dataset.label.startsWith('_HL')) return '';
                 if (ctx.dataset.label === 'Palp') {
                   const p = ctx.raw;
                   return p._count === 1 ? `Ectopic beat` : `${p._count} palps in ${formatDuration(p._end - p._start)}`;
@@ -8738,7 +8776,7 @@
           }
         },
       },
-      plugins: markLayout ? [HR_OVERLAY_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN],
+      plugins: markLayout ? [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN, markLayout] : [HR_OVERLAY_PLUGIN, HIGHLIGHT_PLUGIN],
     });
   }
 
