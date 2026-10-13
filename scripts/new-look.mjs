@@ -1,5 +1,7 @@
 // Guards: S41 (2026-10-12) the "new look" announcement page, new-look.html, and its pictures in assets/new-look/.
-// Two modes. Runtime: --capture about 3 min; checks about 60 s; --mutants about 30 s more.
+// Named bugs: pages drifting to their own top bar (Khal 2026-10-12, "the home button on privacy and terms is weirdly
+// placed"), so nav and footer must equal index.html; the phone Day picture showing a tall one-column summary (Khal 10-12).
+// Two modes. Runtime: --capture about 3 min; checks about 10 s; --mutants about 30 s more.
 //   node scripts/new-look.mjs --capture <before-root>   takes every before/after pair on synthetic data only
 //        (the viewer's ?demo=1 files, identical in both builds, and the fake phone bridge for the monitor) and
 //        writes display and full-size WebP files. <before-root> holds the app files written out with `git show`.
