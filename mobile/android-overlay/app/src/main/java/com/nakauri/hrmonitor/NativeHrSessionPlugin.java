@@ -691,6 +691,74 @@ public class NativeHrSessionPlugin extends Plugin {
         }
     }
 
+    @PluginMethod
+    public void savePdf(PluginCall call) {
+        // Save to phone: PdfPrinter writes the PDF to the cache on its own thread, then the SAF "Save as" screen
+        // (same as exportCsv) lets the person pick Downloads or any folder. Every path settles the call.
+        try {
+            PdfPrinter.save(getContext(), call, (file) -> {
+                final String id = call.getCallbackId();
+                PdfPrinter.hold(id, file);
+                boolean posted = new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                    try {
+                        androidx.appcompat.app.AppCompatActivity a = getActivity();
+                        // A picker started from the background never returns, so the call would hang.
+                        if (a == null || a.isFinishing() || !a.getLifecycle().getCurrentState()
+                                .isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                            PdfPrinter.discard(id);
+                            call.reject("pdf_save_background");
+                            return;
+                        }
+                        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                        i.addCategory(Intent.CATEGORY_OPENABLE);
+                        i.setType("application/pdf");
+                        i.putExtra(Intent.EXTRA_TITLE, file.getName());
+                        startActivityForResult(call, i, "savePdfResult");
+                    } catch (Throwable t) {
+                        Log.w(TAG, "savePdf picker failed: " + t);
+                        PdfPrinter.discard(id);
+                        call.reject("pdf_save_failed");
+                    }
+                });
+                if (!posted) {
+                    PdfPrinter.discard(id);
+                    call.reject("pdf_save_failed");
+                }
+            });
+        } catch (Throwable t) {
+            call.reject("pdf_failed");
+        }
+    }
+
+    @com.getcapacitor.annotation.ActivityCallback
+    private void savePdfResult(PluginCall call, androidx.activity.result.ActivityResult result) {
+        if (call == null) return;
+        try { getBridge().releaseCall(call); } catch (Throwable ignored) {}
+        try {
+            final String id = call.getCallbackId();
+            if (result == null || result.getResultCode() != android.app.Activity.RESULT_OK) {
+                PdfPrinter.discard(id);
+                JSObject ret = new JSObject();
+                ret.put("saved", false);
+                ret.put("cancelled", true);
+                call.resolve(ret);
+                return;
+            }
+            Intent data = result.getData();
+            android.net.Uri uri = data != null ? data.getData() : null;
+            if (uri == null) {
+                PdfPrinter.discard(id);
+                call.reject("pdf_save_failed");
+                return;
+            }
+            // PdfPrinter copies off the main thread and settles.
+            PdfPrinter.copyTo(getContext(), call, uri);
+        } catch (Throwable t) {
+            Log.w(TAG, "savePdfResult failed: " + t);
+            try { call.reject("pdf_save_failed"); } catch (Throwable ignored) {}
+        }
+    }
+
     // CSV export writes; engine work runs on the engine's own executor.
     private java.util.concurrent.ExecutorService exportExecutor;
     private synchronized java.util.concurrent.ExecutorService exportExecutor() {

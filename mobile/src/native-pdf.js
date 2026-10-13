@@ -1,4 +1,5 @@
-// Native report PDF: page canvases in, a shared PDF out (PdfPrinter.java through NativeHrSession.printPdf).
+// Native report PDF: page canvases in, a shared PDF out (PdfPrinter.java through NativeHrSession.printPdf),
+// or a PDF saved where the person picks (NativeHrSession.savePdf).
 // Pages are US Letter drawn at 2x; window.__aortiNativePdf.proof() prints a worst-case synthetic day.
 (function () {
   'use strict';
@@ -72,6 +73,31 @@
       args.week = !!opts.week;
     }
     return withCeiling(p.printPdf(args));
+  }
+
+  function canSave() {
+    var p = plugin();
+    return !!(p && typeof p.savePdf === 'function');
+  }
+
+  // Save to phone: the same pages, written by PdfPrinter, then the system "Save as" screen.
+  // opts: { pages: [canvas], filename, moments?, week? }. Resolves { saved: true, name } or { saved: false, cancelled: true }.
+  // No ceiling: the call stays open while the person picks a folder; native settles every path.
+  function save(opts) {
+    var p = plugin();
+    if (!p || typeof p.savePdf !== 'function') return Promise.reject(new Error('pdf_unavailable'));
+    var pages = [];
+    try {
+      for (var i = 0; i < opts.pages.length; i++) pages.push(encode(opts.pages[i]));
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    var args = { pages: pages, filename: opts.filename || 'aorti-report.pdf' };
+    if (opts.moments != null) {
+      args.moments = opts.moments;
+      args.week = !!opts.week;
+    }
+    return p.savePdf(args);
   }
 
   // ---- Worst-case synthetic day: 6 moments, 2 gaps, notes ----------------
@@ -355,5 +381,5 @@
     });
   }
 
-  window.__aortiNativePdf = { available: available, pageCount: pageCount, newPage: newPage, print: print, proof: proof };
+  window.__aortiNativePdf = { available: available, canSave: canSave, pageCount: pageCount, newPage: newPage, print: print, save: save, proof: proof };
 })();

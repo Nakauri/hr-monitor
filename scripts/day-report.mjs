@@ -13,6 +13,8 @@
 // 5. Digits centred in every moment circle within 0.5 px (mocks/report-centre.mjs, measured from pixels at 3x).
 // 6. App path (fake bridge): Share report calls printPdf with N pages of 1224 x 1584 PNG and the promise settles; a
 //    rejected call shows a notice and clears the report (the app WebView ignores print).
+// 7. Save to phone (S48, fake bridge): the app menu shows "Save to phone" then "Share report"; Save calls savePdf with
+//    N pages and no share flag, and settles for saved ("Saved" notice), cancelled (no notice) and failed (plain notice).
 // --mutants: page 1 one row over the footer, and a menu count off by one; each must FAIL.
 // Usage: node scripts/day-report.mjs [--mutants] [--ux <ux-audit dir>] [--shots]
 import http from 'node:http';
@@ -67,8 +69,8 @@ async function openDay(base, iso, o = {}) {
   if (o.app) {
     await ctx.addInitScript(fakeBridge({ scenario: 'idle' }));
     await ctx.addInitScript(NATIVE_PDF);
-    await ctx.addInitScript(({ reject }) => {
-      window.__pdfCalls = []; window.__printCalls = 0;
+    await ctx.addInitScript(({ reject, saveMode }) => {
+      window.__pdfCalls = []; window.__printCalls = 0; window.__saveCalls = [];
       window.print = () => { window.__printCalls++; };
       const install = () => {
         const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeHrSession;
@@ -78,9 +80,20 @@ async function openDay(base, iso, o = {}) {
           window.__pdfCalls.push(call);
           return new Promise((ok, no) => setTimeout(() => { call.settled = reject ? 'rejected' : 'resolved'; reject ? no(new Error('pdf_low_memory')) : ok({ uri: 'content://x/aorti.pdf', pages: a.pages.length, shared: true }); }, 50));
         };
+        // S48 Save to phone: one fake mode per run, the three ways the native call settles.
+        p.savePdf = (a) => {
+          const call = { pages: a.pages.length, moments: a.moments, week: a.week, share: a.share, filename: a.filename, images: a.pages.map((x) => x.image), landscape: a.pages.map((x) => x.landscape), settled: null };
+          window.__saveCalls.push(call);
+          return new Promise((ok, no) => setTimeout(() => {
+            call.settled = saveMode === 'failed' ? 'rejected' : 'resolved';
+            if (saveMode === 'failed') no(new Error('pdf_save_failed'));
+            else if (saveMode === 'cancelled') ok({ saved: false, cancelled: true });
+            else ok({ saved: true, name: a.filename });
+          }, 50));
+        };
       };
       install();
-    }, { reject: !!o.reject });
+    }, { reject: !!o.reject, saveMode: o.saveMode || 'saved' });
   }
   const page = await ctx.newPage();
   page.errors = [];
@@ -210,7 +223,7 @@ async function webDay(base, label, iso, o = {}) {
   });
   check(`${tag} captions 7 pt or more, body 9 pt`, !type.small.length && type.body === 9 && type.span === 9, `${type.small.length} under 7 pt ${type.small.slice(0, 3).join('; ')}; body ${type.body} pt`);
   // Words.
-  const text = await page.evaluate(() => document.getElementById('report-print').innerText + '\n' + 'Share with my doctor Download report (PDF) Share report');
+  const text = await page.evaluate(() => document.getElementById('report-print').innerText + '\n' + 'Share with my doctor Download report (PDF) Save to phone Share report');
   const hits = FORBIDDEN.flatMap((re) => (text.match(new RegExp(re.source, 'gi')) || []));
   check(`${tag} forbidden words 0`, hits.length === 0, hits.join(', '));
   const dashes = (text.match(/[–—]/g) || []).length;
@@ -331,7 +344,7 @@ async function appPath(base, iso, expect) {
     const { ctx, page } = await openDay(base, iso, { app: true, reject });
     const vis = await page.evaluate(() => !document.getElementById('export-report').hidden);
     const m = vis ? await openMenuByClick(page) : { items: [] };
-    if (!reject) check(`app ${iso} Share shows Share report with the page count`, vis && m.items.length === 1 && /Share report/.test(m.items[0]) && m.count === expect, JSON.stringify(m));
+    if (!reject) check(`app ${iso} Share shows Save to phone then Share report with the page count`, vis && m.items.length === 2 && /^Save to phone$/.test(m.items[0].trim()) && /Share report/.test(m.items[1]) && m.count === expect, JSON.stringify(m));
     if (!vis) { await ctx.close(); continue; }
     await page.click('#share-menu [data-act="share"]');
     await page.waitForFunction(() => window.__pdfCalls.length && window.__pdfCalls[0].settled, null, { timeout: 60000 }).catch(() => {});
@@ -357,6 +370,43 @@ async function appPath(base, iso, expect) {
       check(`app ${iso} a rejected printPdf settles, shows a notice, clears the report`, !!r && r.settled === 'rejected' && r.printCalls === 0 && /Could not make the PDF/.test(r.notice) && left.pages === 0 && !left.printing, JSON.stringify(r && { settled: r.settled, printCalls: r.printCalls, notice: r.notice, left }));
     }
     check(`app ${iso}${reject ? ' rejected' : ''} no page errors`, page.errors.length === 0, page.errors.slice(0, 2).join('; '));
+    await ctx.close();
+  }
+}
+
+// ---------- 7: Save to phone with the fake bridge (S48) ----------
+async function savePath(base, iso, expect) {
+  for (const mode of ['saved', 'cancelled', 'failed']) {
+    const { ctx, page } = await openDay(base, iso, { app: true, saveMode: mode });
+    const vis = await page.evaluate(() => !document.getElementById('export-report').hidden);
+    if (!vis) { check(`app save ${mode}: Share button visible`, false); await ctx.close(); continue; }
+    // Notices already up (the demo banner) are the baseline; a cancel adds none.
+    const before = await page.evaluate(() => [...document.querySelectorAll('.notice')].map((n) => n.textContent.trim()).join(' | '));
+    await openMenuByClick(page);
+    await page.click('#share-menu [data-act="save"]');
+    await page.waitForFunction(() => window.__saveCalls.length && window.__saveCalls[0].settled, null, { timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(async () => {
+      const c = window.__saveCalls[0];
+      if (!c) return null;
+      const dims = [];
+      for (const b64 of c.images) { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); dims.push(img.width + 'x' + img.height); }
+      const notice = [...document.querySelectorAll('.notice')].map((n) => n.textContent.trim()).join(' | ');
+      return { pages: c.pages, moments: c.moments, share: c.share, filename: c.filename, dims, landscape: c.landscape, settled: c.settled, saves: window.__saveCalls.length, prints: window.__pdfCalls.length, printCalls: window.__printCalls, notice,
+        left: document.querySelectorAll('#report-print .page').length };
+    });
+    const base1 = !!r && r.saves === 1 && r.prints === 0 && r.printCalls === 0 && r.left === 0;
+    if (mode === 'saved') {
+      check(`app ${iso} Save calls savePdf with N pages of 1224 x 1584 PNG, named aorti-day-${iso}.pdf`, base1 && r.pages === expect && r.share === undefined && r.filename === `aorti-day-${iso}.pdf` && r.dims.every((d) => d === '1224x1584') && r.landscape.every((l) => !l), JSON.stringify(r && { ...r, dims: [...new Set(r.dims)] }));
+      check(`app ${iso} Save saved: settles and shows Saved`, base1 && r.settled === 'resolved' && /\bSaved\b/.test(r.notice) && !/Could not/.test(r.notice), JSON.stringify(r && { settled: r.settled, notice: r.notice }));
+    } else if (mode === 'cancelled') {
+      check(`app ${iso} Save cancelled: settles with no notice`, base1 && r.settled === 'resolved' && r.notice === before, JSON.stringify(r && { settled: r.settled, notice: r.notice, before }));
+    } else {
+      check(`app ${iso} Save failed: settles and says Could not save the PDF. Try again.`, base1 && r.settled === 'rejected' && /Could not save the PDF\. Try again\./.test(r.notice), JSON.stringify(r && { settled: r.settled, notice: r.notice }));
+    }
+    // The menu opens again afterwards, so a settled save never leaves the report busy.
+    const again = await openMenuByClick(page).catch(() => ({ items: [] }));
+    check(`app ${iso} Save ${mode}: menu opens again, no page errors`, again.items.length === 2 && page.errors.length === 0, page.errors.slice(0, 2).join('; ') || JSON.stringify(again.items));
     await ctx.close();
   }
 }
@@ -404,6 +454,7 @@ try {
   await phoneMenu(base, DAYS[0][1]);
   for (const [, iso] of DAYS) await centring(base, iso);
   await appPath(base, DAYS[0][1], counts[DAYS[0][1]]);
+  await savePath(base, DAYS[0][1], counts[DAYS[0][1]]);
   if (MUTANTS) await mutants(base);
 } finally {
   await browser.close();
