@@ -1,0 +1,341 @@
+// Guards: S41 (2026-10-12) the "new look" announcement page, new-look.html, and its pictures in assets/new-look/.
+// Two modes. Runtime: --capture about 3 min; checks about 60 s; --mutants about 30 s more.
+//   node scripts/new-look.mjs --capture <before-root>   takes every before/after pair on synthetic data only
+//        (the viewer's ?demo=1 files, identical in both builds, and the fake phone bridge for the monitor) and
+//        writes display and full-size WebP files. <before-root> holds the app files written out with `git show`.
+//   node scripts/new-look.mjs [--mutants]   checks the page: every pair at both sizes, files resolve and stay under
+//        budget; the picture dialog opens by click and by Enter, traps focus, closes on Escape with focus back on the
+//        picture, arrows move in page order; no sideways scroll at 360; nav and footer identical to index.html;
+//        analytics tag present. --mutants serves a copy whose dialog never returns focus, which must FAIL.
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { uxDir } from './ux-dir.mjs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import os from 'node:os';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(here, '..');
+const args = process.argv.slice(2);
+const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
+const UX = uxDir(here, argVal('--ux'));
+const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
+const OUT = path.join(ROOT, 'assets', 'new-look');
+
+// Pairs in page order. Sizes: 1440 laptop, 360 phone. The widget pair is one size (the widget does not change with the page).
+export const PAIRS = ['day', 'zoom', 'month', 'week', 'trends', 'monitor', 'settings'];
+export const WIDGETS = ['chip', 'slim', 'hrhrv', 'notrends'];
+const BUDGET = { display: 300 * 1024, full: 900 * 1024 };
+const DAY = '2026-04-24'; // Khal 2026-10-12: the most complete demo day
+
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.csv': 'text/csv', '.ico': 'image/x-icon' };
+function serve(root, rewrite) {
+  const server = http.createServer((req, res) => {
+    const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    const file = path.join(root, rel === '/' ? '/index.html' : rel);
+    if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
+    let body = fs.readFileSync(file);
+    if (rewrite) body = rewrite(rel, body);
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); res.end(body);
+  });
+  return new Promise((ok) => server.listen(0, '127.0.0.1', () => ok({ server, base: `http://127.0.0.1:${server.address().port}` })));
+}
+// The app page as copy-web builds it for the phone: the native shims before </head>, read from that build's mobile/src.
+const SHIMS = ['capacitor-bootstrap', 'ble-adapter', 'native-relay-socket', 'native-hr-session', 'drive-auth-native', 'foreground-service', 'battery-opt', 'wake-lock', 'oem-background', 'restore-overlay'];
+const appShim = (root) => (rel, body) => {
+  if (rel !== '/hr_monitor.html') return body;
+  const tags = SHIMS.filter((n) => fs.existsSync(path.join(root, 'mobile', 'src', n + '.js'))).map((n) => `<script src="./mobile/src/${n}.js"></script>`).join('\n');
+  return Buffer.from(body.toString('utf8').replace(/<\/head>/i, tags + '\n</head>'));
+};
+async function route(ctx, base) {
+  await ctx.route('**/*', (r) => {
+    const u = r.request().url();
+    if (u.startsWith(base) || u.startsWith('data:') || u.startsWith('blob:')) return r.continue();
+    if (/chart\.umd(\.min)?\.js/.test(u)) return r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(CHART) });
+    if (/fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net\/npm\/(sortablejs|chartjs-plugin)/.test(u)) return r.continue();
+    if (/googleapis\.com\/(drive|upload)\//.test(u)) return r.fulfill({ status: 200, contentType: 'application/json', body: '{"files":[]}' });
+    const js = r.request().resourceType() === 'script';
+    return r.fulfill({ status: js ? 200 : 204, contentType: js ? 'text/javascript' : 'text/plain', body: '' });
+  });
+}
+
+// ---------------------------------------------------------------- capture
+async function capture(beforeRoot) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+  const browser = await chromium.launch().catch(() => chromium.launch({ channel: 'chrome' }));
+  const enc = await (await browser.newContext()).newPage();
+  const log = [];
+  async function save(png, name, maxW) {
+    for (const [kind, w] of [['display', Math.round(maxW * 0.75)], ['full', maxW]]) {
+      const r = await enc.evaluate(async ({ b64, w, budget }) => {
+        const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+        const W = Math.min(w, img.naturalWidth), H = Math.round(img.naturalHeight * W / img.naturalWidth);
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        const x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, W, H);
+        let d, q;
+        for (q = 0.9; q >= 0.4; q -= 0.05) { d = c.toDataURL('image/webp', q); if ((d.length - 23) * 0.75 <= budget) break; }
+        return { d, W, H, q: +q.toFixed(2) };
+      }, { b64: png.toString('base64'), w, budget: BUDGET[kind] });
+      const file = path.join(OUT, `${name}${kind === 'full' ? '-full' : ''}.webp`);
+      fs.writeFileSync(file, Buffer.from(r.d.split(',')[1], 'base64'));
+      log.push(`${path.basename(file)} ${r.W}x${r.H} q${r.q} ${Math.round(fs.statSync(file).size / 1024)} KB`);
+    }
+  }
+  for (const [ver, root] of [['before', path.resolve(beforeRoot)], ['after', ROOT]]) {
+    const { server, base } = await serve(root, appShim(root));
+    for (const size of [1440, 360]) {
+      const phone = size === 360;
+      const vp = phone ? { width: 360, height: 760 } : { width: 1440, height: 900 };
+      const opts = { viewport: vp, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' };
+      const maxW = phone ? 720 : 1440;
+      // Viewer on the demo files (synthetic, identical in both builds).
+      const ctx = await browser.newContext(opts); await route(ctx, base);
+      const page = await ctx.newPage();
+      const go = async (hash) => {
+        await page.goto('about:blank');
+        await page.goto(`${base}/hrv_viewer.html?demo=1${hash}`, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(2500);
+        await page.evaluate(() => window.scrollTo(0, 0));
+      };
+      for (const [id, hash] of [['day', `#/day/${DAY}`], ['month', '#/month/2026-04'], ['week', '#/week/2026-04-20'], ['trends', '#/all']]) {
+        // Taller frames where the view's point sits low: the phone Day chart, the laptop Month's data week.
+        const tall = { day: phone ? 1300 : null, month: phone ? null : 1180 }[id];
+        await page.setViewportSize({ width: vp.width, height: tall || vp.height });
+        await go(hash);
+        await save(await page.screenshot(), `${id}-${ver}-${size}`, maxW);
+      }
+      // Zoomed chart: before, the full-day session view; after, the Day view. Drag across the strip under the chart.
+      await page.setViewportSize(vp);
+      await go(ver === 'before' ? `#/session/day:${DAY}` : `#/day/${DAY}`);
+      const strip = await page.evaluate(() => {
+        const b = document.getElementById('context-brush'); const el = document.querySelector('.context-overlay') || (b && b.parentElement);
+        if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left, y: r.top + r.height / 2, w: r.width };
+      });
+      if (strip) {
+        // Both builds open with the brush over the whole day: pull the left handle in, then the right one.
+        const drag = async (from, to) => {
+          await page.mouse.move(strip.x + from, strip.y); await page.mouse.down();
+          for (let i = 1; i <= 12; i++) await page.mouse.move(strip.x + from + (to - from) * i / 12, strip.y);
+          await page.mouse.up(); await page.waitForTimeout(700);
+        };
+        await drag(2, strip.w * 0.555);
+        await drag(strip.w - 2, strip.w * 0.64);
+        await page.waitForTimeout(600);
+        await page.evaluate(() => { const c = document.getElementById('session-chart'); if (c) { const r = c.getBoundingClientRect(); window.scrollBy(0, r.top - 200); } });
+        await page.waitForTimeout(400);
+      } else log.push(`WARN ${ver} ${size}: no brush strip`);
+      await save(await page.screenshot(), `zoom-${ver}-${size}`, maxW);
+      await ctx.close();
+      // Monitor while recording, on the fake phone bridge (generated heart rate ticks only).
+      const mctx = await browser.newContext(opts); await route(mctx, base);
+      await mctx.addInitScript(fakeBridge({ scenario: 'live', savedStrap: true, signedIn: true, sessionAgeMs: 72 * 60000 }));
+      const m = await mctx.newPage();
+      // Four minutes of generated beats, fed through the fake strap's own listener with spread timestamps.
+      await m.goto(`${base}/hr_monitor.html`, { waitUntil: 'domcontentloaded' });
+      await m.waitForTimeout(2500);
+      const feedBeats = (pg) => pg.evaluate(async () => {
+        const F = window.__fake; if (!F || !F.listeners.hr) return;
+        const t0 = Date.now() - 240000;
+        for (let i = 0; i < 240; i++) {
+          const hr = Math.round(74 + 9 * Math.sin(i / 23) + 4 * Math.sin(i / 5.3) + ((i * 7) % 5) - 2);
+          const rr = [Math.round(60000 / hr) + ((i * 13) % 31) - 15];
+          const rmssd = 28 + 7 * Math.sin(i / 31) + ((i * 11) % 7) - 3; // the phone engine sends its own HRV
+          F.listeners.hr({ hr, rrIntervals: rr, rmssd, timestampMs: t0 + i * 1000, contactOff: false });
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      });
+      await feedBeats(m);
+      const openSec = (names, open = true) => m.evaluate(([names, open]) => {
+        for (const n of names) {
+          const s = document.querySelector(`.section[data-section="${n}"]`); if (!s) continue;
+          const h = s.querySelector('.section-header') || s.firstElementChild;
+          const closed = s.classList.contains('collapsed') || (h && h.getAttribute('aria-expanded') === 'false');
+          if (closed === open && h) h.click();
+        }
+      }, [names, open]);
+      await openSec(['stats', 'chart']);
+      await m.waitForTimeout(1500);
+      await m.evaluate(() => window.scrollTo(0, 0));
+      await save(await m.screenshot(), `monitor-${ver}-${size}`, maxW);
+      await openSec(['stats', 'chart', 'connection'], false); await openSec(['settings']);
+      await m.waitForTimeout(800);
+      await m.evaluate(() => { const s = document.querySelector('.section[data-section="settings"]'); if (s) window.scrollBy(0, s.getBoundingClientRect().top - 16); });
+      await m.waitForTimeout(400);
+      await save(await m.screenshot(), `settings-${ver}-${size}`, maxW);
+      if (!phone) {
+        const wctx = await browser.newContext(Object.assign({}, opts, { deviceScaleFactor: 2 })); await route(wctx, base);
+        await wctx.addInitScript(fakeBridge({ scenario: 'live', savedStrap: true, signedIn: true, sessionAgeMs: 72 * 60000 }));
+        const w = await wctx.newPage();
+        await w.goto(`${base}/hr_monitor.html`, { waitUntil: 'domcontentloaded' });
+        await w.waitForTimeout(2500); await feedBeats(w); await w.waitForTimeout(1000);
+        const variants = ver === 'before' ? [['single', '']] : [['chip', ''], ['slim', 'no-hrv no-live-hr no-inline-trends'], ['hrhrv', 'no-live-hr no-inline-trends'], ['notrends', 'no-inline-trends']];
+        for (const [v, cls] of variants) {
+          await w.evaluate((cls) => { ['no-hr', 'no-hrv', 'no-live-hr', 'no-inline-trends'].forEach((c) => document.body.classList.remove(c)); cls.split(' ').filter(Boolean).forEach((c) => document.body.classList.add(c)); }, cls);
+          await w.waitForTimeout(500);
+          const png = await w.locator('#hr-widget').screenshot();
+          await save(png, `widget-${ver}-${v}`, 1200);
+        }
+        await wctx.close();
+      }
+      await mctx.close();
+      console.log(`captured ${ver} ${size}`);
+    }
+    server.close();
+  }
+  await browser.close();
+  console.log(log.join('\n'));
+}
+
+if (args.includes('--capture')) { await capture(argVal('--capture')); process.exit(0); }
+
+// ---------------------------------------------------------------- checks
+const MAIN = path.dirname(UX); // the main checkout: files this branch does not carry yet (S40's site.css and site.js)
+const MUTANTS = args.includes('--mutants');
+let fails = 0;
+const check = (ok, label, detail) => { if (ok) console.log('ok   ' + label); else { fails++; console.log('FAIL ' + label + (detail ? '  ' + detail : '')); } return !!ok; };
+const PAGE = fs.readFileSync(path.join(ROOT, 'new-look.html'), 'utf8').replace(/\r\n/g, '\n');
+const MUTANT = ['dialog without focus return', [['if (opener) opener.focus();', '']]];
+
+function staticChecks() {
+  const kb = (f) => Math.round(fs.statSync(f).size / 1024);
+  const want = [];
+  for (const id of PAIRS) for (const size of [1440, 360]) for (const ver of ['before', 'after']) want.push(`${id}-${ver}-${size}`);
+  want.push('widget-before-single', ...WIDGETS.map((v) => `widget-after-${v}`));
+  const missing = [], over = [];
+  for (const n of want) {
+    for (const [suffix, budget, attr] of [['', BUDGET.display, `src="./assets/new-look/${n}.webp"`], ['-full', BUDGET.full, `data-full="./assets/new-look/${n}-full.webp"`]]) {
+      const f = path.join(OUT, `${n}${suffix}.webp`);
+      if (!fs.existsSync(f) || !PAGE.includes(attr)) missing.push(n + suffix);
+      else if (fs.statSync(f).size > budget) over.push(`${n}${suffix} ${kb(f)} KB`);
+    }
+  }
+  check(!missing.length, `every pair at 1440 and 360 plus the widget set: ${want.length} pictures, each with a full-size file, on the page and on disk`, missing.join(', '));
+  check(!over.length, `display pictures under ${BUDGET.display / 1024} KB, full-size under ${BUDGET.full / 1024} KB`, over.join(', '));
+  const imgs = [...PAGE.matchAll(/<img [^>]*src="([^"]+)"/g)].map((m) => m[1]);
+  check(imgs.length >= want.length && imgs.every((s) => s.startsWith('./assets/new-look/')) && !imgs.some((s) => s.endsWith('-full.webp')),
+    `pictures come only from assets/new-look (demo data and the fake strap), full-size files never in an img src (${imgs.length} img)`, imgs.filter((s) => !s.startsWith('./assets/new-look/')).join(', '));
+  check((PAGE.match(/<img [^>]*loading="lazy"/g) || []).length === imgs.length, 'every page picture is lazy-loaded');
+  check(/<script defer src="https:\/\/cdn\.vercel-insights\.com\/v1\/script\.js"><\/script>/.test(PAGE), 'Vercel analytics tag present');
+  // Nav and footer: this tree's index.html once main is merged into it, else main's (S40's shared nav landed there first).
+  let idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replace(/\r\n/g, '\n'), from = 'index.html';
+  const hasMain = spawnSync('git', ['-C', ROOT, 'merge-base', '--is-ancestor', 'main', 'HEAD']).status === 0;
+  if (!hasMain) { idx = execFileSync('git', ['-C', ROOT, 'show', 'main:index.html'], { encoding: 'utf8' }).replace(/\r\n/g, '\n'); from = 'main:index.html'; }
+  const nav = (s) => (s.match(/<nav class="nav"[\s\S]*?\n<\/nav>/) || [null])[0];
+  const foot = (s) => (s.match(/<footer class="site-footer">[\s\S]*?<\/footer>/) || [null])[0];
+  check(nav(idx) && nav(PAGE) === nav(idx), `nav identical to ${from}`);
+  check(foot(idx) && foot(PAGE) === foot(idx), `footer identical to ${from}`);
+}
+
+async function runtime(browser, base, size, only) {
+  const phone = size === 360;
+  const ctx = await browser.newContext({ viewport: phone ? { width: 360, height: 760 } : { width: 1440, height: 900 }, isMobile: phone, hasTouch: phone, deviceScaleFactor: 1 });
+  await ctx.route('**/*', (r) => (r.request().url().startsWith(base) ? r.continue() : r.fulfill({ status: 204, body: '' })));
+  const page = await ctx.newPage();
+  const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+  const fulls = []; page.on('request', (q) => { if (/-full\.webp/.test(q.url())) fulls.push(q.url()); });
+  await page.goto(base + '/new-look.html', { waitUntil: 'load' });
+  await page.waitForTimeout(400);
+  const t = `${size}`;
+  const state = () => page.evaluate(() => {
+    const d = document.getElementById('lightbox'), a = document.activeElement;
+    return { open: d.open, inside: d.contains(a), active: a && (a.getAttribute('aria-label') || a.id || a.tagName), cap: document.getElementById('lb-caption').textContent,
+      src: (document.getElementById('lb-img').getAttribute('src') || '') };
+  });
+  const order = await page.evaluate(() => [...document.querySelectorAll('button.zoom')].filter((b) => b.offsetParent)
+    .sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return (ra.top - rb.top) || (ra.left - rb.left); })
+    .map((b) => ({ alt: b.querySelector('img').alt, full: b.dataset.full })));
+  if (!only) {
+    check(!fulls.length, `${t}: no full-size picture loads before a dialog opens`, fulls.slice(0, 2).join(' '));
+    const sw = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, w: window.innerWidth }));
+    check(sw.sw <= sw.w, `${t}: no sideways scroll`, JSON.stringify(sw));
+    if (phone) check(/after/.test(order[0].full), `${t}: Now stacks first on the phone`, order[0].full);
+  }
+  // Click the third picture in page order: opens on its full-size file with its alt text as the caption.
+  const third = order[2];
+  // Opened by a click that leaves focus where it was, as Safari does with a tapped button: the browser's own
+  // dialog focus return then lands on the page, so only the page's explicit return puts it back on the picture.
+  await page.evaluate((full) => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); document.querySelector(`button.zoom[data-full="${full}"]`).click(); }, third.full);
+  await page.waitForTimeout(250);
+  let s = await state();
+  if (!only) check(s.open && s.src === third.full && s.cap === third.alt && s.inside, `${t}: a click opens the dialog on that picture, caption is its alt text, focus inside`, JSON.stringify(s));
+  if (!only) {
+    let trapped = true;
+    for (let i = 0; i < 6; i++) { await page.keyboard.press('Tab'); if (!(await state()).inside) trapped = false; }
+    for (let i = 0; i < 6; i++) { await page.keyboard.press('Shift+Tab'); if (!(await state()).inside) trapped = false; }
+    check(trapped, `${t}: Tab and Shift+Tab stay inside the dialog`);
+    await page.keyboard.press('ArrowRight'); const r1 = await state();
+    await page.keyboard.press('ArrowRight'); const r2 = await state();
+    await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); const l1 = await state();
+    check(r1.src === order[3].full && r2.src === order[4].full && l1.src === order[1].full, `${t}: arrow keys move through the pictures in page order`, [r1.src, r2.src, l1.src].map((x) => path.basename(x)).join(' '));
+    if (phone) {
+      const cdp = await ctx.newCDPSession(page);
+      const from = (await state()).src;
+      const touch = (type, x) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y: 380 }] });
+      await touch('touchStart', 300); await touch('touchMove', 200); await touch('touchMove', 100); await touch('touchEnd', 100);
+      await page.waitForTimeout(150);
+      check(from === order[1].full && (await state()).src === order[2].full, `${t}: a left swipe moves to the next picture`);
+    }
+  }
+  await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+  s = await state();
+  const back = await page.evaluate((full) => !!(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.full === full), third.full);
+  check(!s.open && back, `${t}: Escape closes and focus returns to the picture that opened it`, JSON.stringify({ open: s.open, active: s.active }));
+  if (!only) {
+    // Keyboard only: focus a picture, Enter opens, the Close button shuts it, focus back on that picture.
+    const first = order[0];
+    await page.locator(`button.zoom[data-full="${first.full}"]`).focus();
+    await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    const e1 = await state();
+    await page.locator('#lb-close').click(); await page.waitForTimeout(200);
+    const e2 = await page.evaluate((full) => ({ open: document.getElementById('lightbox').open, back: !!(document.activeElement && document.activeElement.dataset.full === full) }), first.full);
+    check(e1.open && e1.src === first.full && !e2.open && e2.back, `${t}: Enter opens it, Close shuts it, focus back on the picture`, JSON.stringify({ e1, e2 }));
+    check(!errs.length, `${t}: no page errors`, errs.join(' | '));
+  }
+  await ctx.close();
+}
+
+{
+  // Files this branch does not carry yet (site.css, site.js from S40) come from the main checkout.
+  const srv = http.createServer((req, res) => {
+    const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    let file = path.join(ROOT, rel);
+    if (!fs.existsSync(file)) file = path.join(MAIN, rel);
+    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
+    let body = fs.readFileSync(file);
+    if (srv.mutant && rel === '/new-look.html') body = Buffer.from(srv.mutant[1].reduce((s, [a, b]) => s.split(a).join(b), body.toString('utf8')));
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); res.end(body);
+  });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const browser = await chromium.launch().catch(() => chromium.launch({ channel: 'chrome' }));
+  if (!MUTANTS) {
+    staticChecks();
+    for (const size of [1440, 360]) await runtime(browser, base, size, false);
+    for (const w of [1440, 360]) {
+      const r = spawnSync(process.execPath, [path.join(UX, 'redesign', 'checks', 'rules.mjs'), 'new-look.html', '--states', '--root', ROOT, '--fallback', MAIN, '--width', String(w)], { encoding: 'utf8', timeout: 150000 });
+      const out = (r.stdout || '') + (r.stderr || '');
+      const line = ((out.match(/state contrast:.*/) || [''])[0]).trim();
+      check(r.status === 0 && /rules pass/.test(out) && /; 0 under/.test(line), `rules --states at ${w}: ${line}`, out.split('\n').slice(-12).join(' | '));
+    }
+    const lint = path.join(os.homedir(), '.claude', 'tools', 'copylint', 'cli.mjs');
+    if (fs.existsSync(lint)) {
+      const r = spawnSync(process.execPath, [lint, path.join(ROOT, 'new-look.html')], { encoding: 'utf8' });
+      const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').pop();
+      check(/ 0 errors, 0 warnings/.test(tail), `copylint: ${tail}`);
+    } else console.log('note copylint is not on this machine, skipped');
+  } else {
+    srv.mutant = MUTANT;
+    const before = fails;
+    await runtime(browser, base, 1440, true);
+    const caught = fails > before;
+    fails = before;
+    check(caught, `mutant "${MUTANT[0]}" FAILS the focus-return check`);
+  }
+  await browser.close(); srv.close();
+  console.log(fails ? `new-look: ${fails} failed` : 'new-look: all passed');
+  process.exit(fails ? 1 : 0);
+}
