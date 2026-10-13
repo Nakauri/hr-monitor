@@ -63,10 +63,17 @@
   .zoom img { display: block; width: 100%; height: auto; }
   .zoom:hover { border-color: var(--text-dim); }
   .zoom:focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }
-  .pair-widget { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .now-set { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+  /* Widgets at their true size (each figure's --w is its footprint), so the layouts compare at one scale. */
+  .pair-widget, .now-set { display: flex; flex-wrap: wrap; gap: var(--s5); align-items: flex-start; }
+  .pair-widget .shot, .now-set .shot { width: var(--w); max-width: 100%; }
+  .now-set { margin-top: var(--s5); }
   .now-set .shot figcaption { font-weight: 500; }
-  .pair-widget .zoom { background: var(--bg); }
+  .pair-widget .zoom, .now-set .zoom { background: var(--bg); }
+  @media (min-width: 1024px) {
+    .now-set { display: grid; grid-template-columns: minmax(0, 144fr) minmax(0, 216fr) minmax(0, 334fr); grid-template-rows: auto auto;
+      column-gap: var(--s4); row-gap: 0; max-width: calc(694px + 2 * var(--s4)); }
+    .now-set .shot { display: grid; grid-template-rows: subgrid; grid-row: span 2; width: auto; }
+  }
   .speed ul { margin: 0; padding-left: var(--s5); max-width: 40em; color: var(--text-dim); }
   .speed li + li { margin-top: var(--s2); }
   .next { padding-top: var(--s7); border-top: 1px solid var(--border); }
@@ -446,39 +453,39 @@
       </div>
       <div class="area-pics">
       <div class="pair pair-widget">
-        <figure class="shot">
+        <figure class="shot" style="--w: 311px">
           <figcaption>Before</figcaption>
           <button type="button" class="zoom" data-full="./assets/new-look/widget-before-single-full.webp" aria-label="Show full size: Stream widget before: heart rate, HRV and the live trace with all-caps units">
             <img src="./assets/new-look/widget-before-single.webp" width="622" height="476" alt="Stream widget before: heart rate, HRV and the live trace with all-caps units" loading="lazy" decoding="async">
           </button>
         </figure>
-        <div class="now-set">
-          <figure class="shot now">
-            <figcaption>Now: Full chip, 311 × 238 px</figcaption>
+          <figure class="shot now" style="--w: 334px">
+            <figcaption>Now: Full chip, 334 × 238 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-chip-full.webp" aria-label="Show full size: Stream widget now, full chip: heart rate, HRV and the live trace">
-              <img src="./assets/new-look/widget-after-chip.webp" width="622" height="476" alt="Stream widget now, full chip: heart rate, HRV and the live trace" loading="lazy" decoding="async">
+              <img src="./assets/new-look/widget-after-chip.webp" width="668" height="476" alt="Stream widget now, full chip: heart rate, HRV and the live trace" loading="lazy" decoding="async">
             </button>
           </figure>
-          <figure class="shot now">
-            <figcaption>Now: Heart rate only, 145 × 148 px</figcaption>
+      </div>
+        <div class="now-set">
+          <figure class="shot now" style="--w: 144px">
+            <figcaption>Now: Heart rate only, 144 × 148 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-slim-full.webp" aria-label="Show full size: Stream widget now, slim: heart rate only">
               <img src="./assets/new-look/widget-after-slim.webp" width="290" height="296" alt="Stream widget now, slim: heart rate only" loading="lazy" decoding="async">
             </button>
           </figure>
-          <figure class="shot now">
-            <figcaption>Now: Heart rate and HRV, 217 × 148 px</figcaption>
+          <figure class="shot now" style="--w: 216px">
+            <figcaption>Now: Heart rate and HRV, 216 × 148 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-hrhrv-full.webp" aria-label="Show full size: Stream widget now: heart rate and HRV side by side">
-              <img src="./assets/new-look/widget-after-hrhrv.webp" width="434" height="296" alt="Stream widget now: heart rate and HRV side by side" loading="lazy" decoding="async">
+              <img src="./assets/new-look/widget-after-hrhrv.webp" width="432" height="296" alt="Stream widget now: heart rate and HRV side by side" loading="lazy" decoding="async">
             </button>
           </figure>
-          <figure class="shot now">
-            <figcaption>Now: No trends, 311 × 152 px</figcaption>
+          <figure class="shot now" style="--w: 334px">
+            <figcaption>Now: No trends, 334 × 152 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-notrends-full.webp" aria-label="Show full size: Stream widget now: heart rate, live trace and HRV without the trend row">
-              <img src="./assets/new-look/widget-after-notrends.webp" width="622" height="304" alt="Stream widget now: heart rate, live trace and HRV without the trend row" loading="lazy" decoding="async">
+              <img src="./assets/new-look/widget-after-notrends.webp" width="668" height="304" alt="Stream widget now: heart rate, live trace and HRV without the trend row" loading="lazy" decoding="async">
             </button>
           </figure>
         </div>
-      </div>
       </div>
     </section>
 
