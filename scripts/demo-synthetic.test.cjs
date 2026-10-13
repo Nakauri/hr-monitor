@@ -36,7 +36,10 @@ const runs = [1, 2].map((i) => {
 for (const f of [...names, 'manifest.json']) {
   const a = fs.readFileSync(path.join(runs[0], f));
   const b = fs.readFileSync(path.join(runs[1], f));
-  const c = fs.readFileSync(path.join(DEMO, f));
+  // A Windows checkout may hold demo/ with CRLF (core.autocrlf); git stores LF.
+  const c = Buffer.from(fs.readFileSync(path.join(DEMO, f), 'utf8').replace(/
+/g, '
+'), 'utf8');
   check('same bytes on two runs and in demo/: ' + f, a.equals(b) && a.equals(c));
 }
 for (const d of runs) fs.rmSync(d, { recursive: true, force: true });
