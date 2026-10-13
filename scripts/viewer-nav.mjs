@@ -408,8 +408,10 @@ try {
     await page.click('#viewer-settings-btn');
     ok(!(await page.isVisible('#drive-pop')), 'gear closes the Drive status');
     await page.mouse.click(700, 600);
-    await page.click('#export-report'); await page.waitForTimeout(400);
-    ok((await page.evaluate(() => window.__prints)) === 1, 'Share runs the print path');
+    await page.click('#export-report'); await page.waitForSelector('#share-menu', { timeout: 10000 }).catch(() => {});
+    ok(await page.isVisible('#share-menu') && (await page.getAttribute('#export-report', 'aria-expanded')) === 'true' && (await page.evaluate(() => window.__prints)) === 0, 'Share opens the share menu (S44), not a page print');
+    await page.keyboard.press('Escape');
+    ok(!(await page.isVisible('#share-menu')), 'Escape closes the share menu');
     ok((await page.getAttribute('#monitor-link', 'href')) === './hr_monitor.html' && /Monitor/.test(await page.textContent('#monitor-link')), 'Monitor link');
     ok(page.errors.length === 0, 'no page errors at 1440: ' + page.errors.join(' | '));
     await ctx.close();

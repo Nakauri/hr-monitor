@@ -22,6 +22,7 @@
 <script src="./marks-drive.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <link rel="stylesheet" href="./ui.css">
+<link rel="stylesheet" href="./report.css">
 <script src="./ui.js"></script>
 <style>
   * { box-sizing: border-box; }
@@ -79,6 +80,12 @@
   .vbar .btn.icon .ico { width: 20px; height: 20px; }
   .vbar .share-btn { margin-left: var(--s2); white-space: nowrap; }
   .vbar .share-btn .lbl-short { display: none; }
+  /* Share menu: anchored under Share on the laptop, inside a sheet on the phone. */
+  .share-menu { position: fixed; min-width: 260px; }
+  .share-menu-head { display: flex; justify-content: space-between; gap: var(--s3); padding: var(--s2) var(--s3); color: var(--text-dim); font-size: var(--t12); }
+  .share-menu-head .share-menu-count { color: var(--text); white-space: nowrap; }
+  .sheet .share-menu { position: static; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .sheet .share-menu-head { padding: 0 0 var(--s2); }
   /* Drive cloud: synced, syncing (sync icon spins, 3 px bar fills under the bar), off. Transform only. */
   .vbar .sync .when-syncing, .vbar .sync .when-off { display: none; }
   .vbar.syncing .sync .when-synced, .vbar.drive-off .sync .when-synced { display: none; }
@@ -1592,7 +1599,7 @@
   <button class="btn icon" id="viewer-settings-btn" type="button" aria-label="Settings">
     <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
-  <button class="btn primary share-btn" id="export-report" type="button" aria-label="Share with my doctor">
+  <button class="btn primary share-btn" id="export-report" type="button" aria-label="Share with my doctor" aria-haspopup="menu" aria-expanded="false">
     <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg><span class="lbl lbl-long">Share with my doctor</span><span class="lbl lbl-short">Share</span>
   </button>
   <div class="syncbar" aria-hidden="true"><span id="syncbar-fill"></span></div>
@@ -4792,9 +4799,10 @@
   }
 
   function showOnly(id) {
-    // Android WebView ignores window.print() without a native PrintManager, so the app hides Share.
+    // Android WebView ignores window.print(), so the app shows Share only when the native PDF path is there.
     const exportBtn = document.getElementById('export-report');
-    const isNativeApp = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+    // isNativeApp here means the app without the PDF path.
+    const isNativeApp = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) && !rptNativeOk();
     if (exportBtn) exportBtn.hidden = isNativeApp || id === 'empty-state';
     ['empty-state', 'view-index', 'view-session', 'view-month', 'view-day', 'view-week', 'view-all'].forEach(v => {
       const el = document.getElementById(v);
@@ -7012,6 +7020,777 @@
       }, 200);
     });
   }
+
+  // ===== Day report (S44) BEGIN =====
+  // REPORT-SPEC page 1 plus moment pages two per page, built from the Day view's memoised day (buildDaySession), never a
+  // re-parse. Sleep is not validated (S13), so one Whole day column; gap causes wait for S14, so gaps list times only.
+  // Web prints the pages (the browser saves a PDF); the app draws the same pages to canvases for native-pdf.js.
+  const RPT_ZONES = [70, 90, 110, 130];
+  const RPT_ZC = ['var(--rp-z1)', 'var(--rp-z2)', 'var(--rp-z3)', 'var(--rp-z4)', 'var(--rp-z5)'];
+  const RPT_DIGIT_Y = 0.33; // SVG digit baseline offset as a share of font size (mocks/report.js, measured from pixels)
+  const RPT_W = 688;
+  let rptUid = 0;
+
+  function rptPad(n) { return (n < 10 ? '0' : '') + n; }
+  function rptEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function rptDur(min) { min = Math.round(min); const h = Math.floor(min / 60), m = min % 60; return h ? h + ' h' + (m ? ' ' + m + ' min' : '') : m + ' min'; }
+  function rptPlural(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
+  // Colours that are tokens go to style, so SVG resolves var() everywhere, rasterised pages included.
+  function rptEl(tag, attrs, inner) {
+    let s = '<' + tag, style = '';
+    for (const k in attrs) {
+      const v = attrs[k];
+      if (v == null) continue;
+      if (typeof v === 'string' && v.startsWith('var(') && (k === 'fill' || k === 'stroke' || k === 'stop-color')) style += k + ':' + v + ';';
+      else s += ' ' + k + '="' + v + '"';
+    }
+    if (style) s += ' style="' + style + '"';
+    return s + (inner == null ? '/>' : '>' + inner + '</' + tag + '>');
+  }
+  // The person's line prints only when they set it (Settings > Thresholds); unset lines do not print.
+  function rptLine() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_QUADRANT_THRESH) || 'null');
+      if (saved && saved.customized && Number.isFinite(QUADRANT_THRESH.hrHigh)) return QUADRANT_THRESH.hrHigh;
+    } catch (e) {}
+    return null;
+  }
+
+  // The day the report covers: the Day view's day, a recording's start day, otherwise the latest day with data.
+  function rptDayIso() {
+    const { view, arg } = parseHash();
+    if (view === 'day' && arg && sessionsByDate[arg]) return arg;
+    if (view === 'session' && arg && sessionsIndex[arg] && sessionsIndex[arg].startEpoch) {
+      const k = sessionLocalDateKey(sessionsIndex[arg], parseSessionFilename(arg));
+      if (sessionsByDate[k]) return k;
+    }
+    const keys = Object.keys(sessionsByDate).filter(k => (sessionsByDate[k] || []).length).sort();
+    return keys.length ? keys[keys.length - 1] : null;
+  }
+
+  // Minute bins of a {x, y} series over the day.
+  function rptBin(points, n) {
+    const sum = new Array(n).fill(0), cnt = new Array(n).fill(0);
+    for (const p of points || []) {
+      if (!p || p.y == null || !isFinite(p.y) || !isFinite(p.x)) continue;
+      const i = Math.floor(p.x);
+      if (i < 0 || i >= n) continue;
+      sum[i] += p.y; cnt[i]++;
+    }
+    return sum.map((s, i) => cnt[i] ? s / cnt[i] : null);
+  }
+  function rptAt(arr, m, reach) {
+    m = Math.round(m);
+    for (let d = 0; d <= (reach || 0); d++) {
+      if (arr[m + d] != null) return Math.round(arr[m + d]);
+      if (d && arr[m - d] != null) return Math.round(arr[m - d]);
+    }
+    return null;
+  }
+  function rptMean(arr, a, b) { let s = 0, n = 0; for (let m = Math.max(0, a); m <= Math.min(arr.length - 1, b); m++) if (arr[m] != null) { s += arr[m]; n++; } return n ? s / n : null; }
+  function rptMedian(vals) { const s = vals.slice().sort((p, q) => p - q), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null; }
+  function rptWindow(d, a, b) {
+    let peak = null, low = null, lowHrv = null;
+    for (let m = Math.max(0, a); m <= Math.min(d.n - 1, b); m++) {
+      const v = d.hr[m], w = d.hrv[m];
+      if (v != null) { if (!peak || v > peak.v) peak = { m, v: Math.round(v) }; if (!low || v < low.v) low = { m, v: Math.round(v) }; }
+      if (w != null && (!lowHrv || w < lowHrv.v)) lowHrv = { m, v: Math.round(w) };
+    }
+    return { peak, low, lowHrv };
+  }
+
+  // Everything the report prints for one day, from the memoised Day build plus marks.
+  async function rptModel(iso) {
+    const summary = await buildDaySession(iso);
+    const entry = virtualSessions['day:' + iso];
+    if (!summary || !entry) return null;
+    // The Day build's own window: every point carries x = minutes from the day start and its epoch.
+    const p0 = (entry.data.hr || []).find(p => p && p.ep != null && isFinite(p.x));
+    if (!p0) return null;
+    const dayStart = Math.round(p0.ep - p0.x * 60000), n = Math.round(summary.duration), dayEnd = dayStart + n * 60000;
+    const d = { iso, n, dayStart, dayEnd, summary, line: rptLine(), personal: isAutonomicOn() };
+    d.hr = rptBin(entry.data.hr, n);
+    d.hrv = rptBin(entry.data.rmssd, n);
+    for (const g of summary.connGaps || []) for (let m = Math.ceil(g.start); m < Math.floor(g.end); m++) if (m >= 0 && m < n) { d.hr[m] = null; d.hrv[m] = null; }
+    d.clock = (m) => { if (m >= n) return '24:00'; const t = new Date(dayStart + Math.round(m) * 60000); return rptPad(t.getHours()) + ':' + rptPad(t.getMinutes()); };
+    d.recorded = d.hr.filter(v => v != null).length;
+    d.first = d.hr.findIndex(v => v != null);
+    d.last = d.hr.length - 1 - d.hr.slice().reverse().findIndex(v => v != null);
+    d.gaps = (summary.connGaps || []).filter(g => g.end - g.start >= 1 && g.end > d.first && g.start < d.last).map(g => [Math.max(0, g.start), Math.min(n, g.end)]);
+    const files = (summary.__sourceFiles || []).map(fn => sessionsIndex[fn]).filter(Boolean);
+    d.beganBefore = files.filter(s => s.startEpoch && s.startEpoch < dayStart).map(s => s.startEpoch).sort((p, q) => p - q)[0] || null;
+    d.runsOn = files.some(s => s.startEpoch && s.duration && s.startEpoch + s.duration * 60000 > dayEnd + 60000);
+    // Marks: symptom taps are moments, context and note marks are ticks.
+    d.taps = []; d.ticks = [];
+    for (const e of viewMarks(summary).events || []) {
+      if (!isFinite(e.t) || e.t < 0 || e.t >= n) continue;
+      const pm = parseMark(e.label);
+      if (pm.kind === 'symptom') d.taps.push({ m: Math.round(e.t), kind: 'Symptom', label: pm.label });
+      else d.ticks.push({ m: Math.round(e.t), word: (pm.label || 'Note').toLowerCase() });
+    }
+    // Standing taps: the posture log's switches to standing; a span clipped at the day start is not a tap.
+    const spans = (summary.postureSpans || []).slice().sort((p, q) => p.start - q.start);
+    let lastStand = -99;
+    spans.forEach((sp, i) => {
+      if (sp.posture !== 'standing' || sp.start < 0.5 || sp.start >= n) return;
+      if (sp.start - lastStand < 3) return;
+      lastStand = sp.start;
+      const prev = spans.slice(0, i).reverse().find(p => p.posture !== 'standing');
+      d.taps.push({ m: Math.min(n - 1, Math.round(sp.start)), kind: 'Standing', from: prev ? prev.posture : null });
+    });
+    d.taps.sort((p, q) => p.m - q.m);
+    d.moments = rptMoments(d);
+    return d;
+  }
+
+  function rptStanding(d, t) {
+    const base = Math.round(rptMean(d.hr, t - 5, t - 1) || rptAt(d.hr, t, 2) || 0);
+    const baseHrv = rptMean(d.hrv, t - 5, t - 1);
+    const w = rptWindow(d, t, t + 10);
+    const at = (k) => rptAt(d.hr, t + k, 1);
+    let held = 0;
+    for (let k = 1; k <= 10; k++) { const v = d.hr[Math.round(t) + k]; if (v != null && v - base >= 30) held++; }
+    let end = null;
+    if (w.peak) for (let m = w.peak.m + 1; m < Math.min(d.n, t + 90); m++) if (d.hr[m] != null && d.hr[m] <= base + 10) { end = { m, v: Math.round(d.hr[m]) }; break; }
+    return { t, base, baseHrv: baseHrv == null ? null : Math.round(baseHrv), r1: at(1), r3: at(3), r5: at(5), r10: at(10), peak: w.peak, lowHrv: w.lowHrv, held, met: held > 0, end };
+  }
+
+  // Slots per REPORT-SPEC: up to 2 Standing, up to 2 Symptom (largest HR change), 1 Rise or Above line; Calm waits for
+  // validated sleep. Overlaps merge; page slots go Symptom and Standing first, cap 6; numbers follow time.
+  function rptMoments(d) {
+    const list = [];
+    d.taps.filter(t => t.kind === 'Standing').forEach(t => list.push({ a: t.m - 5, b: t.m + 10, t: t.m, taps: [t] }));
+    d.taps.filter(t => t.kind === 'Symptom').forEach(t => {
+      const a = t.m - 10, b = t.m + 20;
+      const hit = list.find(x => x.a <= b && a <= x.b);
+      if (hit) { hit.a = Math.min(hit.a, a); hit.b = Math.max(hit.b, b); hit.taps.push(t); }
+      else list.push({ a, b, t: t.m, taps: [t] });
+    });
+    const free = (a, b) => !list.some(x => x.a <= b && a <= x.b);
+    if (d.line != null) {
+      let best = null, s = -1;
+      for (let m = 0; m <= d.n; m++) {
+        const up = m < d.n && d.hr[m] != null && d.hr[m] > d.line;
+        if (up && s < 0) s = m;
+        if (!up && s >= 0) { if (m - s >= 10 && (!best || m - s > best.e - best.s)) best = { s, e: m }; s = -1; }
+      }
+      if (best && free(best.s - 10, best.s + 10)) list.push({ kind: 'Above line', s: best.s, e: best.e, t: best.s, a: best.s - 10, b: Math.min(best.e + 20, best.s + 110), taps: [] });
+    }
+    if (!list.some(x => x.kind === 'Above line')) {
+      const rises = (d.summary.hrDeltas || []).filter(h => h.direction === 'rise' && h.start >= 0 && h.start < d.n && free(h.start - 10, h.start + 20))
+        .sort((p, q) => q.delta - p.delta || p.start - q.start);
+      if (rises[0]) list.push({ kind: 'Rise', t: rises[0].start, a: rises[0].start - 10, b: rises[0].start + 20, taps: [] });
+    }
+    list.forEach(x => {
+      x.a = Math.max(0, Math.round(x.a)); x.b = Math.min(d.n - 1, Math.round(x.b));
+      x.taps.sort((p, q) => p.m - q.m);
+      if (!x.kind) x.kind = [...new Set(x.taps.map(t => t.kind))].join(' · ');
+      x.slot = x.taps.some(t => t.kind === 'Symptom') ? 'Symptom' : x.taps.some(t => t.kind === 'Standing') ? 'Standing' : 'RS';
+      rptDescribe(d, x);
+    });
+    const cap = { Standing: 2, Symptom: 2, RS: 1 };
+    const rank = { Symptom: 0, Standing: 0, RS: 1 };
+    const pick = list.slice().sort((p, q) => rank[p.slot] - rank[q.slot] || q.change - p.change || p.t - q.t);
+    const used = { Standing: 0, Symptom: 0, RS: 0 };
+    let total = 0;
+    pick.forEach(x => { x.zoom = used[x.slot] < cap[x.slot] && total < 6; if (x.zoom) { used[x.slot]++; total++; } });
+    return list.sort((p, q) => p.t - q.t);
+  }
+
+  function rptDescribe(d, x) {
+    const w = rptWindow(d, x.a, x.b);
+    x.peak = w.peak || { m: x.t, v: null }; x.lowHrv = w.lowHrv || { m: x.t, v: null }; x.low = w.low;
+    const st = x.taps.find(t => t.kind === 'Standing');
+    x.stand = st ? Object.assign(rptStanding(d, st.m), { from: st.from }) : null;
+    if (x.stand) { x.start = x.stand.base; x.startHrv = x.stand.baseHrv; }
+    else { x.start = rptAt(d.hr, x.t, 2); x.startHrv = rptAt(d.hrv, x.t, 3); }
+    if (x.kind === 'Above line') {
+      const sw = rptWindow(d, x.s, x.e - 1); x.peak = sw.peak || x.peak; x.lowHrv = sw.lowHrv || x.lowHrv;
+      x.hrText = x.start + ' to ' + x.peak.v + ', ' + (x.e - x.s) + ' min';
+      x.when = d.clock(x.s) + ' to ' + d.clock(x.e);
+    } else {
+      x.hrText = x.start != null && x.peak.v != null ? x.start + ' to ' + x.peak.v : '';
+      x.when = d.clock(x.t);
+    }
+    x.hrvText = x.startHrv != null && x.lowHrv.v != null ? x.startHrv + ' to ' + x.lowHrv.v + ' ms' : '';
+    x.change = x.start != null && x.peak.v != null ? x.peak.v - x.start : 0;
+    const words = x.taps.filter(t => t.kind === 'Symptom' && t.label && t.label.toLowerCase() !== 'symptom').map(t => t.label);
+    x.note = [...new Set(words)].join(', ');
+    x.back = null;
+    if (d.line != null && x.peak.v != null) for (let m = x.peak.m + 1; m < d.n; m++) if (d.hr[m] != null && d.hr[m] < d.line) { x.back = m; break; }
+  }
+
+  // The listed moments for this render: every zoomed one plus the first `keep` others; the rest go to one text line.
+  function rptListed(d, keep) {
+    const others = d.moments.filter(x => !x.zoom);
+    const kept = new Set(others.slice(0, keep));
+    const listed = d.moments.filter(x => x.zoom || kept.has(x));
+    let n = 0, z = 0;
+    d.moments.forEach(x => { x.n = null; x.zi = null; });
+    listed.forEach(x => { x.n = ++n; });
+    listed.filter(x => x.zoom).forEach(x => { x.zi = z++; });
+    return { listed, rest: others.filter(x => !kept.has(x)) };
+  }
+  function rptPageCount(d) { return 1 + Math.ceil(d.moments.filter(x => x.zoom).length / 2); }
+
+  // ---------- SVG pieces ----------
+  function rptHatch(id) { return '<pattern id="' + id + '" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' + rptEl('line', { x1: 0, y1: 0, x2: 0, y2: 4, stroke: 'var(--rp-hatch)', 'stroke-width': 1 }) + '</pattern>'; }
+  function rptZoneGrad(id, yOf) {
+    const yTop = yOf(400), yBot = yOf(0);
+    const off = (v) => Math.min(1, Math.max(0, (yOf(v) - yTop) / (yBot - yTop))).toFixed(4);
+    const c = RPT_ZC, z = RPT_ZONES;
+    const st = [[0, c[4]], [off(z[3]), c[4]], [off(z[3]), c[3]], [off(z[2]), c[3]], [off(z[2]), c[2]], [off(z[1]), c[2]], [off(z[1]), c[1]], [off(z[0]), c[1]], [off(z[0]), c[0]], [1, c[0]]];
+    return '<linearGradient id="' + id + '" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="' + yTop.toFixed(1) + '" y2="' + yBot.toFixed(1) + '">' +
+      st.map(s => rptEl('stop', { offset: s[0], 'stop-color': s[1] })).join('') + '</linearGradient>';
+  }
+  function rptTrace(arr, a, b, xOf, yOf) {
+    const out = []; let cur = '';
+    for (let m = a; m <= b; m++) {
+      const v = arr[m];
+      if (v == null) { if (cur) out.push(cur); cur = ''; continue; }
+      cur += (cur ? ' L' : 'M') + xOf(m).toFixed(1) + ' ' + yOf(v).toFixed(1);
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  function rptSmooth(arr, k) {
+    return arr.map((v, i) => {
+      if (v == null) return null;
+      let s = 0, n = 0;
+      for (let j = i - k; j <= i + k; j++) if (arr[j] != null) { s += arr[j]; n++; }
+      return s / n;
+    });
+  }
+  function rptDiamond(x, y, r) { return rptEl('path', { d: 'M' + x.toFixed(1) + ' ' + (y - r) + ' L' + (x + r).toFixed(1) + ' ' + y + ' L' + x.toFixed(1) + ' ' + (y + r) + ' L' + (x - r).toFixed(1) + ' ' + y + 'Z', fill: 'var(--rp-ink)' }); }
+  function rptSquare(x, y, r) { return rptEl('rect', { x: (x - r).toFixed(1), y: (y - r).toFixed(1), width: 2 * r, height: 2 * r, fill: 'var(--rp-paper)', stroke: 'var(--rp-ink)', 'stroke-width': 1.25 }); }
+  function rptCircleNum(x, y, n, off) {
+    return rptEl('circle', { cx: x.toFixed(2), cy: y, r: 7.5, fill: 'var(--rp-paper)', stroke: off ? 'var(--rp-ink-3)' : 'var(--rp-ink)', 'stroke-width': 1.25, 'stroke-dasharray': off ? '2 1.5' : null, class: 'mc' }) +
+      rptEl('text', { x: x.toFixed(2), y: (y + RPT_DIGIT_Y * 9.33).toFixed(2), 'text-anchor': 'middle', 'font-size': 9.33, 'font-weight': 600, fill: off ? 'var(--rp-ink-2)' : 'var(--rp-ink)' }, n);
+  }
+  function rptMn(n, o) {
+    o = o || {};
+    const size = o.big ? 20 : 15, sw = o.big ? 1.5 : 1.25, c = size / 2, fs = o.big ? 12 : 9.33;
+    return '<svg class="mn" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" aria-label="Moment ' + n + '">' +
+      rptEl('circle', { cx: c, cy: c, r: c - sw / 2, fill: 'var(--rp-paper)', stroke: o.off ? 'var(--rp-ink-3)' : 'var(--rp-ink)', 'stroke-width': sw, 'stroke-dasharray': o.off ? '2 1.5' : null }) +
+      rptEl('text', { x: c, y: (c + RPT_DIGIT_Y * fs).toFixed(2), 'text-anchor': 'middle', 'font-size': fs, 'font-weight': 600, fill: o.off ? 'var(--rp-ink-2)' : 'var(--rp-ink)' }, n) + '</svg>';
+  }
+  function rptLabelBox(x, y, text, anchor, dim) {
+    const w = String(text).length * 4.6 + 6;
+    const bx = anchor === 'end' ? x - w + 3 : anchor === 'middle' ? x - w / 2 : x - 3;
+    return rptEl('rect', { x: bx.toFixed(1), y: (y - 8).toFixed(1), width: w.toFixed(1), height: 11, fill: 'var(--rp-paper)', 'fill-opacity': 0.85 }) +
+      rptEl('text', { x: x.toFixed(1), y: y.toFixed(1), 'text-anchor': anchor || 'start', class: dim ? 'callout-dim' : 'callout' }, rptEsc(text));
+  }
+  function rptLanes(items, xOf, gap) {
+    const lanes = [];
+    items.sort((p, q) => p.m - q.m).forEach(it => {
+      const x = xOf(it.m); let i = 0;
+      while (lanes[i] != null && x - lanes[i] < gap) i++;
+      lanes[i] = x + (it.w || 0); it.lane = i;
+    });
+    return lanes.length;
+  }
+  function rptGapsAll(d) {
+    const out = d.gaps.slice();
+    if (d.first > 0) out.push([0, d.first]);
+    if (d.last < d.n - 1) out.push([d.last + 1, d.n]);
+    return out;
+  }
+  // HRV axis top: 60 ms, or the next 20 above the window's highest smoothed reading, up to 120.
+  function rptHrvTop(arr, a, b) {
+    let hi = 0;
+    rptSmooth(arr.slice(Math.max(0, a), b + 1), 2).forEach(v => { if (v != null) hi = Math.max(hi, v); });
+    return Math.min(120, Math.max(60, Math.ceil(hi / 20) * 20));
+  }
+  function rptHrvTicks(top) { const t = [], step = top > 60 ? 40 : 20; for (let v = step; v < top; v += step) t.push(v); return t; }
+  function rptCircleX(x) { return x.kind === 'Above line' ? x.s : x.peak && x.peak.m != null ? x.peak.m : x.t; }
+
+  // Page 1 chart: HR zone-coloured, HRV dashed beneath, one clock axis, gaps hatched, the person's line if set.
+  function rptDayChart(d, listed) {
+    const W = RPT_W, G = 30, PW = W - G - 4, xOf = (m) => G + m / d.n * PW;
+    const marks = d.taps.map(t => ({ m: t.m, kind: t.kind })).concat(d.ticks.map(c => ({ m: c.m, kind: 'ctx', word: c.word, w: Math.min(70, c.word.length * 4.4 + 6) })));
+    const nl = rptLanes(marks, xOf, 9);
+    let lo = 50, hi = 130;
+    d.hr.forEach(v => { if (v != null) { lo = Math.min(lo, Math.floor(v / 10) * 10); hi = Math.max(hi, Math.ceil(v / 10) * 10); } });
+    const top = 22, laneH = 11, hrT = top + nl * laneH + 6, hrH = 100, hrB = hrT + hrH, vT = hrB + 6, vH = 40, vB = vT + vH, H = vB + 18;
+    const vMax = rptHrvTop(d.hrv, 0, d.n - 1);
+    const yOf = (v) => hrB - (v - lo) / (hi - lo) * hrH, vOf = (v) => vB - Math.min(v, vMax) / vMax * vH;
+    const gid = 'rzg' + (++rptUid), hid = 'rhx' + rptUid;
+    let s = '<defs>' + rptZoneGrad(gid, yOf) + rptHatch(hid) + '</defs>';
+    rptGapsAll(d).forEach(g => {
+      const x = xOf(g[0]), w = Math.max(2, xOf(g[1]) - x);
+      s += rptEl('rect', { x: x.toFixed(1), y: hrT, width: w.toFixed(1), height: hrH, fill: 'url(#' + hid + ')' });
+      s += rptEl('rect', { x: x.toFixed(1), y: vT, width: w.toFixed(1), height: vH, fill: 'url(#' + hid + ')' });
+    });
+    const ticks = []; for (let v = Math.ceil(lo / 20) * 20; v <= hi; v += 20) if (v > lo) ticks.push(v);
+    ticks.forEach(v => { if (v < hi) s += rptEl('line', { x1: G, x2: G + PW, y1: yOf(v).toFixed(1), y2: yOf(v).toFixed(1), stroke: 'var(--rp-grid)', 'stroke-width': 0.75 }); s += rptEl('text', { x: G - 4, y: (yOf(v) + 3).toFixed(1), 'text-anchor': 'end', class: 'ax' }, v); });
+    s += rptEl('text', { x: G - 4, y: hrB + 3, 'text-anchor': 'end', class: 'ax' }, 'bpm');
+    rptHrvTicks(vMax).forEach(v => { s += rptEl('line', { x1: G, x2: G + PW, y1: vOf(v), y2: vOf(v), stroke: 'var(--rp-grid)', 'stroke-width': 0.75 }); s += rptEl('text', { x: G - 4, y: vOf(v) + 3, 'text-anchor': 'end', class: 'ax' }, v); });
+    s += rptEl('text', { x: G - 4, y: vB + 3, 'text-anchor': 'end', class: 'ax' }, 'ms');
+    s += rptEl('rect', { x: G, y: hrT, width: PW, height: hrH, fill: 'none', stroke: 'var(--rp-rule)', 'stroke-width': 0.75 });
+    s += rptEl('rect', { x: G, y: vT, width: PW, height: vH, fill: 'none', stroke: 'var(--rp-rule)', 'stroke-width': 0.75 });
+    rptTrace(rptSmooth(d.hrv, 2), 0, d.n - 1, xOf, vOf).forEach(p => { s += rptEl('path', { d: p, fill: 'none', stroke: 'var(--rp-hrv)', 'stroke-width': 1, 'stroke-dasharray': '3 2' }); });
+    rptTrace(d.hr, 0, d.n - 1, xOf, yOf).forEach(p => { s += rptEl('path', { d: p, fill: 'none', stroke: 'url(#' + gid + ')', 'stroke-width': 1.2, 'stroke-linejoin': 'round' }); });
+    if (d.line != null && d.line > lo && d.line < hi) {
+      s += rptEl('line', { x1: G, x2: G + PW, y1: yOf(d.line).toFixed(1), y2: yOf(d.line).toFixed(1), stroke: 'var(--rp-ink)', 'stroke-width': 0.9, 'stroke-dasharray': '4 3' });
+      s += rptLabelBox(G + PW - 4, yOf(d.line) - 3, 'Your line ' + d.line, 'end');
+    }
+    s += rptEl('rect', { x: G + 1, y: vT + 1, width: 74, height: 12, fill: 'var(--rp-paper)', 'fill-opacity': 0.85 }) + rptEl('text', { x: G + 4, y: vT + 10, class: 'ax-b' }, 'HRV (RMSSD)');
+    const placed = [];
+    listed.forEach(x => {
+      const x0 = xOf(x.a), x1 = xOf(x.b), cx = Math.max(G + 8, Math.min(G + PW - 8, xOf(rptCircleX(x))));
+      let lane = 0;
+      while (placed.some(p => p.lane === lane && Math.abs(p.x - cx) < 17)) lane++;
+      placed.push({ x: cx, lane });
+      s += rptEl('rect', { x: x0.toFixed(1), y: hrT - 3, width: Math.max(3, x1 - x0).toFixed(1), height: 3, fill: x.zoom ? 'var(--rp-ink)' : 'var(--rp-dim-bar)' });
+      s += rptEl('line', { x1: cx.toFixed(1), x2: cx.toFixed(1), y1: 17 - lane * 17, y2: hrT - 3, stroke: 'var(--rp-rule)', 'stroke-width': 0.75 });
+      s += rptCircleNum(cx, 9 - lane * 17, x.n, !x.zoom);
+    });
+    marks.forEach(mk => {
+      const x = xOf(mk.m), y = top + mk.lane * laneH + 5;
+      if (mk.kind === 'Symptom') s += rptDiamond(x, y, 4);
+      else if (mk.kind === 'Standing') s += rptSquare(x, y, 3.2);
+      else { s += rptEl('line', { x1: x.toFixed(1), x2: x.toFixed(1), y1: y - 4, y2: y + 4, stroke: 'var(--rp-ink)', 'stroke-width': 1.25 }); s += rptEl('text', { x: (x + 3).toFixed(1), y: y + 3, class: 'callout-dim' }, rptEsc(mk.word)); }
+    });
+    for (let h = 0; h <= 24; h += 3) {
+      const m = Math.min(d.n, h * 60), x = xOf(m);
+      s += rptEl('line', { x1: x.toFixed(1), x2: x.toFixed(1), y1: vB, y2: vB + 3, stroke: 'var(--rp-ink-3)', 'stroke-width': 0.75 });
+      s += rptEl('text', { x: x.toFixed(1), y: vB + 13, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle', class: 'ax' }, h === 24 ? '24:00' : d.clock(m));
+    }
+    const lift = Math.max(0, ...placed.map(p => p.lane)) * 17;
+    return '<svg width="' + W + '" height="' + (H + lift) + '" viewBox="0 ' + (-lift) + ' ' + W + ' ' + (H + lift) + '" role="img" aria-label="Heart rate and HRV, 00:00 to 24:00">' + s + '</svg>';
+  }
+
+  function rptLegend(d) {
+    const g = (svg) => '<svg width="18" height="10" viewBox="0 0 18 10">' + svg + '</svg>';
+    const z = RPT_ZONES;
+    const zones = '<div class="zones"><b>HR, bpm</b>' + ['under ' + z[0], z[0] + ' to ' + (z[1] - 1), z[1] + ' to ' + (z[2] - 1), z[2] + ' to ' + (z[3] - 1), z[3] + ' and over']
+      .map((t, i) => '<span><span class="zsw" style="background:' + RPT_ZC[i] + '"></span>' + t + '</span>').join('') + '</div>';
+    const hid = 'rlh' + (++rptUid);
+    const items = [
+      [g(rptEl('line', { x1: 0, x2: 18, y1: 5, y2: 5, stroke: 'var(--rp-hrv)', 'stroke-dasharray': '3 2' })), '<b>HRV</b> (RMSSD), ms'],
+      d.line != null ? [g(rptEl('line', { x1: 0, x2: 18, y1: 5, y2: 5, stroke: 'var(--rp-ink)', 'stroke-dasharray': '4 3' })), '<b>Your line</b>, ' + d.line + ' bpm'] : null,
+      [g('<defs>' + rptHatch(hid) + '</defs>' + rptEl('rect', { x: 0, y: 0, width: 18, height: 10, fill: 'url(#' + hid + ')' })), '<b>No reading</b>'],
+      [g(rptEl('circle', { cx: 9, cy: 5, r: 4.5, fill: 'var(--rp-paper)', stroke: 'var(--rp-ink)', 'stroke-width': 1.25 })), '<b>Moment</b>'],
+      [g(rptDiamond(9, 5, 4)), '<b>Symptom</b> tap'],
+      [g(rptSquare(9, 5, 3.2)), '<b>Standing</b> tap'],
+      [g(rptEl('line', { x1: 9, x2: 9, y1: 1, y2: 9, stroke: 'var(--rp-ink)', 'stroke-width': 1.25 })), '<b>Context</b> mark'],
+    ].filter(Boolean);
+    return '<div class="legend">' + zones + items.map(it => '<div class="k">' + it[0] + '<span>' + it[1] + '</span></div>').join('') + '</div>';
+  }
+
+  function rptFoot(note) {
+    const when = new Date().toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    return '<div class="foot">' + (note ? '<p class="note">' + note + '</p>' : '') +
+      '<div class="bar"><span>Recorded with aorti · exported ' + when + '</span><b class="pgno">Page %%N%% of %%M%%</b></div></div>';
+  }
+  function rptRunhead(d) {
+    return '<div class="runhead"><span><b>Heart rate and HRV</b> · ' + rptEsc(d.shortDate) + '</span><span>Day report</span></div>';
+  }
+  function rptPage(id, inner) { return '<section class="page" id="' + id + '">' + inner + '</section>'; }
+
+  function rptCoverage(d) {
+    let s = '<b>Recorded ' + rptDur(d.recorded) + ' of ' + rptDur(d.n) + '</b>';
+    if (d.gaps.length) {
+      const shown = d.gaps.slice().sort((p, q) => (q[1] - q[0]) - (p[1] - p[0])).slice(0, 4).sort((p, q) => p[0] - q[0]);
+      s += ' · ' + rptPlural(d.gaps.length, 'gap') + ': ' + shown.map(g => d.clock(g[0]) + ' to ' + d.clock(g[1])).join(', ');
+      if (d.gaps.length > shown.length) s += ', and ' + (d.gaps.length - shown.length) + ' shorter';
+    }
+    return s;
+  }
+
+  function rptPage1(d, listed, rest, pageOf) {
+    const stands = listed.filter(x => x.stand);
+    let h = rptRunhead(d) + '<h1 class="title">' + rptEsc(d.longDate) + '</h1>';
+    const q = [];
+    if (d.beganBefore) q.push('recording began ' + new Date(d.beganBefore).toLocaleDateString('en-CA', { weekday: 'long' }) + ' ' + rptPad(new Date(d.beganBefore).getHours()) + ':' + rptPad(new Date(d.beganBefore).getMinutes()));
+    else if (d.first > 0) q.push('recording began ' + d.clock(d.first));
+    if (d.runsOn) q.push('continued past 24:00');
+    else if (d.last < d.n - 1) q.push('ended ' + d.clock(d.last + 1));
+    h += '<p class="span">00:00 to 24:00' + (q.length ? ' <span class="q">· ' + q.join(' · ') + '</span>' : '') + '</p>';
+    h += '<p class="cover">' + rptCoverage(d) + '</p>';
+    if (stands.length) {
+      h += '<h2 class="sec">Standing</h2><table class="t"><thead><tr><th>Tap</th>';
+      h += d.personal ? '<th>Baseline, 5 min before</th><th>1 min</th><th>3 min</th><th>5 min</th><th>10 min</th><th>Peak</th>' : '<th>Start</th><th>Peak</th><th>End of rise</th>';
+      h += '<th>HRV</th><th class="r">Moment</th></tr></thead><tbody>';
+      stands.forEach(x => {
+        const r = x.stand, dl = (v) => v == null ? '' : ' <span class="dim">' + (v - r.base >= 0 ? 'up ' : 'down ') + Math.abs(v - r.base) + '</span>';
+        const cell = (v) => '<td class="num">' + (v == null ? '<span class="dim">no reading</span>' : v + dl(v)) + '</td>';
+        h += '<tr><td class="k num">' + d.clock(r.t) + (d.personal && r.met ? '<sup>1</sup>' : '') + '</td>';
+        const pk = r.peak ? r.peak.v + ' at ' + d.clock(r.peak.m) + dl(r.peak.v) : '';
+        if (d.personal) h += '<td class="num">' + r.base + ' bpm' + (r.from ? ' <span class="dim">' + r.from + '</span>' : '') + '</td>' + [r.r1, r.r3, r.r5, r.r10].map(cell).join('') + '<td class="num">' + pk + '</td>';
+        else h += '<td class="num">' + r.base + ' bpm</td><td class="num">' + pk + '</td><td class="num">' + (r.end ? r.end.v + ' at ' + d.clock(r.end.m) + ' <span class="dim">' + Math.round(r.end.m - r.t) + ' min</span>' : '') + '</td>';
+        h += '<td class="num">' + (r.baseHrv != null && r.lowHrv ? r.baseHrv + ' to ' + r.lowHrv.v + ' ms' : '') + '</td><td class="r pg">' + rptMn(x.n, { off: !x.zoom }) + (x.zoom ? ' p ' + pageOf(x) : '') + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    h += '<h2 class="sec">The day</h2><div class="chart">' + rptDayChart(d, listed) + '</div>' + rptLegend(d);
+    h += '<h2 class="sec">Moments</h2>';
+    if (listed.length) {
+      h += '<table class="t idx"><colgroup><col style="width:30px"><col style="width:84px"><col style="width:110px"><col style="width:116px"><col style="width:84px"><col><col style="width:80px"></colgroup><thead><tr><th>No.</th><th>Time</th><th>Kind</th><th>HR, bpm</th><th>HRV</th><th>Note</th><th class="r">Page</th></tr></thead><tbody>';
+      listed.forEach(x => {
+        h += '<tr><td>' + rptMn(x.n, { off: !x.zoom }) + '</td><td class="num">' + x.when + '</td><td><span class="k">' + rptEsc(x.kind) + '</span></td>' +
+          '<td class="num">' + x.hrText + '</td><td class="num">' + x.hrvText + '</td><td>' + rptEsc(x.note) + '</td>' +
+          '<td class="r pg">' + (x.zoom ? '<a href="#rpg' + pageOf(x) + '">' + pageOf(x) + '</a>' : '<span class="dim">not zoomed</span>') + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    } else h += '<p class="more">No symptom or standing taps, and no rise to list.</p>';
+    if (rest.length) {
+      const byKind = {};
+      rest.forEach(x => { (byKind[x.kind] = byKind[x.kind] || []).push(d.clock(x.t)); });
+      h += '<p class="more">Also on this day: ' + Object.keys(byKind).map(k => k.toLowerCase() + ' at ' + byKind[k].join(', ')).join('; ') + '.</p>';
+    }
+    // One Whole day column: sleep is not validated yet (S13), so no Awake and Asleep split.
+    const vals = d.hr.filter(v => v != null), hv = d.hrv.filter(v => v != null);
+    let lo = null, hi = null;
+    d.hr.forEach((v, m) => { if (v == null) return; if (!lo || v < lo.v) lo = { m, v }; if (!hi || v > hi.v) hi = { m, v }; });
+    const above = d.line != null ? vals.filter(v => v > d.line).length : null;
+    h += '<h2 class="sec">Summary</h2><table class="t sum"><thead><tr><th></th><th class="r">Whole day</th></tr></thead><tbody>' +
+      '<tr><td>Recorded</td><td class="r num">' + rptDur(d.recorded) + '</td></tr>' +
+      (lo ? '<tr><td>Lowest, bpm</td><td class="r num">' + Math.round(lo.v) + ' <span class="dim">at ' + d.clock(lo.m) + '</span></td></tr>' : '') +
+      (vals.length ? '<tr><td>Typical (median), bpm</td><td class="r num">' + Math.round(rptMedian(vals)) + '</td></tr>' : '') +
+      (hi ? '<tr><td>Highest, bpm</td><td class="r num">' + Math.round(hi.v) + ' <span class="dim">at ' + d.clock(hi.m) + '</span></td></tr>' : '') +
+      (above != null ? '<tr><td>Above your line, ' + d.line + ' bpm</td><td class="r num">' + rptDur(above) + (vals.length ? ' <span class="dim">' + Math.round(above / vals.length * 100) + '%</span>' : '') + '</td></tr>' : '') +
+      (hv.length ? '<tr><td>HRV typical (median), ms</td><td class="r num">' + Math.round(rptMedian(hv)) + '</td></tr>' : '') +
+      '</tbody></table>';
+    const met = stands.some(x => x.stand.met);
+    const note = d.personal && met ? '<sup>1</sup> Adult POTS heart rate rule: a rise of 30 bpm or more within 10 min of standing.' : null;
+    return h + rptFoot(note);
+  }
+
+  function rptLocator(d, x) {
+    const W = RPT_W, G = 30, PW = W - G - 4, xOf = (m) => G + m / d.n * PW, hid = 'rlx' + (++rptUid);
+    let s = '<defs>' + rptHatch(hid) + '</defs>';
+    s += rptEl('rect', { x: G, y: 2, width: PW, height: 10, fill: 'var(--rp-paper)', stroke: 'var(--rp-rule)', 'stroke-width': 0.75 });
+    rptGapsAll(d).forEach(g => { s += rptEl('rect', { x: xOf(g[0]).toFixed(1), y: 2, width: Math.max(2, xOf(g[1]) - xOf(g[0])).toFixed(1), height: 10, fill: 'url(#' + hid + ')' }); });
+    const x0 = xOf(x.a), w = Math.max(4, xOf(x.b) - x0);
+    s += rptEl('rect', { x: x0.toFixed(1), y: 0, width: w.toFixed(1), height: 14, fill: 'var(--rp-ink)', 'fill-opacity': 0.12, stroke: 'var(--rp-ink)', 'stroke-width': 1.5 });
+    for (let h = 0; h <= 24; h += 6) { const m = Math.min(d.n, h * 60); s += rptEl('text', { x: xOf(m).toFixed(1), y: 24, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle', class: 'ax' }, h === 24 ? '24:00' : d.clock(m)); }
+    s += rptEl('text', { x: G - 4, y: 11, 'text-anchor': 'end', class: 'ax' }, '24 h');
+    return '<svg width="' + W + '" height="28" viewBox="0 0 ' + W + ' 28" role="img" aria-label="Window in the day">' + s + '</svg>';
+  }
+
+  function rptMomentChart(d, x, ax) {
+    const W = RPT_W, G = 30, PW = W - G - 4, a = x.a, b = x.b, xOf = (m) => G + (m - a) / Math.max(1, b - a) * PW;
+    const hrT = 20, hrH = 136, hrB = hrT + hrH, vT = hrB + 8, vH = 46, vB = vT + vH, H = vB + 18;
+    const yOf = (v) => hrB - (v - ax.bot) / (ax.top - ax.bot) * hrH, vOf = (v) => vB - Math.min(v, ax.vtop) / ax.vtop * vH;
+    const gid = 'rmg' + (++rptUid), hid = 'rmh' + rptUid;
+    let s = '<defs>' + rptZoneGrad(gid, yOf) + rptHatch(hid) + '</defs>';
+    if (x.kind === 'Above line') {
+      const s0 = Math.max(a, x.s), s1 = Math.min(b, x.e);
+      if (s1 > s0) s += rptEl('rect', { x: xOf(s0).toFixed(1), y: hrT, width: (xOf(s1) - xOf(s0)).toFixed(1), height: hrH, fill: 'none', stroke: 'var(--rp-ink-3)', 'stroke-width': 0.75, 'stroke-dasharray': '2 2' });
+    }
+    rptGapsAll(d).forEach(g => { const g0 = Math.max(a, g[0]), g1 = Math.min(b, g[1]); if (g1 > g0) s += rptEl('rect', { x: xOf(g0).toFixed(1), y: hrT, width: (xOf(g1) - xOf(g0)).toFixed(1), height: hrH, fill: 'url(#' + hid + ')' }); });
+    const ticks = []; for (let v = Math.ceil((ax.bot + 1) / 20) * 20; v < ax.top; v += 20) ticks.push(v);
+    ticks.forEach(v => { s += rptEl('line', { x1: G, x2: G + PW, y1: yOf(v).toFixed(1), y2: yOf(v).toFixed(1), stroke: 'var(--rp-grid)', 'stroke-width': 0.75 }); });
+    ticks.concat([ax.top]).forEach(v => { s += rptEl('text', { x: G - 4, y: (yOf(v) + 3).toFixed(1), 'text-anchor': 'end', class: 'ax' }, v); });
+    s += rptEl('text', { x: G - 4, y: hrB + 3, 'text-anchor': 'end', class: 'ax' }, 'bpm');
+    rptHrvTicks(ax.vtop).forEach(v => { s += rptEl('line', { x1: G, x2: G + PW, y1: vOf(v), y2: vOf(v), stroke: 'var(--rp-grid)', 'stroke-width': 0.75 }); s += rptEl('text', { x: G - 4, y: vOf(v) + 3, 'text-anchor': 'end', class: 'ax' }, v); });
+    s += rptEl('text', { x: G - 4, y: vB + 3, 'text-anchor': 'end', class: 'ax' }, 'ms');
+    s += rptEl('rect', { x: G, y: hrT, width: PW, height: hrH, fill: 'none', stroke: 'var(--rp-rule)', 'stroke-width': 0.75 });
+    s += rptEl('rect', { x: G, y: vT, width: PW, height: vH, fill: 'none', stroke: 'var(--rp-rule)', 'stroke-width': 0.75 });
+    rptTrace(d.hrv, a, b, xOf, vOf).forEach(p => { s += rptEl('path', { d: p, fill: 'none', stroke: 'var(--rp-hrv)', 'stroke-width': 1.1, 'stroke-dasharray': '3 2' }); });
+    rptTrace(d.hr, a, b, xOf, yOf).forEach(p => { s += rptEl('path', { d: p, fill: 'none', stroke: 'url(#' + gid + ')', 'stroke-width': 1.6, 'stroke-linejoin': 'round' }); });
+    if (d.line != null && d.line > ax.bot && d.line < ax.top) {
+      s += rptEl('line', { x1: G, x2: G + PW, y1: yOf(d.line).toFixed(1), y2: yOf(d.line).toFixed(1), stroke: 'var(--rp-ink)', 'stroke-width': 0.9, 'stroke-dasharray': '4 3' });
+      s += rptLabelBox(G + 6, yOf(d.line) - 3, 'Your line ' + d.line, 'start');
+    }
+    s += rptEl('rect', { x: G + 1, y: vT + 1, width: 74, height: 12, fill: 'var(--rp-paper)', 'fill-opacity': 0.85 }) + rptEl('text', { x: G + 4, y: vT + 10, class: 'ax-b' }, 'HRV (RMSSD)');
+    const mk = d.taps.filter(t => t.m >= a && t.m <= b).map(t => ({ m: t.m, kind: t.kind })).concat(d.ticks.filter(c => c.m >= a && c.m <= b).map(c => ({ m: c.m, kind: 'ctx', word: c.word })));
+    let lastX = -999;
+    mk.sort((p, q) => p.m - q.m).forEach(q => {
+      const px = xOf(q.m);
+      s += rptEl('line', { x1: px.toFixed(1), x2: px.toFixed(1), y1: hrT, y2: hrB, stroke: 'var(--rp-hatch)', 'stroke-width': 0.75, 'stroke-dasharray': '1 2' });
+      if (q.kind === 'Symptom') s += rptDiamond(px, 9, 4.5); else if (q.kind === 'Standing') s += rptSquare(px, 9, 3.6); else s += rptEl('line', { x1: px.toFixed(1), x2: px.toFixed(1), y1: 4, y2: 14, stroke: 'var(--rp-ink)', 'stroke-width': 1.25 });
+      if (px - lastX > 70) { s += rptEl('text', { x: (px + 7).toFixed(1), y: 12, class: 'callout' }, rptEsc(q.kind === 'ctx' ? q.word : q.kind + ' ' + d.clock(q.m))); lastX = px; }
+    });
+    const startM = x.stand ? x.stand.t : (x.s != null ? x.s : x.t);
+    const standEnd = x.stand && x.stand.end && x.stand.end.m <= b;
+    const endM = standEnd ? x.stand.end.m : x.back != null && x.back <= b ? x.back : null;
+    const pts = [];
+    if (x.start != null) pts.push({ m: startM, v: d.hr[Math.round(startM)] != null ? d.hr[Math.round(startM)] : x.start, t: 'start ' + x.start, dy: 14 });
+    if (x.peak && x.peak.v != null) pts.push({ m: x.peak.m, v: x.peak.v, t: 'peak ' + x.peak.v + ' at ' + d.clock(x.peak.m), dy: -7 });
+    if (endM != null && d.hr[endM] != null) pts.push({ m: endM, v: d.hr[endM], t: standEnd ? 'end of rise ' + Math.round(d.hr[endM]) + ' at ' + d.clock(endM) : 'under ' + d.line + ' at ' + d.clock(endM), dy: -7 });
+    pts.forEach(p => {
+      if (p.m < a || p.m > b) return;
+      const px = xOf(p.m), py = yOf(p.v);
+      s += rptEl('circle', { cx: px.toFixed(1), cy: py.toFixed(1), r: 2.6, fill: 'var(--rp-paper)', stroke: 'var(--rp-ink)', 'stroke-width': 1.25 });
+      s += rptLabelBox(px, py + p.dy, p.t, px > G + PW - 90 ? 'end' : px < G + 40 ? 'start' : 'middle');
+    });
+    const step = b - a > 60 ? 15 : b - a > 45 ? 10 : 5;
+    for (let m = Math.ceil(a / step) * step; m <= b; m += step) {
+      const px = xOf(m);
+      s += rptEl('line', { x1: px.toFixed(1), x2: px.toFixed(1), y1: vB, y2: vB + 3, stroke: 'var(--rp-ink-3)', 'stroke-width': 0.75 });
+      s += rptEl('text', { x: px.toFixed(1), y: vB + 13, 'text-anchor': px > G + PW - 14 ? 'end' : px < G + 14 ? 'start' : 'middle', class: 'ax' }, d.clock(m));
+    }
+    return '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Moment ' + x.n + '">' + s + '</svg>';
+  }
+
+  function rptTimeline(d, x) {
+    const rows = [];
+    if (x.start != null) rows.push([x.t, 'HR ' + x.start + (x.startHrv != null ? ' · HRV ' + x.startHrv + ' ms' : '')]);
+    if (x.peak.v != null && x.peak.m !== x.t) {
+      const drop = x.startHrv && x.lowHrv.v != null ? Math.round((x.startHrv - x.lowHrv.v) / x.startHrv * 100) : null;
+      const hrvBit = x.lowHrv.m === x.peak.m && drop != null && drop > 0 ? ' · HRV ' + x.lowHrv.v + ' ms, down ' + drop + '%' : '';
+      rows.push([x.peak.m, 'Peak ' + x.peak.v + ' bpm, up ' + (x.peak.v - (x.start || x.peak.v)) + hrvBit]);
+      if (x.lowHrv.m !== x.peak.m && drop != null && drop > 0) rows.push([x.lowHrv.m, 'HRV ' + x.lowHrv.v + ' ms, down ' + drop + '%']);
+    }
+    if (x.back != null && x.back <= x.b + 30) rows.push([x.back, 'Under ' + d.line + ' bpm']);
+    x.taps.filter(t => t.kind === 'Symptom').forEach(t => rows.push([t.m, 'Symptom tap']));
+    d.ticks.forEach(c => { if (c.m >= x.a && c.m <= x.b) rows.push([c.m, rptEsc(c.word.charAt(0).toUpperCase() + c.word.slice(1))]); });
+    rows.sort((p, q) => p[0] - q[0]);
+    return '<div class="timeline">' + rows.map(r => '<span class="tm">' + d.clock(r[0]) + '</span><span>' + r[1] + '</span>').join('') + '</div>';
+  }
+
+  function rptMomentBlock(d, x, ax) {
+    let h = '<div class="moment" data-n="' + x.n + '">';
+    h += '<div class="mhead">' + rptMn(x.n, { big: true }) + '<span class="kind">' + rptEsc(x.kind) + '</span><span class="when">' + x.when + '</span><a class="back" href="#rpg1">Page 1</a></div>';
+    const sub = x.taps.map(t => t.kind + ' tap ' + d.clock(t.m));
+    sub.push('Window ' + d.clock(x.a) + ' to ' + d.clock(x.b));
+    h += '<p class="msub">' + sub.join(' · ') + '</p>';
+    h += '<div class="chart">' + rptLocator(d, x) + '</div><div class="chart" style="margin-top:4px">' + rptMomentChart(d, x, ax) + '</div>';
+    if (x.stand) {
+      const r = x.stand, dl = (v) => v == null ? '' : '<span class="d">' + (v - r.base >= 0 ? 'up ' : 'down ') + Math.abs(v - r.base) + '</span>';
+      const cell = (v) => '<td>' + (v == null ? '<span class="d">no reading</span>' : v + dl(v)) + '</td>';
+      const base = 'Baseline' + (r.from ? ', ' + r.from : '') + ', 5 min';
+      if (d.personal) {
+        h += '<table class="readouts"><thead><tr><th>' + base + '</th><th>1 min</th><th>3 min</th><th>5 min</th><th>10 min</th><th>Peak</th><th>30 or more above baseline</th></tr></thead><tbody><tr>' +
+          '<td>' + r.base + '</td>' + [r.r1, r.r3, r.r5, r.r10].map(cell).join('') +
+          '<td>' + (r.peak ? r.peak.v + dl(r.peak.v) + '<span class="d">at ' + d.clock(r.peak.m) + '</span>' : '') + '</td><td>' + r.held + ' of 10 min' + (r.met ? '<sup>1</sup>' : '') + '</td></tr></tbody></table>';
+      } else {
+        h += '<table class="readouts"><thead><tr><th>' + base + '</th><th>Peak</th><th>End of rise</th></tr></thead><tbody><tr><td>' + r.base + '</td>' +
+          '<td>' + (r.peak ? r.peak.v + dl(r.peak.v) + '<span class="d">at ' + d.clock(r.peak.m) + '</span>' : '') + '</td>' +
+          '<td>' + (r.end ? r.end.v + '<span class="d">at ' + d.clock(r.end.m) + '</span>' : '') + '</td></tr></tbody></table>';
+      }
+    } else h += rptTimeline(d, x);
+    if (x.note) h += '<p class="mnote"><span class="lab">Note</span>' + rptEsc(x.note) + '</p>';
+    return h + '</div>';
+  }
+
+  // All pages as HTML for one listing; page numbers filled in last.
+  function rptPagesHtml(d, keep) {
+    const { listed, rest } = rptListed(d, keep);
+    const z = listed.filter(x => x.zoom);
+    const pageOf = (x) => 2 + Math.floor(x.zi / 2);
+    const pages = [rptPage('rpg1', rptPage1(d, listed, rest, pageOf))];
+    if (z.length) {
+      let lo = Infinity, hi = 0;
+      z.forEach(x => { const w = rptWindow(d, x.a, x.b); if (w.low) lo = Math.min(lo, w.low.v); if (w.peak) hi = Math.max(hi, w.peak.v); });
+      const vtop = Math.max(...z.map(x => rptHrvTop(d.hrv, x.a, x.b)));
+      const ax = { bot: Math.max(30, Math.floor((lo - 4) / 10) * 10), top: Math.max(110, Math.ceil((hi + 1) / 5) * 5), vtop };
+      for (let i = 0; i < z.length; i += 2) {
+        let inner = rptRunhead(d);
+        if (i === 0) inner += '<p class="axisnote">HR ' + ax.bot + ' to ' + ax.top + ' bpm and HRV 0 to ' + ax.vtop + ' ms on every moment</p>';
+        inner += rptMomentBlock(d, z[i], ax) + (z[i + 1] ? rptMomentBlock(d, z[i + 1], ax) : '');
+        const st = (z[i].stand && z[i].stand.met) || (z[i + 1] && z[i + 1].stand && z[i + 1].stand.met);
+        pages.push(rptPage('rpg' + (2 + i / 2), inner + rptFoot(st && d.personal ? '<sup>1</sup> Rise of 30 bpm or more within 10 min of standing.' : null)));
+      }
+    }
+    const total = pages.length;
+    return pages.map((p, i) => p.replace('%%N%%', i + 1).replace('%%M%%', total)).join('');
+  }
+
+  // Room left between page 1's content and its footer, in CSS px.
+  function rptRoom(pg) {
+    const foot = pg.querySelector('.foot'), top = pg.getBoundingClientRect().top;
+    let bottom = 0;
+    pg.querySelectorAll('*').forEach(el => {
+      if (foot.contains(el)) return;
+      const r = el.getBoundingClientRect();
+      if (r.width || r.height) bottom = Math.max(bottom, r.bottom - top);
+    });
+    return foot.getBoundingClientRect().top - top - bottom;
+  }
+
+  // Builds the pages into #report-print and fits page 1: moments without a page drop to one text line, latest first.
+  async function rptPrepare(iso) {
+    const d = await rptModel(iso);
+    if (!d) return null;
+    d.longDate = new Date(d.dayStart).toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    d.shortDate = new Date(d.dayStart).toLocaleDateString('en-CA', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+    let host = document.getElementById('report-print');
+    if (!host) { host = document.createElement('div'); host.id = 'report-print'; host.className = 'rpt'; host.setAttribute('aria-hidden', 'true'); document.body.appendChild(host); }
+    host.hidden = false;
+    try { await document.fonts.load("600 12px 'Work Sans'"); await document.fonts.load("400 12px 'Work Sans'"); await document.fonts.ready; } catch (e) {}
+    let keep = d.moments.filter(x => !x.zoom).length;
+    for (;;) {
+      host.innerHTML = rptPagesHtml(d, keep);
+      if (keep === 0 || rptRoom(host.querySelector('#rpg1')) >= 8) break;
+      keep--;
+    }
+    return { d, host, count: host.querySelectorAll('.page').length, zoomed: d.moments.filter(x => x.zoom).length };
+  }
+  function rptClear() {
+    const host = document.getElementById('report-print');
+    if (host) { host.innerHTML = ''; host.hidden = true; }
+    document.body.classList.remove('rpt-printing');
+  }
+
+  // ---------- Web: the print view; the browser saves it as a PDF ----------
+  let rptTitle = null;
+  async function rptDownload(iso) {
+    const prep = await rptPrepare(iso);
+    if (!prep) { UI.notice({ kind: 'error', text: 'No recording on this day.' }); return; }
+    rptPrint(iso);
+  }
+  function rptPrint(iso) {
+    rptTitle = document.title;
+    document.title = 'aorti day report ' + iso;
+    document.body.classList.add('rpt-printing');
+    window.print();
+  }
+  function rptAfterPrint() {
+    if (!document.body.classList.contains('rpt-printing')) return;
+    if (rptTitle != null) { document.title = rptTitle; rptTitle = null; }
+    rptClear();
+  }
+
+  // ---------- App: the same pages drawn to canvases for native-pdf.js and the share sheet ----------
+  let rptFontCss = null;
+  async function rptFontFaces() {
+    if (rptFontCss != null) return rptFontCss;
+    const files = ['assets/fonts/WorkSans-latin.woff2', 'assets/fonts/WorkSans-latin-ext.woff2'];
+    const faces = [];
+    for (const f of files) {
+      try {
+        const buf = new Uint8Array(await (await fetch(f)).arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        faces.push("@font-face{font-family:'Work Sans';font-weight:100 900;src:url(data:font/woff2;base64," + btoa(bin) + ") format('woff2');}");
+      } catch (e) {}
+    }
+    rptFontCss = faces.join('');
+    return rptFontCss;
+  }
+  function rptSheetCss() {
+    const out = [];
+    for (const sh of document.styleSheets) {
+      if (!sh.href || !/report\.css(\?|$)/.test(sh.href)) continue;
+      try { for (const r of sh.cssRules) out.push(r.cssText); } catch (e) {}
+    }
+    return out.join('\n');
+  }
+  // One page as a 2x US Letter PNG (1224 x 1584), through an SVG foreignObject of the page's own markup.
+  async function rptRaster(pageEl, css) {
+    const wrap = document.createElement('div');
+    wrap.className = 'rpt';
+    const style = document.createElement('style');
+    style.textContent = css;
+    wrap.appendChild(style);
+    wrap.appendChild(pageEl.cloneNode(true));
+    const xhtml = new XMLSerializer().serializeToString(wrap);
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="816" height="1056"><foreignObject x="0" y="0" width="816" height="1056">' + xhtml + '</foreignObject></svg>';
+    const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    // The image's own document loads the embedded font after decode; redraw until the running head has ink.
+    let c = null;
+    for (let i = 0; i < 12; i++) {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      if (i) await new Promise(r => setTimeout(r, 120));
+      c = window.__aortiNativePdf.newPage(false);
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0, 612, 792);
+      if (rptHasInk(g)) break;
+      if (i === 11) throw new Error('pdf_font_not_drawn');
+      c.width = 0; c.height = 0;
+    }
+    const url = c.toDataURL('image/png');
+    c.width = 0; c.height = 0;
+    // native-pdf.js encodes a page through toDataURL and width/height; one page lives in memory at a time.
+    return { toDataURL: () => url, width: 1224, height: 1584 };
+  }
+  // Dark pixels in the running head band (first 70 CSS px), where every page prints text.
+  function rptHasInk(g) {
+    const px = g.getImageData(96, 60, 1032, 30).data;
+    let dark = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i] < 120 && px[i + 3] > 0) dark++;
+    return dark > 40;
+  }
+  function rptNativeOk() { return !!(window.__aortiNativePdf && window.__aortiNativePdf.available && window.__aortiNativePdf.available()); }
+  async function rptShare(iso) {
+    let prep = null;
+    try {
+      prep = await rptPrepare(iso);
+      if (!prep) { UI.notice({ kind: 'error', text: 'No recording on this day.' }); return; }
+      const css = (await rptFontFaces()) + rptSheetCss();
+      const pages = [];
+      for (const pg of prep.host.querySelectorAll('.page')) pages.push(await rptRaster(pg, css));
+      await window.__aortiNativePdf.print({ pages, filename: 'aorti-day-' + iso + '.pdf', moments: prep.zoomed, week: false, share: true });
+      rptClear();
+    } catch (e) {
+      console.warn('[report] native PDF failed', e);
+      UI.notice({ kind: 'error', text: 'Could not make the PDF. Try again.' });
+      if (prep) rptPrint(iso); else rptClear();
+    }
+  }
+
+  // ---------- Share menu: a menu on the laptop, a sheet on the phone ----------
+  let rptMenuState = null;
+  function rptCloseMenu(focusBtn) {
+    if (!rptMenuState) return;
+    const st = rptMenuState;
+    rptMenuState = null;
+    document.removeEventListener('pointerdown', st.outside, true);
+    if (st.sheet) st.sheet.close('done'); else st.el.remove();
+    const btn = document.getElementById('export-report');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    if (focusBtn && btn) btn.focus({ preventScroll: true });
+  }
+  async function rptOpenMenu() {
+    const btn = document.getElementById('export-report');
+    if (rptMenuState) { rptCloseMenu(true); return; }
+    const iso = rptDayIso();
+    if (!iso) return;
+    let count = 1;
+    try { const d = await rptModel(iso); if (d) count = rptPageCount(d); } catch (e) { console.warn('[report] count failed', e); }
+    const native = rptNativeOk();
+    const m0 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    const label = new Date(+m0[1], +m0[2] - 1, +m0[3], 12).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    const items = native
+      ? [['share', 'Share report', '<path d="M12 3v12M7 8l5-5 5 5M5 14v6h14v-6"/>']]
+      : [['download', 'Download report (PDF)', '<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>']];
+    const head = '<div class="share-menu-head" id="share-menu-head"><span>Day report, ' + rptEsc(label) + '</span><span class="share-menu-count" data-pages="' + count + '">' + rptPlural(count, 'page') + '</span></div>';
+    const itemsHtml = items.map(([act, text, path]) => '<button type="button" role="menuitem" data-act="' + act + '" tabindex="-1"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + path + '</svg><span>' + text + '</span></button>').join('');
+    const run = (act) => {
+      rptCloseMenu(true);
+      if (act === 'share') rptShare(iso); else rptDownload(iso).catch(e => { console.warn('[report] print failed', e); UI.notice({ kind: 'error', text: 'Could not build the report.' }); rptClear(); });
+    };
+    const phone = window.matchMedia('(max-width: 768px)').matches;
+    let el, sheet = null;
+    if (phone) {
+      sheet = UI.sheet({ title: 'Share with my doctor', className: 'share-sheet', body: '<div class="menu share-menu" id="share-menu" role="menu" aria-labelledby="share-menu-head">' + head + itemsHtml + '</div>',
+        onClose: (why) => { if (why !== 'done' && rptMenuState) { const st = rptMenuState; rptMenuState = null; document.removeEventListener('pointerdown', st.outside, true); btn.setAttribute('aria-expanded', 'false'); } } });
+      el = sheet.root.querySelector('#share-menu');
+    } else {
+      el = document.createElement('div');
+      el.className = 'menu share-menu';
+      el.id = 'share-menu';
+      el.setAttribute('role', 'menu');
+      el.setAttribute('aria-labelledby', 'share-menu-head');
+      el.innerHTML = head + itemsHtml;
+      document.body.appendChild(el);
+      const r = btn.getBoundingClientRect();
+      el.style.top = Math.round(r.bottom + 4) + 'px';
+      el.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + 'px';
+    }
+    const buttons = [...el.querySelectorAll('[role="menuitem"]')];
+    buttons.forEach(b => b.addEventListener('click', () => run(b.dataset.act)));
+    el.addEventListener('keydown', (e) => {
+      const i = buttons.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const k = e.key === 'ArrowDown' ? 1 : -1; buttons[(i + k + buttons.length) % buttons.length].focus(); }
+      else if (e.key === 'Home') { e.preventDefault(); buttons[0].focus(); }
+      else if (e.key === 'End') { e.preventDefault(); buttons[buttons.length - 1].focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); rptCloseMenu(true); }
+      else if (e.key === 'Tab' && !sheet) rptCloseMenu(false);
+    });
+    const outside = (e) => { if (!el.contains(e.target) && !btn.contains(e.target) && !sheet) rptCloseMenu(false); };
+    document.addEventListener('pointerdown', outside, true);
+    rptMenuState = { el, sheet, outside };
+    btn.setAttribute('aria-expanded', 'true');
+    buttons[0].focus({ preventScroll: true });
+  }
+  window.__aortiReport = { prepare: (iso) => rptPrepare(iso || rptDayIso()), pageCount: async (iso) => rptPageCount(await rptModel(iso || rptDayIso())), dayIso: () => rptDayIso(), clear: rptClear, share: (iso) => rptShare(iso || rptDayIso()) };
+  // ===== Day report (S44) END =====
 
   // ===== Keyboard nav: ← / → move between adjacent sessions or days =====
   function setupKeyboardNav() {
@@ -10355,7 +11134,7 @@
         openViewerSettings(e.currentTarget);
       }
     });
-    document.getElementById('export-report').addEventListener('click', exportReport);
+    document.getElementById('export-report').addEventListener('click', () => { rptOpenMenu().catch(e => console.warn('[report] menu failed', e)); });
     // Summary-bar collapse toggle (mobile only). Same pattern as the
     // section/insight carets in this file: tap anywhere on the bar to
     // toggle. Delegated because the bar is re-rendered inside
@@ -10371,6 +11150,7 @@
     });
     setupKeyboardNav();
     window.addEventListener('afterprint', () => {
+      rptAfterPrint();
       document.body.classList.remove('printing');
       resizeAllViewerCharts();
     });
