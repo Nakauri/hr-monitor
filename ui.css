@@ -239,6 +239,12 @@ html.ui-locked, html.ui-locked body { overflow: hidden; }
 @container (max-width: 440px) { .notice .acts { margin: 0 0 0 auto; } }
 .notice .acts .btn:not(.icon) { min-height: 44px; }
 .notice.bar { border-radius: 0; border-width: 0 0 1px 4px; }
+/* A bar notice is one row: message left, actions right, never stacked (demo banner at 360, Khal 2026-10-12). */
+.notice.bar { flex-wrap: nowrap; align-items: center; padding-top: var(--s2); padding-bottom: var(--s2); }
+.notice.bar .msg { flex: 1 1 auto; padding-top: 0; }
+.notice.bar .acts { margin: 0 0 0 auto; }
+.notice.bar > .ico { top: 50%; transform: translateY(-50%); }
+.notice.bar:not(.warning):not(.error) { border-left-width: 0; }
 .notice-stack { position: fixed; top: var(--s2); left: var(--s2); right: var(--s2); z-index: var(--z-ui-toast); display: flex; flex-direction: column; align-items: center; gap: var(--s2); pointer-events: none; }
 .notice-stack .notice { width: 100%; max-width: 560px; pointer-events: auto; box-shadow: var(--shadow-3); }
 

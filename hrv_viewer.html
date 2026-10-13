@@ -326,6 +326,8 @@
     align-items: center;
   }
   .cal-legend-strip .chart-legend-item { gap: 6px; }
+  /* Five zone keys on one row on a phone, never 4 plus 1. */
+  @media (max-width: 480px) { .cal-legend-strip { display: grid; grid-template-columns: repeat(5, auto); justify-content: space-between; gap: var(--s2); width: 100%; margin-left: 0; } }
   .cal-grid {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -997,6 +999,8 @@
     transition: background 0.12s;
   }
   .insight-master-head:hover { background: rgba(255,255,255,0.02); }
+  /* Phone: the title stays on one line and the summary drops under it, aligned with the title. */
+  @media (max-width: 480px) { .insight-master-head { flex-wrap: wrap; row-gap: var(--s1); } .insight-master-head > span:not(.insight-master-summary) { white-space: nowrap; } .insight-master-head .insight-master-summary { flex: 1 0 100%; margin-left: 28px; } }
   .insight-master-head .insight-chevron {
     flex: 0 0 auto;
     width: 16px;
