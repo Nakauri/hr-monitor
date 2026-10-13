@@ -129,6 +129,7 @@
   }
   .lede { font-size: var(--t20); line-height: 1.55; color: var(--text-dim); max-width: 36em; margin: 0 0 var(--s6); }
   .split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--s7); align-items: center; }
+  .hero-title .accent { color: var(--warn-high); }
   .actions { display: flex; flex-wrap: wrap; gap: var(--s3); margin-top: var(--s6); }
   .update-link { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s3); }
   .update-label { color: var(--text-dim); font-size: var(--t14); }
@@ -372,8 +373,8 @@
 
 <header class="wrap hero">
   <div>
-    <h1 class="hero-title">Live heart rate and HRV, for your stream and your own records.</h1>
-    <p class="hero-sub">Put your heart rate on stream, or record it day and night and read it back later. Free.</p>
+    <h1 class="hero-title">Your <span class="accent">heart rate</span>, on stream and on record.</h1>
+    <p class="hero-sub">Put your heart rate and HRV on stream, or record them day and night and read them back later. Free.</p>
     <div class="hero-cta">
       <a class="btn primary lg" id="hero-open-monitor" href="./hr_monitor.html">Open monitor</a>
       <a class="btn lg" href="#android-app">Get the Android app</a>
@@ -793,7 +794,7 @@
       // The frame is a 380 px viewport, the OBS browser source width the monitor suggests, so the preview matches OBS.
       frame.style.height = Math.ceil(r.height) + 'px';
       frame.style.transform = 'translate(' + (32 * k) + 'px, ' + (-32 * k) + 'px) scale(' + k + ')';
-      sizeEl.textContent = 'Default size: ' + Math.round(r.width) + ' × ' + Math.round(r.height) + ' px, ' + (100 * r.width * r.height / (1920 * 1080)).toFixed(1) + '% of a 1080p stream';
+      sizeEl.textContent = 'Default size: ' + Math.round(r.width) + ' × ' + Math.round(r.height) + ' px';
     }
     if (window.ResizeObserver && stage) new ResizeObserver(() => fit()).observe(stage);
     function pick(btn) {
