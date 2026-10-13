@@ -35,8 +35,9 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 function serve(root, rewrite) {
   const server = http.createServer((req, res) => {
     const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    const file = path.join(root, rel === '/' ? '/index.html' : rel);
-    if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
+    // The sample week always comes from this build's demo/ (generated since fb75bb4), so both sides show the same data.
+    const file = path.join(rel.startsWith('/demo/') ? ROOT : root, rel === '/' ? '/index.html' : rel);
+    if (!file.startsWith(rel.startsWith('/demo/') ? ROOT : root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
     let body = fs.readFileSync(file);
     if (rewrite) body = rewrite(rel, body);
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); res.end(body);
@@ -85,7 +86,9 @@ async function capture(beforeRoot) {
       log.push(`${path.basename(file)} ${r.W}x${r.H} q${r.q} ${Math.round(fs.statSync(file).size / 1024)} KB`);
     }
   }
-  for (const [ver, root] of [['before', path.resolve(beforeRoot)], ['after', ROOT]]) {
+  // --side before|after takes one side only (each side runs about 90 s).
+  const side = argVal('--side');
+  for (const [ver, root] of [['before', path.resolve(beforeRoot)], ['after', ROOT]].filter(([v]) => !side || v === side)) {
     const { server, base } = await serve(root, appShim(root));
     for (const size of [1440, 360]) {
       const phone = size === 360;
@@ -106,7 +109,14 @@ async function capture(beforeRoot) {
         const tall = { day: phone ? 1300 : null, month: phone ? null : 1180 }[id];
         await page.setViewportSize({ width: vp.width, height: tall || vp.height });
         await go(hash);
+        // Phone Now Day: the Summary collapsed to its four numbers, so the frame shows the chart (Khal 10-12).
+        const fold = phone && ver === 'after' && id === 'day';
+        if (fold) {
+          await page.evaluate(() => { const b = document.getElementById('summary-bar'); if (b && !b.classList.contains('collapsed')) b.click(); });
+          await page.waitForTimeout(800);
+        }
         await save(await page.screenshot(), `${id}-${ver}-${size}`, maxW);
+        if (fold) await page.evaluate(() => { try { localStorage.removeItem('hrv_summary_collapsed'); } catch (e) {} });
       }
       // Zoomed chart: before, the full-day session view; after, the Day view. Drag across the strip under the chart.
       await page.setViewportSize(vp);
