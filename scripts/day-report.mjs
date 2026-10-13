@@ -1,7 +1,7 @@
 // Guards: Khal 2026-10-12 "since the share with your doctor button is so big now, i'd like us to get the reports in order",
 // and the old page-print bug "Share prints the page in an ugly manner" (2026-10-12): Share printed the whole viewer page.
 // Files: hrv_viewer.html (Share menu, Day report), report.css, mobile/scripts/copy-web.js; reads mobile/src/native-pdf.js.
-// Runtime about 15 s; --mutants adds about 5 s.
+// Runtime about 20 s; --mutants adds about 4 s.
 // S44 Day report and Share menu, headless, on the demo showcase day and one sparse day:
 // 1. Menu: opens by a real click and by the keyboard (Enter, arrows), Escape closes it and focus returns to Share;
 //    the phone opens it as a sheet; menu items keep 4.5:1 text contrast plain, hovered and focused.
@@ -13,7 +13,7 @@
 // 5. Digits centred in every moment circle within 0.5 px (mocks/report-centre.mjs, measured from pixels at 3x).
 // 6. App path (fake bridge): Share report calls printPdf with N pages of 1224 x 1584 PNG and the promise settles; a
 //    rejected call shows a notice and clears the report (the app WebView ignores print).
-// 7. Save to phone (S48, fake bridge): the app menu shows "Save to phone" then "Share report"; Save calls savePdf with
+// 7. Save to phone (S48, fake bridge; guards a save that never settles and leaves Share busy, and a missing or wrong notice): the app menu shows "Save to phone" then "Share report"; Save calls savePdf with
 //    N pages and no share flag, and settles for saved ("Saved" notice), cancelled (no notice) and failed (plain notice).
 // --mutants: page 1 one row over the footer, and a menu count off by one; each must FAIL.
 // Usage: node scripts/day-report.mjs [--mutants] [--ux <ux-audit dir>] [--shots]
