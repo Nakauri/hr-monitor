@@ -1,5 +1,7 @@
 {
-  "generatedAt": "2026-04-27T01:07:38.702Z",
+  "generatedAt": "2026-10-12T00:00:00.000Z",
+  "synthetic": true,
+  "seed": 4220426,
   "files": [
     "hrv_session_2026-04-20T10-55-58.csv",
     "hrv_session_2026-04-21T12-36-30.csv",
