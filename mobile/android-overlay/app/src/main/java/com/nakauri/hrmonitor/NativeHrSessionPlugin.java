@@ -713,9 +713,13 @@ public class NativeHrSessionPlugin extends Plugin {
                         i.addCategory(Intent.CATEGORY_OPENABLE);
                         i.setType("application/pdf");
                         i.putExtra(Intent.EXTRA_TITLE, file.getName());
+                        // The saved call is written into the instance-state Bundle when the picker covers the app;
+                        // the page images would overflow the binder and kill the process, so drop them first.
+                        call.getData().remove("pages");
                         startActivityForResult(call, i, "savePdfResult");
                     } catch (Throwable t) {
                         Log.w(TAG, "savePdf picker failed: " + t);
+                        try { getBridge().releaseCall(call); } catch (Throwable ignored) {}
                         PdfPrinter.discard(id);
                         call.reject("pdf_save_failed");
                     }

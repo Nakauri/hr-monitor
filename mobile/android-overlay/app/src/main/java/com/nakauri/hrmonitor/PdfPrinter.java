@@ -303,8 +303,9 @@ public final class PdfPrinter {
         }
     }
 
-    // Writes only into the document the person just created; on failure that document is left as it is.
+    // Writes only into the document the person just created; on failure that empty document is removed.
     private static void copy(Context app, File src, Uri dest, Settle s) {
+        boolean done = false;
         try {
             if (src == null || !src.isFile()) { s.fail("pdf_save_lost"); return; }
             try (InputStream in = new FileInputStream(src);
@@ -318,12 +319,16 @@ public final class PdfPrinter {
             JSObject ret = new JSObject();
             ret.put("saved", true);
             ret.put("name", displayName(app, dest, src.getName()));
+            done = true;
             s.ok(ret);
         } catch (Throwable t) {
             Log.w(TAG, "save copy failed: " + t);
             s.fail("pdf_save_failed");
         } finally {
             removeOwn(src);
+            if (!done) {
+                try { android.provider.DocumentsContract.deleteDocument(app.getContentResolver(), dest); } catch (Throwable ignored) {}
+            }
         }
     }
 
