@@ -12,7 +12,7 @@
 //   headings are not self-links, a shared link lands below the nav, the copy button copies the right URL.
 // Files: index.html, legal.html, changelog.html, changelog.json, assets/landing/ (site.css, site.js, images),
 //   widget.js, overlay.html; rules.mjs from the main checkout's ux-audit folder.
-// Runtime: about 150 s (static checks under 5 s; one headless Chromium plus 7 rules.mjs runs).
+// Runtime: about 55 s (static checks under 5 s; one headless Chromium plus 7 rules.mjs runs).
 // Usage: node scripts/landing.mjs [--root <dir>] [--shots <dir>] [--prefix s40-] [--shots-only] [--ux <dir>]
 //        node scripts/landing.mjs --write-changelog   (rewrites the entries in changelog.html from changelog.json)
 // Mutants run on every call and must FAIL: story line reworded and Inter loaded (static), the old hover rule
