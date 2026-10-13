@@ -4,6 +4,7 @@
 // S46 named bugs (Khal 2026-10-12): the page "EXTREMELY bad about its right real estate" (text and pictures leaving the
 // right side empty), the Day story missing the old "View as full-day timeline" step, the intro paragraph he cut, and
 // the Zoom copy saying the markers list moved without saying where it lives now.
+// S47: copy in a UX shape (release line, goals, problem then change per section, outcomes list).
 // Two modes. Runtime: --capture about 3 min; checks about 10 s; --mutants about 30 s more.
 //   node scripts/new-look.mjs --capture <before-root>   takes every before/after pair on synthetic data only
 //        (the viewer's ?demo=1 files, identical in both builds, and the fake phone bridge for the monitor) and
@@ -360,6 +361,17 @@ function staticChecks() {
   check(!/I rebuilt most of aorti/.test(PAGE) && /<time datetime="2026-10-12">October 12, 2026<\/time>/.test(PAGE), 'intro paragraph gone, the date in a time[datetime]');
   const zoomSec = (PAGE.match(/<section class="area" id="zoom"[\s\S]*?<\/section>/) || [''])[0];
   check(/Markers button above the chart/.test(zoomSec) && /markers-after-1440\.webp"[^>]*alt="[^"]*Markers · \d+ button/.test(zoomSec), 'Zoom: the copy names the Markers button and a Now picture shows its list open');
+  // S47 (Khal 2026-10-12, after the Studio C&G case study): release line, three goals, each area told as the problem
+  // then the change in exactly two paragraphs, and the speed list as outcomes.
+  check(/<p class="date">Released <time datetime="\d{4}-\d{2}-\d{2}">[^<]+<\/time><\/p>/.test(PAGE), 'intro: "Released" plus a time[datetime]');
+  const goals = (PAGE.match(/<ul class="goals">([\s\S]*?)<\/ul>/) || ['', ''])[1];
+  check((goals.match(/<li>/g) || []).length === 3, 'intro: the goals list has three items', goals.replace(/\s+/g, ' '));
+  const paras = [...PAGE.matchAll(/<section class="area" id="([^"]+)"[\s\S]*?<div class="area-text">([\s\S]*?)<\/div>/g)]
+    .filter((m) => m[1] !== 'speed').map((m) => [m[1], (m[2].match(/<p[\s>]/g) || []).length]);
+  check(paras.length === PAIRS.length + 1 && paras.every((p) => p[1] === 2), `every area section has exactly two copy paragraphs (${paras.length} sections)`, JSON.stringify(paras));
+  const outcomes = (PAGE.match(/<section class="area speed"[\s\S]*?<ul class="outcomes">([\s\S]*?)<\/ul>/) || ['', ''])[1];
+  check(/One click fewer to the graph/.test(outcomes) && /One set of controls instead of each screen's own/.test(outcomes) && /125 ms[\s\S]*14 ms/.test(outcomes),
+    'outcomes list: the measured numbers, one click fewer, one set of controls');
   check(nav(idx) && nav(PAGE) === nav(idx), `nav identical to ${from}`);
   check(foot(idx) && foot(PAGE) === foot(idx), `footer identical to ${from}`);
 }
