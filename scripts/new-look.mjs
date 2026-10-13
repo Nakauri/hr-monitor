@@ -1,6 +1,9 @@
 // Guards: S41 (2026-10-12) the "new look" announcement page, new-look.html, and its pictures in assets/new-look/.
 // Named bugs: pages drifting to their own top bar (Khal 2026-10-12, "the home button on privacy and terms is weirdly
 // placed"), so nav and footer must equal index.html; the phone Day picture showing a tall one-column summary (Khal 10-12).
+// S46 named bugs (Khal 2026-10-12): the page "EXTREMELY bad about its right real estate" (text and pictures leaving the
+// right side empty), the Day story missing the old "View as full-day timeline" step, the intro paragraph he cut, and
+// the Zoom copy saying the markers list moved without saying where it lives now.
 // Two modes. Runtime: --capture about 3 min; checks about 10 s; --mutants about 30 s more.
 //   node scripts/new-look.mjs --capture <before-root>   takes every before/after pair on synthetic data only
 //        (the viewer's ?demo=1 files, identical in both builds, and the fake phone bridge for the monitor) and
@@ -30,8 +33,12 @@ const OUT = path.join(ROOT, 'assets', 'new-look');
 // Pairs in page order. Sizes: 1440 laptop, 360 phone. The widget pair is one size (the widget does not change with the page).
 export const PAIRS = ['day', 'zoom', 'month', 'week', 'trends', 'monitor', 'settings'];
 export const WIDGETS = ['chip', 'slim', 'hrhrv', 'notrends'];
+// S46: Day before step 2 (the old full-day timeline page) at both sizes, and the Markers list open on the laptop.
+export const EXTRAS = ['day-before2-1440', 'day-before2-360', 'markers-after-1440'];
 const BUDGET = { display: 300 * 1024, full: 900 * 1024 };
 const DAY = '2026-04-24'; // Khal 2026-10-12: the most complete demo day
+// Widget measurements taken at capture time (local, beside the build shots): trace and trend coverage, HRV text.
+const WIDGET_LOG = path.join(UX, 'redesign', 'build-shots', 'new-look-widgets.json');
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.csv': 'text/csv', '.ico': 'image/x-icon' };
 function serve(root, rewrite) {
@@ -88,8 +95,94 @@ async function capture(beforeRoot) {
       log.push(`${path.basename(file)} ${r.W}x${r.H} q${r.q} ${Math.round(fs.statSync(file).size / 1024)} KB`);
     }
   }
+  // Stream widget pictures (S46 follow-up, Khal 10-12 "the stream widget example doesnt have a trend line"):
+  // Now comes from the landing page's own variant preview (real widget.js on a seeded heart-like history);
+  // Before is the old monitor fed 11 minutes of beats on a shifted clock so its trend and trace fill.
+  // Each picture's canvases and HRV text are measured as it is taken and written to WIDGET_LOG for the checks.
+  const measure = () => {
+    const out = {};
+    for (const id of ['hr-live-trace', 'compact-chart']) {
+      const c = document.getElementById(id);
+      if (!c || !c.offsetWidth || !c.width) continue;
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let cols = 0;
+      for (let i = 0; i < c.width; i++) for (let j = 0; j < c.height; j++) {
+        const k = (j * c.width + i) * 4;
+        if (d[k + 3] > 60 && Math.max(d[k], d[k + 1], d[k + 2]) - Math.min(d[k], d[k + 1], d[k + 2]) > 40) { cols++; break; }
+      }
+      out[id] = +(cols / c.width).toFixed(2);
+    }
+    const v = document.getElementById('compact-hrv-value');
+    out.hrv = v && v.offsetWidth ? v.textContent.trim() : null;
+    return out;
+  };
+  const record = {};
+  async function widgetShots(base, ver, opts) {
+    const wctx = await browser.newContext(Object.assign({}, opts, { deviceScaleFactor: 2 })); await route(wctx, base);
+    const w = await wctx.newPage();
+    const variants = ver === 'before' ? [['single', '']] : [['chip', ''], ['slim', 'no-hrv no-live-hr no-inline-trends'], ['hrhrv', 'no-live-hr no-inline-trends'], ['notrends', 'no-inline-trends']];
+    if (ver === 'before') {
+      await wctx.addInitScript(fakeBridge({ scenario: 'live', savedStrap: true, signedIn: true, sessionAgeMs: 72 * 60000 }));
+      await wctx.addInitScript(() => { const real = Date.now.bind(Date); window.__dt = 0; Date.now = () => real() + window.__dt; });
+      await w.goto(`${base}/hr_monitor.html`, { waitUntil: 'domcontentloaded' });
+      await w.waitForTimeout(2500);
+      await w.evaluate(async () => {
+        const F = window.__fake; if (!F || !F.listeners.hr) return;
+        for (let i = 0; i < 660; i++) {
+          window.__dt += 1000;
+          const hr = Math.round(76 + 10 * Math.sin(i / 47) + 5 * Math.sin(i / 9.1) + ((i * 7) % 5) - 2);
+          const rr = [Math.round(60000 / hr) + ((i * 13) % 41) - 20];
+          const rmssd = 30 + 8 * Math.sin(i / 61) + ((i * 11) % 7) - 3;
+          F.listeners.hr({ hr, rrIntervals: rr, rmssd, timestampMs: Date.now(), contactOff: false });
+          if (i % 4 === 0) await new Promise((r) => setTimeout(r, 4));
+        }
+      });
+      await w.waitForTimeout(2000);
+      for (const [v] of variants) {
+        const m = await w.evaluate(measure);
+        await save(await w.locator('#hr-widget').screenshot(), `widget-${ver}-${v}`, 1200);
+        record[`widget-${ver}-${v}`] = m;
+      }
+    } else {
+      await w.goto(`${base}/index.html`, { waitUntil: 'load' });
+      await w.waitForSelector('body.variants-ready', { timeout: 20000 });
+      const frame = await (await w.$('#variant-frame')).contentFrame();
+      // Lift the preview out of its scaled stage so the widget renders at its true size.
+      const lift = () => w.evaluate(() => { const f = document.getElementById('variant-frame'); Object.assign(f.style, { position: 'fixed', left: '0px', top: '0px', bottom: 'auto', width: '380px', transform: 'none', zIndex: 99999 }); });
+      await w.waitForTimeout(2500);
+      for (const [v, cls] of variants) {
+        await w.locator('#variant-seg button').nth(variants.findIndex((x) => x[0] === v)).click();
+        await w.waitForTimeout(1500); await lift(); await w.waitForTimeout(600);
+        const got = await frame.evaluate(() => document.body.className);
+        if (cls.split(' ').filter(Boolean).some((c) => !got.includes(c))) log.push(`WARN ${v}: preview classes "${got}"`);
+        const m = await frame.evaluate(measure);
+        m.footprint = await frame.evaluate(() => { const r = document.getElementById('hr-widget').getBoundingClientRect(); return Math.round(r.width) + ' × ' + Math.round(r.height); });
+        await save(await frame.locator('#hr-widget').screenshot(), `widget-${ver}-${v}`, 1200);
+        record[`widget-${ver}-${v}`] = m;
+      }
+    }
+    for (const n of Object.keys(record)) {
+      if (!n.startsWith(`widget-${ver}-`)) continue;
+      const f = path.join(OUT, `${n}.webp`), g = path.join(OUT, `${n}-full.webp`);
+      Object.assign(record[n], { size: fs.statSync(f).size, fullSize: fs.statSync(g).size });
+    }
+    await wctx.close();
+    const prev = fs.existsSync(WIDGET_LOG) ? JSON.parse(fs.readFileSync(WIDGET_LOG, 'utf8')) : {};
+    fs.writeFileSync(WIDGET_LOG, JSON.stringify(Object.assign(prev, record), null, 1));
+    log.push('widgets ' + JSON.stringify(record));
+  }
+  if (argVal('--only') === 'widgets') {
+    for (const [ver, root] of [['before', path.resolve(beforeRoot)], ['after', ROOT]].filter(([v]) => !argVal('--side') || v === argVal('--side'))) {
+      const { server, base } = await serve(root, appShim(root));
+      await widgetShots(base, ver, { viewport: { width: 1440, height: 900 }, timezoneId: 'America/Edmonton' });
+      server.close();
+    }
+    await browser.close(); console.log(log.join('\n')); return;
+  }
   // --side before|after takes one side only (each side runs about 90 s).
   const side = argVal('--side');
+  // --only day2 (with --side before) or --only markers (with --side after) takes just that Day extra; about 20 s.
+  const dayOnly = ['day2', 'markers'].includes(argVal('--only'));
   for (const [ver, root] of [['before', path.resolve(beforeRoot)], ['after', ROOT]].filter(([v]) => !side || v === side)) {
     const { server, base } = await serve(root, appShim(root));
     for (const size of [1440, 360]) {
@@ -106,7 +199,7 @@ async function capture(beforeRoot) {
         await page.waitForTimeout(2500);
         await page.evaluate(() => window.scrollTo(0, 0));
       };
-      for (const [id, hash] of [['day', `#/day/${DAY}`], ['month', '#/month/2026-04'], ['week', '#/week/2026-04-20'], ['trends', '#/all']]) {
+      for (const [id, hash] of [['day', `#/day/${DAY}`], ['month', '#/month/2026-04'], ['week', '#/week/2026-04-20'], ['trends', '#/all']].slice(0, dayOnly ? 1 : 4)) {
         // Taller frames where the view's point sits low: the phone Day chart, the laptop Month's data week.
         const tall = { day: phone ? 1300 : null, month: phone ? null : 1180 }[id];
         await page.setViewportSize({ width: vp.width, height: tall || vp.height });
@@ -117,9 +210,28 @@ async function capture(beforeRoot) {
           await page.evaluate(() => { const b = document.getElementById('summary-bar'); if (b && !b.classList.contains('collapsed')) b.click(); });
           await page.waitForTimeout(800);
         }
-        await save(await page.screenshot(), `${id}-${ver}-${size}`, maxW);
+        if (!dayOnly) await save(await page.screenshot(), `${id}-${ver}-${size}`, maxW);
         if (fold) await page.evaluate(() => { try { localStorage.removeItem('hrv_summary_collapsed'); } catch (e) {} });
+        // Before, step 2: the old Day reached its graph only through "View as full-day timeline" (S46).
+        if (ver === 'before' && id === 'day') {
+          const link = page.locator('#day-view-timeline');
+          if (await link.count()) {
+            await link.click(); await page.waitForTimeout(3000);
+            await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(300);
+            await save(await page.screenshot(), `day-before2-${size}`, maxW);
+          } else log.push(`WARN before ${size}: no "View as full-day timeline" link`);
+        }
+        // Now, laptop: the Markers button opens the list over the chart (S46: the copy names where it lives).
+        if (ver === 'after' && id === 'day' && !phone) {
+          const btn = page.locator('#markers-toggle');
+          if (await btn.count()) {
+            await btn.click(); await page.waitForTimeout(1200);
+            await save(await page.screenshot(), 'markers-after-1440', maxW);
+            await btn.click(); await page.waitForTimeout(400);
+          } else log.push('WARN after 1440: no Markers button');
+        }
       }
+      if (dayOnly) { await ctx.close(); console.log(`captured ${ver} ${size} Day extra`); continue; }
       // Zoomed chart: before, the full-day session view; after, the Day view. Drag across the strip under the chart.
       await page.setViewportSize(vp);
       await go(ver === 'before' ? `#/session/day:${DAY}` : `#/day/${DAY}`);
@@ -178,21 +290,7 @@ async function capture(beforeRoot) {
       await m.evaluate(() => { const s = document.querySelector('.section[data-section="settings"]'); if (s) window.scrollBy(0, s.getBoundingClientRect().top - 16); });
       await m.waitForTimeout(400);
       await save(await m.screenshot(), `settings-${ver}-${size}`, maxW);
-      if (!phone) {
-        const wctx = await browser.newContext(Object.assign({}, opts, { deviceScaleFactor: 2 })); await route(wctx, base);
-        await wctx.addInitScript(fakeBridge({ scenario: 'live', savedStrap: true, signedIn: true, sessionAgeMs: 72 * 60000 }));
-        const w = await wctx.newPage();
-        await w.goto(`${base}/hr_monitor.html`, { waitUntil: 'domcontentloaded' });
-        await w.waitForTimeout(2500); await feedBeats(w); await w.waitForTimeout(1000);
-        const variants = ver === 'before' ? [['single', '']] : [['chip', ''], ['slim', 'no-hrv no-live-hr no-inline-trends'], ['hrhrv', 'no-live-hr no-inline-trends'], ['notrends', 'no-inline-trends']];
-        for (const [v, cls] of variants) {
-          await w.evaluate((cls) => { ['no-hr', 'no-hrv', 'no-live-hr', 'no-inline-trends'].forEach((c) => document.body.classList.remove(c)); cls.split(' ').filter(Boolean).forEach((c) => document.body.classList.add(c)); }, cls);
-          await w.waitForTimeout(500);
-          const png = await w.locator('#hr-widget').screenshot();
-          await save(png, `widget-${ver}-${v}`, 1200);
-        }
-        await wctx.close();
-      }
+      if (!phone) await widgetShots(base, ver, opts);
       await mctx.close();
       console.log(`captured ${ver} ${size}`);
     }
@@ -216,7 +314,7 @@ function staticChecks() {
   const kb = (f) => Math.round(fs.statSync(f).size / 1024);
   const want = [];
   for (const id of PAIRS) for (const size of [1440, 360]) for (const ver of ['before', 'after']) want.push(`${id}-${ver}-${size}`);
-  want.push('widget-before-single', ...WIDGETS.map((v) => `widget-after-${v}`));
+  want.push('widget-before-single', ...WIDGETS.map((v) => `widget-after-${v}`), ...EXTRAS);
   const missing = [], over = [];
   for (const n of want) {
     for (const [suffix, budget, attr] of [['', BUDGET.display, `src="./assets/new-look/${n}.webp"`], ['-full', BUDGET.full, `data-full="./assets/new-look/${n}-full.webp"`]]) {
@@ -238,6 +336,30 @@ function staticChecks() {
   if (!hasMain) { idx = execFileSync('git', ['-C', ROOT, 'show', 'main:index.html'], { encoding: 'utf8' }).replace(/\r\n/g, '\n'); from = 'main:index.html'; }
   const nav = (s) => (s.match(/<nav class="nav"[\s\S]*?\n<\/nav>/) || [null])[0];
   const foot = (s) => (s.match(/<footer class="site-footer">[\s\S]*?<\/footer>/) || [null])[0];
+  // S46 follow-up: widget pictures with a filled trace and trend and a number for HRV, measured when taken.
+  const wl = fs.existsSync(WIDGET_LOG) ? JSON.parse(fs.readFileSync(WIDGET_LOG, 'utf8')) : {};
+  const wbad = [];
+  for (const n of ['widget-before-single', ...WIDGETS.map((v) => `widget-after-${v}`)]) {
+    const r = wl[n], f = path.join(OUT, `${n}.webp`);
+    if (!r) { wbad.push(`${n}: not measured`); continue; }
+    if (!fs.existsSync(f) || fs.statSync(f).size !== r.size) wbad.push(`${n}: file changed since it was measured`);
+    const need = /single|chip/.test(n) ? ['hr-live-trace', 'compact-chart'] : /notrends/.test(n) ? ['hr-live-trace'] : [];
+    for (const c of need) if (!(r[c] >= 0.6)) wbad.push(`${n}: ${c} covers ${r[c]}`);
+    if (!/slim/.test(n) && !/^\d+$/.test(r.hrv || '')) wbad.push(`${n}: HRV shows "${r.hrv}"`);
+    if (r.footprint && !PAGE.includes(`${r.footprint} px</figcaption>`)) wbad.push(`${n}: caption lacks ${r.footprint} px`);
+  }
+  check(!wbad.length, 'widget pictures: trace and trend drawn across 60% or more, HRV a number, captions match the footprint', wbad.join('; '));
+  // S46: Day tells the old two-step route (block bar, then "View as full-day timeline") against one Now screen.
+  const day = (PAGE.match(/<section class="area" id="day"[\s\S]*?<\/section>/) || [''])[0];
+  const steps = [...day.matchAll(/<div class="pair[^"]*">([\s\S]*?)<\/div>\s*(?=<h3|<\/div>)/g)].map((m) =>
+    [...m[1].matchAll(/<figcaption>([^<]*)<\/figcaption>[\s\S]*?<img src="[^"]*-(1440|360)\.webp"/g)].map((f) => f[2] + ' ' + f[1].split(':')[0]));
+  const wantSteps = (s) => [`${s} Before, step 1`, `${s} Before, step 2`, `${s} Now`].join(' | ');
+  check(steps.length === 2 && steps[0].join(' | ') === wantSteps('1440') && steps[1].join(' | ') === wantSteps('360'),
+    'Day: Before step 1, Before step 2 and Now at laptop and phone', JSON.stringify(steps));
+  check(/<figcaption>Before, step 2: after View as full-day timeline<\/figcaption>/.test(day) && /one click less/.test(day), 'Day: step 2 named by its link, Now says one click less');
+  check(!/I rebuilt most of aorti/.test(PAGE) && /<time datetime="2026-10-12">October 12, 2026<\/time>/.test(PAGE), 'intro paragraph gone, the date in a time[datetime]');
+  const zoomSec = (PAGE.match(/<section class="area" id="zoom"[\s\S]*?<\/section>/) || [''])[0];
+  check(/Markers button above the chart/.test(zoomSec) && /markers-after-1440\.webp"[^>]*alt="[^"]*Markers · \d+ button/.test(zoomSec), 'Zoom: the copy names the Markers button and a Now picture shows its list open');
   check(nav(idx) && nav(PAGE) === nav(idx), `nav identical to ${from}`);
   check(foot(idx) && foot(PAGE) === foot(idx), `footer identical to ${from}`);
 }
@@ -265,6 +387,31 @@ async function runtime(browser, base, size, only) {
     const sw = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, w: window.innerWidth }));
     check(sw.sw <= sw.w, `${t}: no sideways scroll`, JSON.stringify(sw));
     if (phone) check(/after/.test(order[0].full), `${t}: Now stacks first on the phone`, order[0].full);
+    if (!phone) {
+      // S46: text column beside the pictures, and no picture row leaving more than 35% of the section empty beside it.
+      const fill = await page.evaluate(() => [...document.querySelectorAll('main > section')].map((sec) => {
+        const s = sec.getBoundingClientRect(), t = sec.querySelector(':scope > .area-text'), p = sec.querySelector(':scope > .area-pics');
+        if (!t || !p) return { id: sec.id || sec.className, empty: 1, side: false };
+        const tr = t.getBoundingClientRect(), pr = p.getBoundingClientRect();
+        const rows = [...p.children].filter((c) => c.tagName !== 'H3').map((r) => {
+          const figs = [...r.querySelectorAll('figure')].map((f) => f.getBoundingClientRect());
+          const w = figs.length ? Math.max(...figs.map((f) => f.right)) - Math.min(...figs.map((f) => f.left)) : r.getBoundingClientRect().width;
+          return 1 - (tr.width + w) / s.width;
+        });
+        const spill = [...p.querySelectorAll('figure')].some((f) => f.getBoundingClientRect().right > s.right + 1);
+        return { id: sec.id || sec.className, side: pr.left >= tr.right - 1 && Math.abs(pr.top - tr.top) < 4 && !spill, spill, empty: +Math.max(...rows).toFixed(2) };
+      }));
+      const bad = fill.filter((f) => !f.side || f.empty > 0.35);
+      check(fill.length >= 10 && !bad.length, `${t}: every section is text beside pictures, worst empty share ${Math.max(...fill.map((f) => f.empty))} (limit 0.35)`, JSON.stringify(bad));
+      const shots = argVal('--shots');
+      if (shots) {
+        fs.mkdirSync(shots, { recursive: true });
+        await page.evaluate(async () => { for (const i of document.images) { i.loading = 'eager'; } await Promise.all([...document.images].map((i) => i.decode().catch(() => {}))); });
+        await page.screenshot({ path: path.join(shots, 's46-page-1440.png'), fullPage: true });
+        await page.locator('#day').screenshot({ path: path.join(shots, 's46-day-1440.png') });
+        await page.evaluate(() => window.scrollTo(0, 0));
+      }
+    }
   }
   // Click the third picture in page order: opens on its full-size file with its alt text as the caption.
   const third = order[2];

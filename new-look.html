@@ -32,14 +32,29 @@
   main { padding-top: var(--s7); padding-bottom: var(--s8); }
   h1 { font-size: clamp(36px, 4.6vw, 56px); line-height: 1.06; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 var(--s5); }
   .intro { max-width: 40em; margin: 0 0 var(--s7); }
-  .intro p { margin: 0 0 var(--s4); font-size: var(--t20); color: var(--text-dim); }
-  .intro p:first-child { color: var(--text); }
+  .intro p { margin: 0 0 var(--s4); font-size: var(--t20); color: var(--text); }
+  .intro p.date { margin-top: calc(-1 * var(--s2)); font-size: var(--t16); color: var(--text-dim); }
   .area { padding: var(--s7) 0; border-top: 1px solid var(--border); scroll-margin-top: 88px; }
   .area h2 { font-size: var(--t32); line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 var(--s4); }
-  .area > p { max-width: 40em; margin: 0 0 var(--s4); color: var(--text-dim); }
+  .area-text p { max-width: 40em; margin: 0 0 var(--s4); color: var(--text-dim); }
   .area h3.size { font-size: var(--t16); font-weight: 600; color: var(--text); margin: var(--s6) 0 var(--s3); }
+  .area-pics > :first-child { margin-top: 0; }
   .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s5); align-items: start; }
   .pair-phone { max-width: 720px; }
+  .pair .wide { grid-column: 1 / -1; }
+  .steps .now { grid-column: 1 / -1; }
+  .steps-phone { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: none; }
+  /* Captions share a row so a two-line caption never pushes its picture below its neighbours. */
+  @media (min-width: 761px) {
+    .steps .shot, .steps-phone .shot { display: grid; grid-template-rows: subgrid; grid-row: span 2; }
+  }
+  /* S46: text 4/12 and sticky while its pictures scroll, pictures 8/12, so no side of the page sits empty. */
+  @media (min-width: 1024px) {
+    .area, .next { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); column-gap: var(--s7); align-items: start; }
+    .area-text { position: sticky; top: 88px; }
+    .area-text p, .speed ul, .next p { max-width: none; }
+    .pair-phone { max-width: none; }
+  }
   .shot { margin: 0; min-width: 0; }
   .shot figcaption { font-size: var(--t14); color: var(--text-dim); margin: 0 0 var(--s2); }
   .shot.now figcaption { color: var(--text); font-weight: 600; }
@@ -48,13 +63,21 @@
   .zoom img { display: block; width: 100%; height: auto; }
   .zoom:hover { border-color: var(--text-dim); }
   .zoom:focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }
-  .pair-widget { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .now-set { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+  /* Widgets at their true size (each figure's --w is its footprint), so the layouts compare at one scale. */
+  .pair-widget, .now-set { display: flex; flex-wrap: wrap; gap: var(--s5); align-items: flex-start; }
+  .pair-widget .shot, .now-set .shot { width: var(--w); max-width: 100%; }
+  .now-set { margin-top: var(--s5); }
   .now-set .shot figcaption { font-weight: 500; }
-  .pair-widget .zoom { background: var(--bg); }
+  .pair-widget .zoom, .now-set .zoom { background: var(--bg); }
+  @media (min-width: 1024px) {
+    .now-set { display: grid; grid-template-columns: minmax(0, 144fr) minmax(0, 216fr) minmax(0, 334fr); grid-template-rows: auto auto;
+      column-gap: var(--s4); row-gap: 0; max-width: calc(694px + 2 * var(--s4)); }
+    .now-set .shot { display: grid; grid-template-rows: subgrid; grid-row: span 2; width: auto; }
+  }
   .speed ul { margin: 0; padding-left: var(--s5); max-width: 40em; color: var(--text-dim); }
   .speed li + li { margin-top: var(--s2); }
   .next { padding-top: var(--s7); border-top: 1px solid var(--border); }
+  .next h2 { margin-top: 0; }
   .next p { max-width: 40em; color: var(--text-dim); margin: 0 0 var(--s5); }
   .next .actions { display: flex; flex-wrap: wrap; gap: var(--s3); }
 
@@ -77,7 +100,9 @@
     .area h2 { font-size: var(--t24); }
     .pair, .pair-widget { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
     .pair .shot.now, .pair-widget .now-set { order: -1; }
+    .pair .shot.now.wide { order: 0; }
     .pair-phone .shot { max-width: 320px; }
+    .steps-phone { grid-template-columns: minmax(0, 1fr); }
   }
 </style>
 </head>
@@ -116,50 +141,71 @@
 <main class="wrap">
   <h1>The new aorti</h1>
   <div class="intro">
-    <p>I rebuilt most of aorti over the last few days. I use it every day on my phone and my laptop, and a lot of it had stopped feeling good: the viewer lagged, zooming into a day was a fight, and every screen had its own slightly different buttons.</p>
+    <p class="date"><time datetime="2026-10-12">October 12, 2026</time></p>
     <p>Below are the main screens before and after, on the same sample data. Each one says what was wrong and what I did about it. Click any picture to see it full size; the arrow keys move between them.</p>
   </div>
 
   <section class="area" id="day" aria-labelledby="day-h">
+      <div class="area-text">
       <h2 id="day-h">The Day view</h2>
-      <p>The Day view used to be a 24-hour bar of coloured blocks with one card per recording. The graph itself was a click away, behind "View as full-day timeline". Now the day opens on the graph: the summary numbers sit on one even grid above it, and the whole day runs underneath, with gaps left as gaps.</p>
-      <p>The date in the title opens a calendar, so getting to any day is one tap instead of paging with the arrows or switching to Month first. On the phone the summary shows its numbers straight away.</p>
+      <p>The Day view used to open on a 24-hour bar of coloured blocks with one card per recording. To see the graph you clicked "View as full-day timeline", and that page put a row of numbers and a panel of interpretation cards above the chart, so the graph started near the bottom of the screen.</p>
+      <p>Now the day opens straight on the graph, one click less. The summary numbers sit on one even grid above it, the whole day runs underneath with gaps left as gaps, and the interpretation cards moved below the chart.</p>
+      <p>The date in the title opens a calendar, so getting to any day is one tap instead of paging with the arrows or switching to Month first.</p>
+      </div>
+      <div class="area-pics">
       <h3 class="size">Laptop</h3>
-      <div class="pair">
+      <div class="pair steps">
         <figure class="shot">
-          <figcaption>Before</figcaption>
-          <button type="button" class="zoom" data-full="./assets/new-look/day-before-1440-full.webp" aria-label="Show full size: Day view before, laptop: a 24-hour bar of coloured session blocks above three session cards">
-            <img src="./assets/new-look/day-before-1440.webp" width="1080" height="675" alt="Day view before, laptop: a 24-hour bar of coloured session blocks above three session cards" loading="lazy" decoding="async">
+          <figcaption>Before, step 1</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-before-1440-full.webp" aria-label="Show full size: Day view before, step 1, laptop: a 24-hour bar of coloured session blocks above three session cards">
+            <img src="./assets/new-look/day-before-1440.webp" width="1080" height="675" alt="Day view before, step 1, laptop: a 24-hour bar of coloured session blocks above three session cards" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot">
+          <figcaption>Before, step 2: after View as full-day timeline</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-before2-1440-full.webp" aria-label="Show full size: Day view before, step 2, laptop: the full-day timeline page, with numbers and interpretation cards above the chart">
+            <img src="./assets/new-look/day-before2-1440.webp" width="1080" height="675" alt="Day view before, step 2, laptop: the full-day timeline page, with numbers and interpretation cards above the chart" loading="lazy" decoding="async">
           </button>
         </figure>
         <figure class="shot now">
-          <figcaption>Now</figcaption>
+          <figcaption>Now: opens straight on the graph, one click less</figcaption>
           <button type="button" class="zoom" data-full="./assets/new-look/day-after-1440-full.webp" aria-label="Show full size: Day view now, laptop: summary numbers in one grid above the full-day heart rate and HRV chart">
             <img src="./assets/new-look/day-after-1440.webp" width="1080" height="675" alt="Day view now, laptop: summary numbers in one grid above the full-day heart rate and HRV chart" loading="lazy" decoding="async">
           </button>
         </figure>
       </div>
       <h3 class="size">Phone</h3>
-      <div class="pair pair-phone">
+      <div class="pair pair-phone steps-phone">
         <figure class="shot phone">
-          <figcaption>Before</figcaption>
-          <button type="button" class="zoom" data-full="./assets/new-look/day-before-360-full.webp" aria-label="Show full size: Day view before, phone: the 24-hour block bar, lens pills and session cards">
-            <img src="./assets/new-look/day-before-360.webp" width="540" height="1950" alt="Day view before, phone: the 24-hour block bar, lens pills and session cards" loading="lazy" decoding="async">
+          <figcaption>Before, step 1</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-before-360-full.webp" aria-label="Show full size: Day view before, step 1, phone: the 24-hour block bar, lens pills and session cards">
+            <img src="./assets/new-look/day-before-360.webp" width="540" height="1950" alt="Day view before, step 1, phone: the 24-hour block bar, lens pills and session cards" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone">
+          <figcaption>Before, step 2: after View as full-day timeline</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-before2-360-full.webp" aria-label="Show full size: Day view before, step 2, phone: the full-day timeline page, with the numbers, the session report and interpretation cards filling the screen before the chart">
+            <img src="./assets/new-look/day-before2-360.webp" width="540" height="1950" alt="Day view before, step 2, phone: the full-day timeline page, with the numbers, the session report and interpretation cards filling the screen before the chart" loading="lazy" decoding="async">
           </button>
         </figure>
         <figure class="shot phone now">
-          <figcaption>Now</figcaption>
+          <figcaption>Now: straight on the graph</figcaption>
           <button type="button" class="zoom" data-full="./assets/new-look/day-after-360-full.webp" aria-label="Show full size: Day view now, phone: the date, the summary numbers and the day chart">
             <img src="./assets/new-look/day-after-360.webp" width="540" height="1950" alt="Day view now, phone: the date, the summary numbers and the day chart" loading="lazy" decoding="async">
           </button>
         </figure>
       </div>
+      </div>
     </section>
 
   <section class="area" id="zoom" aria-labelledby="zoom-h">
+      <div class="area-text">
       <h2 id="zoom-h">Zooming into the chart</h2>
       <p>Zooming was the worst part. Dragging the strip under the chart redrew the whole chart on every mouse move, so on my phone it stuttered and sometimes froze. A drag now paints at most once per frame, and the marks are drawn in one batched pass.</p>
-      <p>On a test that slows the processor six times to roughly phone speed, one redraw while panning went from about 125 ms to about 14 ms. Phones also get pinch and double-tap zoom, and on a laptop you can drag across the chart to zoom to that stretch. The markers list moved into its own panel that opens over the chart instead of squeezing it.</p>
+      <p>On a test that slows the processor six times to roughly phone speed, one redraw while panning went from about 125 ms to about 14 ms. Phones also get pinch and double-tap zoom, and on a laptop you can drag across the chart to zoom to that stretch.</p>
+      <p>The markers list used to sit beside the chart and squeeze it. It now opens from the Markers button above the chart, which shows the count, for example "Markers · 26". On a laptop the list opens over the chart; on the phone it opens as a sheet from the bottom. Tap a marker and the chart zooms to it.</p>
+      </div>
+      <div class="area-pics">
       <h3 class="size">Laptop</h3>
       <div class="pair">
         <figure class="shot">
@@ -172,6 +218,12 @@
           <figcaption>Now</figcaption>
           <button type="button" class="zoom" data-full="./assets/new-look/zoom-after-1440-full.webp" aria-label="Show full size: Zoomed chart now, laptop: the same two hours across the full width, with the coloured strip below showing the zoomed range">
             <img src="./assets/new-look/zoom-after-1440.webp" width="1080" height="675" alt="Zoomed chart now, laptop: the same two hours across the full width, with the coloured strip below showing the zoomed range" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now wide">
+          <figcaption>Now: the Markers button opens the list over the chart</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/markers-after-1440-full.webp" aria-label="Show full size: Markers now, laptop: the Markers · 26 button above the chart opens the markers list over the right side of the chart">
+            <img src="./assets/new-look/markers-after-1440.webp" width="1080" height="675" alt="Markers now, laptop: the Markers · 26 button above the chart opens the markers list over the right side of the chart" loading="lazy" decoding="async">
           </button>
         </figure>
       </div>
@@ -190,12 +242,16 @@
           </button>
         </figure>
       </div>
+      </div>
     </section>
 
   <section class="area" id="month" aria-labelledby="month-h">
+      <div class="area-text">
       <h2 id="month-h">Month</h2>
       <p>Month kept its calendar. The lens buttons above it were small all-caps pills, and on a laptop one of them wrapped onto two lines; they are now normal buttons that fit their words.</p>
       <p>The arrows sit at the ends of the row and stay put however long the month name is, and the month name opens a picker for the year.</p>
+      </div>
+      <div class="area-pics">
       <h3 class="size">Laptop</h3>
       <div class="pair">
         <figure class="shot">
@@ -226,12 +282,16 @@
           </button>
         </figure>
       </div>
+      </div>
     </section>
 
   <section class="area" id="week" aria-labelledby="week-h">
+      <div class="area-text">
       <h2 id="week-h">Week</h2>
       <p>Week works as it did, one card per day with its trace. The header changed: it is the same date control as Day and Month, so the arrows are in the same place on all three and the dates open a calendar.</p>
       <p>The view dropdown in the top bar became plain tabs on a laptop. On a phone it stays a dropdown, now full height and easy to hit.</p>
+      </div>
+      <div class="area-pics">
       <h3 class="size">Laptop</h3>
       <div class="pair">
         <figure class="shot">
@@ -262,12 +322,16 @@
           </button>
         </figure>
       </div>
+      </div>
     </section>
 
   <section class="area" id="trends" aria-labelledby="trends-h">
+      <div class="area-text">
       <h2 id="trends-h">Trends</h2>
       <p>Trends was a fixed stack of charts with jargon under each title. Each chart is now a widget: the Widgets button turns them on and off and sets each one to half or full width, and you can drag them into the order you want.</p>
       <p>The titles and the line under each one are in plain words now.</p>
+      </div>
+      <div class="area-pics">
       <h3 class="size">Laptop</h3>
       <div class="pair">
         <figure class="shot">
@@ -298,12 +362,16 @@
           </button>
         </figure>
       </div>
+      </div>
     </section>
 
   <section class="area" id="monitor" aria-labelledby="monitor-h">
+      <div class="area-text">
       <h2 id="monitor-h">The monitor while recording</h2>
       <p>On the monitor, the big red Stop session button sat open near the top, next to the posture buttons. With the phone in a pocket that is easy to hit by accident.</p>
       <p>Now the state reads as one line (Live, the strap and the session time), and Stop, posture, sharing and the log sit behind one Controls row that is closed every time the page opens. One tap opens it, and Stop still asks before it ends anything.</p>
+      </div>
+      <div class="area-pics">
       <h3 class="size">Laptop</h3>
       <div class="pair">
         <figure class="shot">
@@ -334,12 +402,16 @@
           </button>
         </figure>
       </div>
+      </div>
     </section>
 
   <section class="area" id="settings" aria-labelledby="settings-h">
+      <div class="area-text">
       <h2 id="settings-h">Settings</h2>
       <p>Settings has the same tabs. Under them, every field, checkbox and button is now the same component the viewer uses, so a checkbox looks and behaves the same everywhere and stays readable when you hover or tick it.</p>
       <p>Before, the monitor had its own toggle switch, its own buttons and labels in tiny capitals.</p>
+      </div>
+      <div class="area-pics">
       <h3 class="size">Laptop</h3>
       <div class="pair">
         <figure class="shot">
@@ -370,42 +442,47 @@
           </button>
         </figure>
       </div>
+      </div>
     </section>
 
   <section class="area" id="widget" aria-labelledby="widget-h">
+      <div class="area-text">
       <h2 id="widget-h">The stream widget</h2>
       <p>The widget changed least, on purpose: it is the part your viewers see. Its labels are in the same Work Sans as the app, with units in lower case.</p>
       <p>The switches for what it shows were there before. The home page now shows the four layouts most people want, with each one's footprint, so you can size the OBS source before you go live.</p>
+      </div>
+      <div class="area-pics">
       <div class="pair pair-widget">
-        <figure class="shot">
+        <figure class="shot" style="--w: 311px">
           <figcaption>Before</figcaption>
           <button type="button" class="zoom" data-full="./assets/new-look/widget-before-single-full.webp" aria-label="Show full size: Stream widget before: heart rate, HRV and the live trace with all-caps units">
             <img src="./assets/new-look/widget-before-single.webp" width="622" height="476" alt="Stream widget before: heart rate, HRV and the live trace with all-caps units" loading="lazy" decoding="async">
           </button>
         </figure>
-        <div class="now-set">
-          <figure class="shot now">
-            <figcaption>Now: Full chip, 311 × 238 px</figcaption>
+          <figure class="shot now" style="--w: 334px">
+            <figcaption>Now: Full chip, 334 × 238 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-chip-full.webp" aria-label="Show full size: Stream widget now, full chip: heart rate, HRV and the live trace">
-              <img src="./assets/new-look/widget-after-chip.webp" width="622" height="476" alt="Stream widget now, full chip: heart rate, HRV and the live trace" loading="lazy" decoding="async">
+              <img src="./assets/new-look/widget-after-chip.webp" width="668" height="476" alt="Stream widget now, full chip: heart rate, HRV and the live trace" loading="lazy" decoding="async">
             </button>
           </figure>
-          <figure class="shot now">
-            <figcaption>Now: Heart rate only, 145 × 148 px</figcaption>
+      </div>
+        <div class="now-set">
+          <figure class="shot now" style="--w: 144px">
+            <figcaption>Now: Heart rate only, 144 × 148 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-slim-full.webp" aria-label="Show full size: Stream widget now, slim: heart rate only">
               <img src="./assets/new-look/widget-after-slim.webp" width="290" height="296" alt="Stream widget now, slim: heart rate only" loading="lazy" decoding="async">
             </button>
           </figure>
-          <figure class="shot now">
-            <figcaption>Now: Heart rate and HRV, 217 × 148 px</figcaption>
+          <figure class="shot now" style="--w: 216px">
+            <figcaption>Now: Heart rate and HRV, 216 × 148 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-hrhrv-full.webp" aria-label="Show full size: Stream widget now: heart rate and HRV side by side">
-              <img src="./assets/new-look/widget-after-hrhrv.webp" width="434" height="296" alt="Stream widget now: heart rate and HRV side by side" loading="lazy" decoding="async">
+              <img src="./assets/new-look/widget-after-hrhrv.webp" width="432" height="296" alt="Stream widget now: heart rate and HRV side by side" loading="lazy" decoding="async">
             </button>
           </figure>
-          <figure class="shot now">
-            <figcaption>Now: No trends, 311 × 152 px</figcaption>
+          <figure class="shot now" style="--w: 334px">
+            <figcaption>Now: No trends, 334 × 152 px</figcaption>
             <button type="button" class="zoom" data-full="./assets/new-look/widget-after-notrends-full.webp" aria-label="Show full size: Stream widget now: heart rate, live trace and HRV without the trend row">
-              <img src="./assets/new-look/widget-after-notrends.webp" width="622" height="304" alt="Stream widget now: heart rate, live trace and HRV without the trend row" loading="lazy" decoding="async">
+              <img src="./assets/new-look/widget-after-notrends.webp" width="668" height="304" alt="Stream widget now: heart rate, live trace and HRV without the trend row" loading="lazy" decoding="async">
             </button>
           </figure>
         </div>
@@ -413,23 +490,31 @@
     </section>
 
   <section class="area speed" id="speed" aria-labelledby="speed-h">
+    <div class="area-text">
     <h2 id="speed-h">Faster where it was slow</h2>
     <p>Speed is hard to see in a still picture. These numbers come from tests with the processor slowed down to roughly phone speed.</p>
+    </div>
+    <div class="area-pics">
     <ul>
       <li>Panning a zoomed day: about 125 ms per redraw before, about 14 ms now.</li>
       <li>Clicking a marker to jump to it: the worst stall went from about 400 ms to about 55 ms.</li>
       <li>Moving the mouse over the chart no longer redraws the chart at all; the hover line is drawn on its own.</li>
       <li>Opening the viewer shows your saved sessions first, in well under a second, and syncs with Drive quietly after.</li>
     </ul>
+    </div>
   </section>
 
   <section class="next" aria-labelledby="next-h">
+    <div class="area-text">
     <h2 id="next-h" class="area-h">Try it</h2>
+    </div>
+    <div class="area-pics">
     <p>The sample data in these pictures is in the viewer, so you can click around without a strap. Every change is listed in the changelog.</p>
     <div class="actions">
       <a class="btn primary" href="./hr_monitor.html">Open monitor</a>
       <a class="btn" href="./hrv_viewer.html?demo=1">Sample data</a>
       <a class="btn ghost" href="./changelog.html">Changelog</a>
+    </div>
     </div>
   </section>
 </main>
