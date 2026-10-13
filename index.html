@@ -196,7 +196,7 @@
     border: 1px solid var(--border);
     background: var(--bg-raised);
   }
-  /* Before and after share one frame shape, cropped from the top, so neither reads smaller. */
+  /* Day and Month share one frame shape, cropped from the top, so neither reads smaller. */
   .ba .shot img { aspect-ratio: 1440 / 790; object-fit: cover; object-position: top; }
   .shot figcaption { margin-top: var(--s3); font-size: var(--t14); color: var(--text-dim); }
   .shot figcaption strong { color: var(--text); font-weight: 600; margin-right: var(--s2); }
@@ -485,7 +485,7 @@
         <button type="button" data-classes="no-inline-trends" aria-pressed="false">No trends</button>
       </div>
       <p class="variant-size" id="variant-size" aria-live="polite"></p>
-      <p class="variant-note">The monitor's Widgets tab has the same switches.</p>
+      <p class="variant-note">Scale it in OBS like any other source. The monitor's Widgets tab has the same switches.</p>
     </div>
   </div>
 </section>
@@ -494,31 +494,25 @@
   <h2>The viewer</h2>
   <p class="lede">Several recordings from one day join into one timeline. Read one session, a day, a week or a month.</p>
   <div class="ba">
-    <figure class="shot ba-before">
-      <picture>
-        <source media="(max-width: 600px)" srcset="./assets/landing/viewer-day-before-360.webp">
-        <img src="./assets/landing/viewer-day-before-1440.webp" width="1440" height="933" alt="The Day view before: session blocks on a 24-hour bar, with each session's numbers in its own card" loading="lazy">
-      </picture>
-      <figcaption><strong>Before</strong>One block per session, each with its own card.</figcaption>
-    </figure>
-    <figure class="shot ba-after">
+    <figure class="shot">
       <picture>
         <source media="(max-width: 600px)" srcset="./assets/landing/viewer-day-360.webp">
-        <img src="./assets/landing/viewer-day-1440.webp" width="1440" height="790" alt="The Day view now: the day's numbers above one chart of heart rate and HRV across 24 hours" loading="lazy">
+        <img src="./assets/landing/viewer-day-1440.webp" width="1440" height="790" alt="The Day view: the day's numbers above one chart of heart rate and HRV across 24 hours" loading="lazy">
       </picture>
-      <figcaption><strong>Now</strong>The whole day on one line, its numbers above.</figcaption>
+      <figcaption><strong>Day</strong>The whole day on one line, its numbers above.</figcaption>
+    </figure>
+    <figure class="shot">
+      <picture>
+        <source media="(max-width: 600px)" srcset="./assets/landing/viewer-month-360.webp">
+        <img src="./assets/landing/viewer-month-1440.webp" width="1440" height="1000" alt="The Month view: a calendar with each recorded day's resting heart rate" loading="lazy">
+      </picture>
+      <figcaption><strong>Month</strong>Each day's resting heart rate on one calendar.</figcaption>
     </figure>
   </div>
-  <figure class="shot month-shot">
-    <picture>
-      <source media="(max-width: 600px)" srcset="./assets/landing/viewer-month-360.webp">
-      <img src="./assets/landing/viewer-month-1440.webp" width="1440" height="1000" alt="The Month view: a calendar with each recorded day's resting heart rate" loading="lazy">
-    </picture>
-    <figcaption><strong>Month</strong>Each day's resting heart rate on one calendar.</figcaption>
-  </figure>
   <div class="actions">
     <a class="btn lg" href="./hrv_viewer.html?demo=1">Try it with sample data</a>
     <a class="btn lg" href="./hrv_viewer.html">Open viewer</a>
+    <a class="btn lg" href="./new-look.html">See what changed</a>
   </div>
 </section>
 
@@ -797,7 +791,7 @@
       // The frame is a 380 px viewport, the OBS browser source width the monitor suggests, so the preview matches OBS.
       frame.style.height = Math.ceil(r.height) + 'px';
       frame.style.transform = 'translate(' + (32 * k) + 'px, ' + (-32 * k) + 'px) scale(' + k + ')';
-      sizeEl.textContent = 'Footprint in OBS: ' + Math.round(r.width) + ' × ' + Math.round(r.height) + ' px, ' + (100 * r.width * r.height / (1920 * 1080)).toFixed(1) + '% of a 1080p stream';
+      sizeEl.textContent = 'Default size: ' + Math.round(r.width) + ' × ' + Math.round(r.height) + ' px, ' + (100 * r.width * r.height / (1920 * 1080)).toFixed(1) + '% of a 1080p stream';
     }
     if (window.ResizeObserver && stage) new ResizeObserver(() => fit()).observe(stage);
     function pick(btn) {

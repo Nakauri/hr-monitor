@@ -6,7 +6,7 @@
 // S40 (AUDIT-NOTES item 35, Khal 2026-10-12): button hover contrast on all three pages (rules.mjs --states,
 //   named bug: "Open monitor" hover went dark on dark), hero H1 at most 3 lines with no one-word last line
 //   ("records." alone), story logo centred on its text, the 16:9 stream frame with the widget at true scale
-//   and a full-width variant row, equal before/after shots with one-line captions, the logo back-to-top, one
+//   and a full-width variant row, equal Day and Month shots with one-line captions (before/after moved to new-look.html, Khal 2026-10-12), the logo back-to-top, one
 //   shared nav on all three pages, Google sign-in (signed in leads to the viewer, never the monitor), and the
 //   changelog: every month git shows activity has entries, area chips filter and the hash keeps the filter,
 //   headings are not self-links, a shared link lands below the nav, the copy button copies the right URL.
@@ -441,8 +441,8 @@ async function s40Checks({ browser, base, open, check, shotPath }) {
       const caps = [...document.querySelectorAll('.shot figcaption')].map((c) => { const lh = parseFloat(getComputedStyle(c).lineHeight); return { h: c.getBoundingClientRect().height, lh }; });
       return { imgs, caps };
     });
-    check(ba.imgs.length === 2 && Math.abs(ba.imgs[0] - ba.imgs[1]) <= 1, `before and after shots are the same width (${ba.imgs.map(Math.round).join(' and ')} px)`);
-    check(ba.caps.length === 3 && ba.caps.every((c) => c.h < c.lh * 1.5), `viewer captions are one line at 1440 (${ba.caps.map((c) => Math.round(c.h)).join(', ')} px)`);
+    check(ba.imgs.length === 2 && Math.abs(ba.imgs[0] - ba.imgs[1]) <= 1, `Day and Month shots are the same width (${ba.imgs.map(Math.round).join(' and ')} px)`);
+    check(ba.caps.length === 2 && ba.caps.every((c) => c.h < c.lh * 1.5), `viewer captions are one line at 1440 (${ba.caps.map((c) => Math.round(c.h)).join(', ')} px)`);
     if (SHOTS) {
       await page.screenshot({ path: shotPath('hero-1440.png') });
       for (const [sel, n] of [['#story', 'why-1440.png'], ['#stream', 'stream-1440.png'], ['#viewer', 'viewer-1440.png']]) await page.locator(sel).screenshot({ path: shotPath(n) });
