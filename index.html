@@ -166,13 +166,19 @@
   .stream-frame {
     position: relative;
     aspect-ratio: 16 / 9;
-    border-radius: var(--r-card);
+    border-radius: var(--r-card) var(--r-card) 0 0;
     border: 1px solid var(--border);
+    border-bottom: 0;
     overflow: hidden;
-    background: #1d1530;
+    background: #1b2433;
   }
-  .stream-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  .stream-res { position: absolute; bottom: var(--s2); right: var(--s3); font-size: var(--t12); color: #f2e6da; background: rgba(0,0,0,0.55); padding: 0 var(--s2); border-radius: var(--r-ctl); font-variant-numeric: tabular-nums; }
+  .stream-scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+  .stream-live { position: absolute; top: var(--s3); left: var(--s3); display: inline-flex; align-items: center; gap: var(--s1); padding: 2px var(--s2); border-radius: var(--r-ctl); background: #e5484d; color: #fff; font-size: var(--t12); font-weight: 700; letter-spacing: .04em; }
+  .stream-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+  .stream-bar { display: flex; align-items: center; gap: var(--s3); height: 40px; padding: 0 var(--s3); border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--r-card) var(--r-card); background: #0e0e10; color: #dedee3; }
+  .stream-bar svg { width: 18px; height: 18px; flex: 0 0 auto; }
+  .stream-bar-fill { flex: 1 1 auto; height: 3px; border-radius: 2px; background: linear-gradient(to right, #e5484d 0 100%, transparent 100%); opacity: .8; }
+  .stream-res { font-size: var(--t12); font-weight: 700; color: #0e0e10; background: #dedee3; padding: 1px var(--s2); border-radius: var(--r-ctl); font-variant-numeric: tabular-nums; }
   #variant-frame { position: absolute; left: 0; bottom: 0; display: block; border: 0; width: 320px; height: 240px; background: transparent; transform-origin: 0 100%; }
   .variant-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: var(--s4); }
   .variant-seg > button { min-width: 0; white-space: normal; line-height: 1.2; padding: var(--s1) var(--s2); }
@@ -457,33 +463,20 @@
     </div>
     <div class="stream-preview" id="stream-preview">
       <div class="stream-frame" id="stream-frame">
-        <!-- A made-up 1920 by 1080 game scene; the widget sits on it at its true share of the stream. -->
-        <svg class="stream-scene" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-          <defs>
-            <linearGradient id="sceneSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d1530"/><stop offset="0.55" stop-color="#4a2c4a"/><stop offset="1" stop-color="#b8664a"/></linearGradient>
-            <linearGradient id="sceneGround" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a1d2c"/><stop offset="1" stop-color="#110c15"/></linearGradient>
-          </defs>
-          <rect width="1920" height="1080" fill="url(#sceneSky)"/>
-          <circle cx="1320" cy="600" r="130" fill="#f0b06a" opacity="0.8"/>
-          <path d="M0 650 L220 480 L420 610 L640 440 L900 620 L1120 490 L1380 630 L1600 460 L1920 610 V1080 H0Z" fill="#3a2440"/>
-          <path d="M0 730 L300 610 L560 710 L820 600 L1080 720 L1400 620 L1700 730 L1920 660 V1080 H0Z" fill="#2a1a30"/>
-          <rect y="770" width="1920" height="310" fill="url(#sceneGround)"/>
-          <path d="M880 770 L1040 770 L1520 1080 L400 1080Z" fill="#3b2a36"/>
-          <path d="M954 790 L966 790 L978 840 L942 840Z M944 880 L976 880 L992 950 L928 950Z M928 1000 L992 1000 L1008 1080 L912 1080Z" fill="#d9a066" opacity="0.55"/>
-          <path d="M140 770 L190 640 L240 770Z M260 780 L300 680 L340 780Z M1600 775 L1650 650 L1700 775Z M1720 785 L1760 690 L1800 785Z" fill="#160f1a"/>
-          <rect x="40" y="40" width="380" height="30" rx="6" fill="#000000" opacity="0.5"/>
-          <rect x="46" y="46" width="270" height="18" rx="4" fill="#efe2cf"/>
-          <rect x="40" y="80" width="260" height="20" rx="5" fill="#000000" opacity="0.5"/>
-          <rect x="46" y="85" width="150" height="10" rx="3" fill="#c9a36a"/>
-          <rect x="1650" y="40" width="230" height="230" rx="10" fill="#000000" opacity="0.45" stroke="#efe2cf" stroke-opacity="0.5" stroke-width="3"/>
-          <path d="M1700 220 L1760 120 L1830 200" fill="none" stroke="#efe2cf" stroke-opacity="0.4" stroke-width="4"/>
-          <circle cx="1765" cy="155" r="9" fill="#f0b06a"/>
-          <g fill="#000000" opacity="0.5" stroke="#efe2cf" stroke-opacity="0.45" stroke-width="3"><rect x="752" y="976" width="72" height="72" rx="8"/><rect x="836" y="976" width="72" height="72" rx="8"/><rect x="920" y="976" width="72" height="72" rx="8"/><rect x="1004" y="976" width="72" height="72" rx="8"/><rect x="1088" y="976" width="72" height="72" rx="8"/></g>
-        </svg>
-        <span class="stream-res">1920 × 1080 stream</span>
+        <!-- Khal's own stream, blurred to shapes and colour; the widget sits on it at its true share of the stream. -->
+        <img class="stream-scene" src="./assets/landing/stream-bg.webp" alt="" width="960" height="540" loading="lazy" decoding="async">
+        <span class="stream-live"><span class="stream-live-dot" aria-hidden="true"></span>LIVE</span>
+        
         <!-- The overlay's own widget markup, styled only by widget.css, in a frame of its own so its
              body classes (the monitor's Widgets switches) never touch the hero widget. -->
         <iframe id="variant-frame" title="Widget preview" scrolling="no" tabindex="-1" aria-hidden="true"></iframe>
+      </div>
+      <div class="stream-bar" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        <span class="stream-bar-fill"></span>
+        <span class="stream-res">1080p</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
       </div>
       <div class="segmented variant-seg" role="group" aria-label="Widget layout" id="variant-seg">
         <button type="button" data-classes="" aria-pressed="true">Full chip</button>
