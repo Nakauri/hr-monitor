@@ -9,7 +9,7 @@ const fs = require('fs');
 const { spawnSync } = require('child_process');
 const path = require('path');
 
-const TARGETS = ['hr_monitor.html', 'hrv_viewer.html', 'overlay.html', 'index.html', 'legal.html', 'app-home.html', 'changelog.html'];
+const TARGETS = ['hr_monitor.html', 'hrv_viewer.html', 'overlay.html', 'index.html', 'legal.html', 'app-home.html', 'changelog.html', 'new-look.html'];
 // Shared scripts loaded by those pages; checked with node --check.
 const JS_TARGETS = ['ui.js', 'diagnostics.js', 'widget.js', 'assets/landing/site.js'];
 // hr_monitor.html has a known false-positive: a CSS comment around line ~176
