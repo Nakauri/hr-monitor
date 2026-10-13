@@ -14,7 +14,7 @@ const mobileRoot = path.resolve(__dirname, '..');
 const wwwDir = path.join(mobileRoot, 'www');
 
 // Files copied as-is.
-const PASSTHROUGH = ['overlay.html', 'tokens.css', 'widget.css', 'ui.css', 'ui.js', 'widget.js', 'diagnostics.js', 'settings.js', 'auth.js', 'lifecycle-state.js', 'marks-store.js', 'marks-drive.js',
+const PASSTHROUGH = ['overlay.html', 'tokens.css', 'widget.css', 'ui.css', 'ui.js', 'widget.js', 'diagnostics.js', 'settings.js', 'auth.js', 'lifecycle-state.js', 'marks-store.js', 'marks-drive.js', 'report.css',
   'assets/fonts/WorkSans-latin.woff2', 'assets/fonts/WorkSans-latin-ext.woff2', 'assets/fonts/OFL.txt'];
 // The Capacitor WebView loads index.html by default; we want it to show the
 // dedicated mobile-first landing (app-home.html), not the scrolling public
@@ -57,11 +57,13 @@ const VIEWER_SHIM_TAGS = `
        throws native_refresh_unavailable on token expiry, breaking sign-in.
        restore-overlay so the viewer can also dismiss the native splash if
        a user lands here directly. native-hr-session in reader mode reads
-       the phone's local segments; it starts no session code. -->
+       the phone's local segments; it starts no session code. native-pdf
+       turns the Day report's pages into a shared PDF (S44). -->
   <script src="./capacitor-bootstrap.js"></script>
   <script src="./drive-auth-native.js"></script>
   <script src="./restore-overlay.js"></script>
   <script src="./native-hr-session.js" data-mode="reader"></script>
+  <script src="./native-pdf.js"></script>
 `;
 
 // Every shim under mobile/src copied next to the web files. One source of
@@ -71,6 +73,7 @@ const MOBILE_ASSETS = [
   'ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js',
   'native-hr-session.js', 'drive-auth-native.js', 'foreground-service.js',
   'battery-opt.js', 'wake-lock.js', 'oem-background.js', 'restore-overlay.js',
+  'native-pdf.js',
 ];
 
 function ensureDir(dir) {
