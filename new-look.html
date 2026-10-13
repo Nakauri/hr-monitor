@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0a0a">
+<title>Free heart rate overlay for OBS and a long-term heart rate record: what's new</title>
+<meta name="description" content="Before and after pictures of the aorti.ca rework: the OBS heart rate widget, the live monitor and the heart rate history viewer, with what changed and why.">
+<link rel="canonical" href="https://aorti.ca/new-look">
+<meta property="og:title" content="The new aorti">
+<meta property="og:description" content="Before and after pictures of the aorti.ca rework, with what changed and why.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://aorti.ca/new-look">
+<meta property="og:image" content="https://aorti.ca/assets/new-look/day-after-1440-full.webp">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="./assets/fonts/WorkSans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="./auth.js"></script>
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./ui.css">
+<link rel="stylesheet" href="./assets/landing/site.css">
+<style>
+  /* S41: the rework announcement. Pictures are taken by scripts/new-look.mjs --capture on the demo data
+     (before = commit c166087, the last one before the rework) and checked by scripts/new-look.mjs. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--ui-face);
+    font-size: var(--t16); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding-left: var(--s6); padding-right: var(--s6); }
+  main { padding-top: var(--s7); padding-bottom: var(--s8); }
+  h1 { font-size: clamp(36px, 4.6vw, 56px); line-height: 1.06; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 var(--s5); }
+  .intro { max-width: 40em; margin: 0 0 var(--s7); }
+  .intro p { margin: 0 0 var(--s4); font-size: var(--t20); color: var(--text-dim); }
+  .intro p:first-child { color: var(--text); }
+  .area { padding: var(--s7) 0; border-top: 1px solid var(--border); scroll-margin-top: 88px; }
+  .area h2 { font-size: var(--t32); line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 var(--s4); }
+  .area > p { max-width: 40em; margin: 0 0 var(--s4); color: var(--text-dim); }
+  .area h3.size { font-size: var(--t16); font-weight: 600; color: var(--text); margin: var(--s6) 0 var(--s3); }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s5); align-items: start; }
+  .pair-phone { max-width: 720px; }
+  .shot { margin: 0; min-width: 0; }
+  .shot figcaption { font-size: var(--t14); color: var(--text-dim); margin: 0 0 var(--s2); }
+  .shot.now figcaption { color: var(--text); font-weight: 600; }
+  .zoom { display: block; width: 100%; padding: 0; margin: 0; border: 1px solid var(--border); border-radius: var(--r-card);
+    background: var(--bg-raised); overflow: hidden; cursor: zoom-in; color: inherit; font: inherit; }
+  .zoom img { display: block; width: 100%; height: auto; }
+  .zoom:hover { border-color: var(--text-dim); }
+  .zoom:focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }
+  .pair-widget { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .now-set { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+  .now-set .shot figcaption { font-weight: 500; }
+  .pair-widget .zoom { background: var(--bg); }
+  .speed ul { margin: 0; padding-left: var(--s5); max-width: 40em; color: var(--text-dim); }
+  .speed li + li { margin-top: var(--s2); }
+  .next { padding-top: var(--s7); border-top: 1px solid var(--border); }
+  .next p { max-width: 40em; color: var(--text-dim); margin: 0 0 var(--s5); }
+  .next .actions { display: flex; flex-wrap: wrap; gap: var(--s3); }
+
+  /* Picture dialog */
+  dialog.lightbox { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; margin: 0; padding: 0; border: 0;
+    background: var(--bg); color: var(--text); }
+  dialog.lightbox::backdrop { background: var(--scrim); }
+  .lb { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+  .lb-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--s4); }
+  .lb-count { font-size: var(--t14); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .lb-stage { display: flex; align-items: center; justify-content: center; min-height: 0; padding: 0 var(--s4); touch-action: pan-y; }
+  .lb-stage img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: var(--r-ctl); }
+  .lb-foot { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4) var(--s4); }
+  .lb-foot p { flex: 1; margin: 0; font-size: var(--t14); color: var(--text); text-align: center; }
+  .lightbox .btn { min-width: 44px; min-height: 44px; }
+
+  @media (max-width: 760px) {
+    .wrap { padding-left: var(--s4); padding-right: var(--s4); }
+    .intro p { font-size: var(--t16); }
+    .area h2 { font-size: var(--t24); }
+    .pair, .pair-widget { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
+    .pair .shot.now, .pair-widget .now-set { order: -1; }
+    .pair-phone .shot { max-width: 320px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav" aria-label="Main" data-signin-scope>
+  <div class="wrap nav-inner">
+    <a class="brand" href="/" aria-label="aorti.ca home">
+      <svg class="brand-mark" viewBox="0 0 1779 1642" aria-hidden="true">
+      <path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/>
+      <path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="url(#navEkg)"/>
+      <defs>
+      <linearGradient id="navEkg" x1="66" y1="424" x2="1644" y2="1610" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#AC6F6C"/>
+      <stop offset="0.32" stop-color="#EB3D3C"/>
+      <stop offset="0.54" stop-color="#EE2A29"/>
+      <stop offset="0.76" stop-color="#EB3D3C"/>
+      <stop offset="1" stop-color="#AC6F6C"/>
+      </linearGradient>
+      </defs>
+      </svg>
+      <span>aorti<span class="brand-dot">.</span><span class="brand-ca">ca</span></span>
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="./hrv_viewer.html?demo=1">Sample data</a>
+      <a class="nav-link" href="./hrv_viewer.html">Viewer</a>
+      <a class="nav-link" href="./hrv_viewer.html" data-signin>Sign in</a>
+      <a class="btn primary" href="./hr_monitor.html">Open monitor</a>
+    </div>
+    <p class="signin-msg" role="status" hidden></p>
+  </div>
+</nav>
+<!-- /NAV -->
+
+<main class="wrap">
+  <h1>The new aorti</h1>
+  <div class="intro">
+    <p>I rebuilt most of aorti over the last few days. I use it every day on my phone and my laptop, and a lot of it had stopped feeling good: the viewer lagged, zooming into a day was a fight, and every screen had its own slightly different buttons.</p>
+    <p>Below are the main screens before and after, on the same sample data. Each one says what was wrong and what I did about it. Click any picture to see it full size; the arrow keys move between them.</p>
+  </div>
+
+  <section class="area" id="day" aria-labelledby="day-h">
+      <h2 id="day-h">The Day view</h2>
+      <p>The Day view used to be a 24-hour bar of coloured blocks with one card per recording. The graph itself was a click away, behind "View as full-day timeline". Now the day opens on the graph: the summary numbers sit on one even grid above it, and the whole day runs underneath, with gaps left as gaps.</p>
+      <p>The date in the title opens a calendar, so getting to any day is one tap instead of paging with the arrows or switching to Month first. On the phone the summary shows its numbers straight away.</p>
+      <h3 class="size">Laptop</h3>
+      <div class="pair">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-before-1440-full.webp" aria-label="Show full size: Day view before, laptop: a 24-hour bar of coloured session blocks above three session cards">
+            <img src="./assets/new-look/day-before-1440.webp" width="1080" height="675" alt="Day view before, laptop: a 24-hour bar of coloured session blocks above three session cards" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-after-1440-full.webp" aria-label="Show full size: Day view now, laptop: summary numbers in one grid above the full-day heart rate and HRV chart">
+            <img src="./assets/new-look/day-after-1440.webp" width="1080" height="675" alt="Day view now, laptop: summary numbers in one grid above the full-day heart rate and HRV chart" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+      <h3 class="size">Phone</h3>
+      <div class="pair pair-phone">
+        <figure class="shot phone">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-before-360-full.webp" aria-label="Show full size: Day view before, phone: the 24-hour block bar, lens pills and session cards">
+            <img src="./assets/new-look/day-before-360.webp" width="540" height="1950" alt="Day view before, phone: the 24-hour block bar, lens pills and session cards" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/day-after-360-full.webp" aria-label="Show full size: Day view now, phone: the date, the summary numbers and the day chart">
+            <img src="./assets/new-look/day-after-360.webp" width="540" height="1950" alt="Day view now, phone: the date, the summary numbers and the day chart" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+    </section>
+
+  <section class="area" id="zoom" aria-labelledby="zoom-h">
+      <h2 id="zoom-h">Zooming into the chart</h2>
+      <p>Zooming was the worst part. Dragging the strip under the chart redrew the whole chart on every mouse move, so on my phone it stuttered and sometimes froze. A drag now paints at most once per frame, and the marks are drawn in one batched pass.</p>
+      <p>On a test that slows the processor six times to roughly phone speed, one redraw while panning went from about 125 ms to about 14 ms. Phones also get pinch and double-tap zoom, and on a laptop you can drag across the chart to zoom to that stretch. The markers list moved into its own panel that opens over the chart instead of squeezing it.</p>
+      <h3 class="size">Laptop</h3>
+      <div class="pair">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/zoom-before-1440-full.webp" aria-label="Show full size: Zoomed chart before, laptop: two hours of the day with the markers list squeezed beside the chart">
+            <img src="./assets/new-look/zoom-before-1440.webp" width="1080" height="675" alt="Zoomed chart before, laptop: two hours of the day with the markers list squeezed beside the chart" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/zoom-after-1440-full.webp" aria-label="Show full size: Zoomed chart now, laptop: the same two hours across the full width, with the coloured strip below showing the zoomed range">
+            <img src="./assets/new-look/zoom-after-1440.webp" width="1080" height="675" alt="Zoomed chart now, laptop: the same two hours across the full width, with the coloured strip below showing the zoomed range" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+      <h3 class="size">Phone</h3>
+      <div class="pair pair-phone">
+        <figure class="shot phone">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/zoom-before-360-full.webp" aria-label="Show full size: Zoomed chart before, phone: the legend toggles above a zoomed chart">
+            <img src="./assets/new-look/zoom-before-360.webp" width="540" height="1140" alt="Zoomed chart before, phone: the legend toggles above a zoomed chart" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/zoom-after-360-full.webp" aria-label="Show full size: Zoomed chart now, phone: Clock and Duration, Layers and Markers buttons above the zoomed chart and its strip">
+            <img src="./assets/new-look/zoom-after-360.webp" width="540" height="1140" alt="Zoomed chart now, phone: Clock and Duration, Layers and Markers buttons above the zoomed chart and its strip" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+    </section>
+
+  <section class="area" id="month" aria-labelledby="month-h">
+      <h2 id="month-h">Month</h2>
+      <p>Month kept its calendar. The lens buttons above it were small all-caps pills, and on a laptop one of them wrapped onto two lines; they are now normal buttons that fit their words.</p>
+      <p>The arrows sit at the ends of the row and stay put however long the month name is, and the month name opens a picker for the year.</p>
+      <h3 class="size">Laptop</h3>
+      <div class="pair">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/month-before-1440-full.webp" aria-label="Show full size: Month before, laptop: April calendar with small all-caps lens pills beside the title">
+            <img src="./assets/new-look/month-before-1440.webp" width="1080" height="885" alt="Month before, laptop: April calendar with small all-caps lens pills beside the title" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/month-after-1440-full.webp" aria-label="Show full size: Month now, laptop: April calendar with the arrows at the row ends and full-size lens buttons">
+            <img src="./assets/new-look/month-after-1440.webp" width="1080" height="885" alt="Month now, laptop: April calendar with the arrows at the row ends and full-size lens buttons" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+      <h3 class="size">Phone</h3>
+      <div class="pair pair-phone">
+        <figure class="shot phone">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/month-before-360-full.webp" aria-label="Show full size: Month before, phone: April calendar with pill-shaped lens buttons">
+            <img src="./assets/new-look/month-before-360.webp" width="540" height="1140" alt="Month before, phone: April calendar with pill-shaped lens buttons" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/month-after-360-full.webp" aria-label="Show full size: Month now, phone: April calendar with the date control and square lens buttons">
+            <img src="./assets/new-look/month-after-360.webp" width="540" height="1140" alt="Month now, phone: April calendar with the date control and square lens buttons" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+    </section>
+
+  <section class="area" id="week" aria-labelledby="week-h">
+      <h2 id="week-h">Week</h2>
+      <p>Week works as it did, one card per day with its trace. The header changed: it is the same date control as Day and Month, so the arrows are in the same place on all three and the dates open a calendar.</p>
+      <p>The view dropdown in the top bar became plain tabs on a laptop. On a phone it stays a dropdown, now full height and easy to hit.</p>
+      <h3 class="size">Laptop</h3>
+      <div class="pair">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/week-before-1440-full.webp" aria-label="Show full size: Week before, laptop: seven day cards under a title with arrows beside it">
+            <img src="./assets/new-look/week-before-1440.webp" width="1080" height="675" alt="Week before, laptop: seven day cards under a title with arrows beside it" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/week-after-1440-full.webp" aria-label="Show full size: Week now, laptop: the same seven day cards under the shared date control and tabs in the top bar">
+            <img src="./assets/new-look/week-after-1440.webp" width="1080" height="675" alt="Week now, laptop: the same seven day cards under the shared date control and tabs in the top bar" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+      <h3 class="size">Phone</h3>
+      <div class="pair pair-phone">
+        <figure class="shot phone">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/week-before-360-full.webp" aria-label="Show full size: Week before, phone: the week title, arrows and day cards">
+            <img src="./assets/new-look/week-before-360.webp" width="540" height="1140" alt="Week before, phone: the week title, arrows and day cards" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/week-after-360-full.webp" aria-label="Show full size: Week now, phone: the shared date control above the day cards">
+            <img src="./assets/new-look/week-after-360.webp" width="540" height="1140" alt="Week now, phone: the shared date control above the day cards" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+    </section>
+
+  <section class="area" id="trends" aria-labelledby="trends-h">
+      <h2 id="trends-h">Trends</h2>
+      <p>Trends was a fixed stack of charts with jargon under each title. Each chart is now a widget: the Widgets button turns them on and off and sets each one to half or full width, and you can drag them into the order you want.</p>
+      <p>The titles and the line under each one are in plain words now.</p>
+      <h3 class="size">Laptop</h3>
+      <div class="pair">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/trends-before-1440-full.webp" aria-label="Show full size: Trends before, laptop: fixed chart cards with all-caps titles">
+            <img src="./assets/new-look/trends-before-1440.webp" width="1080" height="675" alt="Trends before, laptop: fixed chart cards with all-caps titles" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/trends-after-1440-full.webp" aria-label="Show full size: Trends now, laptop: chart widgets with plain titles and a Widgets button at the top right">
+            <img src="./assets/new-look/trends-after-1440.webp" width="1080" height="675" alt="Trends now, laptop: chart widgets with plain titles and a Widgets button at the top right" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+      <h3 class="size">Phone</h3>
+      <div class="pair pair-phone">
+        <figure class="shot phone">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/trends-before-360-full.webp" aria-label="Show full size: Trends before, phone: the chart cards stacked">
+            <img src="./assets/new-look/trends-before-360.webp" width="540" height="1140" alt="Trends before, phone: the chart cards stacked" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/trends-after-360-full.webp" aria-label="Show full size: Trends now, phone: the widgets stacked under the Widgets button">
+            <img src="./assets/new-look/trends-after-360.webp" width="540" height="1140" alt="Trends now, phone: the widgets stacked under the Widgets button" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+    </section>
+
+  <section class="area" id="monitor" aria-labelledby="monitor-h">
+      <h2 id="monitor-h">The monitor while recording</h2>
+      <p>On the monitor, the big red Stop session button sat open near the top, next to the posture buttons. With the phone in a pocket that is easy to hit by accident.</p>
+      <p>Now the state reads as one line (Live, the strap and the session time), and Stop, posture, sharing and the log sit behind one Controls row that is closed every time the page opens. One tap opens it, and Stop still asks before it ends anything.</p>
+      <h3 class="size">Laptop</h3>
+      <div class="pair">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/monitor-before-1440-full.webp" aria-label="Show full size: Monitor before, laptop: posture buttons and a wide red Stop session button at the top, connection details open">
+            <img src="./assets/new-look/monitor-before-1440.webp" width="1080" height="675" alt="Monitor before, laptop: posture buttons and a wide red Stop session button at the top, connection details open" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/monitor-after-1440-full.webp" aria-label="Show full size: Monitor now, laptop: a status line reading Live, the strap and the session time, a closed Controls row, then session stats and the trend">
+            <img src="./assets/new-look/monitor-after-1440.webp" width="1080" height="675" alt="Monitor now, laptop: a status line reading Live, the strap and the session time, a closed Controls row, then session stats and the trend" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+      <h3 class="size">Phone</h3>
+      <div class="pair pair-phone">
+        <figure class="shot phone">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/monitor-before-360-full.webp" aria-label="Show full size: Monitor before, phone: the widget, posture buttons and the red Stop session button">
+            <img src="./assets/new-look/monitor-before-360.webp" width="540" height="1140" alt="Monitor before, phone: the widget, posture buttons and the red Stop session button" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/monitor-after-360-full.webp" aria-label="Show full size: Monitor now, phone: the widget, the status line and the closed Controls row">
+            <img src="./assets/new-look/monitor-after-360.webp" width="540" height="1140" alt="Monitor now, phone: the widget, the status line and the closed Controls row" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+    </section>
+
+  <section class="area" id="settings" aria-labelledby="settings-h">
+      <h2 id="settings-h">Settings</h2>
+      <p>Settings has the same tabs. Under them, every field, checkbox and button is now the same component the viewer uses, so a checkbox looks and behaves the same everywhere and stays readable when you hover or tick it.</p>
+      <p>Before, the monitor had its own toggle switch, its own buttons and labels in tiny capitals.</p>
+      <h3 class="size">Laptop</h3>
+      <div class="pair">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/settings-before-1440-full.webp" aria-label="Show full size: Monitor settings before, laptop: Widgets tab with small all-caps labels and a wide green copy button">
+            <img src="./assets/new-look/settings-before-1440.webp" width="1080" height="675" alt="Monitor settings before, laptop: Widgets tab with small all-caps labels and a wide green copy button" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/settings-after-1440-full.webp" aria-label="Show full size: Monitor settings now, laptop: Widgets tab with the shared checkboxes and a full-size Placement field">
+            <img src="./assets/new-look/settings-after-1440.webp" width="1080" height="675" alt="Monitor settings now, laptop: Widgets tab with the shared checkboxes and a full-size Placement field" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+      <h3 class="size">Phone</h3>
+      <div class="pair pair-phone">
+        <figure class="shot phone">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/settings-before-360-full.webp" aria-label="Show full size: Monitor settings before, phone: the Widgets tab">
+            <img src="./assets/new-look/settings-before-360.webp" width="540" height="1140" alt="Monitor settings before, phone: the Widgets tab" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <figure class="shot phone now">
+          <figcaption>Now</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/settings-after-360-full.webp" aria-label="Show full size: Monitor settings now, phone: the Widgets tab with the shared components">
+            <img src="./assets/new-look/settings-after-360.webp" width="540" height="1140" alt="Monitor settings now, phone: the Widgets tab with the shared components" loading="lazy" decoding="async">
+          </button>
+        </figure>
+      </div>
+    </section>
+
+  <section class="area" id="widget" aria-labelledby="widget-h">
+      <h2 id="widget-h">The stream widget</h2>
+      <p>The widget changed least, on purpose: it is the part your viewers see. Its labels are in the same Work Sans as the app, with units in lower case.</p>
+      <p>The switches for what it shows were there before. The home page now shows the four layouts most people want, with each one's footprint, so you can size the OBS source before you go live.</p>
+      <div class="pair pair-widget">
+        <figure class="shot">
+          <figcaption>Before</figcaption>
+          <button type="button" class="zoom" data-full="./assets/new-look/widget-before-single-full.webp" aria-label="Show full size: Stream widget before: heart rate, HRV and the live trace with all-caps units">
+            <img src="./assets/new-look/widget-before-single.webp" width="622" height="476" alt="Stream widget before: heart rate, HRV and the live trace with all-caps units" loading="lazy" decoding="async">
+          </button>
+        </figure>
+        <div class="now-set">
+          <figure class="shot now">
+            <figcaption>Now: Full chip, 311 × 238 px</figcaption>
+            <button type="button" class="zoom" data-full="./assets/new-look/widget-after-chip-full.webp" aria-label="Show full size: Stream widget now, full chip: heart rate, HRV and the live trace">
+              <img src="./assets/new-look/widget-after-chip.webp" width="622" height="476" alt="Stream widget now, full chip: heart rate, HRV and the live trace" loading="lazy" decoding="async">
+            </button>
+          </figure>
+          <figure class="shot now">
+            <figcaption>Now: Heart rate only, 145 × 148 px</figcaption>
+            <button type="button" class="zoom" data-full="./assets/new-look/widget-after-slim-full.webp" aria-label="Show full size: Stream widget now, slim: heart rate only">
+              <img src="./assets/new-look/widget-after-slim.webp" width="290" height="296" alt="Stream widget now, slim: heart rate only" loading="lazy" decoding="async">
+            </button>
+          </figure>
+          <figure class="shot now">
+            <figcaption>Now: Heart rate and HRV, 217 × 148 px</figcaption>
+            <button type="button" class="zoom" data-full="./assets/new-look/widget-after-hrhrv-full.webp" aria-label="Show full size: Stream widget now: heart rate and HRV side by side">
+              <img src="./assets/new-look/widget-after-hrhrv.webp" width="434" height="296" alt="Stream widget now: heart rate and HRV side by side" loading="lazy" decoding="async">
+            </button>
+          </figure>
+          <figure class="shot now">
+            <figcaption>Now: No trends, 311 × 152 px</figcaption>
+            <button type="button" class="zoom" data-full="./assets/new-look/widget-after-notrends-full.webp" aria-label="Show full size: Stream widget now: heart rate, live trace and HRV without the trend row">
+              <img src="./assets/new-look/widget-after-notrends.webp" width="622" height="304" alt="Stream widget now: heart rate, live trace and HRV without the trend row" loading="lazy" decoding="async">
+            </button>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+  <section class="area speed" id="speed" aria-labelledby="speed-h">
+    <h2 id="speed-h">Faster where it was slow</h2>
+    <p>Speed is hard to see in a still picture. These numbers come from tests with the processor slowed down to roughly phone speed.</p>
+    <ul>
+      <li>Panning a zoomed day: about 125 ms per redraw before, about 14 ms now.</li>
+      <li>Clicking a marker to jump to it: the worst stall went from about 400 ms to about 55 ms.</li>
+      <li>Moving the mouse over the chart no longer redraws the chart at all; the hover line is drawn on its own.</li>
+      <li>Opening the viewer shows your saved sessions first, in well under a second, and syncs with Drive quietly after.</li>
+    </ul>
+  </section>
+
+  <section class="next" aria-labelledby="next-h">
+    <h2 id="next-h" class="area-h">Try it</h2>
+    <p>The sample data in these pictures is in the viewer, so you can click around without a strap. Every change is listed in the changelog.</p>
+    <div class="actions">
+      <a class="btn primary" href="./hr_monitor.html">Open monitor</a>
+      <a class="btn" href="./hrv_viewer.html?demo=1">Sample data</a>
+      <a class="btn ghost" href="./changelog.html">Changelog</a>
+    </div>
+  </section>
+</main>
+
+<dialog class="lightbox" id="lightbox" aria-labelledby="lb-caption">
+  <div class="lb ui">
+    <div class="lb-bar">
+      <span class="lb-count" id="lb-count"></span>
+      <button type="button" class="btn icon" id="lb-close" aria-label="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="lb-stage" id="lb-stage"><img id="lb-img" alt=""></div>
+    <div class="lb-foot">
+      <button type="button" class="btn icon" id="lb-prev" aria-label="Previous picture"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <p id="lb-caption"></p>
+      <button type="button" class="btn icon" id="lb-next" aria-label="Next picture"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+  </div>
+</dialog>
+
+<!-- FOOTER -->
+<button class="to-top" id="back-to-top" type="button" aria-label="Back to top">
+  <svg viewBox="0 0 1779 1642" aria-hidden="true"><path d="M335.246 1288.39H597.239V1501.89H30.0461C6.76784 1501.89 -7.64139 1476.53 4.27458 1456.54L233.18 1072.39H441.775L335.246 1288.39ZM1774.22 1456.54C1786.14 1476.53 1771.73 1501.89 1748.45 1501.89H1181.24V1288.39H1444.25C1444.25 1288.39 1393.32 1190.51 1329.4 1072.39H1545.31L1774.22 1456.54ZM863.476 14.6427C875.11 -4.88088 903.383 -4.88093 915.018 14.6427L1429.12 877.393H1317.25L1304.25 850.394L1303.84 849.757C1286.76 823.042 1278.22 809.685 1266.5 810.385C1254.78 811.085 1247.89 825.364 1234.11 853.922L1222.79 877.393H1221.48C1210.32 857.809 1199.36 838.817 1188.78 820.774L1142.99 690.123C1126.2 642.237 1117.81 618.293 1103.28 618.629C1090.01 618.936 1082.79 639.236 1070.55 679.784C1046.68 675.779 974.839 465.032 921.527 342.432C913.121 305.965 906.446 287.643 894.512 287.215C887.644 286.969 882.089 292.76 876.513 304.539L876.248 304.395L875.4 306.964C869.736 319.716 863.963 338.625 856.69 363.64L790.748 563.395C762.975 661.556 740.801 631.976 712.248 588.395L712.156 588.403C710.618 584.591 708.986 582.083 707.116 580.781C700.623 576.259 692.074 575.99 685.31 580.095C681.914 582.156 679.005 587.924 675.801 597.869L537.945 877.393H349.377L863.476 14.6427Z" fill="#ffffff"/><path d="M527.254 1014.52L66.248 991.395L545.809 947.978C548.96 947.692 550.536 947.55 551.928 948.144C553.319 948.739 554.305 949.977 556.277 952.452L584.684 988.112C591.061 996.117 594.249 1000.12 597.841 999.397C601.434 998.675 602.828 993.751 605.616 983.904L680.458 719.568C685.568 701.521 688.122 692.498 692.78 692.618C697.438 692.737 699.526 701.88 703.703 720.165L765.782 991.942L765.782 991.942C771.002 1014.79 773.612 1026.22 778.536 1026.08C783.461 1025.94 785.412 1014.38 789.313 991.267L877.025 471.652L877.025 471.651C882.345 440.137 885.005 424.38 890.219 424.524C895.433 424.669 897.217 440.549 900.783 472.31L978.497 1164.42C981.627 1192.29 983.192 1206.23 988.291 1206.48C993.39 1206.73 996.313 1193.01 1002.16 1165.58L1092.78 740.318C1096.58 722.497 1098.48 713.587 1103.09 713.364C1107.71 713.141 1110.46 721.826 1115.96 739.197L1194.13 986.092C1197.99 998.281 1199.92 1004.38 1203.98 1004.67C1208.04 1004.96 1210.82 999.2 1216.38 987.684L1255.91 905.753L1255.91 905.752C1260.04 897.185 1262.11 892.902 1265.62 892.692C1269.14 892.482 1271.7 896.489 1276.83 904.503L1301.05 942.392C1302.62 944.848 1303.4 946.076 1304.61 946.8C1305.81 947.524 1307.26 947.645 1310.16 947.887L1563.41 968.965C1616.87 973.414 1643.6 975.639 1643.58 981.178C1643.56 986.716 1616.82 988.774 1563.33 992.888L1283.49 1014.41C1280.43 1014.65 1278.9 1014.77 1277.65 1015.55C1276.41 1016.32 1275.63 1017.65 1274.07 1020.29L1194.84 1154.82C1188.99 1164.74 1186.07 1169.7 1182.21 1169.27C1178.35 1168.84 1176.59 1163.36 1173.07 1152.39L1117.03 977.514C1111.15 959.16 1108.21 949.982 1103.52 950.299C1098.84 950.614 1097.15 960.102 1093.79 979.077L1093.79 979.079L990.445 1561.4C985.109 1591.46 982.442 1606.49 977.265 1606.34C972.088 1606.19 970.296 1591.03 966.713 1560.71L888.151 895.923C884.273 863.109 882.334 846.702 877.093 846.614C871.851 846.525 869.358 862.857 864.371 895.52L798.554 1326.66C794.783 1351.36 792.897 1363.71 787.906 1363.87C782.915 1364.03 780.265 1351.82 774.964 1327.4L774.964 1327.4L693.313 951.261C689.297 932.762 687.29 923.513 682.621 923.354C677.952 923.195 675.321 932.287 670.059 950.47L670.059 950.471L613.607 1145.55C609.704 1159.04 607.752 1165.79 603.528 1166.04C599.305 1166.3 596.55 1159.84 591.042 1146.92L537.691 1021.8C540.266 1022.44 539.55 1020.76 538.138 1019.78C536.726 1018.79 534.904 1018.7 531.26 1018.52Z" fill="#ffffff"/></svg>
+</button>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p class="footer-line">Free, no ads, no account needed. Not a medical tool.</p>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="https://github.com/Nakauri/hr-monitor" rel="noopener"><svg class="gh-mark" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Source on GitHub</a>
+      <a href="./changelog.html">Changelog</a>
+      <a href="./legal.html#privacy">Privacy and terms</a>
+      <a href="/#contact">Contact</a>
+      <a href="https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk" rel="noopener">Android APK</a>
+    </nav>
+  </div>
+</footer>
+<!-- /FOOTER -->
+
+<script>
+  // Picture dialog: click or Enter on a picture opens its full-size file (loaded only then); Tab stays inside;
+  // Escape or Close shuts it and focus goes back to the picture; arrow keys and swipes move in page order.
+  (function () {
+    const dlg = document.getElementById('lightbox');
+    const img = document.getElementById('lb-img');
+    const cap = document.getElementById('lb-caption');
+    const count = document.getElementById('lb-count');
+    const stage = document.getElementById('lb-stage');
+    let list = [], at = -1, opener = null;
+    // Page order is reading order, so on a phone (where Now stacks first) the arrows follow what you see.
+    const ordered = () => [...document.querySelectorAll('button.zoom')].filter((b) => b.offsetParent)
+      .sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return (ra.top - rb.top) || (ra.left - rb.left); });
+    function show(i) {
+      at = (i + list.length) % list.length;
+      const b = list[at], alt = b.querySelector('img').alt;
+      img.src = b.dataset.full; img.alt = alt;
+      cap.textContent = alt;
+      count.textContent = (at + 1) + ' of ' + list.length;
+    }
+    function open(b) {
+      list = ordered(); opener = b;
+      show(list.indexOf(b));
+      dlg.showModal();
+      document.getElementById('lb-close').focus();
+    }
+    function close() { if (dlg.open) dlg.close(); }
+    dlg.addEventListener('close', () => { img.removeAttribute('src'); if (opener) opener.focus(); });
+    document.addEventListener('click', (e) => { const b = e.target.closest('button.zoom'); if (b) open(b); });
+    document.getElementById('lb-close').addEventListener('click', close);
+    document.getElementById('lb-prev').addEventListener('click', () => show(at - 1));
+    document.getElementById('lb-next').addEventListener('click', () => show(at + 1));
+    dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target === stage) close(); });
+    dlg.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); show(at + 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); show(at - 1); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'Tab') {
+        const f = [...dlg.querySelectorAll('button')];
+        const i = f.indexOf(document.activeElement);
+        if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && (i === f.length - 1 || i < 0)) { e.preventDefault(); f[0].focus(); }
+      }
+    });
+    let sx = null, sy = null;
+    stage.addEventListener('touchstart', (e) => { const t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
+    stage.addEventListener('touchend', (e) => {
+      if (sx == null) return;
+      const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy; sx = null;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) show(at + (dx < 0 ? 1 : -1));
+    });
+  })();
+</script>
+<script src="./assets/landing/site.js"></script>
+</body>
+</html>
