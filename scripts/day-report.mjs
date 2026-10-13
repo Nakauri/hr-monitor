@@ -12,7 +12,7 @@
 // 4. Type: captions at 7 pt or more, body 9 pt; forbidden words 0; no paragraph or cell ends on one word alone.
 // 5. Digits centred in every moment circle within 0.5 px (mocks/report-centre.mjs, measured from pixels at 3x).
 // 6. App path (fake bridge): Share report calls printPdf with N pages of 1224 x 1584 PNG and the promise settles; a
-//    rejected call shows a notice and falls back to print.
+//    rejected call shows a notice and clears the report (the app WebView ignores print).
 // --mutants: page 1 one row over the footer, and a menu count off by one; each must FAIL.
 // Usage: node scripts/day-report.mjs [--mutants] [--ux <ux-audit dir>] [--shots]
 import http from 'node:http';
@@ -352,7 +352,9 @@ async function appPath(base, iso, expect) {
         fs.writeFileSync(path.join(SHOT_DIR, 's44', 'app-raster-p1.png'), Buffer.from(png, 'base64'));
       }
     } else {
-      check(`app ${iso} a rejected printPdf settles, shows a notice and falls back to print`, !!r && r.settled === 'rejected' && r.printCalls === 1 && /Could not make the PDF/.test(r.notice), JSON.stringify(r && { settled: r.settled, printCalls: r.printCalls, notice: r.notice }));
+      const left = await page.evaluate(() => ({ pages: document.querySelectorAll('#report-print .page').length, printing: document.body.classList.contains('rpt-printing') }));
+      // The app WebView ignores window.print(), so a failed share clears and says so instead of printing.
+      check(`app ${iso} a rejected printPdf settles, shows a notice, clears the report`, !!r && r.settled === 'rejected' && r.printCalls === 0 && /Could not make the PDF/.test(r.notice) && left.pages === 0 && !left.printing, JSON.stringify(r && { settled: r.settled, printCalls: r.printCalls, notice: r.notice, left }));
     }
     check(`app ${iso}${reject ? ' rejected' : ''} no page errors`, page.errors.length === 0, page.errors.slice(0, 2).join('; '));
     await ctx.close();

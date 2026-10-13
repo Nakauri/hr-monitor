@@ -7004,23 +7004,6 @@
     }
   }
 
-  function exportReport() {
-    // Expand the interp panel so its body shows in the report, then apply printing
-    // mode, let Chart.js resize, and open the print dialog. afterprint handler
-    // (in init) removes the class and restores chart sizing.
-    const interp = document.getElementById('interp-panel');
-    const wasCollapsed = interp && interp.classList.contains('collapsed');
-    if (interp) interp.classList.remove('collapsed');
-    document.body.classList.add('printing');
-    requestAnimationFrame(() => {
-      resizeAllViewerCharts();
-      setTimeout(() => {
-        window.print();
-        if (wasCollapsed && interp) interp.classList.add('collapsed');
-      }, 200);
-    });
-  }
-
   // ===== Day report (S44) BEGIN =====
   // REPORT-SPEC page 1 plus moment pages two per page, built from the Day view's memoised day (buildDaySession), never a
   // re-parse. Sleep is not validated (S13), so one Whole day column; gap causes wait for S14, so gaps list times only.
@@ -7114,6 +7097,7 @@
     for (const g of summary.connGaps || []) for (let m = Math.ceil(g.start); m < Math.floor(g.end); m++) if (m >= 0 && m < n) { d.hr[m] = null; d.hrv[m] = null; }
     d.clock = (m) => { if (m >= n) return '24:00'; const t = new Date(dayStart + Math.round(m) * 60000); return rptPad(t.getHours()) + ':' + rptPad(t.getMinutes()); };
     d.recorded = d.hr.filter(v => v != null).length;
+    if (!d.recorded) return null;
     d.first = d.hr.findIndex(v => v != null);
     d.last = d.hr.length - 1 - d.hr.slice().reverse().findIndex(v => v != null);
     d.gaps = (summary.connGaps || []).filter(g => g.end - g.start >= 1 && g.end > d.first && g.start < d.last).map(g => [Math.max(0, g.start), Math.min(n, g.end)]);
@@ -7130,13 +7114,11 @@
     }
     // Standing taps: the posture log's switches to standing; a span clipped at the day start is not a tap.
     const spans = (summary.postureSpans || []).slice().sort((p, q) => p.start - q.start);
-    let lastStand = -99;
     spans.forEach((sp, i) => {
       if (sp.posture !== 'standing' || sp.start < 0.5 || sp.start >= n) return;
-      if (sp.start - lastStand < 3) return;
-      lastStand = sp.start;
-      const prev = spans.slice(0, i).reverse().find(p => p.posture !== 'standing');
-      d.taps.push({ m: Math.min(n - 1, Math.round(sp.start)), kind: 'Standing', from: prev ? prev.posture : null });
+      const prev = spans[i - 1];
+      if (!prev || prev.posture === 'standing' || sp.start - prev.end > 1) return;
+      d.taps.push({ m: Math.min(n - 1, Math.round(sp.start)), kind: 'Standing', from: prev.posture });
     });
     d.taps.sort((p, q) => p.m - q.m);
     d.moments = rptMoments(d);
@@ -7144,14 +7126,14 @@
   }
 
   function rptStanding(d, t) {
-    const base = Math.round(rptMean(d.hr, t - 5, t - 1) || rptAt(d.hr, t, 2) || 0);
+    const b0 = rptMean(d.hr, t - 5, t - 1), base = b0 != null ? Math.round(b0) : rptAt(d.hr, t, 2);
     const baseHrv = rptMean(d.hrv, t - 5, t - 1);
     const w = rptWindow(d, t, t + 10);
     const at = (k) => rptAt(d.hr, t + k, 1);
     let held = 0;
-    for (let k = 1; k <= 10; k++) { const v = d.hr[Math.round(t) + k]; if (v != null && v - base >= 30) held++; }
+    if (base != null) for (let k = 1; k <= 10; k++) { const v = d.hr[Math.round(t) + k]; if (v != null && v - base >= 30) held++; }
     let end = null;
-    if (w.peak) for (let m = w.peak.m + 1; m < Math.min(d.n, t + 90); m++) if (d.hr[m] != null && d.hr[m] <= base + 10) { end = { m, v: Math.round(d.hr[m]) }; break; }
+    if (w.peak && base != null) for (let m = w.peak.m + 1; m < Math.min(d.n, t + 90); m++) if (d.hr[m] != null && d.hr[m] <= base + 10) { end = { m, v: Math.round(d.hr[m]) }; break; }
     return { t, base, baseHrv: baseHrv == null ? null : Math.round(baseHrv), r1: at(1), r3: at(3), r5: at(5), r10: at(10), peak: w.peak, lowHrv: w.lowHrv, held, met: held > 0, end };
   }
 
@@ -7159,13 +7141,12 @@
   // validated sleep. Overlaps merge; page slots go Symptom and Standing first, cap 6; numbers follow time.
   function rptMoments(d) {
     const list = [];
-    d.taps.filter(t => t.kind === 'Standing').forEach(t => list.push({ a: t.m - 5, b: t.m + 10, t: t.m, taps: [t] }));
-    d.taps.filter(t => t.kind === 'Symptom').forEach(t => {
-      const a = t.m - 10, b = t.m + 20;
-      const hit = list.find(x => x.a <= b && a <= x.b);
-      if (hit) { hit.a = Math.min(hit.a, a); hit.b = Math.max(hit.b, b); hit.taps.push(t); }
-      else list.push({ a, b, t: t.m, taps: [t] });
-    });
+    d.taps.map(t => t.kind === 'Standing' ? { a: t.m - 5, b: t.m + 10, t: t.m, taps: [t] } : { a: t.m - 10, b: t.m + 20, t: t.m, taps: [t] })
+      .sort((p, q) => p.a - q.a).forEach(w => {
+        const last = list[list.length - 1];
+        if (last && w.a <= last.b) { last.b = Math.max(last.b, w.b); last.taps.push(...w.taps); last.t = Math.min(last.t, w.t); }
+        else list.push(w);
+      });
     const free = (a, b) => !list.some(x => x.a <= b && a <= x.b);
     if (d.line != null) {
       let best = null, s = -1;
@@ -7174,7 +7155,8 @@
         if (up && s < 0) s = m;
         if (!up && s >= 0) { if (m - s >= 10 && (!best || m - s > best.e - best.s)) best = { s, e: m }; s = -1; }
       }
-      if (best && free(best.s - 10, best.s + 10)) list.push({ kind: 'Above line', s: best.s, e: best.e, t: best.s, a: best.s - 10, b: Math.min(best.e + 20, best.s + 110), taps: [] });
+      const b1 = best ? Math.min(best.e + 20, best.s + 110) : 0;
+      if (best && free(best.s - 10, b1)) list.push({ kind: 'Above line', s: best.s, e: best.e, t: best.s, a: best.s - 10, b: b1, taps: [] });
     }
     if (!list.some(x => x.kind === 'Above line')) {
       const rises = (d.summary.hrDeltas || []).filter(h => h.direction === 'rise' && h.start >= 0 && h.start < d.n && free(h.start - 10, h.start + 20))
@@ -7302,6 +7284,13 @@
     return Math.min(120, Math.max(60, Math.ceil(hi / 20) * 20));
   }
   function rptHrvTicks(top) { const t = [], step = top > 60 ? 40 : 20; for (let v = step; v < top; v += step) t.push(v); return t; }
+  // Minutes from the day start where the clock reads a multiple of `every` hours, plus the day end.
+  function rptHourTicks(d, every) {
+    const out = [];
+    for (let m = 0; m < d.n; m += 60) { const h = +d.clock(m).slice(0, 2); if (h % every === 0 && d.clock(m).endsWith(':00')) out.push(m); }
+    out.push(d.n);
+    return out;
+  }
   function rptCircleX(x) { return x.kind === 'Above line' ? x.s : x.peak && x.peak.m != null ? x.peak.m : x.t; }
 
   // Page 1 chart: HR zone-coloured, HRV dashed beneath, one clock axis, gaps hatched, the person's line if set.
@@ -7351,11 +7340,11 @@
       else if (mk.kind === 'Standing') s += rptSquare(x, y, 3.2);
       else { s += rptEl('line', { x1: x.toFixed(1), x2: x.toFixed(1), y1: y - 4, y2: y + 4, stroke: 'var(--rp-ink)', 'stroke-width': 1.25 }); s += rptEl('text', { x: (x + 3).toFixed(1), y: y + 3, class: 'callout-dim' }, rptEsc(mk.word)); }
     });
-    for (let h = 0; h <= 24; h += 3) {
-      const m = Math.min(d.n, h * 60), x = xOf(m);
+    rptHourTicks(d, 3).forEach(m => {
+      const x = xOf(m);
       s += rptEl('line', { x1: x.toFixed(1), x2: x.toFixed(1), y1: vB, y2: vB + 3, stroke: 'var(--rp-ink-3)', 'stroke-width': 0.75 });
-      s += rptEl('text', { x: x.toFixed(1), y: vB + 13, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle', class: 'ax' }, h === 24 ? '24:00' : d.clock(m));
-    }
+      s += rptEl('text', { x: x.toFixed(1), y: vB + 13, 'text-anchor': m === 0 ? 'start' : m === d.n ? 'end' : 'middle', class: 'ax' }, d.clock(m));
+    });
     const lift = Math.max(0, ...placed.map(p => p.lane)) * 17;
     return '<svg width="' + W + '" height="' + (H + lift) + '" viewBox="0 ' + (-lift) + ' ' + W + ' ' + (H + lift) + '" role="img" aria-label="Heart rate and HRV, 00:00 to 24:00">' + s + '</svg>';
   }
@@ -7413,12 +7402,12 @@
       h += d.personal ? '<th>Baseline, 5 min before</th><th>1 min</th><th>3 min</th><th>5 min</th><th>10 min</th><th>Peak</th>' : '<th>Start</th><th>Peak</th><th>End of rise</th>';
       h += '<th>HRV</th><th class="r">Moment</th></tr></thead><tbody>';
       stands.forEach(x => {
-        const r = x.stand, dl = (v) => v == null ? '' : ' <span class="dim">' + (v - r.base >= 0 ? 'up ' : 'down ') + Math.abs(v - r.base) + '</span>';
+        const r = x.stand, dl = (v) => v == null || r.base == null ? '' : ' <span class="dim">' + (v - r.base >= 0 ? 'up ' : 'down ') + Math.abs(v - r.base) + '</span>';
         const cell = (v) => '<td class="num">' + (v == null ? '<span class="dim">no reading</span>' : v + dl(v)) + '</td>';
         h += '<tr><td class="k num">' + d.clock(r.t) + (d.personal && r.met ? '<sup>1</sup>' : '') + '</td>';
         const pk = r.peak ? r.peak.v + ' at ' + d.clock(r.peak.m) + dl(r.peak.v) : '';
-        if (d.personal) h += '<td class="num">' + r.base + ' bpm' + (r.from ? ' <span class="dim">' + r.from + '</span>' : '') + '</td>' + [r.r1, r.r3, r.r5, r.r10].map(cell).join('') + '<td class="num">' + pk + '</td>';
-        else h += '<td class="num">' + r.base + ' bpm</td><td class="num">' + pk + '</td><td class="num">' + (r.end ? r.end.v + ' at ' + d.clock(r.end.m) + ' <span class="dim">' + Math.round(r.end.m - r.t) + ' min</span>' : '') + '</td>';
+        if (d.personal) h += '<td class="num">' + (r.base == null ? '<span class="dim">no reading</span>' : r.base + ' bpm') + (r.from ? ' <span class="dim">' + rptEsc(r.from) + '</span>' : '') + '</td>' + [r.r1, r.r3, r.r5, r.r10].map(cell).join('') + '<td class="num">' + pk + '</td>';
+        else h += '<td class="num">' + (r.base == null ? '<span class="dim">no reading</span>' : r.base + ' bpm') + '</td><td class="num">' + pk + '</td><td class="num">' + (r.end ? r.end.v + ' at ' + d.clock(r.end.m) + ' <span class="dim">' + Math.round(r.end.m - r.t) + ' min</span>' : '') + '</td>';
         h += '<td class="num">' + (r.baseHrv != null && r.lowHrv ? r.baseHrv + ' to ' + r.lowHrv.v + ' ms' : '') + '</td><td class="r pg">' + rptMn(x.n, { off: !x.zoom }) + (x.zoom ? ' p ' + pageOf(x) : '') + '</td></tr>';
       });
       h += '</tbody></table>';
@@ -7464,7 +7453,7 @@
     rptGapsAll(d).forEach(g => { s += rptEl('rect', { x: xOf(g[0]).toFixed(1), y: 2, width: Math.max(2, xOf(g[1]) - xOf(g[0])).toFixed(1), height: 10, fill: 'url(#' + hid + ')' }); });
     const x0 = xOf(x.a), w = Math.max(4, xOf(x.b) - x0);
     s += rptEl('rect', { x: x0.toFixed(1), y: 0, width: w.toFixed(1), height: 14, fill: 'var(--rp-ink)', 'fill-opacity': 0.12, stroke: 'var(--rp-ink)', 'stroke-width': 1.5 });
-    for (let h = 0; h <= 24; h += 6) { const m = Math.min(d.n, h * 60); s += rptEl('text', { x: xOf(m).toFixed(1), y: 24, 'text-anchor': h === 0 ? 'start' : h === 24 ? 'end' : 'middle', class: 'ax' }, h === 24 ? '24:00' : d.clock(m)); }
+    rptHourTicks(d, 6).forEach(m => { s += rptEl('text', { x: xOf(m).toFixed(1), y: 24, 'text-anchor': m === 0 ? 'start' : m === d.n ? 'end' : 'middle', class: 'ax' }, d.clock(m)); });
     s += rptEl('text', { x: G - 4, y: 11, 'text-anchor': 'end', class: 'ax' }, '24 h');
     return '<svg width="' + W + '" height="28" viewBox="0 0 ' + W + ' 28" role="img" aria-label="Window in the day">' + s + '</svg>';
   }
@@ -7549,15 +7538,15 @@
     h += '<p class="msub">' + sub.join(' · ') + '</p>';
     h += '<div class="chart">' + rptLocator(d, x) + '</div><div class="chart" style="margin-top:4px">' + rptMomentChart(d, x, ax) + '</div>';
     if (x.stand) {
-      const r = x.stand, dl = (v) => v == null ? '' : '<span class="d">' + (v - r.base >= 0 ? 'up ' : 'down ') + Math.abs(v - r.base) + '</span>';
+      const r = x.stand, dl = (v) => v == null || r.base == null ? '' : '<span class="d">' + (v - r.base >= 0 ? 'up ' : 'down ') + Math.abs(v - r.base) + '</span>';
       const cell = (v) => '<td>' + (v == null ? '<span class="d">no reading</span>' : v + dl(v)) + '</td>';
-      const base = 'Baseline' + (r.from ? ', ' + r.from : '') + ', 5 min';
+      const base = 'Baseline' + (r.from ? ', ' + rptEsc(r.from) : '') + ', 5 min';
       if (d.personal) {
         h += '<table class="readouts"><thead><tr><th>' + base + '</th><th>1 min</th><th>3 min</th><th>5 min</th><th>10 min</th><th>Peak</th><th>30 or more above baseline</th></tr></thead><tbody><tr>' +
-          '<td>' + r.base + '</td>' + [r.r1, r.r3, r.r5, r.r10].map(cell).join('') +
+          '<td>' + (r.base == null ? '<span class="d">no reading</span>' : r.base) + '</td>' + [r.r1, r.r3, r.r5, r.r10].map(cell).join('') +
           '<td>' + (r.peak ? r.peak.v + dl(r.peak.v) + '<span class="d">at ' + d.clock(r.peak.m) + '</span>' : '') + '</td><td>' + r.held + ' of 10 min' + (r.met ? '<sup>1</sup>' : '') + '</td></tr></tbody></table>';
       } else {
-        h += '<table class="readouts"><thead><tr><th>' + base + '</th><th>Peak</th><th>End of rise</th></tr></thead><tbody><tr><td>' + r.base + '</td>' +
+        h += '<table class="readouts"><thead><tr><th>' + base + '</th><th>Peak</th><th>End of rise</th></tr></thead><tbody><tr><td>' + (r.base == null ? '<span class="d">no reading</span>' : r.base) + '</td>' +
           '<td>' + (r.peak ? r.peak.v + dl(r.peak.v) + '<span class="d">at ' + d.clock(r.peak.m) + '</span>' : '') + '</td>' +
           '<td>' + (r.end ? r.end.v + '<span class="d">at ' + d.clock(r.end.m) + '</span>' : '') + '</td></tr></tbody></table>';
       }
@@ -7614,7 +7603,9 @@
     let keep = d.moments.filter(x => !x.zoom).length;
     for (;;) {
       host.innerHTML = rptPagesHtml(d, keep);
-      if (keep === 0 || rptRoom(host.querySelector('#rpg1')) >= 8) break;
+      const room = rptRoom(host.querySelector('#rpg1'));
+      if (room >= 8) break;
+      if (keep === 0) { console.warn('[report] page 1 runs into its footer by', 8 - room, 'px'); break; }
       keep--;
     }
     return { d, host, count: host.querySelectorAll('.page').length, zoomed: d.moments.filter(x => x.zoom).length };
@@ -7628,12 +7619,17 @@
   // ---------- Web: the print view; the browser saves it as a PDF ----------
   let rptTitle = null;
   async function rptDownload(iso) {
-    const prep = await rptPrepare(iso);
-    if (!prep) { UI.notice({ kind: 'error', text: 'No recording on this day.' }); return; }
-    rptPrint(iso);
+    rptBusy = true;
+    try {
+      const prep = await rptPrepare(iso);
+      if (!prep) { UI.notice({ kind: 'error', text: 'No recording on this day.' }); return; }
+      rptPrint(iso);
+    } finally {
+      rptBusy = false;
+    }
   }
   function rptPrint(iso) {
-    rptTitle = document.title;
+    if (rptTitle == null) rptTitle = document.title;
     document.title = 'aorti day report ' + iso;
     document.body.classList.add('rpt-printing');
     window.print();
@@ -7652,14 +7648,16 @@
     const faces = [];
     for (const f of files) {
       try {
-        const buf = new Uint8Array(await (await fetch(f)).arrayBuffer());
+        const res = await fetch(f);
+        if (!res.ok) continue;
+        const buf = new Uint8Array(await res.arrayBuffer());
         let bin = '';
         for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
         faces.push("@font-face{font-family:'Work Sans';font-weight:100 900;src:url(data:font/woff2;base64," + btoa(bin) + ") format('woff2');}");
       } catch (e) {}
     }
-    rptFontCss = faces.join('');
-    return rptFontCss;
+    if (faces.length) rptFontCss = faces.join('');
+    return faces.join('');
   }
   function rptSheetCss() {
     const out = [];
@@ -7696,7 +7694,7 @@
     }
     const url = c.toDataURL('image/png');
     c.width = 0; c.height = 0;
-    // native-pdf.js encodes a page through toDataURL and width/height; one page lives in memory at a time.
+    // native-pdf.js encodes a page through toDataURL and width/height; one canvas lives at a time, PNG strings stay.
     return { toDataURL: () => url, width: 1224, height: 1584 };
   }
   // Dark pixels in the running head band (first 70 CSS px), where every page prints text.
@@ -7709,6 +7707,7 @@
   function rptNativeOk() { return !!(window.__aortiNativePdf && window.__aortiNativePdf.available && window.__aortiNativePdf.available()); }
   async function rptShare(iso) {
     let prep = null;
+    rptBusy = true;
     try {
       prep = await rptPrepare(iso);
       if (!prep) { UI.notice({ kind: 'error', text: 'No recording on this day.' }); return; }
@@ -7720,12 +7719,14 @@
     } catch (e) {
       console.warn('[report] native PDF failed', e);
       UI.notice({ kind: 'error', text: 'Could not make the PDF. Try again.' });
-      if (prep) rptPrint(iso); else rptClear();
+      rptClear();
+    } finally {
+      rptBusy = false;
     }
   }
 
   // ---------- Share menu: a menu on the laptop, a sheet on the phone ----------
-  let rptMenuState = null;
+  let rptMenuState = null, rptBusy = false, rptOpening = false;
   function rptCloseMenu(focusBtn) {
     if (!rptMenuState) return;
     const st = rptMenuState;
@@ -7739,10 +7740,13 @@
   async function rptOpenMenu() {
     const btn = document.getElementById('export-report');
     if (rptMenuState) { rptCloseMenu(true); return; }
+    if (rptBusy) { UI.toast('Making the report'); return; }
+    if (rptOpening) return;
     const iso = rptDayIso();
     if (!iso) return;
     let count = 1;
-    try { const d = await rptModel(iso); if (d) count = rptPageCount(d); } catch (e) { console.warn('[report] count failed', e); }
+    rptOpening = true;
+    try { const d = await rptModel(iso); if (d) count = rptPageCount(d); } catch (e) { console.warn('[report] count failed', e); } finally { rptOpening = false; }
     const native = rptNativeOk();
     const m0 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
     const label = new Date(+m0[1], +m0[2] - 1, +m0[3], 12).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
