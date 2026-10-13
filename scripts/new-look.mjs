@@ -1,6 +1,9 @@
 // Guards: S41 (2026-10-12) the "new look" announcement page, new-look.html, and its pictures in assets/new-look/.
 // Named bugs: pages drifting to their own top bar (Khal 2026-10-12, "the home button on privacy and terms is weirdly
 // placed"), so nav and footer must equal index.html; the phone Day picture showing a tall one-column summary (Khal 10-12).
+// S46 named bugs (Khal 2026-10-12): the page "EXTREMELY bad about its right real estate" (text and pictures leaving the
+// right side empty), the Day story missing the old "View as full-day timeline" step, the intro paragraph he cut, and
+// the Zoom copy saying the markers list moved without saying where it lives now.
 // Two modes. Runtime: --capture about 3 min; checks about 10 s; --mutants about 30 s more.
 //   node scripts/new-look.mjs --capture <before-root>   takes every before/after pair on synthetic data only
 //        (the viewer's ?demo=1 files, identical in both builds, and the fake phone bridge for the monitor) and
@@ -30,6 +33,8 @@ const OUT = path.join(ROOT, 'assets', 'new-look');
 // Pairs in page order. Sizes: 1440 laptop, 360 phone. The widget pair is one size (the widget does not change with the page).
 export const PAIRS = ['day', 'zoom', 'month', 'week', 'trends', 'monitor', 'settings'];
 export const WIDGETS = ['chip', 'slim', 'hrhrv', 'notrends'];
+// S46: Day before step 2 (the old full-day timeline page) at both sizes, and the Markers list open on the laptop.
+export const EXTRAS = ['day-before2-1440', 'day-before2-360', 'markers-after-1440'];
 const BUDGET = { display: 300 * 1024, full: 900 * 1024 };
 const DAY = '2026-04-24'; // Khal 2026-10-12: the most complete demo day
 
@@ -90,6 +95,8 @@ async function capture(beforeRoot) {
   }
   // --side before|after takes one side only (each side runs about 90 s).
   const side = argVal('--side');
+  // --only day2 (with --side before) or --only markers (with --side after) takes just that Day extra; about 20 s.
+  const dayOnly = ['day2', 'markers'].includes(argVal('--only'));
   for (const [ver, root] of [['before', path.resolve(beforeRoot)], ['after', ROOT]].filter(([v]) => !side || v === side)) {
     const { server, base } = await serve(root, appShim(root));
     for (const size of [1440, 360]) {
@@ -106,7 +113,7 @@ async function capture(beforeRoot) {
         await page.waitForTimeout(2500);
         await page.evaluate(() => window.scrollTo(0, 0));
       };
-      for (const [id, hash] of [['day', `#/day/${DAY}`], ['month', '#/month/2026-04'], ['week', '#/week/2026-04-20'], ['trends', '#/all']]) {
+      for (const [id, hash] of [['day', `#/day/${DAY}`], ['month', '#/month/2026-04'], ['week', '#/week/2026-04-20'], ['trends', '#/all']].slice(0, dayOnly ? 1 : 4)) {
         // Taller frames where the view's point sits low: the phone Day chart, the laptop Month's data week.
         const tall = { day: phone ? 1300 : null, month: phone ? null : 1180 }[id];
         await page.setViewportSize({ width: vp.width, height: tall || vp.height });
@@ -117,9 +124,28 @@ async function capture(beforeRoot) {
           await page.evaluate(() => { const b = document.getElementById('summary-bar'); if (b && !b.classList.contains('collapsed')) b.click(); });
           await page.waitForTimeout(800);
         }
-        await save(await page.screenshot(), `${id}-${ver}-${size}`, maxW);
+        if (!dayOnly) await save(await page.screenshot(), `${id}-${ver}-${size}`, maxW);
         if (fold) await page.evaluate(() => { try { localStorage.removeItem('hrv_summary_collapsed'); } catch (e) {} });
+        // Before, step 2: the old Day reached its graph only through "View as full-day timeline" (S46).
+        if (ver === 'before' && id === 'day') {
+          const link = page.locator('#day-view-timeline');
+          if (await link.count()) {
+            await link.click(); await page.waitForTimeout(3000);
+            await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForTimeout(300);
+            await save(await page.screenshot(), `day-before2-${size}`, maxW);
+          } else log.push(`WARN before ${size}: no "View as full-day timeline" link`);
+        }
+        // Now, laptop: the Markers button opens the list over the chart (S46: the copy names where it lives).
+        if (ver === 'after' && id === 'day' && !phone) {
+          const btn = page.locator('#markers-toggle');
+          if (await btn.count()) {
+            await btn.click(); await page.waitForTimeout(1200);
+            await save(await page.screenshot(), 'markers-after-1440', maxW);
+            await btn.click(); await page.waitForTimeout(400);
+          } else log.push('WARN after 1440: no Markers button');
+        }
       }
+      if (dayOnly) { await ctx.close(); console.log(`captured ${ver} ${size} Day extra`); continue; }
       // Zoomed chart: before, the full-day session view; after, the Day view. Drag across the strip under the chart.
       await page.setViewportSize(vp);
       await go(ver === 'before' ? `#/session/day:${DAY}` : `#/day/${DAY}`);
@@ -216,7 +242,7 @@ function staticChecks() {
   const kb = (f) => Math.round(fs.statSync(f).size / 1024);
   const want = [];
   for (const id of PAIRS) for (const size of [1440, 360]) for (const ver of ['before', 'after']) want.push(`${id}-${ver}-${size}`);
-  want.push('widget-before-single', ...WIDGETS.map((v) => `widget-after-${v}`));
+  want.push('widget-before-single', ...WIDGETS.map((v) => `widget-after-${v}`), ...EXTRAS);
   const missing = [], over = [];
   for (const n of want) {
     for (const [suffix, budget, attr] of [['', BUDGET.display, `src="./assets/new-look/${n}.webp"`], ['-full', BUDGET.full, `data-full="./assets/new-look/${n}-full.webp"`]]) {
@@ -238,6 +264,17 @@ function staticChecks() {
   if (!hasMain) { idx = execFileSync('git', ['-C', ROOT, 'show', 'main:index.html'], { encoding: 'utf8' }).replace(/\r\n/g, '\n'); from = 'main:index.html'; }
   const nav = (s) => (s.match(/<nav class="nav"[\s\S]*?\n<\/nav>/) || [null])[0];
   const foot = (s) => (s.match(/<footer class="site-footer">[\s\S]*?<\/footer>/) || [null])[0];
+  // S46: Day tells the old two-step route (block bar, then "View as full-day timeline") against one Now screen.
+  const day = (PAGE.match(/<section class="area" id="day"[\s\S]*?<\/section>/) || [''])[0];
+  const steps = [...day.matchAll(/<div class="pair[^"]*">([\s\S]*?)<\/div>\s*(?=<h3|<\/div>)/g)].map((m) =>
+    [...m[1].matchAll(/<figcaption>([^<]*)<\/figcaption>[\s\S]*?<img src="[^"]*-(1440|360)\.webp"/g)].map((f) => f[2] + ' ' + f[1].split(':')[0]));
+  const wantSteps = (s) => [`${s} Before, step 1`, `${s} Before, step 2`, `${s} Now`].join(' | ');
+  check(steps.length === 2 && steps[0].join(' | ') === wantSteps('1440') && steps[1].join(' | ') === wantSteps('360'),
+    'Day: Before step 1, Before step 2 and Now at laptop and phone', JSON.stringify(steps));
+  check(/<figcaption>Before, step 2: after View as full-day timeline<\/figcaption>/.test(day) && /one click less/.test(day), 'Day: step 2 named by its link, Now says one click less');
+  check(!/I rebuilt most of aorti/.test(PAGE) && /<time datetime="2026-10-12">October 12, 2026<\/time>/.test(PAGE), 'intro paragraph gone, the date in a time[datetime]');
+  const zoomSec = (PAGE.match(/<section class="area" id="zoom"[\s\S]*?<\/section>/) || [''])[0];
+  check(/Markers button above the chart/.test(zoomSec) && /markers-after-1440\.webp"[^>]*alt="[^"]*Markers · \d+ button/.test(zoomSec), 'Zoom: the copy names the Markers button and a Now picture shows its list open');
   check(nav(idx) && nav(PAGE) === nav(idx), `nav identical to ${from}`);
   check(foot(idx) && foot(PAGE) === foot(idx), `footer identical to ${from}`);
 }
@@ -265,6 +302,30 @@ async function runtime(browser, base, size, only) {
     const sw = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, w: window.innerWidth }));
     check(sw.sw <= sw.w, `${t}: no sideways scroll`, JSON.stringify(sw));
     if (phone) check(/after/.test(order[0].full), `${t}: Now stacks first on the phone`, order[0].full);
+    if (!phone) {
+      // S46: text column beside the pictures, and no picture row leaving more than 35% of the section empty beside it.
+      const fill = await page.evaluate(() => [...document.querySelectorAll('main > section')].map((sec) => {
+        const s = sec.getBoundingClientRect(), t = sec.querySelector(':scope > .area-text'), p = sec.querySelector(':scope > .area-pics');
+        if (!t || !p) return { id: sec.id || sec.className, empty: 1, side: false };
+        const tr = t.getBoundingClientRect(), pr = p.getBoundingClientRect();
+        const rows = [...p.children].filter((c) => c.tagName !== 'H3').map((r) => {
+          const figs = [...r.querySelectorAll('figure')].map((f) => f.getBoundingClientRect());
+          const w = figs.length ? Math.max(...figs.map((f) => f.right)) - Math.min(...figs.map((f) => f.left)) : r.getBoundingClientRect().width;
+          return 1 - (tr.width + w) / s.width;
+        });
+        return { id: sec.id || sec.className, side: pr.left >= tr.right - 1 && Math.abs(pr.top - tr.top) < 4, empty: +Math.max(...rows).toFixed(2) };
+      }));
+      const bad = fill.filter((f) => !f.side || f.empty > 0.35);
+      check(fill.length >= 10 && !bad.length, `${t}: every section is text beside pictures, worst empty share ${Math.max(...fill.map((f) => f.empty))} (limit 0.35)`, JSON.stringify(bad));
+      const shots = argVal('--shots');
+      if (shots) {
+        fs.mkdirSync(shots, { recursive: true });
+        await page.evaluate(async () => { for (const i of document.images) { i.loading = 'eager'; } await Promise.all([...document.images].map((i) => i.decode().catch(() => {}))); });
+        await page.screenshot({ path: path.join(shots, 's46-page-1440.png'), fullPage: true });
+        await page.locator('#day').screenshot({ path: path.join(shots, 's46-day-1440.png') });
+        await page.evaluate(() => window.scrollTo(0, 0));
+      }
+    }
   }
   // Click the third picture in page order: opens on its full-size file with its alt text as the caption.
   const third = order[2];
