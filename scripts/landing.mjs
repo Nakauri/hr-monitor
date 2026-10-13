@@ -143,8 +143,9 @@ function staticChecks(files, fail) {
     const top = (h.match(/<button class="to-top" id="back-to-top"[\s\S]*?<\/button>/) || [''])[0];
     fail(/aria-label="Back to top"/.test(top) && /viewBox="0 0 1779 1642"/.test(top) && (top.match(/<path /g) || []).length === 2, `${n}: back-to-top is the aorti logo`);
   }
-  const g = (index.match(/<a class="btn google"[\s\S]*?<\/a>/) || [''])[0];
-  fail(/>Sign in with Google<\/a>$/.test(g) && /#4285F4/.test(g) && /#EA4335/.test(g) && /#FBBC05/.test(g) && /#34A853/.test(g), 'hero has a "Sign in with Google" button with the four-colour G');
+  // Khal 2026-10-12: the hero sign-in button sat on its own row; sign-in lives in the nav as "Sign in" with the G.
+  const g = (index.match(/<a class="nav-link nav-signin"[\s\S]*?<\/a>/) || [''])[0];
+  fail(/>Sign in<\/a>$/.test(g) && /#4285F4/.test(g) && /#EA4335/.test(g) && /#FBBC05/.test(g) && /#34A853/.test(g) && !/id="hero-google"/.test(index), 'nav "Sign in" carries the four-colour G and the hero has no sign-in button');
   fail(!/<h3><a href="#/.test(changelog), 'changelog entry headings are not links to themselves');
   const badArea = json.items.filter((it) => !AREAS.includes(it.area));
   fail(badArea.length === 0, `every changelog entry has an area (${AREAS.join(', ')})${badArea.length ? ' (missing on ' + badArea.map((b) => b.title).join(', ') + ')' : ''}`);
@@ -501,17 +502,17 @@ async function s40Checks({ browser, base, open, check, shotPath }) {
   }
   {
     const { ctx, page } = await authPage({ signed: false, mode: 'ok' });
-    const g = await page.evaluate(() => { const b = document.getElementById('hero-google'), r = b.getBoundingClientRect(); return { h: r.height, g: !!b.querySelector('.g-mark svg path[fill="#4285F4"]'), text: b.textContent.trim() }; });
-    const went = await goesTo(page, '#hero-google');
+    const g = await page.evaluate(() => { const b = document.querySelector('.nav [data-signin]'), r = b.getBoundingClientRect(); return { h: r.height, g: !!b.querySelector('.g-mark svg path[fill="#4285F4"]'), text: b.textContent.trim() }; });
+    const went = await goesTo(page, '.nav [data-signin]');
     const calls = await page.evaluate(() => window.__calls).catch(() => null);
-    check(g.h >= 44 && g.g && g.text === 'Sign in with Google' && went, `signed out: "Sign in with Google" (${Math.round(g.h)} px, G logo ${g.g}) runs sign-in, then opens the viewer (${went})`);
+    check(g.g && g.text === 'Sign in' && went, `signed out: nav "Sign in" with the G (${Math.round(g.h)} px, G logo ${g.g}) runs sign-in, then opens the viewer (${went})`);
     await ctx.close();
   }
   for (const [label, opts, want] of [['rejected sign-in', { mode: 'fail' }, /did not finish/], ['no auth script', { none: true }, /unavailable/]]) {
     const { ctx, page } = await authPage(opts);
-    await page.click('#hero-google');
+    await page.click('.nav [data-signin]');
     await page.waitForTimeout(600);
-    const r = await page.evaluate(() => { const m = document.querySelector('.hero-signin .signin-msg'); return { url: location.pathname, msg: m && !m.hidden ? m.textContent : '' }; });
+    const r = await page.evaluate(() => { const m = document.querySelector('.nav .signin-msg'); return { url: location.pathname, msg: m && !m.hidden ? m.textContent : '' }; });
     check(r.url === '/index.html' && want.test(r.msg), `${label}: stays on the page and says "${r.msg}"`);
     await ctx.close();
   }

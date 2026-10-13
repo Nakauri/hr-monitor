@@ -55,6 +55,10 @@
 .btn.google:hover:not(:disabled) { background: #232325; }
 .btn.google .g-mark { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-pill); background: #ffffff; flex: none; }
 .btn.google .g-mark svg { width: 18px; height: 18px; }
+/* Nav sign-in: the Google G on a white disc, then "Sign in" (a label Google offers for its own button). */
+.nav-signin { display: inline-flex; align-items: center; gap: var(--s2); }
+.nav-signin .g-mark { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: var(--r-pill); background: #ffffff; flex: none; }
+.nav-signin .g-mark svg { width: 14px; height: 14px; }
 .signin-msg { margin: var(--s2) 0 0; font-size: var(--t14); color: var(--text); }
 .signin-msg[hidden] { display: none; }
 
