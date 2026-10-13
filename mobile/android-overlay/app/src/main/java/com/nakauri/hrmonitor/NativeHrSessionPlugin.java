@@ -691,10 +691,10 @@ public class NativeHrSessionPlugin extends Plugin {
         }
     }
 
-    // Save to phone: PdfPrinter writes the PDF to the cache on its own thread, then the SAF "Save as" screen
-    // (same as exportCsv) lets the person pick Downloads or any folder. Every path settles the call.
     @PluginMethod
     public void savePdf(PluginCall call) {
+        // Save to phone: PdfPrinter writes the PDF to the cache on its own thread, then the SAF "Save as" screen
+        // (same as exportCsv) lets the person pick Downloads or any folder. Every path settles the call.
         try {
             PdfPrinter.save(getContext(), call, (file) -> {
                 final String id = call.getCallbackId();
