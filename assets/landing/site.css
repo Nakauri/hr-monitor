@@ -97,3 +97,7 @@
   .to-top { bottom: var(--s4); right: var(--s4); }
 }
 @media (prefers-reduced-motion: reduce) { .to-top { transition: none; } }
+
+/* No widows: a paragraph never ends with one word alone on its last line (Khal 2026-10-12). Headings balance. */
+p, li, figcaption, summary, dd, blockquote, .lede { text-wrap: pretty; }
+h1, h2, h3 { text-wrap: balance; }

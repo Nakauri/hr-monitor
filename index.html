@@ -216,7 +216,8 @@
   }
   .strap-feature h3 { margin: 0; font-size: var(--t24); line-height: 1.2; font-weight: 700; }
   .strap-feature p { margin: 0; color: var(--text-dim); }
-  .strap-feature .badge { align-self: flex-start; }
+  .strap-tested { display: inline-flex; align-items: center; gap: var(--s2); margin: 0; color: var(--text); font-size: var(--t14); font-weight: 600; }
+  .strap-tested svg { width: 16px; height: 16px; flex: 0 0 auto; }
   /* Store links go here later; the row keeps its height so the card does not grow when they land. */
   .strap-links { margin-top: auto; min-height: 44px; display: flex; flex-wrap: wrap; gap: var(--s3); }
   .strap-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
@@ -522,8 +523,8 @@
   <div class="straps">
     <article class="strap-feature">
       <h3>Coospo H808S</h3>
-      <p>The strap I use. Tested daily, day and night.</p>
-      <span class="badge">Tested</span>
+      <p>The strap I use, day and night.</p>
+      <p class="strap-tested"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Tested daily</p>
       <div class="strap-links" data-store-links></div>
     </article>
     <ul class="strap-list">

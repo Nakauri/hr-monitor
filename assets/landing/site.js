@@ -59,3 +59,19 @@
     });
   }
 })();
+
+// No widows: join the last two words of every text block with a non-breaking space, so a line never
+// ends with one word alone (Khal 2026-10-12). CSS text-wrap: pretty does the same where supported.
+(function () {
+  function join(el) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let last = null;
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/\S/.test(n.data)) last = n;
+    if (!last) return;
+    const m = /(\S)\s+(\S+\s*)$/.exec(last.data);
+    if (m) last.data = last.data.slice(0, m.index + 1) + ' ' + m[2];
+  }
+  function run() { document.querySelectorAll('p, li, figcaption, summary, dd, .lede').forEach(join); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+})();
+

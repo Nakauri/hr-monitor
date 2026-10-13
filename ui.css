@@ -263,3 +263,7 @@ html.ui-locked, html.ui-locked body { overflow: hidden; }
    Set --strip-c (and optionally --strip-w) on the element. */
 .strip { position: relative; overflow: hidden; border-left-color: var(--strip-c, var(--border)); }
 .strip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--strip-w, 4px) - 1px); background: var(--strip-c, var(--border)); pointer-events: none; }
+
+/* No widows: a paragraph never ends with one word alone on its last line (Khal 2026-10-12). Headings balance. */
+p, li, figcaption, summary, dd, blockquote, .lede { text-wrap: pretty; }
+h1, h2, h3 { text-wrap: balance; }
