@@ -267,6 +267,8 @@ if (want('chips')) {
   const mk = await page.$('#marker-list .marker-item');
   if (mk) {
     const t = parseFloat(await mk.getAttribute('data-t'));
+    // The list lives in the Markers drawer; the sample week has marks since S42, so open it first.
+    if (!(await mk.isVisible())) { await page.click('#markers-toggle'); await page.waitForTimeout(400); }
     await mk.click(); await page.waitForTimeout(700);
     const sc = await page.evaluate(() => { const c = Chart.getChart(document.getElementById('session-chart')); return [c.scales.x.min, c.scales.x.max]; });
     ok(sc[0] <= t && sc[1] >= t && sc[1] - sc[0] < 60, `marker click zooms to ${t.toFixed(2)}: ${sc.map((v) => v.toFixed(2)).join(' to ')}`);

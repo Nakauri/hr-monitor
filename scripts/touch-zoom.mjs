@@ -178,7 +178,8 @@ async function run(html) {
     const sl = await page.evaluate(() => document.getElementById('context-overlay').getBoundingClientRect().left);
     await gesture(page, cdp, [[sl - 6, hb.y]], [[sl + 60, hb.y]], 10);
     const h2 = await state(page);
-    add('brushgrab', h1.lo < 0.01 && h2.lo > 20 && Math.abs(h2.hi - h1.hi) < 0.5, `touch grabs the left handle at the strip start by its outer half (start ${h1.lo.toFixed(1)} to ${h2.lo.toFixed(1)}, end kept ${h2.hi.toFixed(1)})`);
+    // Full range after the double-tap starts at the first sample: 0.008 min in the old demo, about 0.09 in the S42 sample week.
+    add('brushgrab', h1.lo < 0.2 && h2.lo > 20 && Math.abs(h2.hi - h1.hi) < 0.5, `touch grabs the left handle at the strip start by its outer half (start ${h1.lo.toFixed(1)} to ${h2.lo.toFixed(1)}, end kept ${h2.hi.toFixed(1)})`);
     add('errors', !page.errors.length, `no page errors at 360 ${page.errors.join(' | ')}`);
     await ctx.close();
 
