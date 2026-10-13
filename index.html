@@ -130,6 +130,8 @@
   .lede { font-size: var(--t20); line-height: 1.55; color: var(--text-dim); max-width: 36em; margin: 0 0 var(--s6); }
   .split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--s7); align-items: center; }
   .actions { display: flex; flex-wrap: wrap; gap: var(--s3); margin-top: var(--s6); }
+  .update-link { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s3); }
+  .update-label { color: var(--text-dim); font-size: var(--t14); }
 
   /* ===== Android card ===== */
   .android-card {
@@ -511,9 +513,8 @@
     </figure>
   </div>
   <div class="actions">
-    <a class="btn lg" href="./hrv_viewer.html?demo=1">Try it with sample data</a>
     <a class="btn lg" href="./hrv_viewer.html">Open viewer</a>
-    <a class="btn lg" href="./new-look.html">See what changed</a>
+    <span class="update-link"><span class="update-label">October update:</span><a class="btn lg" href="./new-look.html">See what changed</a></span>
   </div>
 </section>
 
