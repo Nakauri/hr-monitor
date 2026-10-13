@@ -7709,7 +7709,10 @@
     return dark > 40;
   }
   function rptNativeOk() { return !!(window.__aortiNativePdf && window.__aortiNativePdf.available && window.__aortiNativePdf.available()); }
-  async function rptShare(iso) {
+  function rptNativeSave() { return rptNativeOk() && typeof window.__aortiNativePdf.canSave === 'function' && window.__aortiNativePdf.canSave(); }
+  // mode 'share': the system share sheet. mode 'save': the same pages, then the system "Save as" screen (S48).
+  async function rptShare(iso, mode) {
+    const save = mode === 'save';
     let prep = null;
     rptBusy = true;
     try {
@@ -7718,11 +7721,17 @@
       const css = (await rptFontFaces()) + rptSheetCss();
       const pages = [];
       for (const pg of prep.host.querySelectorAll('.page')) pages.push(await rptRaster(pg, css));
-      await window.__aortiNativePdf.print({ pages, filename: 'aorti-day-' + iso + '.pdf', moments: prep.zoomed, week: false, share: true });
+      const opts = { pages, filename: 'aorti-day-' + iso + '.pdf', moments: prep.zoomed, week: false };
+      if (save) {
+        const r = await window.__aortiNativePdf.save(opts);
+        if (r && r.saved) UI.notice({ kind: 'info', text: 'Saved' });
+      } else {
+        await window.__aortiNativePdf.print({ ...opts, share: true });
+      }
       rptClear();
     } catch (e) {
       console.warn('[report] native PDF failed', e);
-      UI.notice({ kind: 'error', text: 'Could not make the PDF. Try again.' });
+      UI.notice({ kind: 'error', text: save ? 'Could not save the PDF. Try again.' : 'Could not make the PDF. Try again.' });
       rptClear();
     } finally {
       rptBusy = false;
@@ -7754,14 +7763,16 @@
     const native = rptNativeOk();
     const m0 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
     const label = new Date(+m0[1], +m0[2] - 1, +m0[3], 12).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    // App: Save to phone first (Khal 2026-10-12: Share only offered Discord and email), then Share report.
     const items = native
-      ? [['share', 'Share report', '<path d="M12 3v12M7 8l5-5 5 5M5 14v6h14v-6"/>']]
+      ? (rptNativeSave() ? [['save', 'Save to phone', '<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>']] : [])
+        .concat([['share', 'Share report', '<path d="M12 3v12M7 8l5-5 5 5M5 14v6h14v-6"/>']])
       : [['download', 'Download report (PDF)', '<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>']];
     const head = '<div class="share-menu-head" id="share-menu-head"><span>Day report, ' + rptEsc(label) + '</span><span class="share-menu-count" data-pages="' + count + '">' + rptPlural(count, 'page') + '</span></div>';
     const itemsHtml = items.map(([act, text, path]) => '<button type="button" role="menuitem" data-act="' + act + '" tabindex="-1"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + path + '</svg><span>' + text + '</span></button>').join('');
     const run = (act) => {
       rptCloseMenu(true);
-      if (act === 'share') rptShare(iso); else rptDownload(iso).catch(e => { console.warn('[report] print failed', e); UI.notice({ kind: 'error', text: 'Could not build the report.' }); rptClear(); });
+      if (act === 'share' || act === 'save') rptShare(iso, act); else rptDownload(iso).catch(e => { console.warn('[report] print failed', e); UI.notice({ kind: 'error', text: 'Could not build the report.' }); rptClear(); });
     };
     const phone = window.matchMedia('(max-width: 768px)').matches;
     let el, sheet = null;
@@ -7797,7 +7808,7 @@
     btn.setAttribute('aria-expanded', 'true');
     buttons[0].focus({ preventScroll: true });
   }
-  window.__aortiReport = { prepare: (iso) => rptPrepare(iso || rptDayIso()), pageCount: async (iso) => rptPageCount(await rptModel(iso || rptDayIso())), dayIso: () => rptDayIso(), clear: rptClear, share: (iso) => rptShare(iso || rptDayIso()) };
+  window.__aortiReport = { prepare: (iso) => rptPrepare(iso || rptDayIso()), pageCount: async (iso) => rptPageCount(await rptModel(iso || rptDayIso())), dayIso: () => rptDayIso(), clear: rptClear, share: (iso) => rptShare(iso || rptDayIso(), 'share'), save: (iso) => rptShare(iso || rptDayIso(), 'save') };
   // ===== Day report (S44) END =====
 
   // ===== Keyboard nav: ← / → move between adjacent sessions or days =====

@@ -26,14 +26,19 @@ import com.getcapacitor.PluginCall;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.ref.WeakReference;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 // Report PDF: each page arrives as one fixed-size raster at 2x and becomes one PdfDocument page,
-// shared through the app FileProvider. Never touches the engine, the services or the plugin executors.
+// shared through the app FileProvider or copied to a place the person picks (Save to phone). Never touches the engine, the services or the plugin executors.
 public final class PdfPrinter {
     private static final String TAG = "PdfPrinter";
     private static final String DIR = "reports";
@@ -46,6 +51,11 @@ public final class PdfPrinter {
         return t;
     });
     private static final AtomicBoolean BUSY = new AtomicBoolean(false);
+    // Save to phone: the cached PDF waits here, keyed by call id, while the "Save as" screen is open.
+    private static final Map<String, File> PENDING = new ConcurrentHashMap<>();
+
+    // Save to phone: gets the cached PDF on the pdf thread and from then on owns settling the call.
+    interface Ready { void ready(File file); }
 
     private PdfPrinter() {}
 
@@ -107,12 +117,20 @@ public final class PdfPrinter {
         }
         void fail(String code) {
             if (!done.compareAndSet(false, true)) return;
+            reject(code);
+        }
+        // Hands settling to someone else; true once, so this Settle stays silent afterwards.
+        boolean claim() { return done.compareAndSet(false, true); }
+        // Only for a claimed call whose new owner threw before it could settle.
+        void failClaimed(String code) { reject(code); }
+        private void reject(String code) {
             try { call.reject(code, code); } catch (Throwable t) { Log.w(TAG, "reject failed: " + t); }
         }
     }
 
     // Called on the plugin thread; returns at once and settles the call from the pdf thread.
-    static void print(Context ctx, Activity activity, PluginCall call) {
+    // With ready (Save to phone) the file is handed over instead of shared, and ready settles from then on.
+    private static void print(Context ctx, Activity activity, PluginCall call, Ready ready) {
         final Settle s = new Settle(call);
         try {
             if (!BUSY.compareAndSet(false, true)) { s.fail("pdf_busy"); return; }
@@ -121,7 +139,7 @@ public final class PdfPrinter {
             try {
                 EXEC.execute(() -> {
                     try {
-                        run(app, act, call, s);
+                        run(app, act, call, s, ready);
                     } finally {
                         BUSY.set(false);
                     }
@@ -135,7 +153,17 @@ public final class PdfPrinter {
         }
     }
 
-    private static void run(Context app, WeakReference<Activity> act, PluginCall call, Settle s) {
+    static void print(Context ctx, Activity activity, PluginCall call) {
+        print(ctx, activity, call, null);
+    }
+
+    // Save to phone: writes the same PDF to the cache, never shares it, then hands the file to ready.
+    // Every failure before the hand-off settles here, as print does.
+    static void save(Context ctx, PluginCall call, Ready ready) {
+        print(ctx, null, call, ready);
+    }
+
+    private static void run(Context app, WeakReference<Activity> act, PluginCall call, Settle s, Ready ready) {
         PdfDocument doc = null;
         Bitmap bmp = null;
         File out = null;
@@ -206,6 +234,10 @@ public final class PdfPrinter {
             ret.put("bytes", out.length());
             ret.put("ms", SystemClock.elapsedRealtime() - t0);
             kept = true;
+            if (ready != null) {
+                handOff(ready, out, s);
+                return;
+            }
             if (!call.getBoolean("share", true)) {
                 ret.put("shared", false);
                 s.ok(ret);
@@ -229,6 +261,92 @@ public final class PdfPrinter {
             // Settled after the pages are released, so the reject itself has memory to run.
             if (failCode != null) s.fail(failCode);
         }
+    }
+
+    // Pdf thread: the file is written and kept; ready settles the call from here on, or this rejects it.
+    private static void handOff(Ready ready, File out, Settle s) {
+        if (!s.claim()) return;
+        try {
+            ready.ready(out);
+        } catch (Throwable t) {
+            Log.w(TAG, "save hand-off failed: " + t);
+            s.failClaimed("pdf_save_failed");
+        }
+    }
+
+    // ---- Save to phone ------------------------------------------------------
+    // The cached PDF waits under the call id while the "Save as" screen is open.
+    static void hold(String id, File file) {
+        if (id != null && file != null) PENDING.put(id, file);
+    }
+
+    // Cancelled or failed before a place was picked: drop our own cached copy, nothing else.
+    static void discard(String id) {
+        try {
+            final File f = id == null ? null : PENDING.remove(id);
+            if (f != null) EXEC.execute(() -> removeOwn(f));
+        } catch (Throwable t) {
+            Log.w(TAG, "discard failed: " + t);
+        }
+    }
+
+    // Main thread in, returns at once; copies the cached PDF to the picked place on the pdf thread and settles.
+    static void copyTo(Context ctx, PluginCall call, Uri dest) {
+        final Settle s = new Settle(call);
+        try {
+            final Context app = ctx.getApplicationContext();
+            final File src = PENDING.remove(call.getCallbackId());
+            EXEC.execute(() -> copy(app, src, dest, s));
+        } catch (Throwable t) {
+            Log.w(TAG, "save copy not started: " + t);
+            s.fail("pdf_save_failed");
+        }
+    }
+
+    // Writes only into the document the person just created; on failure that document is left as it is.
+    private static void copy(Context app, File src, Uri dest, Settle s) {
+        try {
+            if (src == null || !src.isFile()) { s.fail("pdf_save_lost"); return; }
+            try (InputStream in = new FileInputStream(src);
+                 OutputStream os = app.getContentResolver().openOutputStream(dest)) {
+                if (os == null) { s.fail("pdf_save_failed"); return; }
+                byte[] buf = new byte[64 * 1024];
+                int r;
+                while ((r = in.read(buf)) > 0) os.write(buf, 0, r);
+                os.flush();
+            }
+            JSObject ret = new JSObject();
+            ret.put("saved", true);
+            ret.put("name", displayName(app, dest, src.getName()));
+            s.ok(ret);
+        } catch (Throwable t) {
+            Log.w(TAG, "save copy failed: " + t);
+            s.fail("pdf_save_failed");
+        } finally {
+            removeOwn(src);
+        }
+    }
+
+    // The name the person kept in the "Save as" screen; the suggested name when the provider says nothing.
+    private static String displayName(Context app, Uri uri, String fallback) {
+        try (android.database.Cursor c = app.getContentResolver().query(uri,
+                new String[] { android.provider.OpenableColumns.DISPLAY_NAME }, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                String n = c.getString(0);
+                if (n != null && !n.isEmpty()) return n;
+            }
+        } catch (Throwable ignored) {}
+        return fallback;
+    }
+
+    // Our cache file and its own print folder only.
+    private static void removeOwn(File f) {
+        if (f == null) return;
+        try {
+            File own = f.getParentFile();
+            f.delete();
+            if (own != null && own.getParentFile() != null && DIR.equals(own.getParentFile().getName())) own.delete();
+        } catch (Throwable ignored) {}
     }
 
     // Main thread: the system share sheet with read access to this one file.
