@@ -160,10 +160,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # Re-publish instead of swapping the asset, so the release shows this build's date (Khal 2026-10-12: the page
+      # read "6 months ago"). Also drops the stale April native release. Both deletes are no-ops when absent.
+      - name: Remove previous rolling releases
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          gh release delete android-native-latest --repo "${{ github.repository }}" --yes --cleanup-tag || true
+
       - name: Publish rolling GitHub Release
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
+          target_commitish: ${{ github.sha }}
           tag_name: android-latest
           name: Android build (rolling latest)
           body: |
