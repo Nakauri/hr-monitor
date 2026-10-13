@@ -425,7 +425,9 @@ async function s40Checks({ browser, base, open, check, shotPath }) {
       const R = (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; };
       const stage = document.getElementById('stream-frame'), ifr = document.getElementById('variant-frame');
       const btns = [...document.querySelectorAll('#variant-seg > button')].map(R);
-      return { f: R(stage), cw: stage.clientWidth, i: R(ifr), seg: R(document.getElementById('variant-seg')), ww: ifr.contentDocument.getElementById('hr-widget').getBoundingClientRect().width, btns };
+      // The frame is a fixed 380 px OBS viewport; the widget inside it is what must sit at true scale.
+      const wr = ifr.contentDocument.getElementById('hr-widget').getBoundingClientRect(), s = ifr.getBoundingClientRect().width / ifr.offsetWidth;
+      return { f: R(stage), cw: stage.clientWidth, i: { x: ifr.getBoundingClientRect().x + wr.x * s, y: ifr.getBoundingClientRect().y + wr.y * s, w: wr.width * s, h: wr.height * s }, seg: R(document.getElementById('variant-seg')), ww: wr.width, btns };
     });
     const k = st.cw / 1920;
     check(Math.abs(st.f.w / st.f.h - 16 / 9) < 0.02, `stream preview is a 16:9 frame (${Math.round(st.f.w)} x ${Math.round(st.f.h)})`);

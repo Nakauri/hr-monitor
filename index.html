@@ -179,7 +179,7 @@
   .stream-bar svg { width: 18px; height: 18px; flex: 0 0 auto; }
   .stream-bar-fill { flex: 1 1 auto; height: 3px; border-radius: 2px; background: linear-gradient(to right, #e5484d 0 100%, transparent 100%); opacity: .8; }
   .stream-res { font-size: var(--t12); font-weight: 700; color: #0e0e10; background: #dedee3; padding: 1px var(--s2); border-radius: var(--r-ctl); font-variant-numeric: tabular-nums; }
-  #variant-frame { position: absolute; left: 0; bottom: 0; display: block; border: 0; width: 320px; height: 240px; background: transparent; transform-origin: 0 100%; }
+  #variant-frame { position: absolute; left: 0; bottom: 0; display: block; border: 0; width: 380px; height: 240px; background: transparent; transform-origin: 0 100%; }
   .variant-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: var(--s4); }
   .variant-seg > button { min-width: 0; white-space: normal; line-height: 1.2; padding: var(--s1) var(--s2); }
   .variant-size { margin: var(--s3) 0 0; font-size: var(--t14); color: var(--text); font-variant-numeric: tabular-nums; }
@@ -769,16 +769,24 @@
     const seg = document.getElementById('variant-seg');
     const sizeEl = document.getElementById('variant-size');
     if (!frame || !seg) return;
-    const row = document.querySelector('#overlay-zone .widget-row');
+    // A clean copy of the hero widget: canvases lose the sizes the hero's charts gave them, so the
+    // preview lays out the same on every screen.
+    const row = document.querySelector('#overlay-zone .widget-row').cloneNode(true);
+    row.querySelectorAll('canvas').forEach((c) => { c.removeAttribute('width'); c.removeAttribute('height'); c.removeAttribute('style'); });
     const fdoc = frame.contentDocument;
-    fdoc.open();
-    fdoc.write('<!DOCTYPE html><html><head><meta charset="UTF-8">'
-      + '<link rel="stylesheet" href="./tokens.css"><link rel="stylesheet" href="./widget.css">'
-      + '<style>html,body{margin:0;padding:0;background:transparent;}body{width:max-content;}</style>'
-      + '<scr' + 'ipt src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></scr' + 'ipt>'
-      + '<scr' + 'ipt src="./widget.js"></scr' + 'ipt></head><body class="conn-live">'
-      + row.outerHTML + '</body></html>');
-    fdoc.close();
+    // The overlay page's own rules come with it, read from overlay.html, so the preview is what OBS shows.
+    fetch('./overlay.html').then((r) => (r.ok ? r.text() : '')).catch(() => '').then((html) => {
+      const m = /<style>([\s\S]*?)<\/style>/.exec(html);
+      fdoc.open();
+      fdoc.write('<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        + '<link rel="stylesheet" href="./tokens.css"><link rel="stylesheet" href="./widget.css">'
+        + '<style>' + (m ? m[1] : '') + '</style>'
+        + '<style>html,body{margin:0;padding:0;background:transparent;}</style>'
+        + '<scr' + 'ipt src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></scr' + 'ipt>'
+        + '<scr' + 'ipt src="./widget.js"></scr' + 'ipt></head><body class="conn-live"><div id="overlay-zone">'
+        + row.outerHTML + '</div></body></html>');
+      fdoc.close();
+    });
     // The widget at its true share of a 1920 by 1080 stream, 32 stream pixels in from the corner.
     const stage = document.getElementById('stream-frame');
     function fit() {
@@ -786,7 +794,7 @@
       if (!w || !stage) return;
       const r = w.getBoundingClientRect();
       const k = stage.clientWidth / 1920;
-      frame.style.width = Math.ceil(r.width) + 'px';
+      // The frame is a 380 px viewport, the OBS browser source width the monitor suggests, so the preview matches OBS.
       frame.style.height = Math.ceil(r.height) + 'px';
       frame.style.transform = 'translate(' + (32 * k) + 'px, ' + (-32 * k) + 'px) scale(' + k + ')';
       sizeEl.textContent = 'Footprint in OBS: ' + Math.round(r.width) + ' × ' + Math.round(r.height) + ' px, ' + (100 * r.width * r.height / (1920 * 1080)).toFixed(1) + '% of a 1080p stream';
