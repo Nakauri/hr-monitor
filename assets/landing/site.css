@@ -1,5 +1,5 @@
-/* Shared by index.html, changelog.html and legal.html: the top nav, the footer, the sign-in
-   control and the back-to-top button. Buttons are ui.css .btn; this file only sizes them. */
+/* Shared by index.html, changelog.html, legal.html and new-look.html: the top nav, the footer, the sign-in
+   control, the back-to-top button and the brand motion. Buttons are ui.css .btn; this file only sizes them. */
 .nav {
   position: sticky;
   top: 0;
@@ -97,6 +97,35 @@
   .to-top { bottom: var(--s4); right: var(--s4); }
 }
 @media (prefers-reduced-motion: reduce) { .to-top { transition: none; } }
+
+/* Brand motion (S43): the border trail ring comes from site.js. Plays with reduced motion on (Khal 2026-10-12). */
+.trail-host { position: relative; }
+.trail { position: absolute; z-index: 1; overflow: visible; pointer-events: none; opacity: 0; transition: opacity .15s ease-out; }
+.trail-on > .trail, .trail-focus > .trail { opacity: 1; transition: none; }
+.trail rect { fill: none; stroke: var(--warn-high); }
+.trail-rest { opacity: 0; }
+.trail-focus > .trail .trail-rest { opacity: .35; }
+/* Questions: a 1px red line grows from the left over the row's bottom border; it replaces the underline. */
+.faq-item { position: relative; }
+.faq-item::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--warn-high);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .3s cubic-bezier(.4, 0, .2, 1);
+  pointer-events: none;
+}
+.faq-item:has(> summary:hover)::after { transform: scaleX(1); }
+details.faq-item > summary:hover { text-decoration: none; }
+/* Logo: one gentle beat on hover. */
+.brand-mark { transform-origin: 50% 60%; }
+.brand:hover .brand-mark { animation: brand-beat .52s ease-out 1; }
+@keyframes brand-beat { 0% { transform: scale(1); } 28% { transform: scale(1.1); } 52% { transform: scale(.97); } 100% { transform: scale(1); } }
 
 /* No widows: a paragraph never ends with one word alone on its last line (Khal 2026-10-12). Headings balance. */
 p, li, figcaption, summary, dd, blockquote, .lede { text-wrap: pretty; }

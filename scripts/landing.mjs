@@ -10,10 +10,14 @@
 //   shared nav on all three pages, Google sign-in (signed in leads to the viewer, never the monitor), and the
 //   changelog: every month git shows activity has entries, area chips filter and the hash keeps the filter,
 //   headings are not self-links, a shared link lands below the nav, the copy button copies the right URL.
+// S43 (Khal 2026-10-12, brand motion): hovering a .btn runs one 800 ms bell-curve lap of the border trail, then a
+//   0.35 resting edge, and leaving fades it; the Android card's lap ends bare; keyboard focus shows the edge with no
+//   lap; boxes never move; the head crosses long and short edges at one speed (named bug: the mock's conic ring
+//   ran fast on short ends and slow on long edges; that mutant must fail).
 // Files: index.html, legal.html, changelog.html, changelog.json, assets/landing/ (site.css, site.js, images),
 //   widget.js, overlay.html; rules.mjs from the main checkout's ux-audit folder.
-// Runtime: about 55 s (static checks under 5 s; one headless Chromium plus 7 rules.mjs runs).
-// Usage: node scripts/landing.mjs [--root <dir>] [--shots <dir>] [--prefix s40-] [--shots-only] [--ux <dir>]
+// Runtime: about 75 s (static checks under 5 s; one headless Chromium plus 7 rules.mjs runs; S43 about 20 s).
+// Usage: node scripts/landing.mjs [--root <dir>] [--shots <dir>] [--prefix s40-] [--shots-only] [--only-s43] [--ux <dir>]
 //        node scripts/landing.mjs --write-changelog   (rewrites the entries in changelog.html from changelog.json)
 // Mutants run on every call and must FAIL: story line reworded and Inter loaded (static), the old hover rule
 // (rules --states), the old hero column (H1 widow) and a signed-in click that goes to the monitor.
@@ -34,6 +38,7 @@ const ROOT = path.resolve(argVal('--root') || path.join(here, '..'));
 const SHOTS = argVal('--shots');
 const PREFIX = argVal('--prefix') || 's40-';
 const SHOTS_ONLY = args.includes('--shots-only');
+const ONLY_S43 = args.includes('--only-s43');
 // Compare on LF: Windows checkouts (core.autocrlf) hold CRLF while the commits are LF.
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 
@@ -248,6 +253,7 @@ async function runtime(fails) {
       vh: innerHeight, overflow: se.scrollWidth - se.clientWidth };
   });
   try {
+    if (ONLY_S43) { await s43Checks({ open, check }); return; }
     for (const [w, h, scale, label] of [[1440, 900, 1, '1440'], [360, 740, 1, '360'], [360, 740, 2, '360 at 200% text']]) {
       const { ctx, page } = await open('/index.html', w, h, { scale });
       const r = await heroBtn(page);
@@ -369,6 +375,7 @@ async function runtime(fails) {
       }
     }
     await s40Checks({ browser, base, open, check, shotPath });
+    await s43Checks({ open, check });
   } finally {
     await browser.close();
     server.close();
@@ -556,6 +563,165 @@ async function s40Checks({ browser, base, open, check, shotPath }) {
   }
 }
 
+// ---- S43 checks: brand border trail (Khal 2026-10-12: "it doesnt feel smooth, maybe it needs a bell curve
+// animation with 800ms?"). Named bug: the mock's rotating conic ring ran fast on short ends and slow on long
+// edges. The even-speed check reads the head off screenshots (brightest red outside the element), maps it onto
+// the outline, and compares how fast it crosses a long edge and a short edge per unit of the 800 ms bell curve.
+const S43_LAP = 800;
+const bell = (x) => {
+  const B = (t, a, b) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (B(m, 0.37, 0.63) < x) lo = m; else hi = m; }
+  return B((lo + hi) / 2, 0, 1);
+};
+// The mock's technique (brand-motion.html variant A) on the same 800 ms bell curve: must FAIL the even-speed check.
+const CONIC_CSS = `@property --a{syntax:'<angle>';inherits:false;initial-value:0deg}
+.trail{display:none!important}
+.android-card,.btn{position:relative}
+.android-card:hover::after,.btn:hover::after{content:'';position:absolute;inset:-3px;border-radius:15px;padding:2px;pointer-events:none;
+background:conic-gradient(from var(--a),rgba(226,75,74,0) 0deg 240deg,rgba(226,75,74,.3) 310deg,rgba(226,75,74,1) 357deg,rgba(226,75,74,0) 360deg);
+-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;
+animation:s43-conic 800ms cubic-bezier(.37,0,.63,1) forwards}
+@keyframes s43-conic{from{--a:0deg}to{--a:360deg}}`;
+
+// Brightest red outside the element box in each screenshot: { m: max redness, n: pixels, x, y } in page px.
+const redHeads = (page, list, clip, box) => page.evaluate(async ({ list, clip, box }) => Promise.all(list.map(async (b64) => {
+  const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height).data, red = new Float32Array(c.width * c.height);
+  const x0 = box.x - clip.x, y0 = box.y - clip.y, x1 = x0 + box.width, y1 = y0 + box.height;
+  let m = 0;
+  for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
+    if (x >= x0 && x + 1 <= x1 && y >= y0 && y + 1 <= y1) continue;
+    const i = (y * c.width + x) * 4, v = d[i] - Math.max(d[i + 1], d[i + 2]);
+    red[y * c.width + x] = v; if (v > m) m = v;
+  }
+  let sx = 0, sy = 0, n = 0;
+  if (m >= 40) for (let k = 0; k < red.length; k++) if (red[k] >= 0.75 * m) { sx += k % c.width; sy += Math.floor(k / c.width); n++; }
+  return { m, n, x: n ? clip.x + sx / n + 0.5 : null, y: n ? clip.y + sy / n + 0.5 : null };
+})), { list, clip, box });
+
+const s43Clip = (box, pad) => ({ x: Math.floor(box.x) - pad, y: Math.floor(box.y) - pad, width: Math.ceil(box.width) + 2 * pad, height: Math.ceil(box.height) + 2 * pad });
+const pauseOn = (page, sel) => page.evaluate((sel) => {
+  const el = document.querySelector(sel);
+  window.__s43 = document.getAnimations().filter((a) => a.effect && a.effect.target && el.contains(a.effect.target));
+  window.__s43.forEach((a) => a.pause());
+  return window.__s43.length;
+}, sel);
+const seek = (page, t) => page.evaluate((t) => window.__s43.forEach((a) => { a.currentTime = t; }), t);
+
+// Hover, pause the lap, step through it, and return the speed ratio between a long and a short edge.
+async function evenSpeed(page, sel, n = 80) {
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(300);
+  await page.locator(sel).hover();
+  const paused = await pauseOn(page, sel);
+  const box = await page.locator(sel).boundingBox();
+  const clip = s43Clip(box, 8), shots = [];
+  for (let i = 0; i <= n; i++) {
+    const t = S43_LAP * i / n;
+    await seek(page, t);
+    shots.push({ u: bell(i / n), png: (await page.screenshot({ clip })).toString('base64') });
+  }
+  const heads = await redHeads(page, shots.map((s) => s.png), clip, box);
+  const X0 = box.x - 2, Y0 = box.y - 2, W = box.width + 4, H = box.height + 4, P = 2 * (W + H);
+  const perim = (p) => {
+    const d = [Math.abs(p.y - Y0), Math.abs(p.x - (X0 + W)), Math.abs(p.y - (Y0 + H)), Math.abs(p.x - X0)];
+    const k = d.indexOf(Math.min(...d)), cx = Math.min(Math.max(p.x - X0, 0), W), cy = Math.min(Math.max(p.y - Y0, 0), H);
+    return [cx, W + cy, W + H + (W - cx), 2 * W + H + (H - cy)][k];
+  };
+  const pts = [];
+  let off = 0;
+  heads.forEach((h, i) => {
+    if (h.x === null) return;
+    let s = perim(h) + off;
+    if (pts.length && s < pts[pts.length - 1].s - P / 2) { off += P; s += P; }
+    pts.push({ u: shots[i].u, s });
+  });
+  const at = (target) => { for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i]; if (a.s <= target && b.s >= target && b.s > a.s) return a.u + (b.u - a.u) * (target - a.s) / (b.s - a.s); } return null; };
+  const speed = (from, len) => { const a = at(from + 0.2 * len), b = at(from + 0.8 * len); return a === null || b === null || b <= a ? null : (0.6 * len) / (b - a); };
+  const vLong = speed(W + H, W), vShort = speed(W, H);
+  await page.evaluate(() => window.__s43.forEach((a) => a.play()));
+  return { paused, seen: pts.length, ratio: vLong && vShort ? vLong / vShort : null, W: Math.round(W), H: Math.round(H) };
+}
+const evenOk = (r) => r.ratio !== null && Math.abs(r.ratio - 1) <= 0.15;
+
+async function s43Checks({ open, check }) {
+  const shot = (n) => { fs.mkdirSync(SHOTS, { recursive: true }); return path.join(SHOTS, 's43-' + n); };
+  const { ctx, page } = await open('/index.html', 1440, 900);
+  const BTN = '#hero-open-monitor', CARD = '#android-app .android-card';
+  const state = (sel) => page.evaluate((sel) => {
+    const el = document.querySelector(sel), svg = el.querySelector(':scope > svg.trail'), r = el.getBoundingClientRect();
+    const anims = document.getAnimations().filter((a) => a.effect && a.effect.target && el.contains(a.effect.target) && a.playState === 'running');
+    const laps = anims.filter((a) => a.effect.getKeyframes().some((k) => 'strokeDashoffset' in k)).map((a) => {
+      const k = a.effect.getKeyframes(), t = a.effect.getTiming();
+      return { d: t.duration, e: t.easing, span: parseFloat(k[0].strokeDashoffset) - parseFloat(k[k.length - 1].strokeDashoffset) };
+    });
+    return { box: [r.x, r.y, r.width, r.height], laps, svg: svg ? +getComputedStyle(svg).opacity : null,
+      rest: svg ? +getComputedStyle(svg.querySelector('.trail-rest')).opacity : null, group: svg ? +getComputedStyle(svg.querySelector('g')).opacity : null };
+  }, sel);
+  const sameBox = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 0.5);
+  const lapOk = (laps) => laps.length === 3 && laps.every((l) => l.d === S43_LAP && /cubic-bezier\(0?\.37, 0, 0?\.63, 1\)/.test(l.e) && Math.abs(l.span - 100) < 0.01);
+  try {
+    for (const [sel, name, isBtn] of [[BTN, 'primary button', true], [CARD, 'Android card', false]]) {
+      await page.locator(sel).scrollIntoViewIfNeeded();
+      await page.mouse.move(2, 2);
+      await page.waitForTimeout(300);
+      const before = (await state(sel)).box;
+      await page.locator(sel).hover();
+      const s0 = await state(sel);
+      const boxes = [s0.box];
+      for (const t of [200, 200, 200]) { await page.waitForTimeout(t); boxes.push((await state(sel)).box); }
+      check(lapOk(s0.laps), `${name} hover: one lap of 800 ms on cubic-bezier(.37, 0, .63, 1) (${s0.laps.length} dashes, ${s0.laps.map((l) => l.d + ' ms ' + l.e + ' span ' + l.span.toFixed(1)).join('; ')})`);
+      check(boxes.every((b) => sameBox(b, before)), `${name}: box unchanged during the lap (${before.map(Math.round).join(',')})`);
+      await page.waitForTimeout(500);
+      const end = await state(sel);
+      const box = await page.locator(sel).boundingBox(), clip = s43Clip(box, 24);
+      const [px] = await redHeads(page, [(await page.screenshot({ clip })).toString('base64')], clip, box);
+      if (isBtn) {
+        check(end.laps.length === 0 && Math.abs(end.rest - 0.35) < 0.01 && end.svg === 1 && px.m >= 40, `${name}: after the lap the resting edge holds at ${end.rest} opacity (red on screen ${px.m})`);
+        if (SHOTS) await page.screenshot({ path: shot('btn-rest.png'), clip });
+        await page.mouse.move(2, 2);
+        await page.waitForTimeout(300);
+        const gone = await state(sel);
+        check(gone.svg === 0, `${name}: leaving fades the trail out (opacity ${gone.svg})`);
+      } else {
+        check(end.laps.length === 0 && end.rest === 0 && px.m < 40, `${name}: the lap ends with no edge (rest ${end.rest}, trail ${end.group}, red on screen ${px.m})`);
+      }
+      if (SHOTS) {
+        await page.mouse.move(2, 2);
+        await page.waitForTimeout(300);
+        await page.locator(sel).hover();
+        await pauseOn(page, sel);
+        await seek(page, 400);
+        await page.screenshot({ path: shot(isBtn ? 'btn-mid.png' : 'card-mid.png'), clip });
+        await page.evaluate(() => window.__s43.forEach((a) => a.play()));
+      }
+    }
+    // Keyboard focus on a button: the resting edge, no lap.
+    await page.mouse.move(2, 2);
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    let hit = false;
+    for (let i = 0; i < 30 && !hit; i++) { await page.keyboard.press('Tab'); hit = await page.evaluate((s) => document.activeElement === document.querySelector(s), BTN); }
+    await page.waitForTimeout(200);
+    const f = await state(BTN);
+    check(hit && f.laps.length === 0 && Math.abs(f.rest - 0.35) < 0.01 && f.svg === 1, `keyboard focus on the primary button shows the resting edge without a lap (rest ${f.rest}, laps ${f.laps.length})`);
+    await page.evaluate(() => document.activeElement.blur());
+    // Even speed along the outline, then the conic mutant on the card.
+    for (const [sel, name] of [[CARD, 'Android card'], [BTN, 'primary button']]) {
+      await page.locator(sel).scrollIntoViewIfNeeded();
+      const r = await evenSpeed(page, sel);
+      check(evenOk(r), `${name}: the head crosses a long edge and a short edge at the same speed (long/short ${r.ratio && r.ratio.toFixed(2)}, ${r.W}x${r.H}, ${r.seen} frames with a head, ${r.paused} animations)`);
+    }
+    await page.addStyleTag({ content: CONIC_CSS });
+    await page.locator(CARD).scrollIntoViewIfNeeded();
+    const m = await evenSpeed(page, CARD);
+    check(!evenOk(m), `mutant "conic rotation" fails the even-speed check (long/short ${m.ratio && m.ratio.toFixed(2)}, ${m.seen} frames)`);
+    check(page.errors.length === 0, `S43: no page errors ${page.errors.slice(0, 2).join(' | ')}`);
+  } finally { await ctx.close(); }
+}
+
 // rules.mjs --states on the three pages at 1440 and 360, plus the hover mutant that must fail.
 function rulesStates(fails) {
   const RULES = path.join(uxDir(here, argVal('--ux')), 'redesign', 'checks', 'rules.mjs');
@@ -583,8 +749,8 @@ function rulesStates(fails) {
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
-const fails = SHOTS_ONLY ? [] : runStatic();
+const fails = SHOTS_ONLY || ONLY_S43 ? [] : runStatic();
 await runtime(fails);
-if (!SHOTS_ONLY) rulesStates(fails);
+if (!SHOTS_ONLY && !ONLY_S43) rulesStates(fails);
 console.log(fails.length ? `FAIL (${fails.length})` : 'PASS');
 process.exit(fails.length ? 1 : 0);
