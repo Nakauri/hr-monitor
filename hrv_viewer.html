@@ -10133,11 +10133,26 @@
         c.save(); c.font = 'bold 12px ' + Chart.defaults.font.family; wCache = c.measureText(text).width + 6; c.restore();
       }
       const w = wCache, h = 12 * 1.2 + 6, gap = 10;
-      const cx = Math.min(Math.max(px, a.left + w / 2 + 2), a.right - w / 2 - 2);
+      const clampX = (x) => Math.min(Math.max(x, a.left + w / 2 + 2), a.right - w / 2 - 2);
+      const cx = clampX(px);
       let cy = below ? py + gap + h / 2 : py - gap - h / 2;
       if (cy - h / 2 < a.top + 2) cy = py + gap + h / 2;
       if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;
-      return { dx: cx - px, dy: cy - py };
+      // Mark labels sit in rows along the top; step aside from them (AUDIT-NOTES item 38).
+      const mk = chart.config.plugins.find((p) => p.id === 'hrMarks');
+      const labs = mk ? mk._layout(chart).filter((it) => it.lab).map((it) => it.lab) : [];
+      if (!labs.length) return { dx: cx - px, dy: cy - py };
+      const fits = (x, y) => y - h / 2 >= a.top + 2 && y + h / 2 <= a.bottom - 2 && x - w / 2 >= a.left + 2 && x + w / 2 <= a.right - 2;
+      const clear = (x, y) => labs.every((l) => x + w / 2 <= l.x || x - w / 2 >= l.x + l.w || y + h / 2 <= l.y || y - h / 2 >= l.y + l.h);
+      const other = cy < py ? py + gap + h / 2 : py - gap - h / 2;
+      const side = gap + w / 2;
+      const tries = [[cx, cy], [cx, other], [clampX(px + side), py], [clampX(px - side), py]];
+      // Last resort: under the mark labels in this column.
+      let low = Math.max(cy, other);
+      for (const l of labs) if (cx + w / 2 > l.x && cx - w / 2 < l.x + l.w && l.y + l.h + 4 + h / 2 > low) low = l.y + l.h + 4 + h / 2;
+      tries.push([cx, low]);
+      const pick = tries.find(([x, y]) => fits(x, y) && clear(x, y)) || tries[0];
+      return { dx: pick[0] - px, dy: pick[1] - py };
     };
   }
 

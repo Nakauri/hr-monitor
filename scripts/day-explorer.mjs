@@ -15,7 +15,7 @@
 // 6. Layout (S27): one phone tools row at 360 and 200% text, the Layers sheet, Reset zoom on the chart corner, gaps line
 //    below the chart, Max and Min labels inside the plot, date title on one line, collapsed Summary numbers, no empty
 //    band under the chart, chips in full rows, hover line past a pinned mark, clock tooltip; layout-mutants must FAIL.
-// --part parity,chips (inside the Layers popover since S31),phone,marks,mutants,layout,layout-mutants,day-shots,marks-shots runs those parts only (default: all).
+// --part labels,parity,chips (inside the Layers popover since S31),phone,marks,mutants,layout,layout-mutants,day-shots,marks-shots runs those parts only (default: all).
 // Usage: node scripts/day-explorer.mjs [--ref <commit>] [--shots <dir>] [--part <list>] [--ux <ux-audit dir>] [--fixtures <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
@@ -677,7 +677,9 @@ const labelBoxes = (page) => page.evaluate(() => {
   const c = Chart.getChart(document.getElementById('session-chart'));
   const a = c.chartArea;
   return (c.$maxMin || [])
-    .map((e) => ({ name: e.name, inside: e.x >= a.left - 0.5 && e.x2 <= a.right + 0.5 && e.y >= a.top - 0.5 && e.y2 <= a.bottom + 0.5, box: [e.x, e.y, e.x2, e.y2].map(Math.round), area: [a.left, a.top, a.right, a.bottom].map(Math.round) }));
+    .map((e) => ({ name: e.name, inside: e.x >= a.left - 0.5 && e.x2 <= a.right + 0.5 && e.y >= a.top - 0.5 && e.y2 <= a.bottom + 0.5, box: [e.x, e.y, e.x2, e.y2].map(Math.round), area: [a.left, a.top, a.right, a.bottom].map(Math.round),
+      // Mark labels this box covers (AUDIT-NOTES item 38: "Afternoon walk" over "Max 121" on 04-24).
+      over: (c._hrMk || []).filter((it) => it.lab && e.x < it.lab.x + it.lab.w - 0.5 && e.x2 > it.lab.x + 0.5 && e.y < it.lab.y + it.lab.h - 0.5 && e.y2 > it.lab.y + 0.5).map((it) => it.m.label.content) }));
 });
 const rect = (page, sel) => page.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, shown: r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' }; }, sel);
 // Drags the strip's right handle to a share of the strip width.
@@ -879,6 +881,20 @@ const LAYOUT = {
 async function runLayout(name, base) {
   try { return await LAYOUT[name](base); }
   catch (e) { return [[false, `layout ${name} threw: ${String(e && e.message).split(String.fromCharCode(10))[0]}`]]; }
+}
+// Max and Min labels never cover a mark label, on every sample day, laptop and phone (item 38).
+if (want('labels')) {
+  for (const width of [1440, 360]) {
+    const { ctx, page } = await newPage(width);
+    for (const iso of DEMO_DAYS) {
+      await page.goto(cur.base + '/hrv_viewer.html?demo=1#/day/' + iso, { waitUntil: 'networkidle' });
+      await waitExplorer(page, '#view-day #session-chart'); await page.waitForTimeout(300);
+      const lb = await labelBoxes(page);
+      const hit = lb.filter((b) => b.over.length).map((b) => `${b.name} over ${b.over.join(', ')}`);
+      ok(!hit.length, `${width} ${iso}: Max and Min clear of mark labels ${hit.join(' | ')}`);
+    }
+    await ctx.close();
+  }
 }
 if (want('layout')) {
   for (const name of ['phone', 'laptop']) report5(await runLayout(name, cur.base));
