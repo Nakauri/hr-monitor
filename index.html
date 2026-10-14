@@ -279,9 +279,9 @@
   .support h2 { font-size: clamp(24px, 2.4vw, 32px); }
   .support-desc { color: var(--text-dim); margin: 0 0 var(--s5); }
   .support-links { display: flex; gap: var(--s3); flex-wrap: wrap; }
-  /* PayPal stays desktop only: Android Chrome prerenders links that scroll into view, and with
-     the PayPal app set to always open paypal.me, that prerender alone launches the app. */
-  @media (max-width: 768px) { .support-paypal { display: none !important; } }
+  /* The PayPal button is a <button>, not a link: Android Chrome prerenders links in view, and a
+     prerendered paypal.me launches the PayPal app untapped. The QR is desktop only. */
+  @media (max-width: 768px) { .support-qr-box { display: none !important; } }
   .support-qr { background: #fff; padding: var(--s2); border-radius: var(--r-menu); }
   .support-qr img { display: block; width: 136px; height: 136px; }
   .support-qr-label { text-align: center; font-size: var(--t12); color: var(--text-dim); margin-top: var(--s2); }
@@ -596,13 +596,12 @@
       <h2>Free, built by one person.</h2>
       <p class="support-desc">No subscription, no ads. Tips help keep it that way.</p>
       <div class="support-links">
-        <!-- PayPal link is guarded with rel="noopener noreferrer" + data-no-prefetch, and hidden on
-             phones (see .support-paypal), because a prerender can launch the PayPal app. -->
-        <a class="btn primary lg support-paypal" href="https://paypal.me/crowek" rel="noopener noreferrer" data-no-prefetch>Tip via PayPal</a>
+        <!-- A button, not a link, so nothing can prerender paypal.me (see .support-qr-box). -->
+        <button type="button" class="btn primary lg" id="support-paypal">Tip via PayPal</button>
         <a class="btn lg" href="https://ko-fi.com/crowek" rel="noopener noreferrer">Ko-fi</a>
       </div>
     </div>
-    <div class="support-paypal">
+    <div class="support-qr-box">
       <div class="support-qr">
         <img id="support-qr-img" alt="Scan to tip via PayPal" />
       </div>
@@ -883,9 +882,12 @@
 
   // PayPal QR from a public generator; hidden quietly if it fails. The button is the real link.
   (function () {
+    const PAYPAL = 'https://paypal.me/crowek';
+    const btn = document.getElementById('support-paypal');
+    if (btn) btn.addEventListener('click', () => { window.location.href = PAYPAL; });
     const img = document.getElementById('support-qr-img');
     if (!img) return;
-    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=0&bgcolor=ffffff&color=0a0a0a&data=' + encodeURIComponent('https://paypal.me/crowek');
+    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=0&bgcolor=ffffff&color=0a0a0a&data=' + encodeURIComponent(PAYPAL);
     img.onerror = () => { img.style.display = 'none'; };
   })();
 
