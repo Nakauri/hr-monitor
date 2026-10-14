@@ -167,8 +167,9 @@ const ok = (cond, msg) => { if (cond) { passes++; console.log('PASS ' + msg); } 
 
 // --cold (S50): a cold Day open of the 16 h device recording (v2 segments) at 360 6x, through the direct path and
 // through the CSV round trip (window.__hrmV2ViaCsv, the pre-S50 path, which is also the mutant). Named bug: S8 cold
-// Day open 2,531 ms (perf-2026-10-14/S49-RESULTS.md). Budget: the direct path's longest task, median of 3, is at
-// most 80% of the round trip's in the same run (machine speed cancels out). Runtime: about 60 s.
+// Day open 2,531 ms (perf-2026-10-14/S49-RESULTS.md). Rows: V8 call counts during the Day open; the direct path
+// calls v2SessionCsv and parseCSV zero times, the round trip calls them (so the check can fail). Longest tasks are
+// printed, not budgeted: headless timings swing 15% run to run. S8 effect: 22 to 32% (S49-RESULTS.md). Runtime: 30 s.
 if (args.includes('--cold')) {
   const SEGS = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'device-2026-10-10', 'segments');
   const segFiles = {};
@@ -198,23 +199,26 @@ if (args.includes('--cold')) {
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
     const prof = args.includes('--prof') && !viaCsv;
     if (prof) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 200 }); await cdp.send('Profiler.start'); }
+    await cdp.send('Profiler.enable'); await cdp.send('Profiler.startPreciseCoverage', { callCount: true, detailed: false });
+    await cdp.send('Profiler.takePreciseCoverage'); // resets the counters
     await page.evaluate(() => { window.__perf.reset(); setTimeout(() => { location.hash = '#/day/2026-10-10'; }, 0); });
     await page.waitForFunction(() => { const c = document.querySelector('#view-day #session-chart'); const ch = c && window.Chart && Chart.getChart(c); return !!(ch && ch.data.datasets.some((d) => d.data && d.data.length > 100)); }, null, { timeout: 60000 });
     await page.waitForTimeout(800);
     if (prof) { const { profile } = await cdp.send('Profiler.stop'); const st = selfTimes(profile, 16); console.log('direct self ms: ' + st.top.map(([k, v]) => v + ' ' + k).join(' | ')); }
+    const cov = (await cdp.send('Profiler.takePreciseCoverage')).result;
+    const calls = {};
+    for (const sc of cov) if (sc.url.endsWith('hrv_viewer.html')) for (const f of sc.functions) if (['v2SessionCsv', 'parseCSV', 'v2SeriesFromRows'].includes(f.functionName)) calls[f.functionName] = (calls[f.functionName] || 0) + f.ranges[0].count;
     const longest = await page.evaluate(() => Math.round(Math.max(0, ...window.__perf.lt.map((x) => x[1]))));
     if (args.includes('--tasks')) console.log((viaCsv ? 'csv   ' : 'direct') + ' tasks: ' + (await page.evaluate(() => window.__perf.lt.map((x) => Math.round(x[1])).join(' '))));
     await ctx.close();
-    return { longest, errs };
+    return { longest, errs, calls };
   };
-  const med = (a) => a.slice().sort((x, y) => x - y)[1];
-  const direct = [], csv = [], errs = [];
-  for (let i = 0; i < 3; i++) {
-    const a = await coldOpen(false), b = await coldOpen(true);
-    direct.push(a.longest); csv.push(b.longest); errs.push(...a.errs, ...b.errs);
-  }
-  console.log(`cold Day open 360 6x, longest task: direct ${direct.join('/')} ms, CSV round trip ${csv.join('/')} ms`);
-  ok(med(direct) <= 0.8 * med(csv), `cold v2 Day open: direct path median ${med(direct)} ms is at most 80% of the round trip's ${med(csv)} ms`);
+  const a = await coldOpen(false), b = await coldOpen(true);
+  const errs = [...a.errs, ...b.errs];
+  console.log(`cold Day open 360 6x, longest task: direct ${a.longest} ms, CSV round trip ${b.longest} ms (information only)`);
+  const n = (c, k) => c[k] || 0;
+  ok(n(a.calls, 'v2SessionCsv') === 0 && n(a.calls, 'parseCSV') === 0 && n(a.calls, 'v2SeriesFromRows') > 0, `cold v2 Day open builds the series directly: v2SessionCsv ${n(a.calls, 'v2SessionCsv')}, parseCSV ${n(a.calls, 'parseCSV')}, v2SeriesFromRows ${n(a.calls, 'v2SeriesFromRows')} calls`);
+  ok(n(b.calls, 'v2SessionCsv') > 0 && n(b.calls, 'parseCSV') > 0, `negative control, the round trip is seen: v2SessionCsv ${n(b.calls, 'v2SessionCsv')}, parseCSV ${n(b.calls, 'parseCSV')} calls`);
   ok(!errs.length, 'cold: no page errors ' + errs.join(' | '));
   await browser.close(); server.close();
   console.log(`viewer-perf --cold: ${passes} pass, ${fails} fail`);
