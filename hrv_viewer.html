@@ -3809,10 +3809,10 @@
     let n = 0, sum = 0, sumSq = 0, lo = 0;
     for (let i = 0; i < hr.length; i++) {
       const v = hr[i].v;
-      if (v != null) { sum += v; sumSq += v * v; n++; }
+      if (Number.isFinite(v)) { sum += v; sumSq += v * v; n++; }
       while (hr[i].t - hr[lo].t > WIN_MIN) {
         const w = hr[lo].v;
-        if (w != null) { sum -= w; sumSq -= w * w; n--; }
+        if (Number.isFinite(w)) { sum -= w; sumSq -= w * w; n--; }
         lo++;
       }
       if (n < 10) continue;
