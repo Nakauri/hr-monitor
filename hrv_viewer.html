@@ -5651,7 +5651,7 @@
 
   async function drawDaySparkline(canvas, files, morningHR, iso) {
     // 24 h HR trace from every session, placed by epoch and averaged per 5 min; an empty 5 min breaks the line.
-    const dayStart = dayWindow(iso).start, B = 288, BMS = 300000;
+    const { start: dayStart, end: dayEnd } = dayWindow(iso), BMS = 300000, B = Math.round((dayEnd - dayStart) / BMS); // 23 or 25 h on DST days
     const sums = new Float64Array(B), counts = new Uint32Array(B);
     for (const fn of files) {
       try {
@@ -5685,7 +5685,7 @@
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { type: 'linear', min: 0, max: 24, display: false }, y: { display: false, grace: '10%' } },
+        scales: { x: { type: 'linear', min: 0, max: B / 12, display: false }, y: { display: false, grace: '10%' } },
       },
     });
   }

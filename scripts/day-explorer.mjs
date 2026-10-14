@@ -1,4 +1,4 @@
-// Guards: v2 day Duration reading 0:00 (S10a), stats drifting from f7cbb1a, mark edits writing twice (S10b HIGH), S27 layout (AUDIT-NOTES 2026-10-11 items 7, 8, 11, 14 to 18); S31 moved layer rows into Layers (items 23, 24). Files: hrv_viewer.html Day view. Runtime: about 50 s per --part; run when hrv_viewer.html changes.
+// Guards: v2 day Duration reading 0:00 (S10a), stats drifting from f7cbb1a, mark edits writing twice (S10b HIGH), S27 layout (AUDIT-NOTES 2026-10-11 items 7, 8, 11, 14 to 18); S31 moved layer rows into Layers (items 23, 24); Max/Min over mark labels (item 38, --part labels); Week sparklines (item 39, --part week). Files: hrv_viewer.html Day view. Runtime: about 50 s per --part; run when hrv_viewer.html changes.
 // S10a Day explorer checks, headless.
 // 1. Stats parity: the stats bar on a real legacy day and a real v2 day equals the pre-step build
 //    (--ref, default f7cbb1a, read through `git show`, opened at its old #/session/day: route).
