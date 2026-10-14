@@ -247,6 +247,8 @@ async function checkX1() {
   await gotoDay(a.page, '2026-10-05');
   await a.page.waitForSelector('#markers-actions:not([hidden])', { state: 'attached', timeout: 15000 }).catch(() => {});
   // 2026-10-05 15:00Z is 09:00 in Edmonton; the sleep runs 09:05 to 09:15.
+  // Add sleep lives in the laptop Markers drawer (S31).
+  if (!(await a.page.isVisible('#add-sleep'))) await a.page.click('#markers-toggle', { timeout: 4000 }).catch(() => {});
   await a.page.click('#add-sleep', { timeout: 4000 }).catch(() => {});
   await a.page.fill('#sl-from', '2026-10-05T09:05', { timeout: 4000 }).catch(() => {});
   await a.page.fill('#sl-to', '2026-10-05T09:15', { timeout: 4000 }).catch(() => {});

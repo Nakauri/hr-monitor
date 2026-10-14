@@ -15,7 +15,7 @@
 // 6. Layout (S27): one phone tools row at 360 and 200% text, the Layers sheet, Reset zoom on the chart corner, gaps line
 //    below the chart, Max and Min labels inside the plot, date title on one line, collapsed Summary numbers, no empty
 //    band under the chart, chips in full rows, hover line past a pinned mark, clock tooltip; layout-mutants must FAIL.
-// --part parity,chips,phone,marks,mutants,layout,layout-mutants,day-shots,marks-shots runs those parts only (default: all).
+// --part parity,chips (inside the Layers popover since S31),phone,marks,mutants,layout,layout-mutants,day-shots,marks-shots runs those parts only (default: all).
 // Usage: node scripts/day-explorer.mjs [--ref <commit>] [--shots <dir>] [--part <list>] [--ux <ux-audit dir>] [--fixtures <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
@@ -98,7 +98,7 @@ function fixtureCsv() {
     c[0] = (i / 60).toFixed(4);
     c[1] = String(FX0 + i * 1000);
     c[2] = String(i >= 3600 && i < 3630 ? 132 : 82 + Math.round(5 * Math.sin(i / 300)));
-    c[3] = (32 + 6 * Math.cos(i / 400)).toFixed(2);
+    c[3] = (i >= 6000 && i < 6020 ? 110 : 32 + 6 * Math.cos(i / 400)).toFixed(2); // 20 s vagal spike: the chills layer has data
     if (i === 1800 || i === 1805 || i === 1810) c[7] = '1';
     if (i === 2700) c[8] = 'sym:dizzy';
     if (i === 3000) c[8] = 'ctx:water';
@@ -136,7 +136,8 @@ async function seedFixture(page, base) {
   }, { files: { [FX_FILE]: fixtureCsv() }, records: FX_MARKS });
   await page.goto('about:blank');
 }
-async function openFixture(base, width = 1440, scale = 1) {
+// markers: open the laptop Markers drawer (S31), where the marks checks find their rows.
+async function openFixture(base, width = 1440, scale = 1, markers = false) {
   const { ctx, page } = await newPage(width, scale);
   await seedFixture(page, base);
   await page.goto(base + '/hrv_viewer.html#/day/' + FX_DAY, { waitUntil: 'networkidle' });
@@ -145,6 +146,7 @@ async function openFixture(base, width = 1440, scale = 1) {
   await page.waitForSelector('#markers-actions:not([hidden])', { state: 'attached', timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(400);
   await page.scaleText();
+  if (markers && width > 768 && !(await page.isVisible('#marker-list'))) { await page.click('#markers-toggle'); await page.waitForTimeout(400); }
   return { ctx, page };
 }
 
@@ -225,20 +227,22 @@ if (want('chips')) {
   for (const iso of DEMO_DAYS.concat(FX_DAY)) {
     await page.goto(cur.base + '/hrv_viewer.html' + (iso === FX_DAY ? '' : '?demo=1') + '#/day/' + iso, { waitUntil: 'networkidle' });
     await waitExplorer(page, '#view-day #session-chart');
-    const chips = await page.$$eval('#layer-chips .chip[data-layer]', (els) => els.map((e) => ({ t: e.dataset.layer, dis: e.disabled, on: e.getAttribute('aria-pressed') })));
+    await page.click('#markers-open'); await page.waitForSelector('.layers-pop #layer-chips .chip[data-layer]');
+    const chips = await page.$$eval('.layers-pop #layer-chips .chip[data-layer]', (els) => els.map((e) => ({ t: e.dataset.layer, dis: e.disabled, on: e.getAttribute('aria-pressed') })));
     for (const c of chips) {
       seen.add(c.t);
       if (c.dis || covered.has(c.t)) continue;
       const s0 = await signature(page);
-      await page.click(`#layer-chips .chip[data-layer="${c.t}"]`); await page.waitForTimeout(150);
+      await page.click(`.layers-pop #layer-chips .chip[data-layer="${c.t}"]`); await page.waitForTimeout(150);
       const s1 = await signature(page);
-      const p1 = await page.getAttribute(`#layer-chips .chip[data-layer="${c.t}"]`, 'aria-pressed');
-      await page.click(`#layer-chips .chip[data-layer="${c.t}"]`); await page.waitForTimeout(150);
+      const p1 = await page.getAttribute(`.layers-pop #layer-chips .chip[data-layer="${c.t}"]`, 'aria-pressed');
+      await page.click(`.layers-pop #layer-chips .chip[data-layer="${c.t}"]`); await page.waitForTimeout(150);
       const s2 = await signature(page);
-      const p2 = await page.getAttribute(`#layer-chips .chip[data-layer="${c.t}"]`, 'aria-pressed');
+      const p2 = await page.getAttribute(`.layers-pop #layer-chips .chip[data-layer="${c.t}"]`, 'aria-pressed');
       ok(s0 && s1 !== s0 && s2 === s0 && p1 !== c.on && p2 === c.on, `chip ${c.t} on ${iso}: ${s0 === s1 ? 'NO CHANGE' : 'changes'} the chart and restores it (aria-pressed ${c.on} > ${p1} > ${p2})`);
       if (!s0 || s1 !== s0) covered.add(c.t);
     }
+    await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   }
   const never = [...seen].filter((t) => !covered.has(t));
   console.log(`layer chips: ${seen.size} shown, ${covered.size} exercised; no demo day has data for: ${never.join(', ') || 'none'}`);
@@ -342,6 +346,13 @@ const rowOf = (page, label, type = 'event') => page.locator(`#marker-list .marke
 const storeGet = (page, id) => page.evaluate((id) => window.AortiMarksPage.store.get(id), id);
 const storeList = (page, q) => page.evaluate((q) => window.AortiMarksPage.store.list(q), q);
 const settle = (page, ms = 700) => page.waitForTimeout(ms);
+// Layer chips live in the Layers popover (S31): open it, act, close it.
+async function inLayers(page, fn) {
+  await tap(page, '#markers-open'); await settle(page, 300);
+  try { return await fn('.layers-pop #layer-chips'); } finally { await page.keyboard.press('Escape'); await settle(page, 300); }
+}
+const layerTap = (page, t) => inLayers(page, (pre) => tap(page, `${pre} .chip[data-layer="${t}"]`));
+const layerPressed = (page, t) => inLayers(page, (pre) => page.getAttribute(`${pre} .chip[data-layer="${t}"]`, 'aria-pressed', { timeout: 4000 }).catch(() => null));
 // A click that fails soft, so a mutant without the control fails its row instead of stalling the run.
 const fillSoft = (page, sel, v) => page.fill(sel, v, { timeout: 4000 }).then(() => true, () => false);
 const tap = (page, sel) => (typeof sel === 'string' ? page.locator(sel).first() : sel).click({ timeout: 4000 }).then(() => true, () => false);
@@ -411,13 +422,13 @@ const SUBCHECKS = {
   },
 
   async focus(base, width = 1440) {
-    const { ctx, page } = await openFixture(base, width);
+    const { ctx, page } = await openFixture(base, width, 1, true);
     const rows = [];
     const dur = await fullDur(page);
     if (width < 600) {
-      const before = await page.evaluate(() => ({ btn: !!document.getElementById('markers-open').offsetParent, side: !!document.querySelector('#session-layout > .session-sidebar').offsetParent }));
+      const before = await page.evaluate(() => ({ btn: !!document.getElementById('markers-toggle').offsetParent, side: !!document.querySelector('#session-layout > .session-sidebar').offsetParent }));
       rows.push([before.btn && !before.side, `360: Markers button shows and the inline panel is hidden (${JSON.stringify(before)})`]);
-      await tap(page, '#markers-open');
+      await tap(page, '#markers-toggle');
       await settle(page, 300);
       const inSheet = await page.evaluate(() => ({
         list: !!document.querySelector('.markers-sheet #marker-list') && !!document.querySelector('.markers-sheet #marker-list').offsetParent,
@@ -429,7 +440,7 @@ const SUBCHECKS = {
     rows.push([m.dLeft <= 1 && m.dRight <= 1, `${width}: a point mark click eases the chart to its 4 min window (edges off by ${m.dLeft.toFixed(2)} and ${m.dRight.toFixed(2)} px)`]);
     rows.push([m.hlAt != null && Math.abs(m.hlAt - m.t) < 1e-6 && m.selected === m.t, `${width}: the mark is highlighted on the chart and in the list (line at ${m.hlAt}, row ${m.selected})`]);
     if (width < 600) {
-      await tap(page, '#markers-open'); await settle(page, 300);
+      await tap(page, '#markers-toggle'); await settle(page, 300);
       const w = await clickAndMeasure(page, page.locator('.markers-sheet #marker-list .marker-item.type-warning').first(), dur);
       rows.push([w.dLeft <= 1 && w.dRight <= 1, `360: a span click from the sheet eases to the span plus margins (edges off by ${w.dLeft.toFixed(2)} and ${w.dRight.toFixed(2)} px)`]);
       const after = await page.evaluate(() => ({ sheet: !!document.querySelector('.markers-sheet'), back: !!document.querySelector('#session-layout > .session-sidebar #marker-list') }));
@@ -488,18 +499,18 @@ const SUBCHECKS = {
 
   // A viewer tap: edit, delete (Cancel keeps it), delete then Undo.
   async tap(base) {
-    const { ctx, page } = await openFixture(base);
+    const { ctx, page } = await openFixture(base, 1440, 1, true);
     const rows = [];
-    await tap(page, '#layer-chips .chip[data-layer="warning"]');
+    await layerTap(page, 'warning');
     await rowOf(page, 'Nausea').locator('.mk-edit').click({ timeout: 4000 }).catch(() => {});
     await fillSoft(page, '#mk-label', 'Nausea bad');
     await tap(page, '.mark-editor [data-cls="note"]');
     await tap(page, '.mark-editor [data-act="save"]'); await settle(page, 1200);
     let L = await evLabels(page), r = await storeGet(page, FX_TAP);
     rows.push([L.includes('Nausea bad') && !L.includes('Nausea') && r && !r.deleted && r.label === 'Nausea bad' && r.cls === 'note' && r.at === FX_MIN(40), `viewer tap edit: list ${JSON.stringify(L)}, record ${r && r.cls + ' ' + r.label}`]);
-    const warnChip = await page.getAttribute('#layer-chips .chip[data-layer="warning"]', 'aria-pressed').catch(() => null);
+    const warnChip = await layerPressed(page, 'warning');
     rows.push([warnChip === 'false', `a save keeps the layer choices (Warnings chip pressed ${warnChip})`]);
-    await tap(page, '#layer-chips .chip[data-layer="warning"]');
+    await layerTap(page, 'warning');
     await rowOf(page, 'Nausea bad').locator('.mk-edit').click({ timeout: 4000 }).catch(() => {});
     await tap(page, '.mark-editor [data-act="delete"]');
     const cancelled = await tap(page, '.mark-editor .confirm [class="btn"]'); await settle(page, 500);
@@ -520,7 +531,7 @@ const SUBCHECKS = {
 
   // A recorded mark: edit (a reversal plus a replacing tap), delete then Undo.
   async recorded(base) {
-    const { ctx, page } = await openFixture(base);
+    const { ctx, page } = await openFixture(base, 1440, 1, true);
     const rows = [];
     await rowOf(page, 'Dizzy').locator('.mk-edit').click({ timeout: 4000 }).catch(() => {});
     await fillSoft(page, '#mk-label', 'Dizzy spell');
@@ -552,7 +563,7 @@ const SUBCHECKS = {
 
   // Sleep marks: Add sleep, edit the end, an end before the start, delete then Undo.
   async sleep(base) {
-    const { ctx, page } = await openFixture(base);
+    const { ctx, page } = await openFixture(base, 1440, 1, true);
     const rows = [];
     const mine = () => page.$$eval('#marker-list .marker-item.type-sleep.mine', (els) => els.length);
     const n0 = await mine();
@@ -594,7 +605,7 @@ const SUBCHECKS = {
   async phone(base) {
     const rows = await SUBCHECKS.focus(base, 360);
     const { ctx, page } = await openFixture(base, 360);
-    await tap(page, '#markers-open'); await settle(page, 300);
+    await tap(page, '#markers-toggle'); await settle(page, 300);
     await page.locator('.markers-sheet #marker-list .marker-item.type-sleep.mine .mk-edit').first().click({ timeout: 4000 }).catch(() => {});
     await fillSoft(page, '#sl-to', '2026-09-15T10:55');
     await tap(page, '.mark-editor [data-act="save"]'); await settle(page, 1200);
@@ -613,7 +624,9 @@ async function runSub(name, base) {
 }
 const report5 = (rows) => { for (const [c, m] of rows) ok(c, m); };
 if (want('marks')) {
-  for (const name of ['diamonds', 'hover', 'focus', 'tap', 'recorded', 'sleep', 'phone']) report5(await runSub(name, cur.base));
+  // --sub <a,b> runs those sub-checks only; all seven together pass one 170 s shell window.
+  const subs = ['diamonds', 'hover', 'focus', 'tap', 'recorded', 'sleep', 'phone'].filter((n) => !argVal('--sub') || argVal('--sub').split(',').includes(n));
+  for (const name of subs) report5(await runSub(name, cur.base));
 }
 if (want('mutants')) {
   const real = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
