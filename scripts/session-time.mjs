@@ -22,7 +22,8 @@ const EVIDENCE = path.join(ROOT, '..', 'HR Monitor', 'ux-audit', 'redesign', 'bu
 const EVIDENCE_ALT = 'C:/Users/Khal/Desktop/Mine/HR Monitor/ux-audit/redesign/build-shots/evidence-stale-timemin-2026-10-05.csv';
 
 function grabFrom(text, name) {
-  const i = text.search(new RegExp('(?:async\\s+)?function ' + name + '\\s*\\('));
+  // A declaration at the start of a line: the S29 worker builder holds a getHrShiftSettings stub inside a string.
+  const i = text.search(new RegExp('^[ \\t]*(?:async\\s+)?function ' + name + '\\s*\\(', 'm'));
   if (i < 0) throw new Error('function not found: ' + name);
   const j = text.indexOf('{', text.indexOf(')', i));
   let d = 0;
@@ -71,7 +72,7 @@ class FixedDate extends Date {
 }
 
 async function summarizeAll(src, inputs) {
-  const ctx = loadPage(src, ['summarizeCSV', 'parseSegmentV2', 'v2SessionCsv', 'computeUptimePct', 'loadFullSession'],
+  const ctx = loadPage(src, ['summarizeCSV', 'parseSegmentV2', 'v2SessionCsv', 'computeUptimePct', 'loadFullSession', 'isV2SessionKey'],
     { Date: FixedDate, __in: inputs, marksPage: null, virtualSessions: {}, _sessionCache: new Map(), _sessionCacheTouch: (f, v) => v,
       readSessionText: async (fn) => (inputs.find(x => x.name === fn) || {}).text },
     function () {

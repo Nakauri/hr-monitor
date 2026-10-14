@@ -666,6 +666,7 @@
     font-size: var(--t14);
   }
   .summary-bar-title {
+    background: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; text-align: left;
     display: none;
     align-items: center;
     min-height: 44px;
@@ -713,6 +714,7 @@
     margin-top: 4px;
   }
   .summary-stat-value.hrv { color: var(--hrv); }
+  .summary-stat-value .nodata { font-family: var(--ui-face); font-size: var(--t14); font-weight: 500; letter-spacing: 0; color: var(--text-dim); }
   .summary-stat-value .pct { font-size: var(--t16); }
   .summary-stat-unit {
     font-size: var(--t12);
@@ -6523,13 +6525,15 @@
     // Short date ("18 Apr") fits the number row; year and start time go underneath.
     const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const dateObj = meta ? meta.date : null;
+    // A missing value reads as words, not a dash glyph (screen readers say "em dash").
+    const NODATA = '<span class="nodata">no data</span>';
     const dateBig = dateObj ? `${dateObj.getDate()} ${MONTHS_SHORT[dateObj.getMonth()]}` : '—';
     const dateSub = dateObj ? `${dateObj.getFullYear()} · ${meta.isoTime.slice(0, 5)}` : '';
     const uptime = computeUptimePct(s);
     el.innerHTML = `
       ${opts.head || `<div class="session-top-row ui"><a class="back-link" href="#/index">${UI.icon('prev')}All sessions</a></div>`}
       <div class="summary-bar ui" id="summary-bar">
-        <span class="summary-bar-title">Summary</span>
+        <button type="button" class="summary-bar-title" id="summary-toggle" aria-expanded="true" aria-controls="summary-grid">Summary</button>
         <button class="btn icon summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Stats and tags" aria-haspopup="true" aria-expanded="false">${UI.icon('kebab')}</button>
         <div class="menu summary-bar-menu" id="summary-bar-menu" hidden>
           <div class="summary-bar-menu-head">Show stats</div>
@@ -6555,7 +6559,7 @@
             <span class="field"><input id="tag-input" placeholder="Add a tag" aria-label="Add a tag" enterkeyhint="done" /></span>
           </div>
         </div>
-        <div class="summary-grid">
+        <div class="summary-grid" id="summary-grid">
         ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="date">
           <span class="summary-stat-label">Date</span>
           <span class="summary-stat-value" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${dateBig}</span>
@@ -6582,23 +6586,23 @@
         </div>
         <div class="summary-stat" data-stat="rmssdAvg">
           <span class="summary-stat-label">Avg HRV</span>
-          <span class="summary-stat-value hrv">${s.rmssdAvg ?? '—'}</span>
+          <span class="summary-stat-value hrv">${s.rmssdAvg ?? NODATA}</span>
           <span class="summary-stat-unit">${s.rmssdAvg != null ? 'ms, RMSSD' : ''}</span>
         </div>
         <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD.">
-          <span class="summary-stat-label">Avg SDNN</span>
-          <span class="summary-stat-value">${s.sdnnMatchAvg ?? '—'}</span>
-          <span class="summary-stat-unit">${s.sdnnMatchAvg != null ? 'ms, 30 s' : ''}</span>
+          <span class="summary-stat-label">Avg SDNN, 30 s</span>
+          <span class="summary-stat-value">${s.sdnnMatchAvg ?? NODATA}</span>
+          <span class="summary-stat-unit">${s.sdnnMatchAvg != null ? 'ms' : ''}</span>
         </div>
         <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5 min rolling window.">
-          <span class="summary-stat-label">Avg SDNN</span>
-          <span class="summary-stat-value">${s.sdnn5minAvg ?? '—'}</span>
-          <span class="summary-stat-unit">${s.sdnn5minAvg != null ? 'ms, 5 min' : ''}</span>
+          <span class="summary-stat-label">Avg SDNN, 5 min</span>
+          <span class="summary-stat-value">${s.sdnn5minAvg ?? NODATA}</span>
+          <span class="summary-stat-unit">${s.sdnn5minAvg != null ? 'ms' : ''}</span>
         </div>
         ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across every RR interval in the session.">
-          <span class="summary-stat-label">SDNN</span>
-          <span class="summary-stat-value">${s.sdnnFull ?? '—'}</span>
-          <span class="summary-stat-unit">${s.sdnnFull != null ? 'ms, session' : ''}</span>
+          <span class="summary-stat-label">SDNN, session</span>
+          <span class="summary-stat-value">${s.sdnnFull ?? NODATA}</span>
+          <span class="summary-stat-unit">${s.sdnnFull != null ? 'ms' : ''}</span>
         </div>`}
         <div class="summary-stat" data-stat="palpCount">
           <span class="summary-stat-label">Palps</span>
@@ -6611,7 +6615,7 @@
         </div>
         <div class="summary-stat" data-stat="uptime" title="Share of the time with live HR data.">
           <span class="summary-stat-label">Uptime</span>
-          <span class="summary-stat-value">${uptime != null ? uptime : '—'}${uptime != null ? '<span class="pct">%</span>' : ''}</span>
+          <span class="summary-stat-value">${uptime != null ? uptime + '<span class="pct">%</span>' : NODATA}</span>
           <span class="summary-stat-unit">${s.connGaps.length ? formatDuration(s.gapTotalMin) + ' in ' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
         </div>
         <div class="summary-stat" data-stat="tachyPct">
@@ -6709,6 +6713,8 @@
       if (localStorage.getItem('hrv_summary_collapsed') === '1') {
         const bar = document.getElementById('summary-bar');
         if (bar) bar.classList.add('collapsed');
+        const toggle = document.getElementById('summary-toggle');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
       }
     } catch (e) {}
     applySummaryStatVisibility();
@@ -11324,6 +11330,8 @@
       if (e.target.closest('#summary-bar-kebab')) return;
       if (e.target.closest('#summary-bar-menu')) return;
       const collapsed = bar.classList.toggle('collapsed');
+      const toggle = document.getElementById('summary-toggle');
+      if (toggle) toggle.setAttribute('aria-expanded', String(!collapsed));
       fitSummaryStats();
       try { localStorage.setItem('hrv_summary_collapsed', collapsed ? '1' : '0'); } catch (err) {}
     });

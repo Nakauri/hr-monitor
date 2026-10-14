@@ -201,7 +201,9 @@ for (const kind of (want('parity') ? ['legacy', 'v2'] : [])) {
     const errs = b.page.errors.slice();
     await b.ctx.close();
     const keys = Object.keys(before).filter((k) => k in after);
-    const diff = keys.filter((k) => before[k].v !== after[k].v || before[k].u.join(' ') !== after[k].u.join(' '));
+    // Deliberate since 2026-10-14: "0 clusters" is no longer shown under Palps.
+    const unitOf = (k, x) => (k === 'palpCount' && x.u.join(' ') === '0' ? '' : x.u.join(' '));
+    const diff = keys.filter((k) => before[k].v !== after[k].v || unitOf(k, before[k]) !== unitOf(k, after[k]));
     ok(keys.length >= 10 && !diff.length, `${kind} ${iso}: ${keys.length} stats equal the pre-step build` + (diff.length ? ' DIFF ' + diff.map((k) => `${k} ${JSON.stringify(before[k])} vs ${JSON.stringify(after[k])}`).join('; ') : ` (avg HR ${after.hrAvg && after.hrAvg.v}, max ${after.hrMax && after.hrMax.v}, HRV ${after.rmssdAvg && after.rmssdAvg.v}, uptime ${after.uptime && after.uptime.v})`));
     ok(!errs.length, `${kind} ${iso}: no page errors ` + errs.join(' | '));
   }
@@ -801,6 +803,13 @@ const LAYOUT = {
       return { collapsed: bar.classList.contains('collapsed'), shown, vals, h: Math.round(bar.getBoundingClientRect().height) };
     });
     rows.push([sum.collapsed && ['hrAvg', 'hrMax', 'hrMin', 'rmssdAvg'].every((k) => sum.shown.includes(k)) && sum.vals === 4 && sum.h <= 160, `360: collapsed Summary shows Avg HR, Max, Min and Avg HRV (${JSON.stringify(sum)})`]);
+    // The collapse is a real control (a11y audit 2026-10-14: it was a div with a click listener): a button that
+    // says its state and opens from the keyboard.
+    const kb = await page.evaluate(() => { const t = document.getElementById('summary-toggle'); return t ? { tag: t.tagName, exp: t.getAttribute('aria-expanded') } : null; });
+    await page.focus('#summary-toggle').catch(() => {});
+    await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+    const kb2 = await page.evaluate(() => ({ open: !document.getElementById('summary-bar').classList.contains('collapsed'), exp: (document.getElementById('summary-toggle') || {}).getAttribute?.('aria-expanded') }));
+    rows.push([!!kb && kb.tag === 'BUTTON' && kb.exp === 'false' && kb2.open && kb2.exp === 'true', `360: the Summary title is a button with its state, and Enter opens the card (${JSON.stringify([kb, kb2])})`]);
     await ctx.close();
     // Open Summary on the phone (Khal 2026-10-14 "the day summary kpis look a bit funny"): every unit on its value's
     // line where they fit (one that cannot share the column moves down whole), never broken, values aligned per row,
