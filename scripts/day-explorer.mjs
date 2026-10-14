@@ -15,7 +15,7 @@
 // 6. Layout (S27): one phone tools row at 360 and 200% text, the Layers sheet, Reset zoom on the chart corner, gaps line
 //    below the chart, Max and Min labels inside the plot, date title on one line, collapsed Summary numbers, no empty
 //    band under the chart, chips in full rows, hover line past a pinned mark, clock tooltip; layout-mutants must FAIL.
-// --part labels,parity,chips (inside the Layers popover since S31),phone,marks,mutants,layout,layout-mutants,day-shots,marks-shots runs those parts only (default: all).
+// --part labels,week,parity,chips (inside the Layers popover since S31),phone,marks,mutants,layout,layout-mutants,day-shots,marks-shots runs those parts only (default: all).
 // Usage: node scripts/day-explorer.mjs [--ref <commit>] [--shots <dir>] [--part <list>] [--ux <ux-audit dir>] [--fixtures <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
@@ -895,6 +895,25 @@ if (want('labels')) {
     }
     await ctx.close();
   }
+}
+// Week sparklines (AUDIT-NOTES item 39): a day with an overnight recording starts at midnight, and the line breaks
+// wherever 5 min have no data instead of bridging the time between recordings.
+if (want('week')) {
+  const { ctx, page } = await newPage(1440);
+  await page.goto(cur.base + '/hrv_viewer.html?demo=1#/week/2026-04-20', { waitUntil: 'networkidle' });
+  await page.waitForSelector('canvas[data-spark]'); await page.waitForTimeout(1500);
+  const sp = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('canvas[data-spark]')].map((c) => {
+    const ch = Chart.getChart(c), d = ch ? ch.data.datasets[0].data : [];
+    const real = d.filter((p) => p.y != null);
+    let bridge = 0;
+    for (let i = 1; i < d.length; i++) if (d[i].y != null && d[i - 1].y != null && d[i].x - d[i - 1].x > 1 / 12 + 1e-9) bridge++;
+    return [c.dataset.spark, { first: real.length ? +real[0].x.toFixed(2) : null, breaks: d.filter((p) => p.y == null).length, bridge }];
+  })));
+  ok(sp['2026-04-24'] && sp['2026-04-24'].first < 0.5, `Friday 04-24 starts at midnight (first point at ${sp['2026-04-24'] && sp['2026-04-24'].first} h)`);
+  for (const iso of ['2026-04-21', '2026-04-23']) ok(sp[iso] && sp[iso].breaks > 0, `${iso}: the line breaks between recordings (${JSON.stringify(sp[iso])})`);
+  ok(Object.values(sp).every((v) => v.bridge === 0), `no sparkline bridges an empty 5 min ${JSON.stringify(sp)}`);
+  ok(!page.errors.length, 'week: no page errors ' + page.errors.join(' | '));
+  await ctx.close();
 }
 if (want('layout')) {
   for (const name of ['phone', 'laptop']) report5(await runLayout(name, cur.base));

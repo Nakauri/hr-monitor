@@ -5637,7 +5637,7 @@
       if (!col.files.length) continue;
       const canvas = el.querySelector(`canvas[data-spark="${col.iso}"]`);
       if (!canvas) continue;
-      drawDaySparkline(canvas, col.files, col.morningHR);
+      drawDaySparkline(canvas, col.files, col.morningHR, col.iso);
     }
   }
 
@@ -5649,30 +5649,34 @@
     return new Chart(canvas.getContext('2d'), config);
   }
 
-  async function drawDaySparkline(canvas, files, morningHR) {
-    // Build a single-day 24-hr HR trace by stitching all sessions' HR series
-    // (downsampled) on a shared 24-hr x-axis. Fast-read only - uses cached summaries
-    // plus re-parses for HR data on demand.
-    const points = [];
+  async function drawDaySparkline(canvas, files, morningHR, iso) {
+    // 24 h HR trace from every session, placed by epoch and averaged per 5 min; an empty 5 min breaks the line.
+    const dayStart = dayWindow(iso).start, B = 288, BMS = 300000;
+    const sums = new Float64Array(B), counts = new Uint32Array(B);
     for (const fn of files) {
       try {
         const text = await readSessionText(fn);
-        const meta = parseSessionFilename(fn);
-        const startHr = meta.date.getHours() + meta.date.getMinutes() / 60;
         const { rows, header } = parseCSV(text);
         const idx = {};
         header.forEach((h, i) => idx[h.trim()] = i);
-        // Downsample to ~30 points per session
-        const stride = Math.max(1, Math.floor(rows.length / 30));
         const elapsedMin = rowElapsedMinFn(rows, idx);
-        for (let i = 0; i < rows.length; i += stride) {
-          const t = elapsedMin(rows[i]);
-          const h = parseFloat(rows[i][idx.hr_bpm]);
-          if (!isNaN(t) && !isNaN(h)) points.push({ x: startHr + t / 60, y: h });
+        const fileStart = deriveFileStartEpoch(fn);
+        for (const r of rows) {
+          const h = parseFloat(r[idx.hr_bpm]);
+          if (!Number.isFinite(h)) continue;
+          let ep = idx.epoch_ms != null ? parseFloat(r[idx.epoch_ms]) : NaN;
+          if (!Number.isFinite(ep)) { const t = elapsedMin(r); if (!Number.isFinite(t)) continue; ep = fileStart + t * 60000; }
+          const k = Math.floor((ep - dayStart) / BMS);
+          if (k < 0 || k >= B) continue;
+          sums[k] += h; counts[k]++;
         }
       } catch (e) {}
     }
-    points.sort((a, b) => a.x - b.x);
+    const points = [];
+    for (let k = 0; k < B; k++) {
+      if (counts[k]) points.push({ x: (k + 0.5) / 12, y: sums[k] / counts[k] });
+      else if (points.length && points[points.length - 1].y != null) points.push({ x: (k + 0.5) / 12, y: null });
+    }
     const hrStage = getHRStage(morningHR);
     const color = STAGE_COLORS[hrStage];
     freshChart(canvas, {
