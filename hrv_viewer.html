@@ -674,6 +674,10 @@
     font-weight: 600;
     color: var(--text);
   }
+  .summary-bar-title { gap: var(--s2); }
+  .summary-title-dur { font-family: var(--num-face); font-weight: 900; font-variant-numeric: tabular-nums; color: var(--text); }
+  .summary-chevron { width: 12px; height: 12px; flex: 0 0 auto; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; color: var(--text-dim); transition: transform 0.18s ease; }
+  .summary-bar.collapsed .summary-chevron { transform: rotate(-90deg); }
   .summary-bar-kebab { position: absolute; top: calc(var(--card-pad) - var(--s2)); right: calc(var(--card-pad) - var(--s2)); z-index: 2; color: var(--text-dim); }
   .summary-bar-kebab:hover, .summary-bar-kebab[aria-expanded="true"] { color: var(--text); background: var(--selected-fill); }
   .summary-bar-menu {
@@ -1444,8 +1448,11 @@
     /* Phone: the unit sits on the value's line, so every row is one height and the chart starts higher. The kebab
        lives in the title row, so the grid takes the full width: two columns, one when large text makes them tight. */
     .summary-bar { container-type: inline-size; }
-    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @container (max-width: 22em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @container (max-width: 17em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: minmax(0, 1fr); } }
+    .summary-grid [data-stat="duration"] { display: none; }
+    .summary-stat-unit .more { display: none; }
     .summary-bar:not(.collapsed) .summary-stat { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }
     .summary-bar:not(.collapsed) .summary-stat-label { flex: 0 0 100%; }
     /* A unit that does not fit beside its value wraps to the next line whole (flex-wrap), not mid-phrase. */
@@ -6527,13 +6534,15 @@
     const dateObj = meta ? meta.date : null;
     // A missing value reads as words, not a dash glyph (screen readers say "em dash").
     const NODATA = '<span class="nodata">no data</span>';
+    // h:mm:ss with the seconds in .more, so the phone shows h:mm.
+    const hmMore = (t) => { const f = formatDuration(t); const i = f.lastIndexOf(':'); return f.split(':').length === 3 ? f.slice(0, i) + '<span class="more">' + f.slice(i) + '</span>' : f; };
     const dateBig = dateObj ? `${dateObj.getDate()} ${MONTHS_SHORT[dateObj.getMonth()]}` : '—';
     const dateSub = dateObj ? `${dateObj.getFullYear()} · ${meta.isoTime.slice(0, 5)}` : '';
     const uptime = computeUptimePct(s);
     el.innerHTML = `
       ${opts.head || `<div class="session-top-row ui"><a class="back-link" href="#/index">${UI.icon('prev')}All sessions</a></div>`}
       <div class="summary-bar ui" id="summary-bar">
-        <button type="button" class="summary-bar-title" id="summary-toggle" aria-expanded="true" aria-controls="summary-grid">Summary</button>
+        <button type="button" class="summary-bar-title" id="summary-toggle" aria-expanded="true" aria-controls="summary-grid" aria-label="Summary, duration ${dur}"><span>Summary</span><span class="summary-title-dur" data-stat="duration">${dur}</span><svg class="summary-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
         <button class="btn icon summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Stats and tags" aria-haspopup="true" aria-expanded="false">${UI.icon('kebab')}</button>
         <div class="menu summary-bar-menu" id="summary-bar-menu" hidden>
           <div class="summary-bar-menu-head">Show stats</div>
@@ -6577,17 +6586,17 @@
         <div class="summary-stat" data-stat="hrMax">
           <span class="summary-stat-label">Max HR</span>
           <span class="summary-stat-value ${maxStage}">${s.hrMax.v}</span>
-          <span class="summary-stat-unit">at ${formatDuration(s.hrMax.t)}</span>
+          <span class="summary-stat-unit">at ${hmMore(s.hrMax.t)}</span>
         </div>
         <div class="summary-stat" data-stat="hrMin">
           <span class="summary-stat-label">Min HR</span>
           <span class="summary-stat-value ${minStage}">${s.hrMin.v}</span>
-          <span class="summary-stat-unit">at ${formatDuration(s.hrMin.t)}</span>
+          <span class="summary-stat-unit">at ${hmMore(s.hrMin.t)}</span>
         </div>
         <div class="summary-stat" data-stat="rmssdAvg">
           <span class="summary-stat-label">Avg HRV</span>
           <span class="summary-stat-value hrv">${s.rmssdAvg ?? NODATA}</span>
-          <span class="summary-stat-unit">${s.rmssdAvg != null ? 'ms, RMSSD' : ''}</span>
+          <span class="summary-stat-unit">${s.rmssdAvg != null ? 'ms<span class="more">, RMSSD</span>' : ''}</span>
         </div>
         <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD.">
           <span class="summary-stat-label">Avg SDNN, 30 s</span>
@@ -6616,12 +6625,12 @@
         <div class="summary-stat" data-stat="uptime" title="Share of the time with live HR data.">
           <span class="summary-stat-label">Uptime</span>
           <span class="summary-stat-value">${uptime != null ? uptime + '<span class="pct">%</span>' : NODATA}</span>
-          <span class="summary-stat-unit">${s.connGaps.length ? formatDuration(s.gapTotalMin) + ' in ' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
+          <span class="summary-stat-unit">${s.connGaps.length ? '<span class="more">' + formatDuration(s.gapTotalMin) + ' in </span>' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
         </div>
         <div class="summary-stat" data-stat="tachyPct">
           <span class="summary-stat-label">Tachy %</span>
           <span class="summary-stat-value">${s.tachyPct}<span class="pct">%</span></span>
-          <span class="summary-stat-unit">HR over 100</span>
+          <span class="summary-stat-unit"><span class="more">HR over 100</span></span>
         </div>
         </div>
       </div>
@@ -9493,7 +9502,7 @@
   }
   function applySummaryStatVisibility() {
     const hidden = getSummaryHiddenSet();
-    document.querySelectorAll('#summary-bar .summary-stat[data-stat]').forEach(el => {
+    document.querySelectorAll('#summary-bar .summary-stat[data-stat], #summary-bar .summary-title-dur[data-stat]').forEach(el => {
       el.style.display = hidden.has(el.getAttribute('data-stat')) ? 'none' : '';
     });
     fitSummaryStats();

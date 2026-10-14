@@ -201,8 +201,14 @@ for (const kind of (want('parity') ? ['legacy', 'v2'] : [])) {
     const errs = b.page.errors.slice();
     await b.ctx.close();
     const keys = Object.keys(before).filter((k) => k in after);
-    // Deliberate since 2026-10-14: "0 clusters" is no longer shown under Palps.
-    const unitOf = (k, x) => (k === 'palpCount' && x.u.join(' ') === '0' ? '' : x.u.join(' '));
+    // Deliberate since 2026-10-14: "0 clusters" is no longer shown under Palps, and the SDNN window ("30 s", "5 min")
+    // moved from the unit into the label, so the unit is "ms" alone.
+    const unitOf = (k, x) => {
+      const u = x.u.join(' ');
+      if (k === 'palpCount' && u === '0') return '';
+      if ((k === 'sdnnMatchAvg' && u === '30') || (k === 'sdnn5minAvg' && u === '5')) return '';
+      return u;
+    };
     const diff = keys.filter((k) => before[k].v !== after[k].v || unitOf(k, before[k]) !== unitOf(k, after[k]));
     ok(keys.length >= 10 && !diff.length, `${kind} ${iso}: ${keys.length} stats equal the pre-step build` + (diff.length ? ' DIFF ' + diff.map((k) => `${k} ${JSON.stringify(before[k])} vs ${JSON.stringify(after[k])}`).join('; ') : ` (avg HR ${after.hrAvg && after.hrAvg.v}, max ${after.hrMax && after.hrMax.v}, HRV ${after.rmssdAvg && after.rmssdAvg.v}, uptime ${after.uptime && after.uptime.v})`));
     ok(!errs.length, `${kind} ${iso}: no page errors ` + errs.join(' | '));
@@ -831,9 +837,14 @@ const LAYOUT = {
           cols: getComputedStyle(document.querySelector('#summary-bar .summary-grid')).gridTemplateColumns.split(' ').length,
           over: stats.filter((s) => s.scrollWidth > s.clientWidth + 1).map((s) => s.dataset.stat),
           h: Math.round(document.getElementById('summary-bar').getBoundingClientRect().height),
+          // Khal 2026-10-14 "3 kpis in a row ... and a close caret": Duration rides in the title row with a caret.
+          titleDur: !!(document.querySelector('#summary-toggle .summary-title-dur') || {}).offsetParent,
+          caret: !!(document.querySelector('#summary-toggle .summary-chevron') || {}).getBoundingClientRect?.().width,
+          gridDur: stats.some((s) => s.dataset.stat === 'duration'),
         };
       });
-      rows.push([!k.ownLine.length && !k.broken.length && !k.misaligned && k.cols === (scale === 1 ? 2 : 1) && !k.over.length, `360 text ${scale}x: open Summary keeps units on the value's line where they fit, never broken, values aligned, ${scale === 1 ? 2 : 1} column${scale === 1 ? 's' : ''} (${JSON.stringify(k)})`]);
+      const want = scale === 1 ? 3 : 1;
+      rows.push([!k.ownLine.length && !k.broken.length && !k.misaligned && k.cols === want && !k.over.length && k.titleDur && k.caret && !k.gridDur && (scale > 1 || k.h <= 260), `360 text ${scale}x: open Summary in ${want} column${want > 1 ? 's' : ''}, units on the value's line where they fit, never broken, values aligned, Duration and a caret in the title${scale === 1 ? ', card 260 px at most' : ''} (${JSON.stringify(k)})`]);
       await ctx.close();
     }
     return rows;
@@ -969,7 +980,9 @@ if (want('layout-mutants')) {
     ['phone', 'Layers rows without the drawn box (on read from the ring)', '  .layer-rows .chip[aria-pressed=\"true\"]::after { background: var(--action); border-color: var(--action); }\n', ''],
     ['phone', 'Max and Min labels unclamped', '      const clampX = (x) => Math.min(Math.max(x, a.left + w / 2 + 2), a.right - w / 2 - 2);\n      const cx = clampX(px);\n      let cy = below ? py + gap + h / 2 : py - gap - h / 2;\n      if (cy - h / 2 < a.top + 2) cy = py + gap + h / 2;\n      if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;\n', '      const clampX = (x) => x;\n      const cx = px;\n      const cy = below ? py + gap + h / 2 : py - gap - h / 2;\n'],
     ['phone', 'Summary units back on their own line', '    .summary-bar:not(.collapsed) .summary-stat { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }\n', ''],
-    ['phone', 'Summary keeps two columns at 200% text', '    @container (max-width: 17em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: minmax(0, 1fr); } }\n', ''],
+    ['phone', 'Summary keeps several columns at 200% text', '    @container (max-width: 17em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: minmax(0, 1fr); } }\n', ''],
+    ['phone', 'Summary back to two columns', '    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }\n', '    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }\n'],
+    ['phone', 'Summary without the caret', '<svg class="summary-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>', ''],
     ['laptop', 'Max label unclamped', "        place: labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false) },", '        place: () => ({ dx: 0, dy: -4 }) },'],
     ['laptop', 'markers panel back in the row (empty band)', '    position: absolute; z-index: 5; right: var(--card-pad); bottom: var(--card-pad); width: var(--drawer-w);\n', '    position: static; width: var(--drawer-w);\n'],
     ['laptop', 'hover line frozen at the pinned mark', '      const t = hov ? chart.data.datasets[hov.datasetIndex].data[hov.index].x : chart.$hlT;', '      const t = chart.$hlT;'],
