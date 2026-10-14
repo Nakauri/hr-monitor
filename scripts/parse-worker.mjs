@@ -1,7 +1,7 @@
 // Guards: S29 parse off the main thread. Named bug: AUDIT-NOTES 2026-10-11 item 13, phone trace 2026-10-12 11:15
 // (perf-2026-10-12/spin/phone-trace-1.json), one 1,674 ms main-thread task after a Drive reply that froze the sync
 // icon and scrolling. Files: hrv_viewer.html (summarizeCSVAsync, parseWorkerSource). Runtime: about 40 s; run when
-// hrv_viewer.html's parse path changes and before a push.
+// hrv_viewer.html's parse path changes and before a push. The never-replies case alone waits about 20 s.
 // Checks: worker and main-thread summaries are identical on every demo file; a 60k-row recording parses at 360 with
 // the CPU slowed 6x and no main-thread task over 100 ms; the same parse with the worker off (negative control) MUST
 // exceed 100 ms, or the measurement proves nothing.
@@ -110,6 +110,8 @@ ok(!errors.length, 'no page errors ' + errors.join(' | '));
 const FALLBACKS = {
   'no Worker': 'window.Worker = undefined;',
   'a Worker that dies': 'window.Worker = class { constructor() {} postMessage() { setTimeout(() => this.onerror && this.onerror({ message: "boom" }), 20); } terminate() {} };',
+  // The S29 review's hang: no reply, no error. The watchdog must hand the file to the main thread (about 20 s).
+  'a Worker that never replies': 'window.Worker = class { constructor() {} postMessage() {} terminate() {} };',
 };
 for (const [name, init] of Object.entries(FALLBACKS)) {
   const c2 = await browser.newContext({ viewport: { width: 360, height: 740 } });
@@ -122,7 +124,7 @@ for (const [name, init] of Object.entries(FALLBACKS)) {
   const r = await p2.evaluate(async (fn) => {
     const text = await fetch('./demo/' + fn).then((x) => x.text());
     const a = JSON.stringify(window.__hrmParse.summarizeCSV(fn, text));
-    const b = await Promise.race([window.__hrmParse.summarizeCSVAsync(fn, text).then((s) => JSON.stringify(s)), new Promise((res) => setTimeout(() => res('TIMEOUT'), 10000))]);
+    const b = await Promise.race([window.__hrmParse.summarizeCSVAsync(fn, text).then((s) => JSON.stringify(s)), new Promise((res) => setTimeout(() => res('TIMEOUT'), 40000))]);
     return { same: a === b, b: b.slice(0, 40) };
   }, files[0]);
   ok(r.same, `${name}: the summary comes from the main thread instead (${r.b})`);

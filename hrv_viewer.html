@@ -3683,40 +3683,55 @@
 
   // S29: summarizeCSV runs in a Worker built from this page's own function sources, so there is no second copy to
   // drift. Page state goes in with each request (quadrant and HR shift settings). Main thread if the Worker fails.
-  let _parseWorker = null, _parseSeq = 0;
+  let _parseWorker = null, _parseSeq = 0, _parseTimer = 0, _parseUrl = '';
   const _parsePending = new Map();
+  // Gives up on the Worker for this page: every waiting file reruns on the main thread.
+  function failParseWorker(w, why) {
+    console.warn('[parseWorker] ' + why + ', parsing on the main thread');
+    _parseWorker = false;
+    clearTimeout(_parseTimer);
+    for (const p of _parsePending.values()) p.reject(new Error(why));
+    _parsePending.clear();
+    try { w.terminate(); } catch (e) {}
+  }
+  // The Worker answers in order, so only the oldest request is running; a reply that never comes must not wedge loads.
+  function armParseWatchdog(w) {
+    clearTimeout(_parseTimer);
+    const head = _parsePending.values().next().value;
+    if (head) _parseTimer = setTimeout(() => failParseWorker(w, 'no reply'), 20000 + head.size / 100);
+  }
   function parseWorkerSource() {
     const fns = [summarizeCSV, parseCSV, deriveFileStartEpoch, parseSessionFilename, rowElapsedMinFn, mergeGaps,
       trimGapsByData, dataJumpGaps, rollingTrailingMean, detectChillsWindows, nearestRmssdAt, dayKeyOf, isoAddDays,
       localDateLabel, localDateKeyFromEpoch, dayWindow];
     const consts = { ELAPSED_MAX_START_MIN, ELAPSED_MAX_DRIFT_MIN, DATA_JUMP_GAP_MIN, DAY_START_HOUR, SUMMARY_SCHEMA_V };
     return [
+      "'use strict';",
       ...Object.entries(consts).map(([k, v]) => `const ${k} = ${JSON.stringify(v)};`),
       "let QUADRANT_THRESH = {}, _hrShift = null, _dayKeyLast = { start: 0, end: 0, key: '' };",
       'function getHrShiftSettings() { return _hrShift; }',
       ...fns.map((f) => f.toString()),
       'onmessage = (e) => { const d = e.data; QUADRANT_THRESH = d.quad; _hrShift = d.shift;',
-      '  try { postMessage({ id: d.id, summary: summarizeCSV(d.fn, d.text) }); } catch (err) { postMessage({ id: d.id, error: String(err && err.message || err) }); } };',
+      '  try { postMessage({ id: d.id, summary: summarizeCSV(d.fn, d.text) }); } catch (err) { postMessage({ id: d.id, error: String(err && err.message || err), name: err && err.name }); } };',
     ].join('\n');
   }
   function parseWorker() {
     if (_parseWorker !== null) return _parseWorker;
     try {
-      const url = URL.createObjectURL(new Blob([parseWorkerSource()], { type: 'text/javascript' }));
-      const w = new Worker(url);
+      _parseUrl = URL.createObjectURL(new Blob([parseWorkerSource()], { type: 'text/javascript' }));
+      const w = new Worker(_parseUrl);
       w.onmessage = (e) => {
+        if (_parseUrl) { URL.revokeObjectURL(_parseUrl); _parseUrl = ''; }
+        // A missing helper fails every file that reaches it; stop paying for the Worker twice.
+        if (e.data.name === 'ReferenceError') { failParseWorker(w, 'worker is missing ' + e.data.error); return; }
         const p = _parsePending.get(e.data.id);
         if (!p) return;
         _parsePending.delete(e.data.id);
+        armParseWatchdog(w);
         if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data.summary);
       };
-      w.onerror = (e) => {
-        console.warn('[parseWorker] failed, parsing on the main thread', e && e.message);
-        _parseWorker = false;
-        for (const p of _parsePending.values()) p.reject(new Error('worker failed'));
-        _parsePending.clear();
-        try { w.terminate(); } catch (err) {}
-      };
+      w.onerror = (e) => failParseWorker(w, 'worker failed: ' + (e && e.message));
+      w.onmessageerror = () => failParseWorker(w, 'unreadable worker reply');
       _parseWorker = w;
     } catch (e) {
       console.warn('[parseWorker] unavailable, parsing on the main thread', e);
@@ -3730,8 +3745,9 @@
       try {
         return await new Promise((resolve, reject) => {
           const id = ++_parseSeq;
-          _parsePending.set(id, { resolve, reject });
           w.postMessage({ id, fn: filename, text, quad: QUADRANT_THRESH, shift: getHrShiftSettings() });
+          _parsePending.set(id, { resolve, reject, size: text.length });
+          if (_parsePending.size === 1) armParseWatchdog(w);
         });
       } catch (e) {
         console.warn('[parseWorker] retrying on the main thread', filename, e && e.message);
