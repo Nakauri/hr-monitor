@@ -1435,10 +1435,19 @@
        so it doesn't run longer than the viewport if a session has hundreds
        of markers. */
     .session-layout > .session-sidebar { display: none; }
-    .summary-bar { padding: var(--card-pad) calc(var(--card-pad) + 44px) var(--card-pad) var(--card-pad); cursor: pointer; min-height: 60px; }
+    .summary-bar { padding: var(--card-pad); cursor: pointer; min-height: 60px; }
     .summary-bar-kebab { top: var(--card-pad); }
-    .summary-grid { row-gap: var(--s3); margin-top: 4px; }
+    .summary-grid { --kpi-gap: var(--s3); row-gap: var(--s3); margin-top: 4px; }
     .summary-stat-value { font-size: 22px; }
+    /* Phone: the unit sits on the value's line, so every row is one height and the chart starts higher. The kebab
+       lives in the title row, so the grid takes the full width: two columns, one when large text makes them tight. */
+    .summary-bar { container-type: inline-size; }
+    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @container (max-width: 17em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: minmax(0, 1fr); } }
+    .summary-bar:not(.collapsed) .summary-stat { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }
+    .summary-bar:not(.collapsed) .summary-stat-label { flex: 0 0 100%; }
+    /* A unit that does not fit beside its value wraps to the next line whole (flex-wrap), not mid-phrase. */
+    .summary-bar:not(.collapsed) .summary-stat-unit { margin-top: 0; }
     .summary-bar-title { display: flex; }
     /* Collapsed: the key numbers stay, without their sub-lines. */
     .summary-bar.collapsed { min-height: 56px; }
@@ -3701,7 +3710,7 @@
     if (head) _parseTimer = setTimeout(() => failParseWorker(w, 'no reply'), 20000 + head.size / 100);
   }
   function parseWorkerSource() {
-    const fns = [summarizeCSV, parseCSV, deriveFileStartEpoch, parseSessionFilename, rowElapsedMinFn, mergeGaps,
+    const fns = [summarizeCSV, parseCSV, deriveFileStartEpoch, parseSessionFilename, rowElapsedMinFn, elapsedRule, mergeGaps,
       trimGapsByData, dataJumpGaps, rollingTrailingMean, detectChillsWindows, nearestRmssdAt, dayKeyOf, isoAddDays,
       localDateLabel, localDateKeyFromEpoch, dayWindow];
     const consts = { ELAPSED_MAX_START_MIN, ELAPSED_MAX_DRIFT_MIN, DATA_JUMP_GAP_MIN, DAY_START_HOUR, SUMMARY_SCHEMA_V };
@@ -3762,8 +3771,9 @@
     keys: () => (v2Model ? [...v2Model.byKey.keys()] : []),
     load: async (key, viaCsv) => {
       _sessionCache.delete(key);
+      const prev = window.__hrmV2ViaCsv;
       window.__hrmV2ViaCsv = !!viaCsv;
-      try { return await loadFullSession(key); } finally { window.__hrmV2ViaCsv = false; _sessionCache.delete(key); }
+      try { return await loadFullSession(key); } finally { window.__hrmV2ViaCsv = prev; _sessionCache.delete(key); }
     },
   };
 
@@ -3798,16 +3808,15 @@
   // timestamps decide. A normal file returns time_min untouched, so its summary is unchanged.
   const ELAPSED_MAX_START_MIN = 10;
   const ELAPSED_MAX_DRIFT_MIN = 1;
-  function rowElapsedMinFn(rows, idx) {
-    const tI = idx.time_min, eI = idx.epoch_ms;
-    const tm = (r) => tI == null ? NaN : parseFloat(r[tI]);
-    const em = (r) => (eI == null || r[eI] == null || r[eI] === '') ? NaN : parseFloat(r[eI]);
+  // The S35 rule over n rows read through tAt(i) and eAt(i). mode 0: time_min as written; otherwise at(t, e) rebuilds
+  // it. Shared by rowElapsedMinFn (CSV cells) and v2SeriesFromRows (numbers), so the two can never drift.
+  function elapsedRule(n, tAt, eAt) {
     let firstT = NaN, pt0 = NaN, pe0 = NaN, ptN = NaN, peN = NaN;
-    for (const r of rows) {
-      const t = tm(r);
+    for (let i = 0; i < n; i++) {
+      const t = tAt(i);
       if (!Number.isFinite(t)) continue;
       if (!Number.isFinite(firstT)) firstT = t;
-      const e = em(r);
+      const e = eAt(i);
       if (!Number.isFinite(e)) continue;
       if (!Number.isFinite(pt0)) { pt0 = t; pe0 = e; }
       ptN = t; peN = e;
@@ -3816,17 +3825,21 @@
     const round4 = (x) => Math.round(x * 1e4) / 1e4;
     if (Number.isFinite(pt0)) {
       const agree = Math.abs((ptN - pt0) - (peN - pe0) / 60000) <= ELAPSED_MAX_DRIFT_MIN;
-      if (plausible && agree) return tm;
+      if (plausible && agree) return { mode: 0 };
       const base = plausible ? pt0 : 0;
-      return (r) => {
-        const e = em(r);
-        if (Number.isFinite(e)) return round4(base + (e - pe0) / 60000);
-        const t = tm(r);
-        return Number.isFinite(t) ? round4(base + t - pt0) : NaN;
-      };
+      return { mode: 1, at: (t, e) => Number.isFinite(e) ? round4(base + (e - pe0) / 60000) : Number.isFinite(t) ? round4(base + t - pt0) : NaN };
     }
-    if (plausible) return tm;
-    return (r) => { const t = tm(r); return Number.isFinite(t) ? round4(t - firstT) : NaN; };
+    if (plausible) return { mode: 0 };
+    return { mode: 2, at: (t) => Number.isFinite(t) ? round4(t - firstT) : NaN };
+  }
+  function rowElapsedMinFn(rows, idx) {
+    const tI = idx.time_min, eI = idx.epoch_ms;
+    const tm = (r) => tI == null ? NaN : parseFloat(r[tI]);
+    const em = (r) => (eI == null || r[eI] == null || r[eI] === '') ? NaN : parseFloat(r[eI]);
+    const rule = elapsedRule(rows.length, (i) => tm(rows[i]), (i) => em(rows[i]));
+    if (rule.mode === 0) return tm;
+    if (rule.mode === 1) return (r) => rule.at(tm(r), em(r));
+    return (r) => rule.at(tm(r));
   }
 
   // ===== Autonomic event detection (v2) =====
@@ -4501,10 +4514,11 @@
   }
 
   // Full per-beat data (only loaded when rendering session view)
-  // parseFloat(x.toFixed(digits)) for x >= 0 without the string, except within a hair of a halfway point.
+  // parseFloat(x.toFixed(digits)) for x >= 0 without the string. Exact below 2^52 (x * scale is then exact); only a
+  // value on a halfway point needs toFixed's rounding.
   function toFixedNum(x, scale, digits) {
     const y = x * scale, f = y - Math.floor(y);
-    if (!Number.isFinite(y) || Math.abs(f - 0.5) < 1e-6) return parseFloat(x.toFixed(digits));
+    if (!Number.isFinite(y) || y >= 2 ** 52 || Math.abs(f - 0.5) < 1e-6) return parseFloat(x.toFixed(digits));
     return Math.round(y) / scale;
   }
   // S50: the series loadFullSession would read back from v2SessionCsv, built from the rows without the CSV string.
@@ -4517,39 +4531,13 @@
     for (const r of rows) {
       const k = r.k;
       if (k !== 'h' && k !== 'c' && k !== 'e' && k !== 's' && k !== 'w' && k !== 'x' && k !== 'p') continue;
-      const e = typeof r.ep === 'number' ? r.ep : parseFloat('' + r.ep);
+      const e = r.ep;
       T.push(toFixedNum(Math.max(0, r.ep - sid) / 60000, 1e4, 4));
       E.push(e);
       if (k === 'h') { hIdx.push(hRows.length); hRows.push(r); } else hIdx.push(-1);
     }
-    // rowElapsedMinFn on T and E.
-    let firstT = NaN, pt0 = NaN, pe0 = NaN, ptN = NaN, peN = NaN;
-    for (let i = 0; i < T.length; i++) {
-      const t = T[i];
-      if (!Number.isFinite(t)) continue;
-      if (!Number.isFinite(firstT)) firstT = t;
-      const e = E[i];
-      if (!Number.isFinite(e)) continue;
-      if (!Number.isFinite(pt0)) { pt0 = t; pe0 = e; }
-      ptN = t; peN = e;
-    }
-    const plausible = !Number.isFinite(firstT) || (firstT >= 0 && firstT <= ELAPSED_MAX_START_MIN);
-    const round4 = (x) => Math.round(x * 1e4) / 1e4;
-    let mode = 0, base = 0;
-    if (Number.isFinite(pt0)) {
-      const agree = Math.abs((ptN - pt0) - (peN - pe0) / 60000) <= ELAPSED_MAX_DRIFT_MIN;
-      if (!(plausible && agree)) { mode = 1; base = plausible ? pt0 : 0; }
-    } else if (!plausible) mode = 2;
-    const elapsed = (i) => {
-      const t = T[i];
-      if (mode === 0) return t;
-      if (mode === 1) {
-        const e = E[i];
-        if (Number.isFinite(e)) return round4(base + (e - pe0) / 60000);
-        return Number.isFinite(t) ? round4(base + t - pt0) : NaN;
-      }
-      return Number.isFinite(t) ? round4(t - firstT) : NaN;
-    };
+    const rule = elapsedRule(T.length, (i) => T[i], (i) => E[i]);
+    const elapsed = rule.mode === 0 ? (i) => T[i] : (i) => rule.at(T[i], E[i]);
     const hr = [], rmssd = [], sdnnMatch = [], sdnn5min = [];
     for (let i = 0; i < T.length; i++) {
       const t = elapsed(i);
@@ -6595,27 +6583,27 @@
         <div class="summary-stat" data-stat="rmssdAvg">
           <span class="summary-stat-label">Avg HRV</span>
           <span class="summary-stat-value hrv">${s.rmssdAvg ?? '—'}</span>
-          <span class="summary-stat-unit">ms, RMSSD</span>
+          <span class="summary-stat-unit">${s.rmssdAvg != null ? 'ms, RMSSD' : ''}</span>
         </div>
         <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD.">
           <span class="summary-stat-label">Avg SDNN</span>
           <span class="summary-stat-value">${s.sdnnMatchAvg ?? '—'}</span>
-          <span class="summary-stat-unit">ms, 30 s</span>
+          <span class="summary-stat-unit">${s.sdnnMatchAvg != null ? 'ms, 30 s' : ''}</span>
         </div>
         <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5 min rolling window.">
           <span class="summary-stat-label">Avg SDNN</span>
           <span class="summary-stat-value">${s.sdnn5minAvg ?? '—'}</span>
-          <span class="summary-stat-unit">ms, 5 min</span>
+          <span class="summary-stat-unit">${s.sdnn5minAvg != null ? 'ms, 5 min' : ''}</span>
         </div>
         ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across every RR interval in the session.">
           <span class="summary-stat-label">SDNN</span>
           <span class="summary-stat-value">${s.sdnnFull ?? '—'}</span>
-          <span class="summary-stat-unit">ms, session</span>
+          <span class="summary-stat-unit">${s.sdnnFull != null ? 'ms, session' : ''}</span>
         </div>`}
         <div class="summary-stat" data-stat="palpCount">
           <span class="summary-stat-label">Palps</span>
           <span class="summary-stat-value">${s.palpCount}</span>
-          <span class="summary-stat-unit">${s.palpClusters.length} cluster${s.palpClusters.length === 1 ? '' : 's'}</span>
+          <span class="summary-stat-unit">${s.palpClusters.length ? s.palpClusters.length + ' cluster' + (s.palpClusters.length === 1 ? '' : 's') : ''}</span>
         </div>
         <div class="summary-stat" data-stat="warnCount">
           <span class="summary-stat-label">Warnings</span>
@@ -6624,7 +6612,7 @@
         <div class="summary-stat" data-stat="uptime" title="Share of the time with live HR data.">
           <span class="summary-stat-label">Uptime</span>
           <span class="summary-stat-value">${uptime != null ? uptime : '—'}${uptime != null ? '<span class="pct">%</span>' : ''}</span>
-          <span class="summary-stat-unit">${s.connGaps.length ? formatDuration(s.gapTotalMin) + ' across ' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
+          <span class="summary-stat-unit">${s.connGaps.length ? formatDuration(s.gapTotalMin) + ' in ' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
         </div>
         <div class="summary-stat" data-stat="tachyPct">
           <span class="summary-stat-label">Tachy %</span>
@@ -9508,6 +9496,8 @@
   function fitSummaryStats() {
     const grid = document.querySelector('#summary-bar .summary-grid');
     if (!grid) return;
+    // The open phone card has fixed columns in CSS (two, one at large text).
+    if (!window.matchMedia('(min-width: 769px)').matches && !grid.closest('.summary-bar.collapsed')) { grid.style.gridTemplateColumns = ''; return; }
     const stats = [...grid.children].filter((e) => e.offsetParent !== null);
     stats.forEach((e) => { e.style.width = 'max-content'; });
     const w = stats.reduce((a, e) => Math.max(a, e.getBoundingClientRect().width), 0);

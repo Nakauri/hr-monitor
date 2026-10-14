@@ -142,7 +142,7 @@ for (const [name, files] of VARIANTS.filter((v, i) => !MUT && (!ONLY || ONLY.inc
 const MUTANTS = [
   ['SDNN rounding dropped', 'if (s.match != null) { const v = toFixedNum(s.match, 100, 2);', 'if (s.match != null) { const v = s.match;'],
   ['the S35 elapsed rule bypassed', '      const t = elapsed(i);', '      const t = T[i];'],
-  ['time rounded by Math.round alone', '    if (!Number.isFinite(y) || Math.abs(f - 0.5) < 1e-6) return parseFloat(x.toFixed(digits));', '    if (!Number.isFinite(y)) return parseFloat(x.toFixed(digits));'],
+  ['time rounded by Math.round alone', '    if (!Number.isFinite(y) || y >= 2 ** 52 || Math.abs(f - 0.5) < 1e-6) return parseFloat(x.toFixed(digits));', '    if (!Number.isFinite(y) || y >= 2 ** 52) return parseFloat(x.toFixed(digits));'],
 ];
 for (const [name, a, b] of (MUT ? MUTANTS : [])) {
   MUTATE = [a, b]; anchorMissing = false;

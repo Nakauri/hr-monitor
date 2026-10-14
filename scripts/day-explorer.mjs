@@ -802,6 +802,31 @@ const LAYOUT = {
     });
     rows.push([sum.collapsed && ['hrAvg', 'hrMax', 'hrMin', 'rmssdAvg'].every((k) => sum.shown.includes(k)) && sum.vals === 4 && sum.h <= 160, `360: collapsed Summary shows Avg HR, Max, Min and Avg HRV (${JSON.stringify(sum)})`]);
     await ctx.close();
+    // Open Summary on the phone (Khal 2026-10-14 "the day summary kpis look a bit funny"): every unit on its value's
+    // line where they fit (one that cannot share the column moves down whole), never broken, values aligned per row,
+    // two columns, one column at 200% text.
+    for (const scale of [1, 2]) {
+      const { ctx, page } = await openDemo(base, 360, scale, () => { try { localStorage.setItem('hrv_summary_collapsed', '0'); } catch (e) {} });
+      const k = await page.evaluate(() => {
+        const stats = [...document.querySelectorAll('#summary-bar .summary-stat')].filter((e) => e.offsetParent);
+        const rows = {}; for (const s of stats) { const t = Math.round(s.getBoundingClientRect().top); (rows[t] = rows[t] || []).push(s); }
+        const unitOf = (s) => { const u = s.querySelector('.summary-stat-unit'); return u && u.textContent.trim() ? u : null; };
+        return {
+          // Widths of the text itself (a Range), not of boxes a column layout stretches.
+          ownLine: stats.filter((s) => { const v = s.querySelector('.summary-stat-value'), u = unitOf(s);
+            if (!u) return false;
+            const tw = (el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width; };
+            return u.getBoundingClientRect().top >= v.getBoundingClientRect().bottom - 2 && tw(v) + 4 + tw(u) <= s.clientWidth; }).map((s) => s.dataset.stat),
+          broken: stats.map(unitOf).filter((u) => u && u.getClientRects().length > 1).map((u) => u.textContent),
+          misaligned: Object.values(rows).filter((r) => { const t = r.map((s) => s.querySelector('.summary-stat-value').getBoundingClientRect().top); return Math.max(...t) - Math.min(...t) > 2; }).length,
+          cols: getComputedStyle(document.querySelector('#summary-bar .summary-grid')).gridTemplateColumns.split(' ').length,
+          over: stats.filter((s) => s.scrollWidth > s.clientWidth + 1).map((s) => s.dataset.stat),
+          h: Math.round(document.getElementById('summary-bar').getBoundingClientRect().height),
+        };
+      });
+      rows.push([!k.ownLine.length && !k.broken.length && !k.misaligned && k.cols === (scale === 1 ? 2 : 1) && !k.over.length, `360 text ${scale}x: open Summary keeps units on the value's line where they fit, never broken, values aligned, ${scale === 1 ? 2 : 1} column${scale === 1 ? 's' : ''} (${JSON.stringify(k)})`]);
+      await ctx.close();
+    }
     return rows;
   },
 
@@ -920,22 +945,24 @@ if (want('layout')) {
 }
 if (want('layout-mutants')) {
   const real = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+  // Retired 10-14: 'chips auto-fill (11 plus 1)' (the 12-chip row it guarded is gone since S31's Layers popover).
   // Retired 10-12: 'tools row wraps as before' (a flex row without Reset zoom no longer wraps at 360; the 200% overflow
   // mutant guards the one-row rule).
   const L_MUTANTS = [
     ['phone', 'gaps line back above the chart', "chartNote: gapsNoteHtml((s && s.recGaps) || []) });", "});"],
-    ['phone', 'Layers keeps its name at 200% text (row overflows)', '  @container (max-width: 18em) {\n    .chart-tools .markers-open { width: 44px; padding: 0; }\n    .chart-tools .markers-open .lbl { display: none; }\n  }\n', ''],
+    ['phone', 'Layers keeps its name at 200% text (row overflows)', '    .chart-tools :is(.markers-open, .markers-toggle) { width: 44px; padding: 0; }\n    .chart-tools :is(.markers-open, .markers-toggle) .lbl { display: none; }\n', ''],
     ['phone', 'long date title on the phone', '    .datenav .day-title .t-long { display: none; }\n', ''],
     ['phone', 'collapsed Summary hides every stat', '    .summary-bar.collapsed .summary-grid { grid-template-columns:', '    .summary-bar.collapsed .summary-grid { display: none; grid-template-columns:'],
-    ['phone', 'Layers sheet without the layer rows', 'body: chips ? [chips, sb] : sb,', 'body: sb,'],
+    ['phone', 'Layers sheet without the layer rows', 'body: layerRowsEl(),', 'body: document.createElement(\'div\'),'],
     ['phone', 'Reset zoom at the canvas corner over the right axis', '  .chart-wrap .reset-zoom { position: absolute; top: var(--plot-top, 8px); right: var(--plot-right, 8px);', '  .chart-wrap .reset-zoom { position: absolute; top: 4px; right: 4px;'],
     ['laptop', 'Reset zoom at the canvas corner over the right axis (1440)', '  .chart-wrap .reset-zoom { position: absolute; top: var(--plot-top, 8px); right: var(--plot-right, 8px);', '  .chart-wrap .reset-zoom { position: absolute; top: 4px; right: 4px;'],
-    ['phone', 'Layers rows faded as before (off dim, no data at 40%)', '    background: transparent; border-color: var(--border); box-shadow: none; opacity: 1;\n  }\n', '  }\n  .markers-sheet .layer-toggles .chip[aria-pressed="false"] { color: var(--text-dim); }\n  .markers-sheet .layer-toggles .chip:disabled { opacity: .4; }\n'],
-    ['phone', 'Layers rows without the drawn box (on read from the ring)', '  .markers-sheet .layer-toggles .chip[aria-pressed="true"]::after { background: var(--action); border-color: var(--action); }\n', ''],
-    ['phone', 'Max and Min labels unclamped', '      const cx = Math.min(Math.max(px, a.left + w / 2 + 2), a.right - w / 2 - 2);\n      let cy = below ? py + gap + h / 2 : py - gap - h / 2;\n      if (cy - h / 2 < a.top + 2) cy = py + gap + h / 2;\n      if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;\n', '      const cx = px;\n      const cy = below ? py + gap + h / 2 : py - gap - h / 2;\n'],
+    ['phone', 'none-here Layers rows not dimmed', '  .layer-rows .chip:disabled { opacity: .6; }\n', '  .layer-rows .chip:disabled { opacity: 1; }\n'],
+    ['phone', 'Layers rows without the drawn box (on read from the ring)', '  .layer-rows .chip[aria-pressed=\"true\"]::after { background: var(--action); border-color: var(--action); }\n', ''],
+    ['phone', 'Max and Min labels unclamped', '      const clampX = (x) => Math.min(Math.max(x, a.left + w / 2 + 2), a.right - w / 2 - 2);\n      const cx = clampX(px);\n      let cy = below ? py + gap + h / 2 : py - gap - h / 2;\n      if (cy - h / 2 < a.top + 2) cy = py + gap + h / 2;\n      if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;\n', '      const clampX = (x) => x;\n      const cx = px;\n      const cy = below ? py + gap + h / 2 : py - gap - h / 2;\n'],
+    ['phone', 'Summary units back on their own line', '    .summary-bar:not(.collapsed) .summary-stat { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }\n', ''],
+    ['phone', 'Summary keeps two columns at 200% text', '    @container (max-width: 17em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: minmax(0, 1fr); } }\n', ''],
     ['laptop', 'Max label unclamped', "        place: labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false) },", '        place: () => ({ dx: 0, dy: -4 }) },'],
-    ['laptop', 'panel content sizes the row (empty band)', '  .session-layout > .session-sidebar { contain: size; }\n', ''],
-    ['laptop', 'chips auto-fill (11 plus 1)', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(var(--lc), minmax(0, 1fr));', '  .layer-toggles { --lc: 2; grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));'],
+    ['laptop', 'markers panel back in the row (empty band)', '    position: absolute; z-index: 5; right: var(--card-pad); bottom: var(--card-pad); width: var(--drawer-w);\n', '    position: static; width: var(--drawer-w);\n'],
     ['laptop', 'hover line frozen at the pinned mark', '      const t = hov ? chart.data.datasets[hov.datasetIndex].data[hov.index].x : chart.$hlT;', '      const t = chart.$hlT;'],
     ['laptop', 'tooltip title in duration form', "              title: (items) => items.length ? makeTimeTickFormatter(sessionStartEpochMs)(items[0].parsed.x) : '',", "              title: (items) => items.length ? formatDuration(items[0].parsed.x) : '',"],
   ];
