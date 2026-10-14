@@ -165,6 +165,62 @@ function selfTimes(profile, top = 8) {
 let fails = 0, passes = 0;
 const ok = (cond, msg) => { if (cond) { passes++; console.log('PASS ' + msg); } else { fails++; console.log('FAIL ' + msg); } return cond; };
 
+// --cold (S50): a cold Day open of the 16 h device recording (v2 segments) at 360 6x, through the direct path and
+// through the CSV round trip (window.__hrmV2ViaCsv, the pre-S50 path, which is also the mutant). Named bug: S8 cold
+// Day open 2,531 ms (perf-2026-10-14/S49-RESULTS.md). Budget: the direct path's longest task, median of 3, is at
+// most 80% of the round trip's in the same run (machine speed cancels out). Runtime: about 60 s.
+if (args.includes('--cold')) {
+  const SEGS = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'device-2026-10-10', 'segments');
+  const segFiles = {};
+  for (const n of fs.readdirSync(SEGS)) if (n.endsWith('.csv')) segFiles[n] = fs.readFileSync(SEGS + '/' + n, 'utf8');
+  const coldOpen = async (viaCsv) => {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true, timezoneId: 'America/Edmonton' });
+    await ctx.route('**/chart.umd*.js', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(CHART) }));
+    await ctx.addInitScript(INIT);
+    if (viaCsv) await ctx.addInitScript(() => { window.__hrmV2ViaCsv = true; });
+    const page = await ctx.newPage();
+    const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+    await page.goto(base + '/hrv_viewer.html#/month', { waitUntil: 'networkidle' });
+    await page.evaluate(async (files) => {
+      const db = await new Promise((res, rej) => { const q = indexedDB.open('hr_monitor_kv', 2);
+        q.onupgradeneeded = () => { for (const s of ['kv', 'drive-cache']) if (!q.result.objectStoreNames.contains(s)) q.result.createObjectStore(s); };
+        q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+      await new Promise((res, rej) => { const tx = db.transaction('drive-cache', 'readwrite');
+        for (const [k, v] of Object.entries(files)) tx.objectStore('drive-cache').put(v, k);
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+      db.close(); localStorage.removeItem('hrv_viewer_index');
+    }, segFiles);
+    await page.goto('about:blank');
+    await page.goto(base + '/hrv_viewer.html#/month', { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => window.__hrmV2 && window.__hrmV2.keys().length > 0, null, { timeout: 30000 });
+    await page.waitForTimeout(1500);
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+    const prof = args.includes('--prof') && !viaCsv;
+    if (prof) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 200 }); await cdp.send('Profiler.start'); }
+    await page.evaluate(() => { window.__perf.reset(); setTimeout(() => { location.hash = '#/day/2026-10-10'; }, 0); });
+    await page.waitForFunction(() => { const c = document.querySelector('#view-day #session-chart'); const ch = c && window.Chart && Chart.getChart(c); return !!(ch && ch.data.datasets.some((d) => d.data && d.data.length > 100)); }, null, { timeout: 60000 });
+    await page.waitForTimeout(800);
+    if (prof) { const { profile } = await cdp.send('Profiler.stop'); const st = selfTimes(profile, 16); console.log('direct self ms: ' + st.top.map(([k, v]) => v + ' ' + k).join(' | ')); }
+    const longest = await page.evaluate(() => Math.round(Math.max(0, ...window.__perf.lt.map((x) => x[1]))));
+    if (args.includes('--tasks')) console.log((viaCsv ? 'csv   ' : 'direct') + ' tasks: ' + (await page.evaluate(() => window.__perf.lt.map((x) => Math.round(x[1])).join(' '))));
+    await ctx.close();
+    return { longest, errs };
+  };
+  const med = (a) => a.slice().sort((x, y) => x - y)[1];
+  const direct = [], csv = [], errs = [];
+  for (let i = 0; i < 3; i++) {
+    const a = await coldOpen(false), b = await coldOpen(true);
+    direct.push(a.longest); csv.push(b.longest); errs.push(...a.errs, ...b.errs);
+  }
+  console.log(`cold Day open 360 6x, longest task: direct ${direct.join('/')} ms, CSV round trip ${csv.join('/')} ms`);
+  ok(med(direct) <= 0.8 * med(csv), `cold v2 Day open: direct path median ${med(direct)} ms is at most 80% of the round trip's ${med(csv)} ms`);
+  ok(!errs.length, 'cold: no page errors ' + errs.join(' | '));
+  await browser.close(); server.close();
+  console.log(`viewer-perf --cold: ${passes} pass, ${fails} fail`);
+  process.exit(fails ? 1 : 0);
+}
+
 async function runConfig(name, W, CPU) {
   const PHONE = W < 600, H = PHONE ? 740 : 900;
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: PHONE ? 2 : 1, isMobile: PHONE, hasTouch: PHONE, timezoneId: 'America/Edmonton' });
