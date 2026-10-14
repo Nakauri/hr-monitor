@@ -3804,21 +3804,23 @@
 
     const stds = new Array(hr.length).fill(null);
     const winMeans = new Array(hr.length).fill(null);
+    // Sliding window: running sum and sum of squares, one pass. Re-summing
+    // the window at every point cost ~7M steps on a full day.
+    let n = 0, sum = 0, sumSq = 0, lo = 0;
     for (let i = 0; i < hr.length; i++) {
-      let n = 0, sum = 0, j = i;
-      for (; j >= 0 && hr[i].t - hr[j].t <= WIN_MIN; j--) {
-        if (hr[j].v != null) { sum += hr[j].v; n++; }
+      const v = hr[i].v;
+      if (v != null) { sum += v; sumSq += v * v; n++; }
+      while (hr[i].t - hr[lo].t > WIN_MIN) {
+        const w = hr[lo].v;
+        if (w != null) { sum -= w; sumSq -= w * w; n--; }
+        lo++;
       }
       if (n < 10) continue;
       const m = sum / n;
-      let sq = 0;
-      for (let q = i; q > j; q--) {
-        if (hr[q].v != null) { const d = hr[q].v - m; sq += d * d; }
-      }
-      stds[i] = Math.sqrt(sq / n);
+      stds[i] = Math.sqrt(Math.max(0, sumSq / n - m * m));
       winMeans[i] = m;
     }
-    const nonNull = stds.filter(v => v != null).sort((a, b) => a - b);
+    const nonNull = Float64Array.from(stds.filter(v => v != null)).sort();
     const medStd = nonNull.length ? nonNull[Math.floor(nonNull.length / 2)] : 0;
 
     const hint = { idx: 0 };
@@ -4508,40 +4510,31 @@
     // Clip to this day's window [0, DAY_MAX] minutes so midnight-crosser
     // sessions don't leak yesterday's or tomorrow's points into this day's
     // chart. Dedupe by epoch so dual-saves don't double-plot the same beat.
-    const hrByEp = new Map();
-    const rmssdByEp = new Map();
-    const sdnnMatchByEp = new Map();
-    const sdnn5minByEp = new Map();
-    for (const sd of loaded) {
-      for (const p of sd.hr) {
-        if (p.ep == null) continue;
-        const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > DAY_MAX) continue;
-        if (!hrByEp.has(p.ep)) hrByEp.set(p.ep, { x, y: p.y, ep: p.ep });
+    // Stable sort by epoch, then keep the first point of each epoch (earliest
+    // file wins, as before). A Map keyed on 58k epochs was the slow part.
+    const dayPoints = (key) => {
+      const all = [];
+      for (const sd of loaded) {
+        for (const p of sd[key]) {
+          if (p.ep == null) continue;
+          const x = (p.ep - startOfDay) / 60000;
+          if (x < 0 || x > DAY_MAX) continue;
+          all.push({ x, y: p.y, ep: p.ep });
+        }
       }
-      for (const p of sd.rmssd) {
-        if (p.ep == null) continue;
-        const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > DAY_MAX) continue;
-        if (!rmssdByEp.has(p.ep)) rmssdByEp.set(p.ep, { x, y: p.y, ep: p.ep });
+      all.sort((a, b) => a.ep - b.ep);
+      let n = 0;
+      for (let i = 0; i < all.length; i++) {
+        if (n && all[n - 1].ep === all[i].ep) continue;
+        all[n++] = all[i];
       }
-      for (const p of sd.sdnnMatch) {
-        if (p.ep == null) continue;
-        const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > DAY_MAX) continue;
-        if (!sdnnMatchByEp.has(p.ep)) sdnnMatchByEp.set(p.ep, { x, y: p.y, ep: p.ep });
-      }
-      for (const p of sd.sdnn5min) {
-        if (p.ep == null) continue;
-        const x = (p.ep - startOfDay) / 60000;
-        if (x < 0 || x > DAY_MAX) continue;
-        if (!sdnn5minByEp.has(p.ep)) sdnn5minByEp.set(p.ep, { x, y: p.y, ep: p.ep });
-      }
-    }
-    const hr = Array.from(hrByEp.values()).sort((a, b) => a.x - b.x);
-    const rmssd = Array.from(rmssdByEp.values()).sort((a, b) => a.x - b.x);
-    const sdnnMatch = Array.from(sdnnMatchByEp.values()).sort((a, b) => a.x - b.x);
-    const sdnn5min = Array.from(sdnn5minByEp.values()).sort((a, b) => a.x - b.x);
+      all.length = n;
+      return all;
+    };
+    const hr = dayPoints('hr');
+    const rmssd = dayPoints('rmssd');
+    const sdnnMatch = dayPoints('sdnnMatch');
+    const sdnn5min = dayPoints('sdnn5min');
 
     // Walk each session's summary and shift its events into day-minute space,
     // then clip to [0, DAY_MAX] so cross-day sessions don't bleed markers into
