@@ -3187,7 +3187,7 @@
       else {
         try {
           const parsed = await v2ParseParts(S, readText, memo);
-          summary = summarizeCSV(S.key, v2SessionCsv(S.sid, v2SessionRows(S, parsed)));
+          summary = await summarizeCSVAsync(S.key, v2SessionCsv(S.sid, v2SessionRows(S, parsed)));
         } catch (e) { console.warn('[v2] session summary failed', S.key, e); }
         // An empty summary (a failed read) is never cached: the next load retries even at the same sizes.
         if (cache && summary) cache.set('sess:' + S.key, { sig, summary });
@@ -3214,7 +3214,7 @@
         if (r.dropped) {
           if (r.uncoveredMs < V2_MIN_UNCOVERED_MS) res.hide = true;
           else {
-            const t = summarizeCSV(fn, r.text);
+            const t = await summarizeCSVAsync(fn, r.text);
             if (t && !t.__incomplete) res.summary = t; else res.hide = true;
           }
         }
@@ -3681,10 +3681,71 @@
     }
   }
 
+  // S29: summarizeCSV runs in a Worker built from this page's own function sources, so there is no second copy to
+  // drift. Page state goes in with each request (quadrant and HR shift settings). Main thread if the Worker fails.
+  let _parseWorker = null, _parseSeq = 0;
+  const _parsePending = new Map();
+  function parseWorkerSource() {
+    const fns = [summarizeCSV, parseCSV, deriveFileStartEpoch, parseSessionFilename, rowElapsedMinFn, mergeGaps,
+      trimGapsByData, dataJumpGaps, rollingTrailingMean, detectChillsWindows, nearestRmssdAt, dayKeyOf, isoAddDays,
+      localDateLabel, localDateKeyFromEpoch, dayWindow];
+    const consts = { ELAPSED_MAX_START_MIN, ELAPSED_MAX_DRIFT_MIN, DATA_JUMP_GAP_MIN, DAY_START_HOUR, SUMMARY_SCHEMA_V };
+    return [
+      ...Object.entries(consts).map(([k, v]) => `const ${k} = ${JSON.stringify(v)};`),
+      "let QUADRANT_THRESH = {}, _hrShift = null, _dayKeyLast = { start: 0, end: 0, key: '' };",
+      'function getHrShiftSettings() { return _hrShift; }',
+      ...fns.map((f) => f.toString()),
+      'onmessage = (e) => { const d = e.data; QUADRANT_THRESH = d.quad; _hrShift = d.shift;',
+      '  try { postMessage({ id: d.id, summary: summarizeCSV(d.fn, d.text) }); } catch (err) { postMessage({ id: d.id, error: String(err && err.message || err) }); } };',
+    ].join('\n');
+  }
+  function parseWorker() {
+    if (_parseWorker !== null) return _parseWorker;
+    try {
+      const url = URL.createObjectURL(new Blob([parseWorkerSource()], { type: 'text/javascript' }));
+      const w = new Worker(url);
+      w.onmessage = (e) => {
+        const p = _parsePending.get(e.data.id);
+        if (!p) return;
+        _parsePending.delete(e.data.id);
+        if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data.summary);
+      };
+      w.onerror = (e) => {
+        console.warn('[parseWorker] failed, parsing on the main thread', e && e.message);
+        _parseWorker = false;
+        for (const p of _parsePending.values()) p.reject(new Error('worker failed'));
+        _parsePending.clear();
+        try { w.terminate(); } catch (err) {}
+      };
+      _parseWorker = w;
+    } catch (e) {
+      console.warn('[parseWorker] unavailable, parsing on the main thread', e);
+      _parseWorker = false;
+    }
+    return _parseWorker;
+  }
+  async function summarizeCSVAsync(filename, text) {
+    const w = window.__hrmNoParseWorker ? false : parseWorker();
+    if (w) {
+      try {
+        return await new Promise((resolve, reject) => {
+          const id = ++_parseSeq;
+          _parsePending.set(id, { resolve, reject });
+          w.postMessage({ id, fn: filename, text, quad: QUADRANT_THRESH, shift: getHrShiftSettings() });
+        });
+      } catch (e) {
+        console.warn('[parseWorker] retrying on the main thread', filename, e && e.message);
+      }
+    }
+    return summarizeCSV(filename, text);
+  }
+
+  window.__hrmParse = { summarizeCSV, summarizeCSVAsync, parseSessionFile }; // checks: scripts/parse-worker.mjs
+
   async function parseSessionFile(filename) {
     try {
       const text = await readSessionText(filename);
-      return summarizeCSV(filename, text);
+      return await summarizeCSVAsync(filename, text);
     } catch (e) {
       console.error('Parse failed for', filename, e);
       return null;
@@ -11041,7 +11102,7 @@
     const results = await Promise.all(files.map(async fn => {
       try {
         const text = await fetch('./demo/' + fn).then(r => r.text());
-        return { fn, summary: summarizeCSV(fn, text) };
+        return { fn, summary: await summarizeCSVAsync(fn, text) };
       } catch (e) {
         console.warn('[demo] failed to load', fn, e);
         return { fn, summary: null };
