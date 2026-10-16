@@ -405,7 +405,6 @@
   .signal-chip:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; border-radius: 4px; }
   .signal-detail { display: none; margin: 0 0 var(--s1); color: var(--text-dim); font-size: var(--t14); line-height: 1.45; }
   .signal-chip[aria-expanded="true"] + .signal-detail { display: block; }
-  @media (hover: hover) { .signal-row:hover .signal-detail { display: block; } }
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .battery-display {
     font-size: 11px;
@@ -2642,7 +2641,8 @@
   const SIGNAL_WINDOW_MS = 60000, SIGNAL_GRACE_MS = 20000, SIGNAL_MIN_BEATS = 30;
   // Each change waits 60 s in its band: real HR changes outrun the strap's HR byte for shorter spells.
   const SIGNAL_SHOW = 0.35, SIGNAL_HIDE = 0.20, SIGNAL_TOL_BPM = 40, SIGNAL_SUSTAIN_MS = 60000;
-  const signal = { beats: [], pending: null, liveSince: 0, shown: false, bound: false, since: 0 };
+  const SIGNAL_GAP_MS = 5000;
+  const signal = { beats: [], pending: null, liveSince: 0, shown: false, bound: false, since: 0, thinSince: 0, lastAt: 0 };
   function signalShow(on, share) {
     signal.shown = on;
     const row = document.getElementById('signal-row');
@@ -2655,19 +2655,33 @@
     document.body.classList.toggle('signal-poor', on);
     if (chip && !on) chip.setAttribute('aria-expanded', 'false');
     const live = document.getElementById('status-announce');
-    if (live && on) live.textContent = 'Readjust strap';
+    if (live && on) { live.textContent = ''; setTimeout(function () { live.textContent = 'Readjust strap'; }, 100); }
     if (window.HRMLog) window.HRMLog.event('signal ' + (on ? 'poor' : 'ok'), { share: share == null ? null : Math.round(share * 100) / 100 });
   }
   function signalReset() {
     signal.beats = [];
     signal.pending = null;
     signal.since = 0;
+    signal.thinSince = 0;
+    signal.lastAt = 0;
     if (signal.shown) signalShow(false, null);
+  }
+  // A shown chip with too few beats to judge clears after 60 s.
+  function signalThin(nowMs) {
+    signal.since = 0;
+    if (!signal.shown) { signal.thinSince = 0; return; }
+    if (!signal.thinSince) signal.thinSince = nowMs;
+    else if (nowMs - signal.thinSince >= SIGNAL_SUSTAIN_MS) { signal.thinSince = 0; signalShow(false, null); }
   }
   // Junk: outside 250 to 2500 ms, or off the strap's own HR by over 40 bpm and not a short-long ectopic pair.
   function signalFeed(hr, rrs) {
     const nowMs = Date.now();
-    if (state.connState !== 'live' || !(hr > 0) || nowMs - signal.liveSince < SIGNAL_GRACE_MS) return;
+    if (signal.lastAt && nowMs - signal.lastAt > SIGNAL_GAP_MS) signal.since = 0;
+    signal.lastAt = nowMs;
+    if (state.connState !== 'live') { signal.since = 0; return; }
+    const cut = nowMs - SIGNAL_WINDOW_MS;
+    while (signal.beats.length && signal.beats[0].t < cut) signal.beats.shift();
+    if (!(hr > 0) || nowMs - signal.liveSince < SIGNAL_GRACE_MS) { signalThin(nowMs); return; }
     const th = getEctopicThresholds();
     const base = 60000 / hr;
     const push = (junk) => signal.beats.push({ t: nowMs, junk });
@@ -2684,10 +2698,9 @@
       if ((base - rr) / base >= th.short) { signal.pending = { rr, base }; continue; }
       push(true);
     }
-    const cut = nowMs - SIGNAL_WINDOW_MS;
-    while (signal.beats.length && signal.beats[0].t < cut) signal.beats.shift();
     const n = signal.beats.length;
-    if (n < SIGNAL_MIN_BEATS) return;
+    if (n < SIGNAL_MIN_BEATS) { signalThin(nowMs); return; }
+    signal.thinSince = 0;
     let junk = 0;
     for (const b of signal.beats) if (b.junk) junk++;
     const share = junk / n;
@@ -4982,8 +4995,10 @@
     if (window.HRMLog && state.connState !== connState) {
       window.HRMLog.event('connState', state.connState + ' -> ' + connState);
     }
-    if (connState === 'live' && state.connState !== 'live') signal.liveSince = Date.now();
-    if (connState !== 'live') signalReset();
+    try {
+      if (connState === 'live' && state.connState !== 'live') signal.liveSince = Date.now();
+      if (connState !== 'live') signalReset();
+    } catch (e) {}
     state.connState = connState;
     document.body.classList.remove('conn-live', 'conn-reconnecting');
     if (connState === 'live') document.body.classList.add('conn-live');

@@ -5,8 +5,11 @@
 // holds it (hysteresis); clean hides it after 60 s; real fast HR
 // at 150 no chip; PVC bigeminy (every other beat a short-long pair) no chip; PVC pairs plus junk shows it; HR, HRV and every series
 // byte-identical with the check removed (native path, Needs mobile/www from `npm run copy-web`). While the chip shows, the monitor's HRV is dimmed and says unreliable. Drives processHRData, the one pipeline both web and native feed.
+// Also: no-RR packets clear a shown chip, a packet gap restarts the show timer, reconnecting clears it, and the web
+// path (page computes RMSSD) is byte-identical too.
 // Usage: node scripts/signal-chip.mjs [--mutant <name>] [--shots <dir>] [--ux <dir>]. Mutants: no-hysteresis, no-threshold,
-// ectopic-junk, dim-without-chip, chip-without-dim, alters-hr, alters-rr. Each mutant must FAIL. Runtime: about 20 seconds.
+// ectopic-junk, dim-without-chip, chip-without-dim, stale-since, thin-never-hides, alters-hr, alters-rr.
+// Each mutant must FAIL. Runtime: about 20 seconds.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -31,6 +34,8 @@ const MUTANTS = {
   'ectopic-junk': ['if (pair) { push(false); continue; }', 'if (pair) { push(true); continue; }'],
   'dim-without-chip': ["document.body.classList.toggle('signal-poor', on);", "document.body.classList.toggle('signal-poor', true);"],
   'chip-without-dim': ["document.body.classList.toggle('signal-poor', on);", "document.body.classList.toggle('signal-poor', false);"],
+  'stale-since': ['if (signal.lastAt && nowMs - signal.lastAt > SIGNAL_GAP_MS) signal.since = 0;', ''],
+  'thin-never-hides': ['else if (nowMs - signal.thinSince >= SIGNAL_SUSTAIN_MS)', 'else if (false)'],
   'alters-hr': ['const base = 60000 / hr;', 'const base = 60000 / hr; state.hrSeries[state.hrSeries.length - 1].v = Math.round(hr * 0.9);'],
   'alters-rr': ['const base = 60000 / hr;', 'const base = 60000 / hr; state.rrBuffer = state.rrBuffer.filter((b) => b.rr > 450);'],
 };
@@ -40,13 +45,14 @@ if (mutant && !MUTANTS[mutant]) { console.log('FAIL unknown mutant ' + mutant); 
 const WWW = path.join(ROOT, 'mobile', 'www');
 const src = fs.existsSync(path.join(WWW, 'hr_monitor.html')) ? fs.readFileSync(path.join(WWW, 'hr_monitor.html'), 'utf8') : '';
 if (!src.includes(CALL)) { console.log('FAIL mobile/www/hr_monitor.html missing or stale: run npm run copy-web in mobile'); process.exit(1); }
-let featured = src;
-if (mutant) {
+const webSrc = fs.readFileSync(path.join(ROOT, 'hr_monitor.html'), 'utf8');
+const mutate = (html) => {
+  if (!mutant) return html;
   const [a, b] = MUTANTS[mutant];
-  if (featured.split(a).length !== 2) { console.log('FAIL mutant anchor not unique: ' + a); process.exit(1); }
-  featured = featured.replace(a, b);
-}
-const variants = { '/feat.html': featured, '/bare.html': src.replace(CALL, '') };
+  if (html.split(a).length !== 2) { console.log('FAIL mutant anchor not unique: ' + a); process.exit(1); }
+  return html.replace(a, b);
+};
+const variants = { '/feat.html': mutate(src), '/bare.html': src.replace(CALL, ''), '/web-feat.html': mutate(webSrc), '/web-bare.html': webSrc.replace(CALL, '') };
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
 const server = http.createServer((req, res) => {
@@ -73,6 +79,8 @@ const FEED = `window.__feed = (seconds, kind, seed) => {
   const tick = (hr, rr) => { window.__shift(rr); window.__hrCb({ hr, rrIntervals: [rr], rmssd: 108, timestampMs: Date.now(), contactOff: false }); elapsed += rr;
     const s = !document.getElementById('signal-row').hidden; if (s !== wasShown) { flips++; wasShown = s; } };
   while (elapsed < seconds * 1000) {
+    if (kind === 'norr') { window.__shift(1000); window.__hrCb({ hr: 80, rrIntervals: [], rmssd: 108, timestampMs: Date.now(), contactOff: false }); elapsed += 1000;
+      const s = !document.getElementById('signal-row').hidden; if (s !== wasShown) { flips++; wasShown = s; } continue; }
     if (kind === 'junk25') { n12++; tick(80, n12 % 4 ? 750 + Math.round((rnd() - 0.5) * 60) : 300); continue; }
     if (kind === 'fast') { tick(150, 400 + Math.round((rnd() - 0.5) * 20)); continue; }
     const pvc = kind === 'pvc' ? 1 : kind === 'pvc20' ? 0.2 : kind === 'pvcjunk' ? 0.1 : 0;
@@ -90,7 +98,27 @@ const fail = (m) => { fails++; console.log('FAIL ' + m); };
 const pass = (m) => console.log('ok   ' + m);
 const browser = await chromium.launch().catch(() => chromium.launch({ channel: 'chrome' }));
 
-async function open(file) {
+// Web path: a fake strap behind navigator.bluetooth; __hrCb sends one 0x2A37 packet, so the page computes RMSSD itself.
+const WEB = `(() => {
+  const listeners = [];
+  const chr = { value: null, startNotifications: async () => chr, stopNotifications: async () => chr,
+    addEventListener: (t, cb) => { if (t === 'characteristicvaluechanged') listeners.push(cb); }, removeEventListener: () => {} };
+  const gatt = { connected: false, connect: async () => { gatt.connected = true; return server; }, disconnect: () => { gatt.connected = false; } };
+  const server = { device: null, connected: true,
+    getPrimaryService: async (s) => { if (s === 'heart_rate' || s === 0x180d || s === 0x180D) return { getCharacteristic: async () => chr }; throw new Error('no service'); } };
+  const device = { name: 'Test strap', id: 'fake', gatt, addEventListener: () => {}, removeEventListener: () => {}, watchAdvertisements: async () => {} };
+  server.device = device;
+  Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { getDevices: async () => [], requestDevice: async () => device, getAvailability: async () => true } });
+  window.__hrCb = (d) => {
+    const rrs = d.rrIntervals || [];
+    const b = new DataView(new ArrayBuffer(2 + 2 * rrs.length));
+    b.setUint8(0, rrs.length ? 0x10 : 0); b.setUint8(1, d.hr);
+    rrs.forEach((rr, i) => b.setUint16(2 + 2 * i, Math.round(rr * 1024 / 1000), true));
+    chr.value = b; listeners.forEach((cb) => cb({ target: chr }));
+  };
+})();`;
+
+async function open(file, web) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
@@ -100,13 +128,22 @@ async function open(file) {
     return route.fulfill({ status: js ? 200 : 204, contentType: js ? 'text/javascript' : 'text/plain', body: '' });
   });
   await ctx.addInitScript(CLOCK);
-  await ctx.addInitScript(fakeBridge({ scenario: 'live', savedStrap: true, signedIn: true, sessionAgeMs: 600000 }));
-  await ctx.addInitScript(`(() => { const h = window.Capacitor && window.Capacitor.Plugins.NativeHrSession; if (!h) return;
+  if (web) await ctx.addInitScript(WEB);
+  else await ctx.addInitScript(fakeBridge({ scenario: 'live', savedStrap: true, signedIn: true, sessionAgeMs: 600000 }));
+  if (!web) await ctx.addInitScript(`(() => { const h = window.Capacitor && window.Capacitor.Plugins.NativeHrSession; if (!h) return;
     const add = h.addListener; h.addListener = (n, cb) => { if (n === 'hr') { window.__hrCb = cb; return Promise.resolve({ remove() {} }); } return add(n, cb); }; })();`);
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
   await page.goto(BASE + file, { waitUntil: 'load' });
+  if (web) {
+    await page.waitForTimeout(500);
+    if (await page.evaluate(() => { const s = document.getElementById('session-toggle').closest('.section'); return !!s && s.classList.contains('collapsed'); })) {
+      await page.click('[data-section="controls"] .section-header');
+      await page.waitForTimeout(300);
+    }
+    await page.click('#session-toggle');
+  }
   await page.waitForFunction(() => typeof window.__hrCb === 'function' && document.body.classList.contains('conn-live'), null, { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(500);
   await page.evaluate(FEED);
@@ -114,12 +151,13 @@ async function open(file) {
   return { ctx, page, errs };
 }
 
-const tile = (page) => page.evaluate(() => {
+const tile = async (page) => { await page.waitForTimeout(600); return page.evaluate(() => {
   const v = document.getElementById('compact-hrv-value'), f = document.getElementById('compact-hrv-flag');
-  const dim = getComputedStyle(document.body).getPropertyValue('--text-dim').trim();
-  return { poor: document.body.classList.contains('signal-poor'), flag: !!f && getComputedStyle(f).display !== 'none' && f.textContent === 'unreliable',
-    dimmed: getComputedStyle(v).transitionDuration && v.matches('body.signal-poor #overlay-zone #hr-widget .compact-hrv-value'), dimToken: dim };
-});
+  const probe = document.createElement('span'); probe.style.color = 'var(--text-dim)'; v.parentNode.appendChild(probe);
+  const dim = getComputedStyle(probe).color; probe.remove();
+  const color = getComputedStyle(v).color;
+  return { poor: document.body.classList.contains('signal-poor'), flag: !!f && getComputedStyle(f).display !== 'none' && f.textContent === 'unreliable', dimmed: color === dim, color, dim };
+}); };
 const tileOk = (t, on) => (on ? t.poor && t.flag && t.dimmed : !t.poor && !t.flag && !t.dimmed);
 const feed = (page, s, kind, seed) => page.evaluate(([a, b, c]) => window.__feed(a, b, c), [s, kind, seed]);
 
@@ -136,6 +174,7 @@ const feed = (page, s, kind, seed) => page.evaluate(([a, b, c]) => window.__feed
   r = await feed(page, 60, 'junk50', 2);
   if (r.shown && r.flips === 1) pass('(b) 50% junk: chip shows'); else fail(`(b) 50% junk: shown=${r.shown} flips=${r.flips}`);
   { const t = await tile(page); if (tileOk(t, true)) pass('(b) HRV tile unreliable'); else fail('(b) HRV tile ' + JSON.stringify(t)); }
+  await page.waitForTimeout(300);
   const chip = await page.evaluate(() => ({ text: document.getElementById('signal-chip').textContent, live: document.getElementById('status-announce').textContent }));
   if (chip.text === 'Readjust strap' && chip.live === 'Readjust strap') pass('(b) chip text and polite announcement'); else fail('(b) chip text ' + JSON.stringify(chip));
   const shots = argVal('--shots');
@@ -161,13 +200,26 @@ const feed = (page, s, kind, seed) => page.evaluate(([a, b, c]) => window.__feed
   { const t = await tile(page); if (tileOk(t, false)) pass('(e) HRV tile normal'); else fail('(e) HRV tile ' + JSON.stringify(t)); }
   r = await feed(page, 130, 'pvcjunk', 7);
   if (r.shown) pass('(g) PVC pairs plus 50% junk: chip shows'); else fail(`(g) PVC plus junk: shown=${r.shown}`);
+  r = await feed(page, 130, 'norr', 8);
+  if (!r.shown && r.flips === 1) pass('(i) shown chip clears once beats stay under 30 for 60 s (packets with no RR)'); else fail(`(i) no RR: shown=${r.shown} flips=${r.flips}`);
+  { const t = await tile(page); if (tileOk(t, false)) pass('(i) HRV tile normal again'); else fail('(i) HRV tile ' + JSON.stringify(t)); }
+  r = await feed(page, 50, 'junk50', 14);
+  await page.evaluate(() => window.__shift(10000));
+  const r2 = await feed(page, 40, 'junk50', 15);
+  if (!r.shown && !r2.shown) pass('(j) a 10 s packet gap restarts the 60 s show timer'); else fail(`(j) gap: shown=${r.shown || r2.shown}`);
+  r = await feed(page, 40, 'junk50', 16);
+  if (r.shown) pass('(j) chip shows once junk holds 60 s after the gap'); else fail('(j) chip never showed after the gap');
+  await page.evaluate(() => { const F = window.__fake; F.snapshot = JSON.parse(JSON.stringify(F.states.RECONNECTING)); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.waitForFunction(() => !document.body.classList.contains('conn-live'), null, { timeout: 8000 }).catch(() => {});
+  { const t = await tile(page); const hid = await page.evaluate(() => document.getElementById('signal-row').hidden);
+    if (hid && tileOk(t, false)) pass('(k) reconnecting clears the chip and the dim'); else fail('(k) after reconnecting: hidden=' + hid + ' ' + JSON.stringify(t)); }
   if (errs.length) fail('page errors: ' + errs.join(' | '));
   await ctx.close();
 }
 
 // (d) Same beats through the build without the check: every shown and recorded value must match.
-async function snapshot(file) {
-  const { ctx, page, errs } = await open(file);
+async function snapshot(file, web) {
+  const { ctx, page, errs } = await open(file, web);
   await feed(page, 50, 'junk50', 9);
   await feed(page, 30, 'pvc20', 10);
   await page.waitForTimeout(300);
@@ -183,8 +235,14 @@ async function snapshot(file) {
 }
 const withCheck = await snapshot('/feat.html');
 const without = await snapshot('/bare.html');
-if (withCheck === without) pass(`(d) HR, HRV and series byte-identical without the check (${withCheck.length} bytes)`);
-else fail('(d) values differ with the check: ' + withCheck.slice(0, 160) + ' vs ' + without.slice(0, 160));
+if (withCheck === without) pass(`(d) native: HR, HRV and series byte-identical without the check (${withCheck.length} bytes)`);
+else fail('(d) native values differ with the check: ' + withCheck.slice(0, 160) + ' vs ' + without.slice(0, 160));
+const webWith = await snapshot('/web-feat.html', true);
+const webWithout = await snapshot('/web-bare.html', true);
+const webHrv = JSON.parse(webWith).ids[1];
+if (!/^\d+$/.test(webHrv)) fail('(d) web: page RMSSD did not run, HRV shows "' + webHrv + '"');
+else if (webWith === webWithout) pass(`(d) web: computeRMSSD path, HRV ${webHrv}, byte-identical without the check (${webWith.length} bytes)`);
+else fail('(d) web values differ with the check: ' + webWith.slice(0, 160) + ' vs ' + webWithout.slice(0, 160));
 
 await browser.close();
 server.close();
