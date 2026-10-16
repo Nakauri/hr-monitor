@@ -56,7 +56,8 @@ function run(label, mutant) {
     fs.mkdirSync(outDir);
     const paths = [];
     for (const f of FILES) {
-      let text = fs.readFileSync(path.join(SRC, f), 'utf8');
+      // LF so multi-line anchors match on a CRLF checkout.
+      let text = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\r\n/g, '\n');
       if (mutant && mutant[0] === f) {
         if (!text.includes(mutant[1])) return { ok: false, out: 'mutation anchor not found: ' + mutant[1], anchorMissing: true };
         text = text.replace(mutant[1], mutant[2]);
