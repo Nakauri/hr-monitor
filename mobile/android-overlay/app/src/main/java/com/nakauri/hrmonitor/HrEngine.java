@@ -1733,8 +1733,8 @@ public final class HrEngine implements HrDevice.Callback {
         try { segmentUploadExecutor.execute(this::segmentUploadCheck); } catch (Throwable t) { Log.w(TAG, "upload check not queued: " + t); }
     }
 
-    // Fact row from the WebView. Returns written, not_written, no_session or bad_kind.
-    public String logFact(String kind, Long tsMsArg, String text, Double value) {
+    // Fact row from the WebView. {status: written | not_written | no_session | bad_kind}, plus the stored ts and label once it reaches the sink.
+    public JSONObject logFact(String kind, Long tsMsArg, String text, Double value) {
         String letter;
         String[] fields;
         if ("marker".equals(kind)) {
@@ -1753,10 +1753,10 @@ public final class HrEngine implements HrDevice.Callback {
             letter = "x";
             fields = new String[0];
         } else {
-            return "bad_kind";
+            return putSafe(new JSONObject(), "status", "bad_kind");
         }
         HrSink s = sink;
-        if (s == null || !sessionActive.get()) return "no_session";
+        if (s == null || !sessionActive.get()) return putSafe(new JSONObject(), "status", "no_session");
         if ("p".equals(letter) && text != null && !text.isEmpty()) {
             lastPosture = text;
             // Persisted so a native resume in a new process still reports it in status().
@@ -1777,7 +1777,10 @@ public final class HrEngine implements HrDevice.Callback {
         } else {
             NativeHrService.logLifecycle(appCtx, "fact kind=" + letter + " written=" + written);
         }
-        return written ? "written" : "not_written";
+        JSONObject r = putSafe(new JSONObject(), "status", written ? "written" : "not_written");
+        putSafe(r, "ts", ts);
+        putSafe(r, "label", fields.length > 0 ? SegmentWriter.clean(fields[0]) : "");
+        return r;
     }
 
     // counts[0] = facts since the last line, counts[1] = of those written.

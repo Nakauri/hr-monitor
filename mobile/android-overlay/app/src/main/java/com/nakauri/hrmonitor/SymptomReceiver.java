@@ -52,7 +52,7 @@ public class SymptomReceiver extends BroadcastReceiver {
             }
             lastWriteMs = now;
         }
-        String r = e.logFact("symptom", now, "sym:symptom", null);
+        String r = e.logFact("symptom", now, "sym:symptom", null).optString("status");
         if ("no_session".equals(r)) {
             NativeHrService.logLifecycle(ctx, "symptom_dropped reason=no_session");
         } else {

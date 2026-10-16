@@ -474,15 +474,17 @@ public class NativeHrSessionPlugin extends Plugin {
             JSObject data = call.getData();
             Object ts = data != null ? data.opt("tsMs") : null;
             Object val = data != null ? data.opt("value") : null;
-            String r = e.logFact(call.getString("kind"),
+            org.json.JSONObject r = e.logFact(call.getString("kind"),
                 ts instanceof Number ? Long.valueOf(((Number) ts).longValue()) : null,
                 call.getString("text"),
                 val instanceof Number ? Double.valueOf(((Number) val).doubleValue()) : null);
-            if ("bad_kind".equals(r) || "no_session".equals(r)) {
-                call.reject(r);
+            String status = r.optString("status");
+            if ("bad_kind".equals(status) || "no_session".equals(status)) {
+                call.reject(status);
                 return;
             }
-            call.resolve(new JSObject().put("written", "written".equals(r)));
+            call.resolve(new JSObject().put("written", "written".equals(status))
+                .put("ts", r.optLong("ts")).put("label", r.optString("label")));
         } catch (Throwable t) {
             call.reject("log_fact_failed: " + t.getMessage());
         }

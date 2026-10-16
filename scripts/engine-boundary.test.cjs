@@ -742,6 +742,11 @@ function detangleChecks() {
     // Runtime review 4: the posture survives a native resume in a new process.
     check('[rv4] logFact persists lastPosture and resumeLocked restores it',
       /putString\s*\(\s*"lastPosture"/.test(E) && /getString\s*\(\s*"lastPosture"/.test(E.slice(...(methodSpans(ec, 'private\\s+JSONObject\\s+resumeLocked')[0] || [0, 0]))));
+    // Ledger 25 (S55): logFact hands back the stored time and the sanitised label, and the plugin resolves both.
+    const lf = E.slice(...(methodSpans(ec, 'public\\s+JSONObject\\s+logFact')[0] || [0, 0]));
+    check('[S55] logFact returns {status, ts, label}, label through SegmentWriter.clean',
+      /putSafe\s*\(\s*r\s*,\s*"ts"\s*,\s*ts\s*\)/.test(lf) && /"label"\s*,[^;]*SegmentWriter\.clean\s*\(\s*fields\[0\]\s*\)/.test(lf));
+    check('[S55] the plugin resolves written, ts and label', /\.put\(\s*"ts"\s*,\s*r\.optLong\(\s*"ts"\s*\)\s*\)\s*\.put\(\s*"label"/.test(P));
     const arm = spanOf('private\\s+void\\s+armPendingConnect');
     // Runtime review 3: the setting is read again inside the ioExecutor task.
     const lambdaAt = arm.indexOf('ioExecutor.execute(');

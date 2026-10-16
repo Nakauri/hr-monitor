@@ -429,16 +429,17 @@
       setStageThresholds: function (t) {
         return plugin.setStageThresholds(t || {});
       },
-      // Fire and forget: a fact row (marker, posture, symptom, warning, ectopic) in the native v2 segment.
+      // A fact row (marker, posture, symptom, warning, ectopic) in the native v2 segment. Never rejects:
+      // resolves {written, ts, label} as stored, or null.
       logFact: function (kind, opts) {
-        if (typeof plugin.logFact !== 'function') return;
+        if (typeof plugin.logFact !== 'function') return Promise.resolve(null);
         const o = opts || {};
         const payload = { kind: kind, tsMs: Math.round(Number.isFinite(o.tsMs) ? o.tsMs : Date.now()) };
         if (o.text != null) payload.text = String(o.text);
         if (Number.isFinite(o.value)) payload.value = o.value;
         // A status() already in flight carries the older posture: bump the epoch so it reads as stale.
         if (kind === 'posture' && o.text != null && snapshot.sessionActive) { snapshot.posture = String(o.text); epoch++; }
-        try { plugin.logFact(payload).catch(() => {}); } catch (e) {}
+        try { return plugin.logFact(payload).catch(() => null); } catch (e) { return Promise.resolve(null); }
       },
       getSessionSnapshot: function (opts) {
         // opts.tailMinutes: trailing minutes only; older APKs ignore.
