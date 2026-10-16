@@ -4,7 +4,7 @@
 // Cases: clean 80 bpm no chip; a 40 s junk burst no chip; 50% junk shows it only after 60 s sustained; 1 in 4 junk
 // holds it (hysteresis); clean hides it after 60 s; real fast HR
 // at 150 no chip; PVC bigeminy (every other beat a short-long pair) no chip; PVC pairs plus junk shows it; HR, HRV and every series
-// byte-identical with the check removed (native path, Needs mobile/www from `npm run copy-web`). While the chip shows, the monitor's HRV is dimmed and says unreliable. Drives processHRData, the one pipeline both web and native feed.
+// byte-identical with the check removed (native path, Needs mobile/www from `npm run copy-web`). While the chip shows, the monitor's HRV keeps its stage colour and says unreliable. Drives processHRData, the one pipeline both web and native feed.
 // Also: no-RR packets clear a shown chip, a packet gap restarts the show timer, reconnecting clears it, and the web
 // path (page computes RMSSD) is byte-identical too.
 // Usage: node scripts/signal-chip.mjs [--mutant <name>] [--shots <dir>] [--ux <dir>]. Mutants: no-hysteresis, no-threshold,
