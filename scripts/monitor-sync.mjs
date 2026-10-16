@@ -198,7 +198,8 @@ try {
   check(gateCount === 1, 'hr_monitor.html: the gate line appears once, as the first line of driveUploadSession', String(gateCount));
   check(/async function driveUploadSession\(filename, csvText\) \{\n    if \(!driveSyncOn\(\)\) return;\n/.test(monitorSrc), 'driveUploadSession opens with the gate line');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  check(!/mode=offline/.test(idx) && (idx.match(/href="\.\/hr_monitor\.html"/g) || []).length === 2, 'index.html: both offline links are plain links to the monitor');
+  const monLinks = idx.match(/href="[^"]*hr_monitor\.html[^"]*"/g) || [];
+  check(!/mode=offline/.test(idx) && monLinks.length >= 2 && monLinks.every((h) => h === 'href="./hr_monitor.html"'), 'index.html: every Open monitor link is a plain link to the monitor', monLinks.join(' '));
   check(!/mode=offline/.test(fs.readFileSync(path.join(ROOT, 'app-home.html'), 'utf8')), 'app-home.html: no Offline mode link');
   check(!/mode-offline|__hrMonitorMode/.test(monitorSrc), 'hr_monitor.html: no mode-offline rules and no __hrMonitorMode');
 
