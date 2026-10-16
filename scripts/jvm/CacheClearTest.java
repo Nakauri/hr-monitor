@@ -88,6 +88,11 @@ public class CacheClearTest {
         check("legacy_pending counts exactly the files Clear cache keeps", SegmentUploadPlan.legacyPending(local, drive()) == 2,
             "pending=" + SegmentUploadPlan.legacyPending(local, drive()));
 
+        File emptyDir = Files.createTempDirectory("cacheclear").toFile();
+        put(emptyDir, "empty.csv", 0);
+        CacheClear.run(emptyDir, skip(), drive());
+        check("keeps an empty file Drive does not have", left(emptyDir).contains("empty.csv"), "left=" + left(emptyDir));
+
         System.out.println("CacheClearTest: " + passes + " passed, " + failures + " failed");
         System.exit(failures == 0 ? 0 : 1);
     }

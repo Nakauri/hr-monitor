@@ -17,7 +17,7 @@ public final class CacheClear {
         for (File f : files) {
             if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
             if (skip != null && skip.contains(f.getName())) continue;
-            if (driveMaxSizes != null
+            if (driveMaxSizes != null && driveMaxSizes.containsKey(f.getName())
                 && SegmentUploadPlan.legacyOnDrive(f.length(), driveMaxSizes.get(f.getName()))
                 && f.delete()) {
                 deleted++;

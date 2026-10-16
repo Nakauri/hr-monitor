@@ -232,6 +232,9 @@ public class NativeDriveUploader {
         java.util.Set<String> skip = new java.util.HashSet<>(FINALIZING);
         String activeName = sessionFilenameRef.get();
         if (activeName != null) skip.add(activeName);
+        // A crashed session not yet resumed lives only in prefs; its resume reuses the name and Drive id.
+        String savedName = context.getSharedPreferences("hr_monitor_session", Context.MODE_PRIVATE).getString("activeCsvFilename", null);
+        if (savedName != null && !savedName.isEmpty()) skip.add(savedName);
         int[] r = CacheClear.run(sessionsDir, skip, driveSizes);
         Log.i(TAG, "clearLocalCache drive=" + drive + " deleted=" + r[0] + " kept=" + r[1]);
         return new JSONObject().put("deleted", r[0]).put("kept", r[1]).put("drive", drive);

@@ -27,11 +27,13 @@ const read = (f) => fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\r\n/g, 
 
 const MUTANTS = {
   'delete-all': ['CacheClear.java',
-    'if (driveMaxSizes != null\n                && SegmentUploadPlan.legacyOnDrive(f.length(), driveMaxSizes.get(f.getName()))\n                && f.delete()) {',
+    'if (driveMaxSizes != null && driveMaxSizes.containsKey(f.getName())\n                && SegmentUploadPlan.legacyOnDrive(f.length(), driveMaxSizes.get(f.getName()))\n                && f.delete()) {',
     'if (f.delete()) {'],
   'no-drive-deletes': ['CacheClear.java',
-    'if (driveMaxSizes != null\n                && SegmentUploadPlan.legacyOnDrive(f.length(), driveMaxSizes.get(f.getName()))',
+    'if (driveMaxSizes != null && driveMaxSizes.containsKey(f.getName())\n                && SegmentUploadPlan.legacyOnDrive(f.length(), driveMaxSizes.get(f.getName()))',
     'if ((driveMaxSizes == null || SegmentUploadPlan.legacyOnDrive(f.length(), driveMaxSizes.get(f.getName())))'],
+  'empty-deletes': ['CacheClear.java', 'driveMaxSizes != null && driveMaxSizes.containsKey(f.getName())', 'driveMaxSizes != null'],
+  'wiring-no-saved': [UPLOADER, 'if (savedName != null && !savedName.isEmpty()) skip.add(savedName);', ''],
   'name-only': ['SegmentUploadPlan.java', 'return localSize <= (driveMaxSize != null ? driveMaxSize : 0L);', 'return driveMaxSize != null;'],
   'skip-ignored': ['CacheClear.java', 'if (skip != null && skip.contains(f.getName())) continue;', ''],
   'wiring-delete': [UPLOADER, 'int[] r = CacheClear.run(sessionsDir, skip, driveSizes);',
@@ -66,8 +68,8 @@ function wiring(uploaderSrc) {
   if (!b) return out;
   const code = b.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/\/\/.*$/gm, '');
   ok('W1 deletes only through CacheClear.run (no .delete( of its own)', /CacheClear\.run\(/.test(code) && !/\.delete\(/.test(code));
-  ok('W2 passes the live and stopping names', /new java\.util\.HashSet<>\(FINALIZING\)/.test(code) && /skip\.add\(activeName\)/.test(code)
-    && /CacheClear\.run\(sessionsDir, skip, driveSizes\)/.test(code));
+  ok('W2 passes the live, stopping and saved-prefs names', /new java\.util\.HashSet<>\(FINALIZING\)/.test(code) && /skip\.add\(activeName\)/.test(code)
+    && /skip\.add\(savedName\)/.test(code) && /CacheClear\.run\(sessionsDir, skip, driveSizes\)/.test(code));
   ok('W3 Drive sizes start null and are set only from a Drive listing',
     /java\.util\.Map<String, Long> driveSizes = null;/.test(code) && (code.match(/driveSizes = /g) || []).length === 2
     && /if \(files != null\) \{\s*driveSizes = new java\.util\.HashMap<>\(\);/.test(code));
