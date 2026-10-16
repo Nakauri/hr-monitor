@@ -2878,6 +2878,12 @@
       if (l.endsWith('\r')) l = l.slice(0, -1);
       if (!l) continue;
       const c = l.split(',');
+      // A y row (10-15 to 10-16 builds) holds the strap's HR for the h row before it; that h HR was a bad beat estimate.
+      if (c[0] === 'y') {
+        const prev = rows[rows.length - 1];
+        if (c.length === 3 && prev && prev.k === 'h' && /^\d+$/.test(c[2])) prev.f[0] = c[2];
+        continue;
+      }
       const n = SEG_FIELDS[c[0]];
       if (n == null || c.length !== n + 2 || c[1] === '') continue;
       const t = Number(c[1]);
@@ -3207,11 +3213,12 @@
       const sig = hashStr(JSON.stringify([S.parts, S.segs.map(n => sizes[n] == null ? null : String(sizes[n]))]));
       const hit = cache ? cache.get('sess:' + S.key) : null;
       let summary = null;
-      if (hit && hit.sig === sig && hit.summary && hit.summary.__schemaV === SUMMARY_SCHEMA_V) summary = hit.summary;
+      if (hit && hit.sig === sig && hit.summary && hit.summary.__schemaV === SUMMARY_SCHEMA_V && !yFixSuspect(hit.summary)) summary = hit.summary;
       else {
         try {
           const parsed = await v2ParseParts(S, readText, memo);
           summary = await summarizeCSVAsync(S.key, v2SessionCsv(S.sid, v2SessionRows(S, parsed)));
+          if (summary) summary.__yfix = 1;
         } catch (e) { console.warn('[v2] session summary failed', S.key, e); }
         // An empty summary (a failed read) is never cached: the next load retries even at the same sizes.
         if (cache && summary) cache.set('sess:' + S.key, { sig, summary });
@@ -3565,6 +3572,12 @@
     return !!c && !c.__incomplete && !c.__s35 && c.__schemaV === SUMMARY_SCHEMA_V
       && Number.isFinite(c.duration) && c.duration * 60 > 4 * (c.hrCount || 0) + 3600;
   }
+  // Summaries built while the 10-15 to 10-16 builds recorded bad beat HR in h rows; re-read once with the y-row repair.
+  const YFIX_FROM = Date.UTC(2026, 9, 15, 0), YFIX_TO = Date.UTC(2026, 9, 18, 0);
+  function yFixSuspect(c) {
+    return !!c && !c.__incomplete && !c.__yfix && c.__schemaV === SUMMARY_SCHEMA_V && Number.isFinite(c.startEpoch)
+      && c.startEpoch < YFIX_TO && c.startEpoch + (c.duration || 0) * 60000 > YFIX_FROM;
+  }
   let s35Logged = false;
   async function upgradeStaleSummaries(list) {
     try {
@@ -3572,12 +3585,13 @@
       let done = 0;
       for (const fn of list) {
         const c = sessionsIndex[fn];
-        const suspect = s35Suspect(c);
+        const yfix = yFixSuspect(c);
+        const suspect = s35Suspect(c) || yfix;
         if (!c || (c.__schemaV === SUMMARY_SCHEMA_V && !suspect)) continue;
         const summary = await parseSessionFile(fn);
-        if (summary && suspect) summary.__s35 = 1;
+        if (summary && suspect) { summary.__s35 = 1; summary.__yfix = 1; }
         if (summary) { sessionsIndex[fn] = summary; done++; }
-        else if (suspect) { c.__s35 = 1; done++; }
+        else if (suspect) { c.__s35 = 1; if (yfix) c.__yfix = 1; done++; }
         if (done > 0 && done % 25 === 0) persistIndex();
         await new Promise(r => setTimeout(r, 0));
       }
@@ -3623,7 +3637,7 @@
       return !!c && !c.__incomplete && c.__schemaV === SUMMARY_SCHEMA_V - 1
         && ('flushes' in c) && ('chillsWindows' in c) && ('hrDeltas' in c) && ('quadPct' in c) && ('restingHR' in c);
     }
-    const s35 = filenames.filter(fn => s35Suspect(sessionsIndex[fn]));
+    const s35 = filenames.filter(fn => s35Suspect(sessionsIndex[fn]) || yFixSuspect(sessionsIndex[fn]));
     if (s35.length && !s35Logged) { s35Logged = true; console.info('[S35] re-read ' + s35.length + ' sessions'); }
     const deferred = filenames.filter(staleOnly).concat(s35);
     const todo = filenames.filter(fn => needsReparse(fn) && !staleOnly(fn));

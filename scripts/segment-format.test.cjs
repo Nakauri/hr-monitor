@@ -377,7 +377,8 @@ ${LABELS.map(l => `    System.out.println("clean " + Base64.getEncoder().encodeT
   }
 }
 
-// ---- y rows (S54): the viewer skips them; h rows and the session CSV are unchanged ----
+// ---- y rows (10-15 to 10-16 builds): the h HR before a y row was a bad beat estimate (209 bpm on 10-16);
+// the viewer replaces it with the y row's strap HR. Guards that repair. Runs with the rest of this file (seconds). ----
 {
   const vsrc = viewer.replace(/\r\n/g, '\n');
   const base = Date.UTC(2026, 0, 5, 3, 0, 0), sid = base + 1000;
@@ -397,9 +398,13 @@ ${LABELS.map(l => `    System.out.println("clean " + Base64.getEncoder().encodeT
   check('viewer parses a synthetic segment with and without y rows', !!res, err ? String(err.message) : '');
   if (res) {
     const hs = (p) => JSON.stringify(p.rows.filter((r) => r.k === 'h'));
-    check('y rows: parsed h rows identical (' + res.pa.rows.filter((r) => r.k === 'h').length + ')', hs(res.pa) === hs(res.pb));
+    const hrOf = (p) => p.rows.filter((r) => r.k === 'h').map((r) => r.f[0]).join(',');
+    const strapOnly = rows.slice(3).map((l) => l.split(',')[2]).map((v, i) => (i >= 5 && i < 20 ? String(80 + (i % 4)) : v)).join(',');
+    check('y rows: each h HR before a y row becomes the strap HR', hrOf(res.pb) === strapOnly, hrOf(res.pb));
+    check('y rows: h rows without a y row are untouched', hrOf(res.pa) === rows.slice(3).map((l) => l.split(',')[2]).join(','));
     check('y rows: no y row survives parseSegmentV2', !res.pb.rows.some((r) => r.k === 'y') && withY.length - rows.length === 15);
-    check('y rows: v2SessionCsv byte-identical with and without y rows', typeof res.ca === 'string' && res.ca.length > 0 && res.ca === res.cb);
+    check('y rows: the repaired session CSV has no HR over 100', typeof res.cb === 'string' && res.cb.split(/\r?\n/).slice(1).filter((l) => +l.split(',')[2] > 0).length === 40
+      && !res.cb.split(/\r?\n/).slice(1).some((l) => +l.split(',')[2] > 100), '');
   }
 }
 
