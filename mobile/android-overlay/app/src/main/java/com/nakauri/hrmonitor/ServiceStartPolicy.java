@@ -98,11 +98,6 @@ public final class ServiceStartPolicy {
             .stripTrailingZeros().toPlainString();
     }
 
-    // {title, body} with the exact 10-minute alarm in use.
-    public static String[] text(LinkStatePolicy.State state, int hr, Double rmssd, long elapsedMs) {
-        return text(state, hr, rmssd, elapsedMs, true);
-    }
-
     // The ENDED text names the bound the auto-end used.
     public static String[] endedText(long autoEndMs) {
         String h = hoursLabel(autoEndMs);
@@ -115,19 +110,16 @@ public final class ServiceStartPolicy {
         return m < 60L ? m + "m" : (m / 60L) + "h " + (m % 60L) + "m";
     }
 
-    // {title, body}. hr <= 0 means no reading yet; rmssd null means none. exactAlarm false: the
-    // retry interval is the system's, so NOT_FOUND names no interval.
-    public static String[] text(LinkStatePolicy.State state, int hr, Double rmssd, long elapsedMs, boolean exactAlarm) {
+    // {title, body}. hr <= 0 means no reading yet; rmssd null means none. Searching says Reconnecting until the auto-end.
+    public static String[] text(LinkStatePolicy.State state, int hr, Double rmssd, long elapsedMs) {
         String title = "HR Monitor";
         switch (state) {
             case RECORDING:
                 if (hr > 0) title = "HR " + hr + " bpm" + (rmssd != null ? " · HRV " + Math.round(rmssd) + "ms" : "");
                 return new String[] { title, "Live · " + minutesLabel(elapsedMs) };
             case RECONNECTING:
-                return new String[] { title, "Reconnecting" };
             case NOT_FOUND:
-                return new String[] { title, exactAlarm ? "Strap not found · trying every 10 min"
-                    : "Strap not found · trying from time to time" };
+                return new String[] { title, "Reconnecting" };
             case ENDED:
                 return endedText(LinkStatePolicy.AUTO_END_NOT_FOUND_MS);
             case STOPPING:

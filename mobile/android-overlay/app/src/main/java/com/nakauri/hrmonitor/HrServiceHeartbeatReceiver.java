@@ -56,17 +56,6 @@ public class HrServiceHeartbeatReceiver extends BroadcastReceiver {
         if (shouldContinue) schedule(context);
     }
 
-    // True when the 10-minute alarm is an exact alarm clock (always below API 31).
-    public static boolean exactAlarmsAllowed(Context context) {
-        try {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
-            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            return am != null && am.canScheduleExactAlarms();
-        } catch (Throwable t) {
-            return true;
-        }
-    }
-
     public static void schedule(Context context) {
         scheduleAt(context, System.currentTimeMillis() + INTERVAL_MS);
     }

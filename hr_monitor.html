@@ -1694,7 +1694,6 @@
       }
       const strapRaw = NATIVE ? (snap && snap.strapName) : (device && device.name);
       const strap = typeof strapRaw === 'string' ? strapShortName(strapRaw) : '';
-      const since = (L && L.open) || lastReading;
       const head = [], sub = [];
       if (kind === 'live') {
         head.push(['Live', strap].filter(Boolean).join(' · '));
@@ -1704,15 +1703,14 @@
         if (g === 'no gaps') tail.push(g); else if (g) sub.push(g);
         if (tail.length) head.push(tail.join(' · '));
       } else if (kind === 'reconnecting') {
-        head.push('Reconnecting' + (since ? ' ' + statusElapsed(now - since) : ''));
+        head.push('Reconnecting');
         if (strap) head.push(strap);
         const g = statusGapText(L, false);
         if (g) sub.push(g);
       } else if (kind === 'not_found') {
-        head.push('Strap not found' + (since ? ' since ' + statusClock(since) : ''));
+        head.push('Reconnecting');
         const g = statusGapText(L, false);
         if (g) sub.push(g);
-        sub.push('trying every 10 min');
       } else if (kind === 'resuming') {
         head.push('Resuming');
         if (lastReading) head.push('last reading ' + statusClock(lastReading));

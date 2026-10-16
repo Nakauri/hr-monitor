@@ -54,8 +54,8 @@ const MIN = 60000;
 // lostAgoMs: 42 s for reconnecting; 17 min for not found and resuming (the f2 mock's 2:14 against 2:31).
 const STATES = {
   live: { scenario: 'live', sessionAgeMs: 72 * MIN + 4000, kind: 'live', head: /^Live · 808S · 1:12:0\d · no gaps$/, stop: true },
-  reconnecting: { scenario: 'reconnecting', sessionAgeMs: 72 * MIN, lostAgoMs: 42000, kind: 'reconnecting', head: /^Reconnecting 0:4\d · 808S$/, stop: true },
-  not_found: { scenario: 'not_found', sessionAgeMs: 72 * MIN, lostAgoMs: 17 * MIN, kind: 'not_found', head: /^Strap not found since \d{1,2}:\d\d$/, sub: /^2 gaps · 18 min missing · trying every 10 min$/, stop: true },
+  reconnecting: { scenario: 'reconnecting', sessionAgeMs: 72 * MIN, lostAgoMs: 42000, kind: 'reconnecting', head: /^Reconnecting · 808S$/, stop: true },
+  not_found: { scenario: 'not_found', sessionAgeMs: 72 * MIN, lostAgoMs: 17 * MIN, kind: 'not_found', head: /^Reconnecting$/, sub: /^2 gaps · 18 min missing$/, stop: true },
   resuming: { scenario: 'resuming', sessionAgeMs: 72 * MIN, lostAgoMs: 17 * MIN, kind: 'resuming', head: /^Resuming · last reading \d{1,2}:\d\d$/, stop: true },
   idle: { scenario: 'idle', kind: 'idle', head: null, stop: false },
 };
@@ -194,8 +194,8 @@ try {
       document.dispatchEvent(new Event('visibilitychange'));
     }, { st, lostAgoMs });
     const want = [
-      ['RECONNECTING', 42000, 'reconnecting', /^Reconnecting 0:4\d · 808S$/],
-      ['NOT_FOUND', 42000, 'not_found', /^Strap not found since \d{1,2}:\d\d$/],
+      ['RECONNECTING', 42000, 'reconnecting', /^Reconnecting · 808S$/],
+      ['NOT_FOUND', 42000, 'not_found', /^Reconnecting$/],
       ['RESUMING', 42000, 'resuming', /^Resuming · last reading \d{1,2}:\d\d$/],
       ['LIVE', 0, 'live', /^Live · 808S · 2:\d\d$/],
     ];

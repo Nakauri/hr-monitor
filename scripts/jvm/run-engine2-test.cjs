@@ -41,7 +41,8 @@ const MUTANTS = {
     'autoEndArmed = nowMs - notFoundSinceMs >= autoEndMs;'],
   'search-late': ['LinkStatePolicy.java', 'nowMs - searchFromMs >= STRAP_SEARCH_MS', 'nowMs - searchFromMs > STRAP_SEARCH_MS'],
   'announce-unclaimed': ['ServiceStartPolicy.java', 'return claimed && REASON_AUTO_END.equals(reason);', 'return REASON_AUTO_END.equals(reason);'],
-  'text-leak': ['ServiceStartPolicy.java', '"Strap not found · trying every 10 min"', '"Live · strap not found"'],
+  'text-leak': ['ServiceStartPolicy.java', '            case NOT_FOUND:\n                return new String[] { title, "Reconnecting" };',
+    '                return new String[] { title, "Reconnecting" };\n            case NOT_FOUND:\n                return new String[] { title, "Live · strap not found" };'],
   // Review batch 2026-10-10.
   'one-133-decides': ['LinkStatePolicy.java', 'if (nowMs < attemptUntilMs) return false;\n', ''],
   'no-retry': ['LinkStatePolicy.java', 'return state == State.NOT_FOUND && nowMs < attemptUntilMs;', 'return false;'],
@@ -58,7 +59,9 @@ const MUTANTS = {
   // Detangle 2026-10-10.
   'wire-name-inactive': ['LinkStatePolicy.java', 'if (!sessionActive || s == null) return "none";', 'if (s == null) return "none";'],
   'rearm-unbounded': ['LinkStatePolicy.java', 'return Math.min(d, PENDING_REARM_MAX_MS);', 'return d;'],
-  'inexact-says-10min': ['ServiceStartPolicy.java', ': "Strap not found · trying from time to time"', ': "Strap not found · trying every 10 min"'],
+  // S55: searching says Reconnecting with no interval or clock.
+  'not-found-old-words': ['ServiceStartPolicy.java', '            case NOT_FOUND:\n                return new String[] { title, "Reconnecting" };',
+    '                return new String[] { title, "Reconnecting" };\n            case NOT_FOUND:\n                return new String[] { title, "Strap not found · trying every 10 min" };'],
   // S5 notification Symptom.
   'symptom-inactive-writes': ['ServiceStartPolicy.java', 'return engineNonNull && sessionActive;', 'return engineNonNull;'],
   'symptom-hidden-not-found': ['ServiceStartPolicy.java', '|| s == LinkStatePolicy.State.NOT_FOUND;', ';'],

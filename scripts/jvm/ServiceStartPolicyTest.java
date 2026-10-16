@@ -267,9 +267,8 @@ public class ServiceStartPolicyTest {
         check("[nit] ENDED names the bound used", eq(ServiceStartPolicy.endedText(1_800_000L), "HR Monitor",
             "Ended after 0.5 h without the strap")
             && eq(ServiceStartPolicy.endedText(H12), "HR Monitor", "Ended after 12 h without the strap"));
-        String[] inexact = ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 0, false);
-        check("[nit] inexact alarm: NOT_FOUND names no 10-minute interval", !inexact[1].contains("10 min")
-            && ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 0, true)[1].contains("every 10 min"));
+        check("[S55] NOT_FOUND names no interval, elapsed time or clock", !ServiceStartPolicy.text(State.NOT_FOUND, 0, null, 3_725_000L)[1]
+            .matches(".*(\\d|min|since|trying).*"));
     }
 
     // Audit batch 2026-10-10: stale-prefs age gate (R3), declined-resume alarm, teardown-aware release.
@@ -322,9 +321,7 @@ public class ServiceStartPolicyTest {
         check("PRE_RESUME", eq(ServiceStartPolicy.text(State.PRE_RESUME, 0, null, 0), "HR Monitor", "Resuming"));
         check("RESUMING", eq(ServiceStartPolicy.text(State.RESUMING, 0, null, 0), "HR Monitor", "Resuming"));
         check("RECONNECTING", eq(ServiceStartPolicy.text(State.RECONNECTING, 80, null, 0), "HR Monitor", "Reconnecting"));
-        check("NOT_FOUND", eq(ServiceStartPolicy.text(State.NOT_FOUND, 80, null, 0), "HR Monitor", "Strap not found · trying every 10 min"));
-        check("NOT_FOUND, inexact alarm", eq(ServiceStartPolicy.text(State.NOT_FOUND, 80, null, 0, false), "HR Monitor",
-            "Strap not found · trying from time to time"));
+        check("NOT_FOUND says Reconnecting (S55)", eq(ServiceStartPolicy.text(State.NOT_FOUND, 80, null, 0), "HR Monitor", "Reconnecting"));
         check("ENDED", eq(ServiceStartPolicy.text(State.ENDED, 0, null, 0), "HR Monitor", "Ended after 12 h without the strap"));
         boolean onlyRecording = true;
         boolean noDash = true;

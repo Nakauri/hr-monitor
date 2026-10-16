@@ -638,8 +638,7 @@ public final class HrEngine implements HrDevice.Callback {
     // {title, body} for the current link state; PRE_RESUME while no session records.
     public String[] notificationText() {
         LinkStatePolicy.State st = sessionActive.get() ? link.state() : LinkStatePolicy.State.PRE_RESUME;
-        return ServiceStartPolicy.text(st, lastHrValue, lastRmssdValue, System.currentTimeMillis() - sessionStartMs,
-            HrServiceHeartbeatReceiver.exactAlarmsAllowed(appCtx));
+        return ServiceStartPolicy.text(st, lastHrValue, lastRmssdValue, System.currentTimeMillis() - sessionStartMs);
     }
 
     public LinkStatePolicy.State linkState() { return link.state(); }
