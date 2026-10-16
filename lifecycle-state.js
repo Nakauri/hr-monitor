@@ -76,6 +76,7 @@
     const onLateLive = opts.onLateLive || function () {};
     const recoveryTimeoutMs = typeof opts.recoveryTimeoutMs === 'number' ? opts.recoveryTimeoutMs : BUDGETS.recoveryMs;
     const rehydrateTimeoutMs = typeof opts.rehydrateTimeoutMs === 'number' ? opts.rehydrateTimeoutMs : BUDGETS.rehydrateMs;
+    // Same value as MainActivity RESUME_OVERLAY_MIN_STOP_MS (native shows on resume only past it).
     const resumeOverlayMs = typeof opts.resumeOverlayMs === 'number' ? opts.resumeOverlayMs : 60000;
     const log = opts.log || function () {};
 

@@ -6,7 +6,7 @@ const WT = path.join(__dirname, '..');
 const J = 'mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/';
 const P = J + 'PdfPrinter.java', S = J + 'NativeHrSessionPlugin.java', JS = 'mobile/src/native-pdf.js';
 const FILES = ['.github/workflows/build-android.yml', 'hr_monitor.html', 'mobile/android-overlay/app/src/main/AndroidManifest.xml',
-  'mobile/android-overlay/app/test-hooks.gradle', 'mobile/scripts/inject-manifest.js', JS];
+  'mobile/android-overlay/app/test-hooks.gradle', 'mobile/scripts/inject-manifest.js', JS, 'lifecycle-state.js'];
 const M = {
   'engine-ref': [P, 'private PdfPrinter() {}', 'private PdfPrinter() { HrEngine.peek(); }'],
   'service-ref': [P, 'private PdfPrinter() {}', 'private PdfPrinter() { NativeHrService.logLifecycle(null, "x"); }'],

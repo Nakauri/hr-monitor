@@ -11388,7 +11388,7 @@
 
   async function init() {
     hideRestoreOverlay();
-    // Native shows the overlay on every resume while recording, sometimes just after this page wakes, so a single
+    // Native shows the overlay after a stop over 60 s while recording, sometimes just after this page wakes, so a single
     // hide can land first and the overlay then sits until its 60 s fence (Khal 2026-10-12). Hide again briefly after.
     const hideAfterResume = () => { hideRestoreOverlay(); [250, 750, 1500, 3000].forEach((ms) => setTimeout(hideRestoreOverlay, ms)); };
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') hideAfterResume(); });

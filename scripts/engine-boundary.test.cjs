@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Guards: services, receivers or the PDF path reaching engine state they must not touch. Files: HrEngine and its callers, SymptomReceiver, PdfPrinter. Runtime: under 1 s.
+// [S56] also guards: the restore overlay shown on a resume with no stop, which the page never hides (stuck "Restoring session" after a short screen-off, 2026-10-15 21:49). Files: MainActivity, lifecycle-state.js. Negative controls: overlay-resume-mutants.cjs.
 // Engine boundary test: reads the native Java as text, no JVM.
 // Guards three bugs: the C3 orphan neutralize on Activity recreate, a
 // sessionActive seeded outside start/stop (skips strap reconnection after a
@@ -941,6 +942,58 @@ function pdfChecks() {
   }
 }
 pdfChecks();
+
+// S56: the resume overlay needs a real stop longer than the page's resumeOverlayMs; cold start and the fence stay.
+function overlayChecks() {
+  const A = readSource('MainActivity.java');
+  check('[S56] MainActivity.java exists', A != null);
+  if (A == null) return;
+  const ac = codeView(A);
+  const constM = ac.match(/static\s+final\s+long\s+RESUME_OVERLAY_MIN_STOP_MS\s*=\s*(\d+)L\s*;/);
+  const L = readRepo('lifecycle-state.js');
+  const jsM = L && L.match(/const\s+resumeOverlayMs\s*=[^;]*:\s*(\d+)\s*;/);
+  check('[S56] RESUME_OVERLAY_MIN_STOP_MS equals lifecycle-state.js resumeOverlayMs',
+    !!constM && !!jsM && constM[1] === jsM[1], (constM ? constM[1] : 'none') + ' vs ' + (jsM ? jsM[1] : 'none'));
+  const stop = methodSpans(ac, 'public\\s+void\\s+onStop')[0];
+  const sb = stop ? ac.slice(stop[0], stop[1]) : '';
+  check('[S56] onStop records stoppedAtMs from SystemClock.elapsedRealtime()',
+    /stoppedAtMs\s*=\s*SystemClock\s*\.\s*elapsedRealtime\s*\(\s*\)\s*;/.test(sb));
+  const res = methodSpans(ac, 'public\\s+void\\s+onResume')[0];
+  const rb = res ? ac.slice(res[0], res[1]) : '';
+  const rraw = res ? A.slice(res[0], res[1]) : '';
+  const shows = indexesOf(rb, 'showRestoreOverlay(');
+  // The one show must sit under a flag that compares the measured stop with the constant.
+  const dur = rb.match(/long\s+(\w+)\s*=\s*stoppedAtMs\s*>\s*0L\s*\?\s*SystemClock\s*\.\s*elapsedRealtime\s*\(\s*\)\s*-\s*stoppedAtMs\s*:\s*-1L\s*;/);
+  const durVar = dur ? dur[1] : null;
+  const gateRe = durVar ? new RegExp('\\b' + durVar + '\\s*>\\s*RESUME_OVERLAY_MIN_STOP_MS\\b') : null;
+  const flag = gateRe && rb.match(/boolean\s+(\w+)\s*=([^;]*);/);
+  const flagVar = flag && gateRe.test(flag[2]) && /\bactive\b/.test(flag[2]) && /!\s*cleanly\b/.test(flag[2]) ? flag[1] : null;
+  const gated = shows.length === 1 && !!flagVar
+    && new RegExp('if\\s*\\(\\s*' + flagVar + '\\s*\\)\\s*showRestoreOverlay\\s*\\(').test(rb);
+  check('[S56] onResume shows only when active, not clean, and stopped longer than RESUME_OVERLAY_MIN_STOP_MS',
+    gated, 'shows=' + shows.length + ' dur=' + durVar + ' flag=' + flagVar);
+  check('[S56] onResume clears stoppedAtMs after reading it',
+    !!dur && /stoppedAtMs\s*=\s*0L\s*;/.test(rb.slice(rb.indexOf(dur[0]) + dur[0].length)));
+  const tryAt = rb.search(/try\s*\{/);
+  const tryBlk = tryAt >= 0 ? blockFrom(rb, tryAt) : null;
+  check('[S56] the stop read and the show sit inside the onResume try',
+    !!tryBlk && !!dur && rb.indexOf(dur[0]) > tryBlk[0] && shows.length === 1 && shows[0] < tryBlk[1]);
+  check('[S56] onResume logs overlay_resume show= stopped_ms=',
+    /logLifecycleAsync\s*\(\s*"overlay_resume show="\s*\+\s*\w+\s*\+\s*" stopped_ms="/.test(rraw));
+  const cre = methodSpans(ac, 'public\\s+void\\s+onCreate')[0];
+  const craw = cre ? A.slice(cre[0], cre[1]) : '';
+  check('[S56] onCreate still shows unconditionally',
+    /\n\s*showRestoreOverlay\s*\(\s*\)\s*;/.test(craw) && !/if\s*\([^)]*\)\s*\{?\s*showRestoreOverlay/.test(craw));
+  check('[S56] the 60 s fence is unchanged and armed on every show',
+    /static\s+final\s+long\s+OVERLAY_SAFETY_MS\s*=\s*60000L\s*;/.test(ac) && /postDelayed\s*\(\s*restoreSafetyTimer\s*,\s*OVERLAY_SAFETY_MS\s*\)/.test(ac));
+  const logs = [...ac.matchAll(/NativeHrService\s*\.\s*logLifecycle\s*\(/g)].map(m => m.index);
+  const lla = methodSpans(ac, 'private\\s+void\\s+logLifecycleAsync')[0];
+  const sto = methodSpans(ac, 'private\\s+void\\s+hideRestoreOverlayBySafetyTimer')[0];
+  check('[S56] lifecycle lines go through logLifecycleAsync (off the UI thread)',
+    !!lla && /LIFECYCLE_LOG\s*\.\s*execute\s*\(/.test(ac.slice(lla[0], lla[1]))
+      && logs.every(i => (i > lla[0] && i < lla[1]) || (!!sto && i > sto[0] && i < sto[1])), 'logLifecycle calls: ' + logs.length);
+}
+overlayChecks();
 
 if (failures) {
   console.error('\n' + failures + ' engine boundary check(s) FAILED.');

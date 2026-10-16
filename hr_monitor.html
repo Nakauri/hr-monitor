@@ -4521,7 +4521,7 @@
         document.documentElement.classList.remove('restoring');
         renderStatusLine(engineSnapshot());
         try { sessionStorage.removeItem('hrm_resuming'); } catch (e) {}
-        // The native overlay is shown on every resume while recording; JS owns dismissing it.
+        // Native shows the overlay at cold start and after a stop over 60 s; JS owns dismissing it.
         if (window.HRMRestoreOverlay) { try { window.HRMRestoreOverlay.hide(); } catch (e) {} }
       },
       performRehydrate: function () { return rehydrateFromNativeCsv(); },

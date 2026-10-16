@@ -7,6 +7,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -37,7 +38,7 @@ public class MainActivity extends BridgeActivity {
     private static final String TAG = "MainActivity";
 
     // Native loading overlay. Branded splash + spinner painted ON TOP of
-    // the WebView whenever the Activity comes to the foreground while a
+    // the WebView at cold start, and on return from a long stop while a
     // session is active. JS calls RestoreOverlayPlugin.hide() once the
     // page has rehydrated. This native timer is the WebView-dead-on-arrival
     // fence; JS owns its own shorter ceiling for recovery flows.
@@ -50,6 +51,13 @@ public class MainActivity extends BridgeActivity {
     private static final long OVERLAY_SAFETY_MS = 60000L;
     // First show since the last hide, for the overlay_hidden ms= lifecycle line.
     private final java.util.concurrent.atomic.AtomicLong overlayShownAtMs = new java.util.concurrent.atomic.AtomicLong(0L);
+    // Same value as lifecycle-state.js resumeOverlayMs: a shorter stop resumes with no overlay.
+    static final long RESUME_OVERLAY_MIN_STOP_MS = 60000L;
+    // elapsedRealtime at the last onStop; 0 once a resume has read it.
+    private long stoppedAtMs = 0L;
+    // One ordered writer for this Activity's lifecycle.log lines, off the UI thread.
+    private static final java.util.concurrent.ExecutorService LIFECYCLE_LOG =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "hrm-lifecycle-log"));
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -150,16 +158,20 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // Re-show the loading overlay every time the Activity comes back to
-    // foreground while a session is active. WebView rehydrate of a 12-hour
-    // CSV on the S8 takes ~20-30 sec; without this the user stares at a
-    // frozen WebView during that window. JS calls hide() once rehydrate
-    // completes (or immediately on visibilitychange-visible if hidden was
-    // brief enough to skip rehydrate).
+    @Override
+    public void onStop() {
+        super.onStop();
+        stoppedAtMs = SystemClock.elapsedRealtime();
+    }
+
+    // Shows the overlay only after a stop past RESUME_OVERLAY_MIN_STOP_MS: a resume with no
+    // stop gives the page no visibility edge, so JS would never hide it.
     @Override
     public void onResume() {
         super.onResume();
         try {
+            long stoppedForMs = stoppedAtMs > 0L ? SystemClock.elapsedRealtime() - stoppedAtMs : -1L;
+            stoppedAtMs = 0L;
             // Source of truth: the engine's AtomicBoolean. The prefs are
             // last-write-wins crash anchors, used only before the engine exists.
             HrEngine e = HrEngine.peek();
@@ -173,7 +185,9 @@ public class MainActivity extends BridgeActivity {
                 active = prefs.getBoolean("sessionActive", false);
                 cleanly = prefs.getBoolean("cleanlyStopped", true);
             }
-            if (active && !cleanly) showRestoreOverlay();
+            boolean show = active && !cleanly && stoppedForMs > RESUME_OVERLAY_MIN_STOP_MS;
+            logLifecycleAsync("overlay_resume show=" + show + " stopped_ms=" + (stoppedForMs < 0L ? "none" : String.valueOf(stoppedForMs)));
+            if (show) showRestoreOverlay();
         } catch (Throwable t) {
             Log.w(TAG, "onResume overlay check failed: " + t.getMessage());
         }
@@ -265,12 +279,20 @@ public class MainActivity extends BridgeActivity {
         return (int) (value * density + 0.5f);
     }
 
+    private void logLifecycleAsync(String event) {
+        try {
+            LIFECYCLE_LOG.execute(() -> NativeHrService.logLifecycle(this, event));
+        } catch (Throwable t) {
+            Log.w(TAG, "lifecycle log not queued: " + t);
+        }
+    }
+
     // Idempotent. No-ops when the overlay is already attached. Always
     // re-arms the safety timer so a stale onResume can't strand the user.
     public void showRestoreOverlay() {
         overlayShownAtMs.compareAndSet(0L, System.currentTimeMillis());
         runOnUiThread(() -> {
-            new Thread(() -> NativeHrService.logLifecycle(this, "overlay_shown"), "hrm-lifecycle-log").start();
+            logLifecycleAsync("overlay_shown");
             try {
                 if (restoreOverlay != null && restoreOverlay.getParent() != null) {
                     armRestoreSafetyTimer();
