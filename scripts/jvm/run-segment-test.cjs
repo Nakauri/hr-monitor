@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Compiles and runs scripts/jvm/SegmentWriterTest.java and SegmentReaderTest.java with plain JDK 21
+// Compiles and runs scripts/jvm/SegmentWriterTest.java and SegmentReaderTest.java with plain JDK 21 (about 30 s)
 // (no Gradle, no Android), then reruns both against mutated copies, each of which must FAIL:
 //   trim-off       SegmentWriter keeps a partial last line on reopen [K10]
 //   tee-getfile    TeeSink.getFile answers from the segment, not the legacy writer [K1]

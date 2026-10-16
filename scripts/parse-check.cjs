@@ -1,6 +1,7 @@
 // Inline-script parse check for the project's single-file HTML pages.
 // Catches duplicate-const / bracket / typo errors that would brick the page
 // silently in the browser. Run before any push that touches the HTMLs.
+// Named bug: a duplicate `const totalSession` in hrv_viewer.html killed Sign In on 2026-04-26. Under 1 s.
 //
 // Usage: node scripts/parse-check.js
 // Exit: 0 = clean (or only the known false-positive on hr_monitor.html), 1 = real failure.

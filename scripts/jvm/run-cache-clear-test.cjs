@@ -9,7 +9,9 @@
 //   wiring-delete       NativeDriveUploader deletes files itself instead of through CacheClear
 //   wiring-no-skip      NativeDriveUploader stops passing the live and stopping names
 //   wiring-assume-drive NativeDriveUploader hands CacheClear sizes when Drive was not read
-// Run: node scripts/jvm/run-cache-clear-test.cjs   (exit 0 = real run passes AND every mutant fails). About 10 s.
+//   empty-deletes       an empty local file with no Drive copy counts as on Drive
+//   wiring-no-saved     a crashed session not yet resumed (name only in prefs) is deleted
+// Run: node scripts/jvm/run-cache-clear-test.cjs   (exit 0 = real run passes AND every mutant fails). About 8 s.
 
 const fs = require('fs');
 const os = require('os');

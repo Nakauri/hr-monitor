@@ -4,7 +4,8 @@
 // copies, each of which must FAIL. Also holds the HrEngine wiring text checks W1 to W8, each with a text mutant
 // that must FAIL it (HrEngine does not compile on plain JDK; it is read with comments and strings blanked), and E1:
 // the onHr try/catch block cut from HrEngine and run against a policy that throws.
-// Run: node scripts/jvm/run-hr-source-test.cjs   (exit 0 = real run passes AND every mutant fails). About 10 s.
+// Run: node scripts/jvm/run-hr-source-test.cjs   (exit 0 = real run passes AND every mutant fails). About 16 s.
+// Guards: the strap's HR byte lagging the beats at session start (10-15: strap 80 to 101 while RR said ~155) and Java/JS drift (April 2026 HRV 133 vs 86).
 
 const fs = require('fs');
 const os = require('os');

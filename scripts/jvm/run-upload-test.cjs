@@ -2,7 +2,8 @@
 // Compiles and runs scripts/jvm/UploadPlanTest.java and SegmentUploaderTest.java with plain JDK 21 (no Gradle,
 // no Android, no network: Drive is an in-memory fake), then reruns both against mutated copies, each of which
 // must FAIL. Each mutant names the bug it stands for.
-// Run: node scripts/jvm/run-upload-test.cjs   (exit 0 = tests pass AND every mutant fails)
+// Guards SegmentUploadPlan.java and SegmentUploader.java: lost or double-uploaded segments (each mutant names its bug).
+// Run: node scripts/jvm/run-upload-test.cjs   (exit 0 = tests pass AND every mutant fails). About 3.5 min: pre-push tier, split if needed.
 
 const fs = require('fs');
 const os = require('os');

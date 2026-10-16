@@ -2,6 +2,7 @@
 // J1 constants equal, J2 parseHR decodes every vector packet, J3 golden and assertions, J4 RR arrays untouched,
 // J5 the twin runs only on the Web Bluetooth path of processHRData, J6 switched and newRun agree with source changes and marks,
 // M1 the JS and JVM mutant tables carry the same names.
+// Guards: the strap's HR byte lagging the beats at session start (10-15: strap 80 to 101 while RR said ~155) and Java/JS drift (April 2026 HRV 133 vs 86).
 // Golden row: <case> <idx> <shown> <S|B> <switched> <newRun 1|0> <estimate x100 rounded, or ->. Runtime about 2 s.
 // Run: node scripts/hr-source-parity.test.cjs [--write | --mutants]   (must exit 0)
 // --write rewrites hr-source-golden.txt from the twin; only after a deliberate change, noted in the step's progress.
