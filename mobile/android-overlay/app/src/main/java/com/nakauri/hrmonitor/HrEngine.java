@@ -166,7 +166,6 @@ public final class HrEngine implements HrDevice.Callback {
     private final AtomicReference<ServiceHooks> serviceHooks = new AtomicReference<>();
 
     private final LinkStatePolicy link = new LinkStatePolicy();
-    private final HrSourcePolicy hrSource = new HrSourcePolicy();
     private volatile int lastHrValue = 0;
     private volatile Double lastRmssdValue = null;
     // A wake's strap attempt holds the CPU this long; the auto-end decision lands inside it.
@@ -1930,7 +1929,6 @@ public final class HrEngine implements HrDevice.Callback {
             }
             NativeHrService.logLifecycle(appCtx, resuming ? "session_resume file=" + resumeFilename : "session_start");
             synchronized (rrWindow) { rrWindow.clear(); }
-            hrSource.reset();
             synchronized (rrWindow5min) { rrWindow5min.clear(); }
             synchronized (rrWindow) {
                 sdnnFullCount = 0;
@@ -2344,7 +2342,6 @@ public final class HrEngine implements HrDevice.Callback {
         NativeHrService.logLifecycle(appCtx, "notifications_live");
         String addr = device.address();
         if (addr != null) targetMac = addr;
-        hrSource.linkLive();
         applyLink(link.onHr(System.currentTimeMillis()));
         HrSink w = sink;
         if (w != null) w.appendConnection("connected", System.currentTimeMillis());
@@ -2364,24 +2361,8 @@ public final class HrEngine implements HrDevice.Callback {
     @Override
     public void onHr(int hr, int[] rrMs, boolean contactOff, long tsMs) {
         long now = tsMs;
-        final int strapHr = hr;
-        boolean wasBeat = false;
-        HrSourcePolicy.Result pick;
-        try {
-            wasBeat = hrSource.isBeat();
-            pick = hrSource.onPacket(strapHr, rrMs, now);
-        } catch (Throwable t) {
-            pick = HrSourcePolicy.Result.strap(strapHr);
-            if (hrSource.errorLogDue(now)) NativeHrService.logLifecycle(appCtx, "hr_source error " + t.getClass().getSimpleName());
-        }
-        hr = pick.shownHr;
         lastHrAtMs = now;
         lastHrValue = hr;
-        if (pick.newRun && wasBeat) NativeHrService.logLifecycle(appCtx, "hr_source to=strap reason=run");
-        if (pick.newRun) NativeHrService.logLifecycle(appCtx, "hr_source run strap=" + strapHr + " contact=" + (contactOff ? "off" : "on"));
-        if (pick.switched != 0) NativeHrService.logLifecycle(appCtx, "hr_source to=" + (pick.beat ? "beat" : "strap")
-            + " strap=" + strapHr + " beat=" + (Double.isNaN(pick.beatHr) ? "none" : String.valueOf(Math.round(pick.beatHr)))
-            + " contact=" + (contactOff ? "off" : "on"));
         applyLink(link.onHr(now));
         firstHrSeen = true;
         gattReconnectAttempts = 0;
@@ -2466,18 +2447,14 @@ public final class HrEngine implements HrDevice.Callback {
 
         HrSink writer = sink;
         if (writer != null) {
-            // One hold on the tee, so a segment roll cannot land between h and its y.
-            synchronized (writer) {
-                writer.appendHr(
-                    hr,
-                    rmssd,
-                    sdnnMatch != null ? sdnnMatch : 0.0,
-                    sdnn5min != null ? sdnn5min : 0.0,
-                    sdnnFull != null ? sdnnFull : 0.0,
-                    rrMs,
-                    now);
-                if (pick.beat) writer.appendStrapHr(strapHr, now);
-            }
+            writer.appendHr(
+                hr,
+                rmssd,
+                sdnnMatch != null ? sdnnMatch : 0.0,
+                sdnn5min != null ? sdnn5min : 0.0,
+                sdnnFull != null ? sdnnFull : 0.0,
+                rrMs,
+                now);
             int consec = writer.getConsecutiveFailures();
             if (consec == CSV_FAIL_ALERT_THRESHOLD) {
                 JSONObject err = putSafe(new JSONObject(), "kind", "csv");

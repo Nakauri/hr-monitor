@@ -60,7 +60,6 @@ const jstr = (s) => s.replace(/\\\\/g, '\u0000').replace(/\\"/g, '"').replace(/\
 // Spec section 2: kind -> field names after t.
 const SPEC_KINDS = {
   h: 3, c: 1, g: 2, e: 1, p: 2, s: 1, w: 2, x: 0, z: 1, k: 1,
-  y: 1,
 };
 const SPEC_NAME_REGEX = '^hrm_(\\d{8})T(\\d{2})Z_([a-z0-9]{6})\\.csv$';
 
@@ -94,7 +93,6 @@ for (const [k, n] of Object.entries(SPEC_KINDS)) {
 }
 check('no kind beyond the spec table', Object.keys(kinds).every(k => k in SPEC_KINDS), Object.keys(kinds).join(''));
 check('h fields are hr, rmssd, rr', kinds.h && kinds.h.join(',') === 'hr,rmssd,rr', kinds.h && kinds.h.join(','));
-check('y field is strapHr', kinds.y && kinds.y.join(',') === 'strapHr', kinds.y && kinds.y.join(','));
 const factKinds = (w.match(/FACT_KINDS\s*=\s*"([^"]*)"/) || [])[1];
 check('appendFact accepts e p s w x only', factKinds === 'epswx', String(factKinds));
 
@@ -264,40 +262,6 @@ if (symLabel) {
   check('s row reads back as kind s with one field sym:symptom', parts.length === 2 + SPEC_KINDS.s && parts[0] === 's' && parts[2] === 'sym:symptom', row);
 }
 
-// A viewer function by name from src. A declaration at line start: the Worker source holds same-named functions
-// inside string literals.
-function grabV(src, name) {
-  const dm = new RegExp('^[ \\t]*function ' + name + '\\(', 'm').exec(src);
-  const i = dm ? dm.index : -1;
-  if (i < 0) return '';
-  const j = src.indexOf('{', src.indexOf(')', i));
-  let d = 0;
-  for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; if (src[k] === '}' && !--d) return src.slice(i, k + 1); }
-  return '';
-}
-const constV = (src, name) => (src.match(new RegExp('^\\s*(?:const|let) ' + name + ' = [^\\n]*;', 'm')) || [''])[0];
-// Runs the named viewer functions, then tail, in a fresh context; each missing global is pulled from src by name.
-// Returns the context, or err.
-function runViewer(src, names, globals, tail) {
-  const vmod = require('vm');
-  let code = names.map((n) => grabV(src, n)).join('\n');
-  const have = new Set();
-  for (let attempt = 0; attempt < 80; attempt++) {
-    const ctx = vmod.createContext({ console, Math, JSON, Map, Set, Date, Number, String, Array, Object, parseFloat, parseInt, isNaN, isFinite, Infinity, NaN,
-      localStorage: { getItem() { return null; }, setItem() {} }, window: {}, document: { getElementById() { return null; } }, ...globals });
-    try {
-      vmod.runInContext(code + '\n;' + tail, ctx);
-      return { ctx };
-    } catch (e) {
-      const m = String(e && e.message).match(/^(\w+) is not defined$/);
-      if (!m || have.has(m[1])) return { err: e };
-      have.add(m[1]);
-      code = (grabV(src, m[1]) || constV(src, m[1])) + '\n' + code;
-    }
-  }
-  return { err: null };
-}
-
 // ---- Marks store (S9): the real writer, then the viewer's reader --------------
 // The JVM writes facts with SegmentWriter.writeFact; the grabbed viewer reads them back. A rev hides a row by
 // (ep, kind, label), so ep must survive exactly and the JS label rule must equal SegmentWriter.clean.
@@ -355,11 +319,32 @@ ${LABELS.map(l => `    System.out.println("clean " + Base64.getEncoder().encodeT
     const [, segName, segB64] = fileLine ? fileLine.split(' ') : [];
     const segText = segB64 ? Buffer.from(segB64, 'base64').toString('utf8') : '';
     // The viewer's own reader and summary, pulled out by name.
-    const { ctx: vctx, err } = runViewer(viewerSrc, ['parseSegmentV2', 'v2SessionCsv', 'summarizeCSV'], { __seg: segText, __name: segName },
-      'globalThis.__seg2 = parseSegmentV2(__seg, __name);\n' +
-      "const __sid = __seg2.rows.find(r => r.k === 'g').f[0] * 1;\n" +
-      "globalThis.__sum = summarizeCSV('v2:probe', v2SessionCsv(__sid, __seg2.rows));");
-    const out = vctx ? { seg: vctx.__seg2, sum: vctx.__sum } : null;
+    const grabV = (name) => {
+      const i = viewerSrc.indexOf('function ' + name + '(');
+      const j = viewerSrc.indexOf('{', viewerSrc.indexOf(')', i));
+      let d = 0;
+      for (let k = j; k < viewerSrc.length; k++) { if (viewerSrc[k] === '{') d++; if (viewerSrc[k] === '}' && !--d) return viewerSrc.slice(i, k + 1); }
+      return '';
+    };
+    const constV = (name) => (viewerSrc.match(new RegExp('^\\s*(?:const|let) ' + name + ' = [^\\n]*;', 'm')) || [''])[0];
+    let code = ['parseSegmentV2', 'v2SessionCsv', 'summarizeCSV'].map(grabV).join('\n');
+    const have = new Set();
+    let out = null, err = null;
+    for (let attempt = 0; attempt < 80 && !out; attempt++) {
+      const ctx = vmod.createContext({ console, Math, JSON, Map, Set, Date, Number, String, Array, Object, parseFloat, parseInt, isNaN, isFinite, Infinity, NaN,
+        localStorage: { getItem() { return null; }, setItem() {} }, window: {}, document: { getElementById() { return null; } }, __seg: segText, __name: segName });
+      try {
+        vmod.runInContext(code + '\n;globalThis.__seg2 = parseSegmentV2(__seg, __name);\n' +
+          "const __sid = __seg2.rows.find(r => r.k === 'g').f[0] * 1;\n" +
+          "globalThis.__sum = summarizeCSV('v2:probe', v2SessionCsv(__sid, __seg2.rows));", ctx);
+        out = { seg: ctx.__seg2, sum: ctx.__sum };
+      } catch (e) {
+        const m = String(e && e.message).match(/^(\w+) is not defined$/);
+        if (!m || have.has(m[1])) { err = e; break; }
+        have.add(m[1]);
+        code = (grabV(m[1]) || constV(m[1])) + '\n' + code;
+      }
+    }
     check('viewer reads the written segment', !!out, err ? String(err.message) : '');
     if (out) {
       const facts = out.seg.rows.filter(r => r.k === 's' || r.k === 'e');
@@ -376,32 +361,6 @@ ${LABELS.map(l => `    System.out.println("clean " + Base64.getEncoder().encodeT
       JSON.stringify(javaClean.map((v, i) => v === jsClean[i] ? 'ok' : [v, jsClean[i]])));
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
-  }
-}
-
-// ---- y rows (S54): the viewer skips them; h rows and the session CSV are unchanged ----
-{
-  const vsrc = viewer.replace(/\r\n/g, '\n');
-  const base = Date.UTC(2026, 0, 5, 3, 0, 0), sid = base + 1000;
-  const rows = ['#hrm,v=2,base=' + base + ',tz=-420,app=1.0,dev=synthetic,flavour=personal', 'g,1000,' + sid + ',start', 'c,1500,connected'];
-  const withY = rows.slice();
-  for (let i = 0; i < 40; i++) {
-    const t = 2000 + i * 1000, beat = i >= 5 && i < 20;
-    const h = 'h,' + t + ',' + (beat ? 150 + (i % 3) : 80 + (i % 4)) + ',' + (i < 3 ? '' : (30 + i / 4).toFixed(2)) + ',' + (beat ? '400;402' : (750 + i) + '');
-    rows.push(h); withY.push(h);
-    if (beat) withY.push('y,' + t + ',' + (80 + (i % 4)));
-  }
-  const name = 'hrm_20260105T03Z_abc123.csv';
-  const { ctx, err } = runViewer(vsrc, ['parseSegmentV2', 'v2SessionCsv'], { __a: rows.join('\n') + '\n', __b: withY.join('\n') + '\n', __name: name, __sid: sid },
-    'globalThis.__pa = parseSegmentV2(__a, __name); globalThis.__pb = parseSegmentV2(__b, __name);\n' +
-    'globalThis.__ca = v2SessionCsv(__sid, __pa.rows); globalThis.__cb = v2SessionCsv(__sid, __pb.rows);');
-  const res = ctx ? { pa: ctx.__pa, pb: ctx.__pb, ca: ctx.__ca, cb: ctx.__cb } : null;
-  check('viewer parses a synthetic segment with and without y rows', !!res, err ? String(err.message) : '');
-  if (res) {
-    const hs = (p) => JSON.stringify(p.rows.filter((r) => r.k === 'h'));
-    check('y rows: parsed h rows identical (' + res.pa.rows.filter((r) => r.k === 'h').length + ')', hs(res.pa) === hs(res.pb));
-    check('y rows: no y row survives parseSegmentV2', !res.pb.rows.some((r) => r.k === 'y') && withY.length - rows.length === 15);
-    check('y rows: v2SessionCsv byte-identical with and without y rows', typeof res.ca === 'string' && res.ca.length > 0 && res.ca === res.cb);
   }
 }
 

@@ -3,9 +3,9 @@ package com.nakauri.hrmonitor;
 import java.io.File;
 import java.io.IOException;
 
-// Writes every row to the legacy CSV and the v2 segment, except y rows, which go to the segment only.
-// The legacy writer alone answers every file, status and failure getter, so resume, snapshot, trickle upload
-// and status() see the legacy file. A throw on one side is caught here and never reaches the other. Pure Java.
+// Writes every row to the legacy CSV and the v2 segment. The legacy writer alone answers every
+// file, status and failure getter, so resume, snapshot, trickle upload and status() see the legacy file.
+// A throw on one side is caught here and never reaches the other. Pure Java.
 public final class TeeSink implements HrSink {
     public interface SegmentOpener {
         SegmentWriter open() throws IOException;
@@ -77,14 +77,6 @@ public final class TeeSink implements HrSink {
             SegmentWriter s = seg(tsMs);
             if (s != null) s.appendHr(hr, rmssd, sdnnMatch, sdnn5min, sdnnFull, rrMs, tsMs);
         } catch (Throwable t) { segmentFailed("hr", t); }
-    }
-
-    @Override
-    public synchronized void appendStrapHr(int strapHr, long tsMs) {
-        try {
-            SegmentWriter s = seg(tsMs);
-            if (s != null) s.appendStrapHr(strapHr, tsMs);
-        } catch (Throwable t) { segmentFailed("y", t); }
     }
 
     @Override

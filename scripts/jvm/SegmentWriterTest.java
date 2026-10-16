@@ -56,7 +56,6 @@ public class SegmentWriterTest {
     static {
         FIELDS.put("h", 3); FIELDS.put("c", 1); FIELDS.put("g", 2); FIELDS.put("e", 1); FIELDS.put("p", 2);
         FIELDS.put("s", 1); FIELDS.put("w", 2); FIELDS.put("x", 0); FIELDS.put("z", 1); FIELDS.put("k", 1);
-        FIELDS.put("y", 1);
     }
 
     static final List<File> made = new ArrayList<>();
@@ -146,8 +145,6 @@ public class SegmentWriterTest {
         lastZOnReopen();
         failingStreamNoDuplicates();
         stopInsideBackoff();
-        strapHrRows();
-        strapHrHoldBlocksRoll();
         for (File d : made) deleteTree(d);
         System.out.println();
         System.out.println(passes + " passed, " + failures + " failed");
@@ -474,108 +471,6 @@ public class SegmentWriterTest {
         public long getSessionStartMs() { return 1234L; }
         public int getConsecutiveFailures() { return 7; }
         public int getTotalFailures() { return 9; }
-    }
-
-    // Records appendStrapHr, which FakeLegacy leaves to the interface default.
-    static final class StrapSpyLegacy implements HrSink {
-        final List<String> calls = new ArrayList<>();
-        final File file = new File("hrv_session_2026-10-09T10-00-00.000.csv");
-        public void appendHr(int hr, Double r, double a, double b, double c, int[] rr, long ts) { calls.add("hr " + hr); }
-        public void appendStrapHr(int strapHr, long ts) { calls.add("y " + strapHr); }
-        public void appendConnection(String s, long ts) { calls.add("c " + s); }
-        public void appendFact(String k, String[] f, long ts) { calls.add("fact " + k); }
-        public void appendSession(long id, String w, long ts) { calls.add("g " + w); }
-        public void close() { calls.add("close"); }
-        public File getFile() { return file; }
-        public String getFilename() { return file.getName(); }
-        public long getSessionStartMs() { return 1234L; }
-        public int getConsecutiveFailures() { return 0; }
-        public int getTotalFailures() { return 0; }
-    }
-
-    // S54: y,<t>,<strapHr> follows its h row, in the same file, and never reaches the legacy CSV.
-    static void strapHrRows() throws Exception {
-        File dir = freshDir("strap");
-        Log log = new Log();
-        FakeClock c = new FakeClock(ms("2026-10-09T06:10:00Z"));
-        SegmentWriter w = writer(dir, "abc123", c, UTC, log);
-        long sid = c.wall;
-        w.appendSession(sid, "start", c.wall);
-        w.appendHr(152, 30.0, 0, 0, 0, new int[] { 400, 402 }, c.wall);
-        w.appendStrapHr(87, c.wall);
-        w.close();
-        List<String> ls = lines(segFiles(dir)[0]);
-        check("y: appendStrapHr(87, t) writes y,<t-base>,87 right after its h row",
-            ls.size() == 4 && ls.get(2).startsWith("h,600000,152,") && ls.get(3).equals("y,600000,87"), ls.toString());
-        check("y: rows well formed", badRows(segFiles(dir)[0]).isEmpty(), badRows(segFiles(dir)[0]).toString());
-
-        File dir2 = freshDir("strap-tee");
-        FakeClock c2 = new FakeClock(ms("2026-10-09T06:59:59.500Z"));
-        StrapSpyLegacy legacy = new StrapSpyLegacy();
-        SegmentWriter seg = writer(dir2, "abc123", c2, UTC, log);
-        TeeSink tee = new TeeSink(legacy, seg, null, c2, log);
-        long t = c2.wall;
-        tee.appendSession(t, "start", t);
-        tee.appendHr(150, null, 0, 0, 0, new int[] { 400 }, t);
-        c2.advance(700);
-        tee.appendStrapHr(88, t);
-        tee.appendHr(151, null, 0, 0, 0, new int[] { 400 }, c2.wall);
-        tee.close();
-        File[] fs = segFiles(dir2);
-        List<String> a = fs.length > 0 ? lines(fs[0]) : new ArrayList<>();
-        check("y: tee forwards to the segment", fs.length == 2 && a.contains("y,3599500,88"), fs.length + " " + a);
-        check("y: written across the hour boundary, y lands in its h row's file, next to it",
-            fs.length == 2 && fs[0].getName().equals("hrm_20261009T06Z_abc123.csv") && a.indexOf("y,3599500,88") == a.size() - 1
-                && a.get(a.size() - 2).startsWith("h,3599500,150,"), a.toString());
-        check("y: the legacy writer gets no y", !legacy.calls.toString().contains("y "), legacy.calls.toString());
-        check("y: legacy still gets the h rows", legacy.calls.contains("hr 150") && legacy.calls.contains("hr 151"), legacy.calls.toString());
-        HrSink plain = new FakeLegacy();
-        plain.appendStrapHr(90, t);
-        check("y: the HrSink default is a no-op", ((FakeLegacy) plain).calls.isEmpty());
-    }
-
-    // S54: HrEngine.onHr writes h and y inside synchronized (writer). A roll from the segment tick thread then
-    // waits for both rows; without the hold the roll closes the hour between them and y opens the next file alone.
-    static void strapHrHoldBlocksRoll() throws Exception {
-        Log log = new Log();
-        File dir = freshDir("strap-hold");
-        FakeClock c = new FakeClock(ms("2026-10-09T06:59:59.500Z"));
-        TeeSink tee = new TeeSink(new FakeLegacy(), writer(dir, "abc123", c, UTC, log), null, c, log);
-        long t = c.wall;
-        tee.appendSession(t, "start", t);
-        Thread roll;
-        boolean blocked;
-        synchronized (tee) {
-            tee.appendHr(150, null, 0, 0, 0, new int[] { 400 }, t);
-            c.advance(700);
-            roll = new Thread(() -> tee.rollIfDue(c.wall));
-            roll.start();
-            roll.join(300);
-            blocked = roll.isAlive();
-            tee.appendStrapHr(88, t);
-        }
-        roll.join(5000);
-        tee.close();
-        File[] fs = segFiles(dir);
-        List<String> a = lines(fs[0]);
-        check("y hold: the roll waits while the engine holds the tee", blocked);
-        check("y hold: y lands right after its h row in the h row's hour", fs.length == 1 && fs[0].getName().equals("hrm_20261009T06Z_abc123.csv")
-            && a.get(a.size() - 1).equals("y,3599500,88") && a.get(a.size() - 2).startsWith("h,3599500,150,"), Arrays.toString(fs) + " " + a);
-
-        File dir2 = freshDir("strap-nohold");
-        FakeClock c2 = new FakeClock(ms("2026-10-09T06:59:59.500Z"));
-        TeeSink tee2 = new TeeSink(new FakeLegacy(), writer(dir2, "abc123", c2, UTC, log), null, c2, log);
-        long t2 = c2.wall;
-        tee2.appendSession(t2, "start", t2);
-        tee2.appendHr(150, null, 0, 0, 0, new int[] { 400 }, t2);
-        c2.advance(700);
-        tee2.rollIfDue(c2.wall);
-        tee2.appendStrapHr(88, t2);
-        tee2.close();
-        File[] fs2 = segFiles(dir2);
-        check("y hold: without it a roll between the rows strands y in the next file (the hazard the hold closes)",
-            fs2.length == 2 && lines(fs2[1]).stream().anyMatch(l -> l.startsWith("y,")) && lines(fs2[0]).stream().noneMatch(l -> l.startsWith("y,")),
-            fs2.length + " files");
     }
 
     static final class ThrowingSegment extends SegmentWriter {

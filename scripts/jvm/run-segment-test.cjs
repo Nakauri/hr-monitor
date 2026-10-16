@@ -11,7 +11,6 @@
 //   no-drop        a failed write keeps its buffer and writes it twice (ENOSPC)
 //   skip-uncounted / stop-obeys-backoff   rows refused in the backoff go unlogged, or g,stop is lost
 //   read-no-flush / read-past-capture / read-keeps-partial / list-raw-size / read-any-name   B-b2 reader
-//   no-y-kind      KINDS lacks the y row, so appendStrapHr throws (S54)
 // Run: node scripts/jvm/run-segment-test.cjs   (exit 0 = test passes AND every mutant fails)
 
 const fs = require('fs');
@@ -46,7 +45,6 @@ const MUTANTS = {
   'read-keeps-partial': ['SegmentReader.java', "while (end > 0 && buf[end - 1] != '\\n') end--;", ''],
   'list-raw-size': ['SegmentReader.java', 'lastLfLength(f, cap), f.lastModified()', 'cap, f.lastModified()'],
   'read-any-name': ['SegmentReader.java', 'return name != null && SegmentWriter.NAME_PATTERN.matcher(name).matches();', 'return name != null;'],
-  'no-y-kind': ['SegmentWriter.java', '        { "y", "strapHr" },\n', ''],
 };
 
 function run(label, mutant) {
@@ -58,8 +56,7 @@ function run(label, mutant) {
     fs.mkdirSync(outDir);
     const paths = [];
     for (const f of FILES) {
-      // LF so multi-line anchors match on a CRLF checkout.
-      let text = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\r\n/g, '\n');
+      let text = fs.readFileSync(path.join(SRC, f), 'utf8');
       if (mutant && mutant[0] === f) {
         if (!text.includes(mutant[1])) return { ok: false, out: 'mutation anchor not found: ' + mutant[1], anchorMissing: true };
         text = text.replace(mutant[1], mutant[2]);
