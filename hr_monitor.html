@@ -2064,6 +2064,7 @@
     pageVisible = !document.hidden;
     if (!pageVisible) {
       lastHiddenAt = Date.now();
+      if (window.HRMLog) window.HRMLog.event('lc vis=hidden');
       // Free GPU memory while backgrounded. Chart.js canvases hold ~320 MB
       // of GL buffers in long sessions.
       destroyCharts();
@@ -2087,6 +2088,10 @@
       && window.HRMNativeHrSession
       && window.HRMNativeHrSession.isPublishing
       && window.HRMNativeHrSession.isPublishing();
+    const visPath = needsRehydrate && __hrLifecycle
+      ? (__hrLifecycle.getState() === 'recovering' ? 'skip-recovering' : 'rehydrate')
+      : (window.HRMRestoreOverlay ? 'hide' : 'none');
+    if (window.HRMLog) window.HRMLog.event('lc vis=visible path=' + visPath + ' hiddenMs=' + (wasHidden ? hiddenMs : -1));
     if (needsRehydrate && __hrLifecycle) {
       // Controller shows the overlay, rehydrates, dismisses on completion.
       if (window.HRMLog) window.HRMLog.event('resume rehydrate', { hiddenSec: Math.round(hiddenMs / 1000) });

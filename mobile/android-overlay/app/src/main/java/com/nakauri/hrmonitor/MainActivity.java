@@ -1,5 +1,6 @@
 package com.nakauri.hrmonitor;
 
+import android.app.KeyguardManager;
 import android.content.ComponentCallbacks2;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -7,6 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
 import android.util.TypedValue;
@@ -68,7 +70,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(RestoreOverlayPlugin.class);
         super.onCreate(savedInstanceState);
 
-        showRestoreOverlay();
+        showRestoreOverlay("create");
 
         // Renderer-recovery WebViewClient. Long sessions can OOM Chromium's
         // renderer; reloading the page in place beats Activity teardown.
@@ -159,9 +161,22 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onStart() {
+        super.onStart();
+        logLifecycleAsync("activity_start");
+    }
+
+    @Override
     public void onStop() {
         super.onStop();
         stoppedAtMs = SystemClock.elapsedRealtime();
+        logLifecycleAsync("activity_stop");
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        logLifecycleAsync("window_focus has=" + hasFocus);
     }
 
     // Shows the overlay only after a stop past RESUME_OVERLAY_MIN_STOP_MS: a resume with no
@@ -172,6 +187,7 @@ public class MainActivity extends BridgeActivity {
         try {
             long stoppedForMs = stoppedAtMs > 0L ? SystemClock.elapsedRealtime() - stoppedAtMs : -1L;
             stoppedAtMs = 0L;
+            logResumeContext();
             // Source of truth: the engine's AtomicBoolean. The prefs are
             // last-write-wins crash anchors, used only before the engine exists.
             HrEngine e = HrEngine.peek();
@@ -187,7 +203,7 @@ public class MainActivity extends BridgeActivity {
             }
             boolean show = active && !cleanly && stoppedForMs > RESUME_OVERLAY_MIN_STOP_MS;
             logLifecycleAsync("overlay_resume show=" + show + " stopped_ms=" + (stoppedForMs < 0L ? "none" : String.valueOf(stoppedForMs)));
-            if (show) showRestoreOverlay();
+            if (show) showRestoreOverlay("resume");
         } catch (Throwable t) {
             Log.w(TAG, "onResume overlay check failed: " + t.getMessage());
         }
@@ -287,12 +303,24 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private void logResumeContext() {
+        boolean keyguard = false;
+        boolean interactive = true;
+        try {
+            KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+            if (km != null) keyguard = km.isKeyguardLocked();
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null) interactive = pm.isInteractive();
+        } catch (Throwable ignored) {}
+        logLifecycleAsync("resume_ctx keyguard=" + keyguard + " interactive=" + interactive);
+    }
+
     // Idempotent. No-ops when the overlay is already attached. Always
     // re-arms the safety timer so a stale onResume can't strand the user.
-    public void showRestoreOverlay() {
+    public void showRestoreOverlay(String why) {
         overlayShownAtMs.compareAndSet(0L, System.currentTimeMillis());
         runOnUiThread(() -> {
-            logLifecycleAsync("overlay_shown");
+            logLifecycleAsync("overlay_shown why=" + why);
             try {
                 if (restoreOverlay != null && restoreOverlay.getParent() != null) {
                     armRestoreSafetyTimer();

@@ -978,18 +978,21 @@ function overlayChecks() {
   const tryBlk = tryAt >= 0 ? blockFrom(rb, tryAt) : null;
   check('[S56] the stop read and the show sit inside the onResume try',
     !!tryBlk && !!dur && rb.indexOf(dur[0]) > tryBlk[0] && shows.length === 1 && shows[0] < tryBlk[1]);
-  check('[S56] onResume logs overlay_resume show= stopped_ms=',
-    /logLifecycleAsync\s*\(\s*"overlay_resume show="\s*\+\s*\w+\s*\+\s*" stopped_ms="/.test(rraw));
+  check('[S56] onResume logs overlay_resume show= stopped_ms= and resume_ctx',
+    /logLifecycleAsync\s*\(\s*"overlay_resume show="\s*\+\s*\w+\s*\+\s*" stopped_ms="/.test(rraw) && /logResumeContext\s*\(\s*\)/.test(rb)
+      && /"resume_ctx keyguard="[^;]*" interactive="/.test(A));
   const cre = methodSpans(ac, 'public\\s+void\\s+onCreate')[0];
   const craw = cre ? A.slice(cre[0], cre[1]) : '';
-  check('[S56] onCreate still shows unconditionally',
-    /\n\s*showRestoreOverlay\s*\(\s*\)\s*;/.test(craw) && !/if\s*\([^)]*\)\s*\{?\s*showRestoreOverlay/.test(craw));
+  check('[S56] onCreate still shows unconditionally (why=create)',
+    /\n\s*showRestoreOverlay\s*\(\s*"create"\s*\)\s*;/.test(craw) && !/if\s*\([^)]*\)\s*\{?\s*showRestoreOverlay/.test(craw));
   check('[S56] the 60 s fence is unchanged and armed on every show',
     /static\s+final\s+long\s+OVERLAY_SAFETY_MS\s*=\s*60000L\s*;/.test(ac) && /postDelayed\s*\(\s*restoreSafetyTimer\s*,\s*OVERLAY_SAFETY_MS\s*\)/.test(ac));
+  check('[S56] activity_stop, activity_start, window_focus and overlay_shown why= are logged',
+    ['"activity_stop"', '"activity_start"', '"window_focus has="', '"overlay_shown why="'].every(t => A.includes(t)));
   const logs = [...ac.matchAll(/NativeHrService\s*\.\s*logLifecycle\s*\(/g)].map(m => m.index);
   const lla = methodSpans(ac, 'private\\s+void\\s+logLifecycleAsync')[0];
   const sto = methodSpans(ac, 'private\\s+void\\s+hideRestoreOverlayBySafetyTimer')[0];
-  check('[S56] lifecycle lines go through logLifecycleAsync (off the UI thread)',
+  check('[S56] new lifecycle lines go through logLifecycleAsync (off the UI thread)',
     !!lla && /LIFECYCLE_LOG\s*\.\s*execute\s*\(/.test(ac.slice(lla[0], lla[1]))
       && logs.every(i => (i > lla[0] && i < lla[1]) || (!!sto && i > sto[0] && i < sto[1])), 'logLifecycle calls: ' + logs.length);
 }

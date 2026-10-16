@@ -87,14 +87,18 @@
     }
 
     let state = 'idle';
+    let stateSince = Date.now();
     let unsubPublishing = null;
     let pendingRecovery = null;
     let lateLiveUnsub = null;
     let disposed = false;
 
     function setState(next) {
+      const now = Date.now();
+      if (state === 'rehydrating' || state === 'recovering') log('lc left ' + state + ' ms=' + (now - stateSince));
       log('lifecycle: ' + state + ' -> ' + next);
       state = next;
+      stateSince = now;
     }
 
     function dismiss(reason) {

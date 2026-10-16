@@ -27,13 +27,13 @@
   }
 
   // ----- Persistent log buffer ------------------------------------------
-  // Ring buffer of the last 60 entries, persisted to localStorage so a
+  // Ring buffer of the last 300 entries, persisted to localStorage so a
   // native Android crash + restart still surfaces the prelude. Anything
   // routed through HRMLog.* shows up in the diagnostics modal's "Recent
   // events" section and in the clipboard copy. Plus we hook window.onerror
   // and onunhandledrejection so uncaught failures land here automatically.
   const LOG_KEY = 'hrm_log_v1';
-  const LOG_MAX = 60;
+  const LOG_MAX = 300;
   function readLog() {
     try { return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }
     catch (e) { return []; }

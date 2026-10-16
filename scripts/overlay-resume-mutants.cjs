@@ -9,19 +9,21 @@ const FILES = ['.github/workflows/build-android.yml', 'hr_monitor.html', 'mobile
   'mobile/android-overlay/app/test-hooks.gradle', 'mobile/scripts/inject-manifest.js', 'mobile/src/native-pdf.js', L];
 const M = {
   'show-every-resume': [A, 'boolean show = active && !cleanly && stoppedForMs > RESUME_OVERLAY_MIN_STOP_MS;', 'boolean show = active && !cleanly;'],
-  'show-ungated': [A, 'if (show) showRestoreOverlay();', 'showRestoreOverlay();'],
-  'second-show': [A, 'if (show) showRestoreOverlay();', 'if (show) showRestoreOverlay();\n            else if (active) showRestoreOverlay();'],
+  'show-ungated': [A, 'if (show) showRestoreOverlay("resume");', 'showRestoreOverlay("resume");'],
+  'second-show': [A, 'if (show) showRestoreOverlay("resume");', 'if (show) showRestoreOverlay("resume");\n            else if (active) showRestoreOverlay("resume");'],
   'stop-wall-clock': [A, 'stoppedAtMs = SystemClock.elapsedRealtime();', 'stoppedAtMs = System.currentTimeMillis();'],
   'stop-not-recorded': [A, 'stoppedAtMs = SystemClock.elapsedRealtime();', ''],
   'stop-never-cleared': [A, '            stoppedAtMs = 0L;\n', ''],
   'threshold-drift': [A, 'RESUME_OVERLAY_MIN_STOP_MS = 60000L;', 'RESUME_OVERLAY_MIN_STOP_MS = 5000L;'],
   'js-threshold-drift': [L, "opts.resumeOverlayMs : 60000;", "opts.resumeOverlayMs : 30000;"],
-  'cold-start-gated': [A, '\n        showRestoreOverlay();', '\n        if (stoppedAtMs > 0L) showRestoreOverlay();'],
+  'cold-start-gated': [A, '\n        showRestoreOverlay("create");', '\n        if (stoppedAtMs > 0L) showRestoreOverlay("create");'],
   'fence-moved': [A, 'OVERLAY_SAFETY_MS = 60000L;', 'OVERLAY_SAFETY_MS = 120000L;'],
   'no-decision-line': [A, 'logLifecycleAsync("overlay_resume show=" + show + " stopped_ms="', 'Log.d(TAG, "overlay_resume show=" + show + " stopped_ms="'],
-  'log-on-ui-thread': [A, 'logLifecycleAsync("overlay_shown");', 'NativeHrService.logLifecycle(MainActivity.this, "overlay_shown");'],
-  'show-outside-try': [A, '            if (show) showRestoreOverlay();\n        } catch (Throwable t) {\n            Log.w(TAG, "onResume overlay check failed: " + t.getMessage());\n        }',
-    '        } catch (Throwable t) {\n            Log.w(TAG, "onResume overlay check failed: " + t.getMessage());\n        }\n        if (stoppedAtMs == 0L) showRestoreOverlay();'],
+  'log-on-ui-thread': [A, 'logLifecycleAsync("activity_stop");', 'NativeHrService.logLifecycle(this, "activity_stop");'],
+  'no-resume-ctx': [A, '            logResumeContext();\n', ''],
+  'no-focus-line': [A, 'logLifecycleAsync("window_focus has=" + hasFocus);', ''],
+  'show-outside-try': [A, '            if (show) showRestoreOverlay("resume");\n        } catch (Throwable t) {\n            Log.w(TAG, "onResume overlay check failed: " + t.getMessage());\n        }',
+    '        } catch (Throwable t) {\n            Log.w(TAG, "onResume overlay check failed: " + t.getMessage());\n        }\n        if (stoppedAtMs == 0L) showRestoreOverlay("resume");'],
 };
 function copyTree(dst) {
   for (const f of fs.readdirSync(path.join(WT, J))) fs.mkdirSync(path.join(dst, J), { recursive: true }), fs.copyFileSync(path.join(WT, J, f), path.join(dst, J, f));
