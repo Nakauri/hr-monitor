@@ -1400,10 +1400,14 @@
     .datenav .btn, .interp-edit, .interp-kebab { display: none !important; }
   }
 
-  /* Large text: fitBar() drops the Syncing word, the Share word, the wordmark text, then the logo, so every control stays 44 px. */
+  /* fitBar() drops the Syncing word, the Share word, the wordmark text, the Monitor word, the logo, then Monitor, so every control stays 44 px. */
   .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark, .vbar.tight-0 .sync .sync-lbl, .vbar.tight-3 .brand { display: none; }
   .vbar.tight-3 .vsel { margin-left: 0; }
   .vbar.tight-1 .share-btn, .vbar.tight-0.syncing .sync { width: 44px; padding: 0; }
+  .vbar.tight-mon .monitor-link { width: 44px; padding: 0; }
+  .vbar.tight-mon .monitor-link .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .vbar.tight-mon .monitor-link:not(.is-live) .ico { display: inline-block; }
+  .vbar.tight-4 .monitor-link { display: none; }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -1420,12 +1424,14 @@
       min-height: 100vh;
       overflow: auto;
     }
-    /* Phone bar: wordmark, view select, Drive cloud, Share, gear. */
+    /* Phone bar: wordmark, Monitor, view select, Drive cloud, Share, gear. */
     .vbar { padding: 0 var(--s1) 0 var(--s3); gap: 0; }
     .vbar .brand { margin-right: 0; }
     .vbar .wordmark { font-size: 15px; }
-    .vbar .monitor-link, .view-tabs { display: none; }
-    .vsel { display: flex; margin-left: var(--s3); }
+    .view-tabs { display: none; }
+    .vbar .monitor-link { min-width: 44px; justify-content: center; }
+    .vbar .monitor-link .ico { display: none; }
+    .vsel { display: flex; margin-left: 0; }
     .vbar.syncing .sync { width: 44px; padding: 0; }
     .vbar.syncing .sync .sync-lbl { display: none; }
     .vbar .share-btn { order: 1; margin-left: 0; padding: 0 var(--s2); gap: 6px; }
@@ -4931,7 +4937,7 @@
     if (sel) sel.value = cur;
     fitBar();
   }
-  // Large text: drop the Syncing word, the Share word, the wordmark text, then the logo, until the bar fits.
+  // Drop the Syncing word, the Share word, the wordmark text, the Monitor word, the logo, then Monitor (the select has it), until the bar fits.
   function fitBar() {
     const bar = document.getElementById('app-bar');
     if (!bar) return;
@@ -4942,8 +4948,8 @@
       share.classList.toggle('primary', !phone);
       share.classList.toggle('ghost', phone);
     }
-    bar.classList.remove('tight-0', 'tight-1', 'tight-2', 'tight-3');
-    for (const c of ['tight-0', 'tight-1', 'tight-2', 'tight-3']) {
+    bar.classList.remove('tight-0', 'tight-1', 'tight-2', 'tight-mon', 'tight-3', 'tight-4');
+    for (const c of ['tight-0', 'tight-1', 'tight-2', 'tight-mon', 'tight-3', 'tight-4']) {
       if (bar.scrollWidth <= bar.clientWidth + 1) break;
       if (c === 'tight-0' && !bar.classList.contains('syncing')) continue;
       bar.classList.add(c);

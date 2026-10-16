@@ -451,6 +451,12 @@ try {
     // S23: the logo is the last thing fitBar drops (tight-3), only when nothing else is left to drop.
     const tight3 = await page.evaluate(() => document.getElementById('app-bar').classList.contains('tight-3'));
     ok(scale === 2 || !tight3, `${tag}: logo ${tight3 ? 'dropped' : 'kept'}`);
+    // S55: the Monitor link stays on the phone bar; only 200% text drops it to the select's Monitor option.
+    const mon = await page.evaluate(() => { const l = document.getElementById('monitor-link'); const r = l.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right), hit: !!(hit && l.contains(hit)), href: l.getAttribute('href'), name: l.textContent.trim() }; });
+    if (scale === 1) ok(mon.w >= 44 && mon.h >= 44 && mon.right <= 360 && mon.hit && mon.href === './hr_monitor.html' && mon.name === 'Monitor', `${tag}: Monitor link ${mon.w}x${mon.h}, tappable, named ${mon.name}`);
+    else ok(mon.w > 0 || (await page.$('#view-select-monitor')), `${tag}: Monitor reachable (link or select option)`);
     for (const [s, w, h, right] of sizes) if (!(tight3 && s === '.vbar .brand')) ok(w >= 44 && h >= 44 && right <= 360, `${tag}: ${s} ${w}x${h} inside the bar (right ${right})`);
     const order = await page.evaluate(() => ['#drive-cloud', '#export-report', '#viewer-settings-btn'].map((s) => document.querySelector(s).getBoundingClientRect().left));
     ok(order[0] < order[1] && order[1] < order[2], `${tag}: cloud, Share, gear in order`);
