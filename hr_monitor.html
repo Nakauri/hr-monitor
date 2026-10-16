@@ -2640,8 +2640,9 @@
 
   // Strap signal check. It only flags; it never changes a shown or recorded value.
   const SIGNAL_WINDOW_MS = 60000, SIGNAL_GRACE_MS = 20000, SIGNAL_MIN_BEATS = 30;
-  const SIGNAL_SHOW = 0.15, SIGNAL_HIDE = 0.10, SIGNAL_TOL_BPM = 40;
-  const signal = { beats: [], pending: null, liveSince: 0, shown: false, bound: false };
+  // Each change waits 60 s in its band: real HR changes outrun the strap's HR byte for shorter spells.
+  const SIGNAL_SHOW = 0.35, SIGNAL_HIDE = 0.20, SIGNAL_TOL_BPM = 40, SIGNAL_SUSTAIN_MS = 60000;
+  const signal = { beats: [], pending: null, liveSince: 0, shown: false, bound: false, since: 0 };
   function signalShow(on, share) {
     signal.shown = on;
     const row = document.getElementById('signal-row');
@@ -2660,6 +2661,7 @@
   function signalReset() {
     signal.beats = [];
     signal.pending = null;
+    signal.since = 0;
     if (signal.shown) signalShow(false, null);
   }
   // Junk: outside 250 to 2500 ms, or off the strap's own HR by over 40 bpm and not a short-long ectopic pair.
@@ -2689,8 +2691,10 @@
     let junk = 0;
     for (const b of signal.beats) if (b.junk) junk++;
     const share = junk / n;
-    if (!signal.shown && share >= SIGNAL_SHOW) signalShow(true, share);
-    else if (signal.shown && share < SIGNAL_HIDE) signalShow(false, share);
+    const inBand = signal.shown ? share < SIGNAL_HIDE : share >= SIGNAL_SHOW;
+    if (!inBand) { signal.since = 0; return; }
+    if (!signal.since) signal.since = nowMs;
+    if (nowMs - signal.since >= SIGNAL_SUSTAIN_MS) { signal.since = 0; signalShow(!signal.shown, share); }
   }
 
   function onHRNotification(event) {
