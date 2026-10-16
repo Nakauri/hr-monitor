@@ -45,6 +45,7 @@
 <script src="./widget.js"></script>
 <script>HRWidget.watchPhoneLayout();</script>
 <script src="./lifecycle-state.js"></script>
+<script src="./hr-source.js"></script>
 <link rel="stylesheet" href="./widget.css">
 <link rel="stylesheet" href="./ui.css">
 <script src="./ui.js"></script>
@@ -1566,6 +1567,9 @@
     audioOn: true,
     autoReconnect: false,
   };
+  // Runs on every Web Bluetooth stream, desktop or the app's ble-adapter; native sessions show the engine's pick (HrSourcePolicy.java).
+  const webHrSource = { policy: window.HrSource ? window.HrSource.create() : null, start: null, errAt: 0 };
+  if (!webHrSource.policy) { try { if (window.HRMLog) window.HRMLog.event('hr_source missing', 'showing the strap byte'); } catch (e) {} }
   const thresholds = { high: 130, low: 55, rmssd: 15, palpPerMin: 5 };
 
   const $ = id => document.getElementById(id);
@@ -2631,6 +2635,17 @@
   function processHRData(hr, rrs, contactSupported, contactDetected, engineRmssd) {
     // Guard against notifications arriving before startTime is set
     if (state.startTime == null) state.startTime = Date.now();
+    if (engineRmssd === undefined && webHrSource.policy) {
+      if (webHrSource.start !== state.startTime) { webHrSource.start = state.startTime; webHrSource.policy.reset(); }
+      // A throw shows the strap byte and logs at most once a minute, as HrEngine.onHr does.
+      try { hr = webHrSource.policy.onPacket(hr, rrs, Date.now()).shown; } catch (e) {
+        const since = Date.now() - webHrSource.errAt;
+        if (since < 0 || since >= 60000) {
+          webHrSource.errAt = Date.now();
+          try { if (window.HRMLog) window.HRMLog.event('hr_source error', (e && e.name) || String(e)); } catch (e2) {}
+        }
+      }
+    }
     const now = (Date.now() - state.startTime) / 60000;
     // Skin-contact state: only flip classes when the strap actually reports
     // the field (many don't). Sustained-contact-lost gating could live here
@@ -4647,6 +4662,7 @@
     const service = await server.getPrimaryService(HR_SERVICE);
     char = await service.getCharacteristic(HR_CHAR);
     await char.startNotifications();
+    if (webHrSource.policy) webHrSource.policy.linkLive();
     char.addEventListener('characteristicvaluechanged', onHRNotification);
     setStatus('Connected to ' + (device.name || 'device') + '. Streaming live.', 'connected');
     setConnState('live');

@@ -27,6 +27,7 @@ public class SegmentWriter implements HrSink {
     // Kind letter, then the field names after t.
     static final String[][] KINDS = {
         { "h", "hr", "rmssd", "rr" },
+        { "y", "strapHr" },
         { "c", "state" },
         { "g", "sessionId", "what" },
         { "e", "label" },
@@ -450,6 +451,11 @@ public class SegmentWriter implements HrSink {
             }
         }
         writeRow("h", tsMs, String.valueOf(hr), rmssdField, rr.toString());
+    }
+
+    @Override
+    public synchronized void appendStrapHr(int strapHr, long tsMs) {
+        writeRow("y", tsMs, String.valueOf(strapHr));
     }
 
     @Override
