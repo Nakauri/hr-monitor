@@ -213,7 +213,7 @@ check('stop closes the sink only inside the lock', (codeView(stop).match(/snap\.
 check('stop flushes the pending fact log counts', /flushFactLogs\(\)/.test(stop));
 
 // Facts: clamped timestamps, per-minute log counts for x and w.
-const logFact = body(eng, '\\bString\\s+logFact\\s*\\(') || '';
+const logFact = body(eng, '\\bJSONObject\\s+logFact\\s*\\(') || '';
 check('logFact clamps the fact time with SegmentWriter.clampFactTs', /SegmentWriter\.clampFactTs\(/.test(logFact));
 check('x and w facts log a per-minute count', /"x"\.equals\(letter\)\s*\|\|\s*"w"\.equals\(letter\)[\s\S]*?countFactLog\(/.test(logFact));
 check('clamp window is 15 min back, 5 s ahead',
@@ -245,7 +245,7 @@ const lf = body(plug, 'public\\s+void\\s+logFact\\s*\\(\\s*PluginCall') || '';
 check('plugin logFact found', lf.length > 0);
 check('logFact catches Throwable and rejects with a string', /catch\s*\(\s*Throwable\s+\w+\s*\)\s*\{\s*call\.reject\("[^"]*"\s*\+/.test(lf));
 check('logFact rejects bad_kind and no_session, resolves written',
-  /"bad_kind"/.test(lf) && /"no_session"/.test(lf) && /call\.reject\(r\)/.test(lf) && /put\("written"/.test(lf));
+  /"bad_kind"/.test(lf) && /"no_session"/.test(lf) && /call\.reject\(status\)/.test(lf) && /put\("written"/.test(lf));
 
 // ---- s row: the symptom mark (S4b) -------------------------------------------
 // The phone's Log row Symptom (and later the notification Symptom) writes s,<t>,sym:<kind>; Note writes e.
