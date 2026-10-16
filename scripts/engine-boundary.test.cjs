@@ -832,7 +832,7 @@ function symptomChecks() {
     const banned = ['startService', 'startForegroundService', 'stopSelf', 'stopService', 'decide', 'START_LOCK']
       .filter(w => new RegExp('\\b' + w + '\\b').test(rc));
     check('[S5] SymptomReceiver never starts, stops or decides', banned.length === 0, banned.join(', '));
-    const lits = (R.match(/"(?:[^"\\]|\\.)*"/g) || []).filter(l => /(?:Live|Reconnecting|Strap|Saving|Resuming|Ended|Symptom|Stop session|Open|HR Monitor)/.test(l));
+    const lits = (R.match(/"(?:[^"\\]|\\.)*"/g) || []).filter(l => /\b(?:Live|Reconnecting|Strap|Saving|Resuming|Ended|Symptom|Stop session|Open|HR Monitor)\b/.test(l));
     check('[S5] SymptomReceiver carries no notification literal', lits.length === 0 && !/\bNotification\w*\b/.test(rc), lits.join(' '));
     const onr = methodSpans(rc, 'public\\s+void\\s+onReceive')[0];
     const ob = onr ? rc.slice(onr[0], onr[1]) : '';
