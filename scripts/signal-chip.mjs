@@ -9,7 +9,7 @@
 // path (page computes RMSSD) is byte-identical too.
 // Usage: node scripts/signal-chip.mjs [--mutant <name>] [--shots <dir>] [--ux <dir>]. Mutants: no-hysteresis, no-threshold,
 // ectopic-junk, dim-without-chip, chip-without-dim, stale-since, thin-never-hides, alters-hr, alters-rr.
-// Each mutant must FAIL. Runtime: about 20 seconds.
+// shared-timer, grey-hrv. Each mutant must FAIL. Runtime: about 20 seconds.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -30,11 +30,13 @@ const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwr
 const CALL = '    try { signalFeed(hr, rrs); } catch (e) {}\n';
 const MUTANTS = {
   'no-hysteresis': ['SIGNAL_HIDE = 0.20, SIGNAL_TOL_BPM = 40, SIGNAL_SUSTAIN_MS = 60000', 'SIGNAL_HIDE = 0.35, SIGNAL_TOL_BPM = 40, SIGNAL_SUSTAIN_MS = 0'],
-  'no-threshold': ['share >= SIGNAL_SHOW', 'share >= 0'],
+  'no-threshold': ['if (share < SIGNAL_SHOW)', 'if (share < 0)'],
   'ectopic-junk': ['if (pair) { push(false); continue; }', 'if (pair) { push(true); continue; }'],
   'dim-without-chip': ["document.body.classList.toggle('signal-poor', on);", "document.body.classList.toggle('signal-poor', true);"],
   'chip-without-dim': ["document.body.classList.toggle('signal-poor', on);", "document.body.classList.toggle('signal-poor', false);"],
-  'stale-since': ['if (signal.lastAt && nowMs - signal.lastAt > SIGNAL_GAP_MS) signal.since = 0;', ''],
+  'stale-since': ['if (signal.lastAt && nowMs - signal.lastAt > SIGNAL_GAP_MS) signalRestartShow();', ''],
+  'shared-timer': ['  function signalRestartShow() {\n    signal.showSince = 0;', '  function signalRestartShow() {\n    signal.showSince = 0; signal.hideSince = 0;'],
+  'grey-hrv': ['  body.signal-poor #overlay-zone #hr-widget .compact-hrv-unit', '  body.signal-poor #overlay-zone #hr-widget .compact-hrv-value { color: var(--text-dim); }\n  body.signal-poor #overlay-zone #hr-widget .compact-hrv-unit'],
   'thin-never-hides': ['else if (nowMs - signal.thinSince >= SIGNAL_SUSTAIN_MS)', 'else if (false)'],
   'alters-hr': ['const base = 60000 / hr;', 'const base = 60000 / hr; state.hrSeries[state.hrSeries.length - 1].v = Math.round(hr * 0.9);'],
   'alters-rr': ['const base = 60000 / hr;', 'const base = 60000 / hr; state.rrBuffer = state.rrBuffer.filter((b) => b.rr > 450);'],
@@ -43,9 +45,9 @@ const mutant = argVal('--mutant');
 if (mutant && !MUTANTS[mutant]) { console.log('FAIL unknown mutant ' + mutant); process.exit(2); }
 
 const WWW = path.join(ROOT, 'mobile', 'www');
-const src = fs.existsSync(path.join(WWW, 'hr_monitor.html')) ? fs.readFileSync(path.join(WWW, 'hr_monitor.html'), 'utf8') : '';
+const src = fs.existsSync(path.join(WWW, 'hr_monitor.html')) ? fs.readFileSync(path.join(WWW, 'hr_monitor.html'), 'utf8').replace(/\r\n/g, '\n') : '';
 if (!src.includes(CALL)) { console.log('FAIL mobile/www/hr_monitor.html missing or stale: run npm run copy-web in mobile'); process.exit(1); }
-const webSrc = fs.readFileSync(path.join(ROOT, 'hr_monitor.html'), 'utf8');
+const webSrc = fs.readFileSync(path.join(ROOT, 'hr_monitor.html'), 'utf8').replace(/\r\n/g, '\n');
 const mutate = (html) => {
   if (!mutant) return html;
   const [a, b] = MUTANTS[mutant];
@@ -153,12 +155,16 @@ async function open(file, web) {
 
 const tile = async (page) => { await page.waitForTimeout(600); return page.evaluate(() => {
   const v = document.getElementById('compact-hrv-value'), f = document.getElementById('compact-hrv-flag');
-  const probe = document.createElement('span'); probe.style.color = 'var(--text-dim)'; v.parentNode.appendChild(probe);
-  const dim = getComputedStyle(probe).color; probe.remove();
+  const poor = document.body.classList.contains('signal-poor');
+  v.style.transition = 'none';
   const color = getComputedStyle(v).color;
-  return { poor: document.body.classList.contains('signal-poor'), flag: !!f && getComputedStyle(f).display !== 'none' && f.textContent === 'unreliable', dimmed: color === dim, color, dim };
+  document.body.classList.toggle('signal-poor', !poor);
+  const other = getComputedStyle(v).color;
+  document.body.classList.toggle('signal-poor', poor);
+  v.style.transition = '';
+  return { poor, flag: !!f && getComputedStyle(f).display !== 'none' && f.textContent === 'unreliable', same: color === other, color, other };
 }); };
-const tileOk = (t, on) => (on ? t.poor && t.flag && t.dimmed : !t.poor && !t.flag && !t.dimmed);
+const tileOk = (t, on) => t.same && (on ? t.poor && t.flag : !t.poor && !t.flag);
 const feed = (page, s, kind, seed) => page.evaluate(([a, b, c]) => window.__feed(a, b, c), [s, kind, seed]);
 
 {
@@ -173,7 +179,7 @@ const feed = (page, s, kind, seed) => page.evaluate(([a, b, c]) => window.__feed
   if (!r.shown) pass('(b) 50% junk for 50 s: not yet (needs 60 s sustained)'); else fail('(b) chip showed before the share held 60 s');
   r = await feed(page, 60, 'junk50', 2);
   if (r.shown && r.flips === 1) pass('(b) 50% junk: chip shows'); else fail(`(b) 50% junk: shown=${r.shown} flips=${r.flips}`);
-  { const t = await tile(page); if (tileOk(t, true)) pass('(b) HRV tile unreliable'); else fail('(b) HRV tile ' + JSON.stringify(t)); }
+  { const t = await tile(page); if (tileOk(t, true)) pass('(b) HRV keeps its colour, unreliable line shows'); else fail('(b) HRV tile ' + JSON.stringify(t)); }
   await page.waitForTimeout(300);
   const chip = await page.evaluate(() => ({ text: document.getElementById('signal-chip').textContent, live: document.getElementById('status-announce').textContent }));
   if (chip.text === 'Readjust strap' && chip.live === 'Readjust strap') pass('(b) chip text and polite announcement'); else fail('(b) chip text ' + JSON.stringify(chip));
@@ -209,10 +215,24 @@ const feed = (page, s, kind, seed) => page.evaluate(([a, b, c]) => window.__feed
   if (!r.shown && !r2.shown) pass('(j) a 10 s packet gap restarts the 60 s show timer'); else fail(`(j) gap: shown=${r.shown || r2.shown}`);
   r = await feed(page, 40, 'junk50', 16);
   if (r.shown) pass('(j) chip shows once junk holds 60 s after the gap'); else fail('(j) chip never showed after the gap');
+  // (l) Gaps over 5 s and HR 0 packets must not hold a shown chip on a clean signal.
+  {
+    let hid = false, ms = 0;
+    for (let k = 0; k < 4 && !hid; k++) {
+      await feed(page, 44, 'clean', 20 + k);
+      await page.evaluate(() => { window.__shift(6000); window.__hrCb({ hr: 0, rrIntervals: [], rmssd: 108, timestampMs: Date.now(), contactOff: false }); });
+      ms += 50000;
+      hid = await page.evaluate(() => document.getElementById('signal-row').hidden);
+    }
+    if (hid && ms <= 150000) pass(`(l) clean beats with a 6 s gap and an HR 0 packet every 50 s: chip hides by ${ms / 1000} s`);
+    else fail(`(l) chip still shown after ${ms / 1000} s of clean beats with gaps and HR 0 packets`);
+  }
+  r = await feed(page, 130, 'junk50', 17);
+  if (!r.shown) fail('(k) setup: chip did not show again');
   await page.evaluate(() => { const F = window.__fake; F.snapshot = JSON.parse(JSON.stringify(F.states.RECONNECTING)); document.dispatchEvent(new Event('visibilitychange')); });
   await page.waitForFunction(() => !document.body.classList.contains('conn-live'), null, { timeout: 8000 }).catch(() => {});
   { const t = await tile(page); const hid = await page.evaluate(() => document.getElementById('signal-row').hidden);
-    if (hid && tileOk(t, false)) pass('(k) reconnecting clears the chip and the dim'); else fail('(k) after reconnecting: hidden=' + hid + ' ' + JSON.stringify(t)); }
+    if (hid && tileOk(t, false)) pass('(k) reconnecting clears the chip and the unreliable line'); else fail('(k) after reconnecting: hidden=' + hid + ' ' + JSON.stringify(t)); }
   if (errs.length) fail('page errors: ' + errs.join(' | '));
   await ctx.close();
 }

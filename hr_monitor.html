@@ -830,7 +830,6 @@
   html.restoring #overlay-zone #hr-widget :is(.big-number, .compact-hrv-value),
   body.status-dim #overlay-zone #hr-widget :is(.big-number, .compact-hrv-value) { color: var(--text-dim); }
   #hr-widget .compact-hrv-flag { display: none; margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--reconnecting); }
-  body.signal-poor #overlay-zone #hr-widget .compact-hrv-value { color: var(--text-dim); }
   body.signal-poor #overlay-zone #hr-widget .compact-hrv-unit { display: none; }
   body.signal-poor #overlay-zone #hr-widget .compact-hrv-flag { display: block; }
 
@@ -1237,7 +1236,7 @@
     <span class="sr-only" id="status-announce" aria-live="polite"></span>
     <div class="ui signal-row" id="signal-row" hidden>
       <button type="button" class="signal-chip" id="signal-chip" aria-expanded="false" aria-controls="signal-detail"><span class="badge"><span class="dot" aria-hidden="true"></span>Readjust strap</span></button>
-      <p class="signal-detail" id="signal-detail">Many beats look impossible. Wet the pads and snug the strap. If it stays, check the strap battery.</p>
+      <p class="signal-detail" id="signal-detail">Many readings from the strap look impossible. Wet the pads and snug the strap. If it stays, check the strap battery.</p>
     </div>
 
     <div class="ui session-ctl">
@@ -2642,9 +2641,12 @@
   // Each change waits 60 s in its band: real HR changes outrun the strap's HR byte for shorter spells.
   const SIGNAL_SHOW = 0.35, SIGNAL_HIDE = 0.20, SIGNAL_TOL_BPM = 40, SIGNAL_SUSTAIN_MS = 60000;
   const SIGNAL_GAP_MS = 5000;
-  const signal = { beats: [], pending: null, liveSince: 0, shown: false, bound: false, since: 0, thinSince: 0, lastAt: 0 };
+  const signal = { beats: [], pending: null, liveSince: 0, shown: false, bound: false, showSince: 0, hideSince: 0, thinSince: 0, lastAt: 0, announce: 0 };
   function signalShow(on, share) {
     signal.shown = on;
+    signal.showSince = 0;
+    signal.hideSince = 0;
+    clearTimeout(signal.announce);
     const row = document.getElementById('signal-row');
     const chip = document.getElementById('signal-chip');
     if (chip && !signal.bound) {
@@ -2655,20 +2657,26 @@
     document.body.classList.toggle('signal-poor', on);
     if (chip && !on) chip.setAttribute('aria-expanded', 'false');
     const live = document.getElementById('status-announce');
-    if (live && on) { live.textContent = ''; setTimeout(function () { live.textContent = 'Readjust strap'; }, 100); }
+    if (live && on) { live.textContent = ''; signal.announce = setTimeout(function () { live.textContent = 'Readjust strap'; }, 100); }
     if (window.HRMLog) window.HRMLog.event('signal ' + (on ? 'poor' : 'ok'), { share: share == null ? null : Math.round(share * 100) / 100 });
   }
   function signalReset() {
     signal.beats = [];
     signal.pending = null;
-    signal.since = 0;
+    signal.showSince = 0;
+    signal.hideSince = 0;
     signal.thinSince = 0;
+    clearTimeout(signal.announce);
     signal.lastAt = 0;
     if (signal.shown) signalShow(false, null);
   }
+  // Gaps and unjudgeable packets restart only the show timer; the hide timer keeps running.
+  function signalRestartShow() {
+    signal.showSince = 0;
+  }
   // A shown chip with too few beats to judge clears after 60 s.
   function signalThin(nowMs) {
-    signal.since = 0;
+    signalRestartShow();
     if (!signal.shown) { signal.thinSince = 0; return; }
     if (!signal.thinSince) signal.thinSince = nowMs;
     else if (nowMs - signal.thinSince >= SIGNAL_SUSTAIN_MS) { signal.thinSince = 0; signalShow(false, null); }
@@ -2676,9 +2684,9 @@
   // Junk: outside 250 to 2500 ms, or off the strap's own HR by over 40 bpm and not a short-long ectopic pair.
   function signalFeed(hr, rrs) {
     const nowMs = Date.now();
-    if (signal.lastAt && nowMs - signal.lastAt > SIGNAL_GAP_MS) signal.since = 0;
+    if (signal.lastAt && nowMs - signal.lastAt > SIGNAL_GAP_MS) signalRestartShow();
     signal.lastAt = nowMs;
-    if (state.connState !== 'live') { signal.since = 0; return; }
+    if (state.connState !== 'live') { signalRestartShow(); return; }
     const cut = nowMs - SIGNAL_WINDOW_MS;
     while (signal.beats.length && signal.beats[0].t < cut) signal.beats.shift();
     if (!(hr > 0) || nowMs - signal.liveSince < SIGNAL_GRACE_MS) { signalThin(nowMs); return; }
@@ -2704,10 +2712,15 @@
     let junk = 0;
     for (const b of signal.beats) if (b.junk) junk++;
     const share = junk / n;
-    const inBand = signal.shown ? share < SIGNAL_HIDE : share >= SIGNAL_SHOW;
-    if (!inBand) { signal.since = 0; return; }
-    if (!signal.since) signal.since = nowMs;
-    if (nowMs - signal.since >= SIGNAL_SUSTAIN_MS) { signal.since = 0; signalShow(!signal.shown, share); }
+    if (signal.shown) {
+      if (share >= SIGNAL_HIDE) { signal.hideSince = 0; return; }
+      if (!signal.hideSince) signal.hideSince = nowMs;
+      if (nowMs - signal.hideSince >= SIGNAL_SUSTAIN_MS) signalShow(false, share);
+    } else {
+      if (share < SIGNAL_SHOW) { signal.showSince = 0; return; }
+      if (!signal.showSince) signal.showSince = nowMs;
+      if (nowMs - signal.showSince >= SIGNAL_SUSTAIN_MS) signalShow(true, share);
+    }
   }
 
   function onHRNotification(event) {
