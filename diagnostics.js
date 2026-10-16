@@ -544,13 +544,20 @@
         oldestEl.textContent = '—';
       }
     }
-    // clearLocalCache deletes every local CSV except the one the live session writes.
+    // clearLocalCache deletes only recordings Drive holds in full, never the live one.
     async function clearableCount() {
       const s = await shim().getCacheStats();
       const n = Number(s && s.count) || 0;
       const live = typeof shim().isPublishing === 'function' && shim().isPublishing()
         && typeof shim().getCsvFilename === 'function' && /\.csv$/.test(shim().getCsvFilename() || '');
       return Math.max(0, n - (live ? 1 : 0));
+    }
+    function clearNote(r) {
+      if (!r) return '';
+      if (r.drive === 'none') return 'Nothing deleted. Without Drive, this phone holds the only copy.';
+      if (r.drive === 'unreachable') return 'Nothing deleted. Drive could not be checked.';
+      const k = Number(r.kept) || 0;
+      return k ? 'Kept ' + k + (k === 1 ? ' recording' : ' recordings') + ' not yet on Drive.' : '';
     }
     refreshCacheStats();
     $('hrm-cache-refresh').addEventListener('click', refreshCacheStats);
@@ -566,11 +573,13 @@
       }
       const what = n == null ? 'every recording' : n + (n === 1 ? ' recording' : ' recordings');
       const go = await window.UI.confirm({ anchor: $('hrm-cache-actions'), key: 'diag', danger: true, title: 'Clear cache',
-        text: 'Deletes ' + what + ' from this phone, including any not yet on Drive', confirmLabel: 'Delete' });
+        text: 'Deletes ' + what + ' from this phone once Drive has a copy. Any not yet on Drive stay.', confirmLabel: 'Delete' });
       if (!go || !cacheClearBtn.isConnected) return;
       try {
         const r = await shim().clearLocalCache();
         cacheClearBtn.textContent = (r && r.deleted != null) ? `Cleared ${r.deleted}` : 'Cleared';
+        const note = clearNote(r);
+        if (note) window.UI.toast(note);
         setTimeout(() => { cacheClearBtn.textContent = 'Clear cache'; refreshCacheStats(); }, 1200);
       } catch (e) {
         cacheClearBtn.textContent = 'Failed';

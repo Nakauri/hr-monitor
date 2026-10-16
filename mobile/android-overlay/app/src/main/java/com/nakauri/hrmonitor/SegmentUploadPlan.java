@@ -107,10 +107,14 @@ public final class SegmentUploadPlan {
         if (driveMaxSizes == null) return -1;
         int n = 0;
         for (Map.Entry<String, Long> e : localSizes.entrySet()) {
-            Long d = driveMaxSizes.get(e.getKey());
-            if (e.getValue() > (d != null ? d : 0L)) n++;
+            if (!legacyOnDrive(e.getValue(), driveMaxSizes.get(e.getKey()))) n++;
         }
         return n;
+    }
+
+    // A legacy file is on Drive when a same-name Drive copy is at least its size (missing = 0).
+    public static boolean legacyOnDrive(long localSize, Long driveMaxSize) {
+        return localSize <= (driveMaxSize != null ? driveMaxSize : 0L);
     }
 
     public static String legacyPendingText(int n) { return n < 0 ? "unknown" : String.valueOf(n); }

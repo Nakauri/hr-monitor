@@ -55,7 +55,7 @@ const MUTANTS = {
   // L7: a signed-out pass is counted as a zero read.
   'legacy-signed-out-zero': ['SegmentUploader.java', 'if (countLegacy) log.log("legacy_pending n=unknown");', 'if (countLegacy) log.log("legacy_pending n=0");'],
   // L7: a legacy file missing from Drive is not counted.
-  'legacy-missing-uncounted': ['SegmentUploadPlan.java', 'if (e.getValue() > (d != null ? d : 0L)) n++;', 'if (d != null && e.getValue() > d) n++;'],
+  'legacy-missing-uncounted': ['SegmentUploadPlan.java', 'return localSize <= (driveMaxSize != null ? driveMaxSize : 0L);', 'return driveMaxSize == null || localSize <= driveMaxSize;'],
   // L8: the pass is removed while local legacy files still exist.
   'guard-ignores-local': ['SegmentUploadPlan.java', 'return localLegacyFiles > 0 || signedInZeroReads < 2;', 'return signedInZeroReads < 2;'],
   // K11: cleanup trusts the name alone.
@@ -125,7 +125,8 @@ function run(label, mutant) {
     fs.mkdirSync(outDir);
     const paths = [];
     for (const f of FILES) {
-      let text = fs.readFileSync(path.join(SRC, f), 'utf8');
+      // LF so multi-line anchors match on a CRLF checkout.
+      let text = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\r\n/g, '\n');
       if (mutant && mutant[0] === f) {
         if (!text.includes(mutant[1])) return { ok: false, out: 'mutation anchor not found: ' + mutant[1], anchorMissing: true };
         text = text.replace(mutant[1], mutant[2]);

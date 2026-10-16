@@ -1345,12 +1345,11 @@ public final class HrEngine implements HrDevice.Callback {
      */
     public void clearLocalCache(Done<JSONObject> done) {
         try {
-            ioExecutor.execute(() -> {
+            new Thread(() -> {
                 boolean settled = false;
                 try {
                     java.io.File sessionsDir = new java.io.File(appCtx.getFilesDir(), "sessions");
-                    int deleted = uploader.clearLocalCache(sessionsDir);
-                    JSONObject ret = putSafe(new JSONObject(), "deleted", deleted);
+                    JSONObject ret = uploader.clearLocalCache(sessionsDir);
                     settled = true;
                     done.ok(ret);
                 } catch (Throwable t) {
@@ -1359,7 +1358,7 @@ public final class HrEngine implements HrDevice.Callback {
                 } finally {
                     if (!settled) done.fail("internal");
                 }
-            });
+            }, "hrm-cache-clear").start();
         } catch (Throwable t) {
             done.fail("clearLocalCache failed: " + t.getMessage());
         }

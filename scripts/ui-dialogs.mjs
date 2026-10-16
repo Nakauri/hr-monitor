@@ -191,6 +191,27 @@ try {
     if (!n || +n[1] !== 4) fail(`clear cache: confirm says "${info.text}", expected 4 (5 local CSVs, 1 live)`);
     else ok(`clear cache: N = ${n[1]} (5 local CSVs minus the live one)`);
     if (!/not yet on Drive/.test(info.text)) fail('clear cache: "not yet on Drive" missing');
+    // S55 ledger 24: the result line says what was kept, on top of the open sheet.
+    for (const [res, want] of [[{ deleted: 2, kept: 2, drive: 'ok' }, 'Kept 2 recordings not yet on Drive.'],
+      [{ deleted: 0, kept: 4, drive: 'none' }, 'Nothing deleted. Without Drive, this phone holds the only copy.'],
+      [{ deleted: 0, kept: 4, drive: 'unreachable' }, 'Nothing deleted. Drive could not be checked.']]) {
+      await page.evaluate((r) => { window.Capacitor.Plugins.NativeHrSession.clearLocalCache = () => Promise.resolve(r); }, res);
+      if (!(await page.locator('#hrm-diag-overlay').count())) await diagOpen(page);
+      await page.locator('#hrm-diag-overlay #hrm-cache-clear').scrollIntoViewIfNeeded();
+      await page.locator('#hrm-diag-overlay #hrm-cache-clear').click();
+      await page.locator('.confirm:not(#stop-confirm) .btn.danger').click();
+      await page.waitForSelector('.toast-host .toast');
+      const t = await page.evaluate(() => {
+        const el = document.querySelector('.toast-host .toast');
+        const r = el.getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { text: el.innerText.trim(), onTop: !!(top && el.contains(top)) };
+      });
+      if (t.text !== want) fail(`clear cache ${res.drive}: toast "${t.text}", expected "${want}"`);
+      else if (!t.onTop) fail(`clear cache ${res.drive}: toast is under the sheet`);
+      else ok(`clear cache ${res.drive}: toast "${t.text}" on top`);
+      await page.evaluate(() => document.querySelectorAll('.toast-host .toast').forEach((e) => e.remove()));
+    }
     await diagCase(page, 'hrm-diag-clearauth', 'signOut', 'clear auth state');
     if (errors.length) fail('monitor diagnostics errors: ' + errors.join(' | '));
     await ctx.close();

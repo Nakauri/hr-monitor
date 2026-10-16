@@ -210,19 +210,31 @@ public class NativeDriveUploader {
         return new long[] { count, bytes, oldest };
     }
 
-    // Deletes every non-active CSV. Returns count.
-    public int clearLocalCache(File sessionsDir) {
-        if (sessionsDir == null || !sessionsDir.isDirectory()) return 0;
-        File[] files = sessionsDir.listFiles();
-        if (files == null) return 0;
-        String activeName = sessionFilenameRef.get();
-        int deleted = 0;
-        for (File f : files) {
-            if (!f.isFile() || !f.getName().endsWith(".csv")) continue;
-            if (activeName != null && f.getName().equals(activeName)) continue;
-            if (f.delete()) deleted++;
+    // Deletes only non-active CSVs Drive holds in full. {deleted, kept, drive: ok | none | unreachable}.
+    public JSONObject clearLocalCache(File sessionsDir) throws org.json.JSONException {
+        String drive = "none";
+        java.util.Map<String, Long> driveSizes = null;
+        try {
+            if (AuthStorage.isSignedIn(context)) {
+                drive = "unreachable";
+                String token = AuthStorage.getValidAccessToken(context);
+                String folderId = token != null ? getOrFetchFolderIdSync(token) : null;
+                java.util.Map<String, DriveFileInfo> files = folderId != null ? listDriveFiles(token, folderId) : null;
+                if (files != null) {
+                    driveSizes = new java.util.HashMap<>();
+                    for (java.util.Map.Entry<String, DriveFileInfo> e : files.entrySet()) driveSizes.put(e.getKey(), e.getValue().size);
+                    drive = "ok";
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "clearLocalCache: Drive lookup failed, deleting nothing: " + t.getMessage());
         }
-        return deleted;
+        java.util.Set<String> skip = new java.util.HashSet<>(FINALIZING);
+        String activeName = sessionFilenameRef.get();
+        if (activeName != null) skip.add(activeName);
+        int[] r = CacheClear.run(sessionsDir, skip, driveSizes);
+        Log.i(TAG, "clearLocalCache drive=" + drive + " deleted=" + r[0] + " kept=" + r[1]);
+        return new JSONObject().put("deleted", r[0]).put("kept", r[1]).put("drive", drive);
     }
 
     // Per-file Drive metadata. id is needed for PATCH (size-mismatch repair),
