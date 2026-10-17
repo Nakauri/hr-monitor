@@ -4012,7 +4012,7 @@
   // Try to find a previously-paired device without prompting. Requires the
   // user to have chrome://flags/#enable-web-bluetooth-new-permissions-backend
   // enabled. Returns null if unavailable — caller falls back to requestDevice.
-  async function findPairedDevice(preferredName) {
+  async function findPairedDevice(preferredName, exact) {
     if (!navigator.bluetooth.getDevices) return null;
     try {
       const devs = await navigator.bluetooth.getDevices();
@@ -4021,6 +4021,7 @@
         const match = devs.find(d => d.name === preferredName);
         if (match) return match;
       }
+      if (exact) return null;
       return devs[0];
     } catch (e) { return null; }
   }
@@ -4053,13 +4054,14 @@
     }
     // Find a strap ignores the remembered one: no paired shortcut, no name filter.
     const last = pick ? null : ((opts && opts.strap) || getLastStrap());
-    if (pick) device = null;
+    const chosen = !!(opts && opts.strap);
+    if (pick || chosen) device = null;
     try {
       // Fast path: if the browser remembers a previously-paired device with a
       // matching name, connect straight to it — no picker UI. Falls back to the
       // normal requestDevice flow if the permissions-backend flag isn't enabled.
       if (last && last.name) {
-        const paired = await findPairedDevice(last.name);
+        const paired = await findPairedDevice(last.name, chosen);
         if (paired) {
           setStatus('Reconnecting to ' + paired.name + '...');
           device = paired;
