@@ -500,65 +500,150 @@
         };
       },
       // Picker modal. Returns Promise<{mac, name}> with a .cancel() method.
+      // Straps = HR evidence from the scan or bonded UUIDs, or a strap the monitor already knows; the rest sit behind a disclosure.
       showPicker: function () {
         let cancelFn = null;
         let cancelled = false;
         let backdropEl = null;
         const p = new Promise(function (resolve, reject) {
-          cancelFn = function () {
-            if (cancelled) return;
-            cancelled = true;
+          function close() {
             if (backdropEl && backdropEl.parentNode) {
               try { backdropEl.parentNode.removeChild(backdropEl); } catch (e) {}
-              backdropEl = null;
             }
-            reject(new Error('cancelled'));
-          };
-          plugin.scan({ timeoutMs: 10000 }).then(function (r) {
+            backdropEl = null;
+          }
+          function finish(err, val) {
             if (cancelled) return;
-            const devices = (r && r.devices) || [];
-            const hr = devices.filter(function (d) { return d.isHr; });
-            const list = hr.length ? hr : devices;
-            if (!list.length) { reject(new Error('No devices found')); return; }
-
-            const backdrop = document.createElement('div');
-            backdropEl = backdrop;
-            backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;';
+            cancelled = true;
+            close();
+            if (err) reject(err); else resolve(val);
+          }
+          cancelFn = function () { finish(new Error('cancelled')); };
+          function knownMacs() {
+            try {
+              const l = JSON.parse(localStorage.getItem('hr_monitor_straps') || '[]');
+              return (Array.isArray(l) ? l : []).map(function (x) { return x && x.mac ? String(x.mac).toUpperCase() : ''; }).filter(Boolean);
+            } catch (e) { return []; }
+          }
+          function css() {
+            if (document.getElementById('hrm-picker-css')) return;
+            const st = document.createElement('style');
+            st.id = 'hrm-picker-css';
+            st.textContent = [
+              '.hrm-pick-back{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;}',
+              '.hrm-pick{box-sizing:border-box;display:flex;flex-direction:column;width:100%;max-width:420px;max-height:calc(100vh - 32px);padding:16px;background:var(--bg-raised,#101010);border:1px solid var(--border,#1f1f1f);border-radius:var(--r-card,12px);color:var(--text,#d8d8d8);font-family:var(--ui-face,sans-serif);}',
+              '.hrm-pick h2{margin:0 0 12px;font-size:var(--t16,16px);font-weight:700;}',
+              '.hrm-pick-body{display:flex;flex-direction:column;gap:8px;min-height:0;overflow-y:auto;}',
+              '.hrm-pick-group{margin:4px 0 0;font-size:var(--t12,12px);font-weight:600;color:var(--text-dim,#8a8a8a);}',
+              '.hrm-pick-row{box-sizing:border-box;display:flex;flex-direction:column;align-items:flex-start;flex-shrink:0;width:100%;min-height:44px;padding:10px 12px;margin:0;background:var(--bg,#0a0a0a);border:1px solid var(--border,#1f1f1f);border-radius:var(--r-ctl,6px);color:inherit;font:inherit;font-size:var(--t14,14px);text-align:left;cursor:pointer;white-space:normal;}',
+              '.hrm-pick-row .n{font-weight:600;overflow-wrap:anywhere;max-width:100%;}',
+              '.hrm-pick-row .m{display:inline-flex;align-items:center;gap:6px;margin-top:2px;font-size:var(--t12,12px);color:var(--text-dim,#8a8a8a);}',
+              '.hrm-pick-row .m svg{width:14px;height:12px;}',
+              '.hrm-pick details{flex-shrink:0;display:flex;flex-direction:column;}',
+              '.hrm-pick summary{min-height:44px;display:flex;align-items:center;font-size:var(--t14,14px);color:var(--text-dim,#8a8a8a);cursor:pointer;}',
+              '.hrm-pick summary::-webkit-details-marker{display:none;}',
+              '.hrm-pick summary::after{content:"";width:7px;height:7px;margin-left:10px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-2px) rotate(45deg);}',
+              '.hrm-pick details[open] summary::after{transform:translateY(2px) rotate(-135deg);}',
+              '.hrm-pick details .hrm-pick-row{margin-top:8px;}',
+              '.hrm-pick-help{margin:0;font-size:var(--t14,14px);line-height:1.4;}',
+              '.hrm-pick-btn{box-sizing:border-box;flex-shrink:0;min-height:44px;width:100%;margin-top:12px;padding:0 14px;background:transparent;border:1px solid var(--border-control,#666);border-radius:var(--r-ctl,6px);color:var(--text,#d8d8d8);font:inherit;font-size:var(--t14,14px);font-weight:600;cursor:pointer;}',
+            ].join('\n');
+            document.head.appendChild(st);
+          }
+          function bars(rssi) {
+            const n = rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1;
+            let svg = '<svg viewBox="0 0 14 12" role="img" aria-label="Signal ' + n + ' of 4">';
+            for (let i = 0; i < 4; i++) {
+              svg += '<rect x="' + (i * 4) + '" y="' + (9 - i * 3) + '" width="2.5" height="' + (3 + i * 3) + '" rx=".5" fill="currentColor" opacity="' + (i < n ? 1 : 0.25) + '"/>';
+            }
+            return svg + '</svg>';
+          }
+          function row(d) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'hrm-pick-row';
+            btn.title = d.mac || '';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = d.name || 'Unnamed device';
+            const m = document.createElement('span');
+            m.className = 'm';
+            if (d.bonded) m.textContent = 'Paired before';
+            else m.innerHTML = 'Nearby ' + bars(d.rssi);
+            btn.appendChild(n);
+            btn.appendChild(m);
+            btn.addEventListener('click', function () { finish(null, { mac: d.mac, name: d.name }); });
+            return btn;
+          }
+          function render(devices) {
+            css();
+            const known = knownMacs();
+            const isStrap = function (d) { return !!d.isHr || known.indexOf(String(d.mac || '').toUpperCase()) >= 0; };
+            const order = function (a, b) { return (a.bonded ? 1 : 0) - (b.bonded ? 1 : 0) || (b.rssi || -127) - (a.rssi || -127); };
+            const straps = devices.filter(isStrap).sort(order);
+            const others = devices.filter(function (d) { return !isStrap(d); }).sort(order);
+            if (!backdropEl) {
+              backdropEl = document.createElement('div');
+              backdropEl.className = 'hrm-pick-back';
+              document.body.appendChild(backdropEl);
+            }
+            backdropEl.textContent = '';
             const modal = document.createElement('div');
-            modal.style.cssText = 'background:#101010;border:1px solid #1f1f1f;border-radius:14px;padding:20px;max-width:420px;width:100%;color:#d8d8d8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
-            modal.innerHTML = '<div style="font-weight:700;font-size:16px;margin-bottom:12px;">Pair a strap</div>';
-            const listEl = document.createElement('div');
-            listEl.style.cssText = 'display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto;';
-            list.forEach(function (d) {
-              const btn = document.createElement('button');
-              btn.style.cssText = 'text-align:left;padding:12px 14px;background:#0a0a0a;border:1px solid #1f1f1f;border-radius:10px;color:inherit;font-family:inherit;font-size:14px;cursor:pointer;';
-              const label = document.createElement('div');
-              label.style.cssText = 'font-weight:600;';
-              label.textContent = d.name || d.mac;
-              const meta = document.createElement('div');
-              meta.style.cssText = 'font-size:11px;color:#8a8a8a;margin-top:3px;font-family:Consolas,Monaco,monospace;';
-              const rssiPart = d.bonded ? 'paired' : (d.rssi + ' dBm');
-              meta.textContent = d.mac + ' • ' + rssiPart + (d.isHr ? ' • HR strap' : '');
-              btn.appendChild(label);
-              btn.appendChild(meta);
-              btn.addEventListener('click', function () {
-                document.body.removeChild(backdrop);
-                resolve({ mac: d.mac, name: d.name });
+            modal.className = 'hrm-pick';
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.setAttribute('aria-labelledby', 'hrm-pick-title');
+            modal.innerHTML = '<h2 id="hrm-pick-title">Choose a strap</h2>';
+            const body = document.createElement('div');
+            body.className = 'hrm-pick-body';
+            if (straps.length) {
+              const g = document.createElement('p');
+              g.className = 'hrm-pick-group';
+              g.textContent = 'Heart rate straps';
+              body.appendChild(g);
+              straps.forEach(function (d) { body.appendChild(row(d)); });
+            } else {
+              const help = document.createElement('p');
+              help.className = 'hrm-pick-help';
+              help.textContent = 'No heart rate strap found. Wake the strap by wetting the pads, then scan again.';
+              body.appendChild(help);
+              const again = document.createElement('button');
+              again.type = 'button';
+              again.className = 'hrm-pick-btn hrm-pick-again';
+              again.textContent = 'Scan again';
+              again.addEventListener('click', function () {
+                again.disabled = true;
+                again.textContent = 'Scanning';
+                runScan();
               });
-              listEl.appendChild(btn);
-            });
-            modal.appendChild(listEl);
+              body.appendChild(again);
+            }
+            if (others.length) {
+              const det = document.createElement('details');
+              det.className = 'hrm-pick-others';
+              if (!straps.length) det.open = true;
+              const sum = document.createElement('summary');
+              sum.textContent = 'Other Bluetooth devices';
+              det.appendChild(sum);
+              others.forEach(function (d) { det.appendChild(row(d)); });
+              body.appendChild(det);
+            }
+            modal.appendChild(body);
             const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.className = 'hrm-pick-btn hrm-pick-cancel';
             cancel.textContent = 'Cancel';
-            cancel.style.cssText = 'margin-top:16px;padding:10px 14px;background:transparent;border:1px solid #1f1f1f;border-radius:999px;color:#8a8a8a;font-family:inherit;font-size:13px;cursor:pointer;width:100%;';
-            cancel.addEventListener('click', function () {
-              document.body.removeChild(backdrop);
-              reject(new Error('cancelled'));
-            });
+            cancel.addEventListener('click', function () { finish(new Error('cancelled')); });
             modal.appendChild(cancel);
-            backdrop.appendChild(modal);
-            document.body.appendChild(backdrop);
-          }).catch(reject);
+            backdropEl.appendChild(modal);
+          }
+          function runScan() {
+            plugin.scan({ timeoutMs: 10000 }).then(function (r) {
+              if (cancelled) return;
+              render((r && r.devices) || []);
+            }).catch(function (e) { finish(e); });
+          }
+          runScan();
         });
         p.cancel = function () { if (cancelFn) cancelFn(); };
         return p;

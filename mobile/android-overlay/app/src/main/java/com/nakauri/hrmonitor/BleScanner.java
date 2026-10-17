@@ -97,6 +97,17 @@ public class BleScanner {
         }
     }
 
+    // A bonded device counts as HR only when its cached service UUIDs list 0x180D.
+    @SuppressLint("MissingPermission")
+    private static boolean hasHrUuid(BluetoothDevice b) {
+        try {
+            android.os.ParcelUuid[] uuids = b.getUuids();
+            if (uuids == null) return false;
+            for (android.os.ParcelUuid u : uuids) if (u != null && HR_SERVICE.equals(u.getUuid())) return true;
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     // Runs on the main looper for a timeout, where an escaped throw kills the process.
     @SuppressLint("MissingPermission")
     private void finishScan(ScanJob job) {
@@ -132,7 +143,7 @@ public class BleScanner {
                     HrEngine.putSafe(obj, "mac", b.getAddress());
                     HrEngine.putSafe(obj, "name", n != null ? n : b.getAddress());
                     HrEngine.putSafe(obj, "rssi", -127);
-                    HrEngine.putSafe(obj, "isHr", true);
+                    HrEngine.putSafe(obj, "isHr", hasHrUuid(b));
                     HrEngine.putSafe(obj, "bonded", true);
                     arr.put(obj);
                 }
