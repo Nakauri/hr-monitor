@@ -392,6 +392,23 @@
   @container (max-width: 22em) { .status-line .sep { display: block; height: 0; overflow: hidden; } }
   .session-ctl { padding: var(--s3) var(--cp-pad) 0; }
   .session-ctl .confirm { margin: 0; }
+  /* Start with a strap caret: one bar in two parts; the menu drops under the whole bar. */
+  .start-split { position: relative; display: flex; }
+  .start-split > .btn-session-toggle { flex: 1 1 auto; min-width: 0; }
+  .start-split.has-caret > .btn-session-toggle { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .strap-caret { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 48px; min-height: 48px; margin: 0; padding: 0; background: var(--action); color: var(--on-fill); border: 1px solid var(--action); border-left-color: color-mix(in srgb, var(--on-fill) 40%, var(--action)); border-radius: 0 var(--r-ctl) var(--r-ctl) 0; cursor: pointer; }
+  .strap-caret[hidden] { display: none; }
+  .strap-caret:hover { background: var(--action); filter: brightness(1.08); }
+  .strap-caret:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .strap-caret .ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
+  .strap-caret[aria-expanded="true"] .ico { transform: rotate(180deg); }
+  .strap-menu { position: absolute; top: calc(100% + var(--s1)); left: 0; right: 0; max-height: 60vh; overflow-y: auto; }
+  .strap-menu[hidden] { display: none; }
+  .strap-menu .strap-row { display: flex; align-items: center; gap: var(--s1); }
+  .strap-menu .strap-row > button { min-height: var(--target); margin: 0; background: transparent; border: 0; border-radius: var(--r-ctl); color: var(--text); font: 500 var(--t14)/1.2 var(--ui-face); cursor: pointer; }
+  .strap-menu .strap-pick { flex: 1 1 auto; min-width: 0; padding: 0 var(--s3); text-align: left; overflow-wrap: anywhere; }
+  .strap-menu .strap-forget { flex: 0 0 auto; padding: 0 var(--s3); color: var(--text-dim); }
+  .strap-menu .strap-row > button:hover, .strap-menu .strap-row > button:focus-visible { background: var(--selected-fill); color: var(--text); }
   .after-stop { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-top: var(--s3); }
   .after-stop .lines { flex: 1 1 12em; min-width: 0; }
   .after-stop p { margin: 0; }
@@ -1240,7 +1257,11 @@
     </div>
 
     <div class="ui session-ctl">
-      <button class="btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
+      <div class="start-split" id="start-split">
+        <button class="btn-session-toggle" id="session-toggle" data-state="idle">Start session</button>
+        <button type="button" class="strap-caret" id="strap-caret" aria-label="Choose a strap" aria-haspopup="menu" aria-expanded="false" aria-controls="strap-menu" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="6 9 12 15 18 9"/></svg></button>
+        <div class="menu strap-menu" id="strap-menu" role="menu" aria-label="Straps" hidden></div>
+      </div>
       <div class="confirm danger" id="stop-confirm" role="group" aria-labelledby="stop-confirm-text" hidden>
         <p class="text" id="stop-confirm-text">Stop this session?</p>
         <div class="actions">
@@ -3599,18 +3620,39 @@
   // Last-used strap memory. We save just the name (user-friendly label) since
   // Web Bluetooth device IDs are origin-scoped and already handled by the
   // permissions layer via getDevices(). Used for the "Reconnect to X" button.
+  // Known straps, most recent first. The old single-strap key is read once and folded in.
   const LS_LAST_STRAP = 'hr_monitor_last_strap';
-  function getLastStrap() {
-    try { return JSON.parse(localStorage.getItem(LS_LAST_STRAP) || 'null'); }
-    catch (e) { return null; }
-  }
-  function saveLastStrap(dev) {
+  const LS_STRAPS = 'hr_monitor_straps';
+  const STRAPS_MAX = 8;
+  function getStraps() {
     try {
-      if (dev && dev.name) {
-        const mac = dev._native ? dev.id : null;
-        localStorage.setItem(LS_LAST_STRAP, JSON.stringify({ name: dev.name, mac: mac }));
+      const raw = localStorage.getItem(LS_STRAPS);
+      if (raw != null) {
+        const list = JSON.parse(raw);
+        return Array.isArray(list) ? list.filter((x) => x && x.name) : [];
       }
-    } catch (e) {}
+      const old = JSON.parse(localStorage.getItem(LS_LAST_STRAP) || 'null');
+      const list = old && old.name ? [{ name: old.name, mac: old.mac || null }] : [];
+      localStorage.setItem(LS_STRAPS, JSON.stringify(list));
+      localStorage.removeItem(LS_LAST_STRAP);
+      return list;
+    } catch (e) { return []; }
+  }
+  function sameStrap(a, b) {
+    if (a.mac || b.mac) return !!a.mac && !!b.mac && a.mac.toUpperCase() === b.mac.toUpperCase();
+    return a.name === b.name;
+  }
+  function setStraps(list) {
+    try { localStorage.setItem(LS_STRAPS, JSON.stringify(list.slice(0, STRAPS_MAX))); } catch (e) {}
+  }
+  function getLastStrap() { return getStraps()[0] || null; }
+  function saveLastStrap(dev) {
+    if (!dev || !dev.name) return;
+    const entry = { name: dev.name, mac: dev._native ? dev.id : null };
+    setStraps([entry].concat(getStraps().filter((x) => !sameStrap(x, entry))));
+  }
+  function forgetStrap(entry) {
+    setStraps(getStraps().filter((x) => !sameStrap(x, entry)));
   }
   function updateConnectButtonLabel() {
     // Legacy name — the connect button no longer exists as its own element.
@@ -3636,6 +3678,7 @@
     if (logBlock && logBlock.hidden === sessionOn) logBlock.hidden = !sessionOn;
     if (sessionOn) hideAfterStop();
     placeSessionCtl(btn, sessionOn);
+    updateStrapCaret(btn, sessionOn);
     updateUnsavedNotice();
     if (!sessionOn) hideStopConfirm();
     if (btn.disabled) {
@@ -3668,6 +3711,87 @@
     }
   }
 
+  // The caret is offered only at rest; Start alone always reaches the remembered strap.
+  let strapStartBusy = false;
+  function updateStrapCaret(btn, sessionOn) {
+    const caret = document.getElementById('strap-caret');
+    if (!caret) return;
+    const show = !sessionOn && state.connState === 'idle' && !btn.disabled && !currentPicker
+      && !connectInFlight && !strapStartBusy && !(NATIVE && !engineReady);
+    if (!show) closeStrapMenu(false);
+    if (caret.hidden === show) caret.hidden = !show;
+    const split = document.getElementById('start-split');
+    if (split) split.classList.toggle('has-caret', show);
+  }
+  function closeStrapMenu(refocus) {
+    const menu = document.getElementById('strap-menu');
+    const caret = document.getElementById('strap-caret');
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    if (caret) caret.setAttribute('aria-expanded', 'false');
+    if (refocus && caret && !caret.hidden) { try { caret.focus(); } catch (e) {} }
+  }
+  function strapMenuButton(cls, text) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.setAttribute('role', 'menuitem');
+    b.textContent = text;
+    return b;
+  }
+  function renderStrapMenu() {
+    const menu = document.getElementById('strap-menu');
+    if (!menu) return;
+    menu.textContent = '';
+    getStraps().forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'strap-row';
+      row.setAttribute('role', 'none');
+      const pickBtn = strapMenuButton('strap-pick', s.name);
+      pickBtn.addEventListener('click', () => startWithStrap({ strap: s }));
+      const forgetBtn = strapMenuButton('strap-forget', 'Forget');
+      forgetBtn.setAttribute('aria-label', 'Forget ' + s.name);
+      forgetBtn.addEventListener('click', () => {
+        forgetStrap(s);
+        renderStrapMenu();
+        updateSessionToggle();
+        const first = menu.querySelector('button');
+        if (first) { try { first.focus(); } catch (e) {} }
+      });
+      row.appendChild(pickBtn);
+      row.appendChild(forgetBtn);
+      menu.appendChild(row);
+    });
+    if (menu.firstChild) {
+      const sep = document.createElement('div');
+      sep.setAttribute('role', 'separator');
+      menu.appendChild(sep);
+    }
+    const find = strapMenuButton('strap-find', 'Find a strap');
+    find.addEventListener('click', () => startWithStrap({ pick: true }));
+    menu.appendChild(find);
+  }
+  function onStrapCaretClick(ev) {
+    ev.stopPropagation();
+    const menu = document.getElementById('strap-menu');
+    const caret = document.getElementById('strap-caret');
+    if (!menu || !caret) return;
+    if (!menu.hidden) { closeStrapMenu(true); return; }
+    renderStrapMenu();
+    menu.hidden = false;
+    caret.setAttribute('aria-expanded', 'true');
+    const first = menu.querySelector('button');
+    if (first) { try { first.focus(); } catch (e) {} }
+  }
+  async function startWithStrap(opts) {
+    closeStrapMenu(false);
+    if (strapStartBusy || currentPicker || connectInFlight) return;
+    strapStartBusy = true;
+    updateSessionToggle();
+    try { await startFromIdle(opts); }
+    finally { strapStartBusy = false; updateSessionToggle(); }
+  }
+
   // Start sits in the open; once a session runs, Stop moves behind the closed Controls header.
   function placeSessionCtl(btn, sessionOn) {
     const ctl = btn.closest('.session-ctl');
@@ -3692,6 +3816,13 @@
       if (ranMs >= STOP_CONFIRM_AFTER_MS) { showStopConfirm(ranMs); return; }
       await stopSessionNow();
     } else {
+      await startFromIdle();
+    }
+  }
+
+  // opts.pick opens the strap list; opts.strap ({ name, mac }) starts with that known strap.
+  async function startFromIdle(opts) {
+    {
       // Silent permission chain. On native, if battery optimisation is
       // still on, fire the system request BEFORE connect so the dialog
       // appears with a clear "why did this pop up" context — the user just
@@ -3708,7 +3839,7 @@
           }
         } catch (e) { /* best-effort, non-fatal */ }
       }
-      try { await connect(); } catch (e) { /* connect already surfaces errors */ }
+      try { await connect(opts); } catch (e) { /* connect already surfaces errors */ }
       updateSessionToggle();
     }
   }
@@ -3894,15 +4025,16 @@
     } catch (e) { return null; }
   }
 
-  async function connect() {
-    if (window.HRMLog) window.HRMLog.event('connect() called');
+  async function connect(opts) {
+    const pick = !!(opts && opts.pick === true);
+    if (window.HRMLog) window.HRMLog.event('connect() called', pick ? 'pick' : '');
     // Capacitor / Android: skip Web Bluetooth entirely. The native plugin
     // owns the BLE connection; JS is a pure consumer of 'hr' events. This
     // eliminates dual-GATT (the Capacitor BLE plugin and the native plugin
     // both fighting for the same strap) which was collapsing at ~5 min
     // once WebView JS got suspended.
     if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) {
-      return connectNative();
+      return connectNative(opts);
     }
     if (!navigator.bluetooth) {
       setStatus('Web Bluetooth not supported. Use Chrome, Edge, or Opera.', 'error');
@@ -3919,7 +4051,9 @@
         setStatus('Auto-save folder permission was denied — sessions will NOT be saved.', 'error');
       }
     }
-    const last = getLastStrap();
+    // Find a strap ignores the remembered one: no paired shortcut, no name filter.
+    const last = pick ? null : ((opts && opts.strap) || getLastStrap());
+    if (pick) device = null;
     try {
       // Fast path: if the browser remembers a previously-paired device with a
       // matching name, connect straight to it — no picker UI. Falls back to the
@@ -3978,7 +4112,20 @@
 
   // Capacitor path: native plugin owns BLE. JS just consumes 'hr' events
   // and drives the UI. No navigator.bluetooth involvement at all.
-  async function connectNative() {
+  // Opens the native strap list; resolves { mac, name }, or rejects 'cancelled'.
+  async function pickNativeStrap(status) {
+    setStatus(status || 'Scanning for strap...');
+    currentPicker = window.HRMNativeHrSession.showPicker();
+    updateSessionToggle();
+    try {
+      return await currentPicker;
+    } finally {
+      currentPicker = null;
+      updateSessionToggle();
+    }
+  }
+
+  async function connectNative(opts) {
     if (connectInFlight) return;
     connectInFlight = true;
     try {
@@ -4008,23 +4155,15 @@
     }
     let startCall = null;
     let picked = null;
-    const lastNative = getLastStrap();
-    if (lastNative && lastNative.mac) {
+    const lastNative = (opts && opts.pick === true) ? null : ((opts && opts.strap) || getLastStrap());
+    const fromMemory = !!(lastNative && lastNative.mac);
+    if (fromMemory) {
       picked = { mac: lastNative.mac, name: lastNative.name || 'HR Strap' };
       setStatus('Connecting to ' + picked.name + '...');
-    } else {
-      setStatus('Scanning for strap...');
     }
     try {
       if (!picked) {
-        currentPicker = window.HRMNativeHrSession.showPicker();
-        updateSessionToggle();
-        try {
-          picked = await currentPicker;
-        } finally {
-          currentPicker = null;
-          updateSessionToggle();
-        }
+        picked = await pickNativeStrap();
         if (!picked || !picked.mac) {
           setStatus('No strap selected.');
           return;
@@ -4033,7 +4172,23 @@
       }
       // Virtual device stand-in so downstream code (device.name, etc.) works.
       device = buildNativeDevice({ name: picked.name || 'HR Strap', id: picked.mac, connected: false });
-      await nativeDeadline(window.HRMNativeHrSession.connect(picked.mac), NATIVE_CONNECT_MS, 'connect');
+      try {
+        await nativeDeadline(window.HRMNativeHrSession.connect(picked.mac), NATIVE_CONNECT_MS, 'connect');
+      } catch (e) {
+        // The remembered strap did not answer (dead, out of range, replaced): offer the list.
+        const why = (e && e.message) ? e.message : String(e);
+        if (!fromMemory || /already_active/.test(why)) throw e;
+        if (window.HRMLog) window.HRMLog.event('remembered strap failed, picker', why);
+        const failedName = picked.name;
+        picked = await pickNativeStrap("Couldn't reach " + failedName + '. Pick a strap.');
+        if (!picked || !picked.mac) {
+          setStatus('No strap selected.');
+          return;
+        }
+        setStatus('Connecting to ' + (picked.name || 'strap') + '...');
+        device = buildNativeDevice({ name: picked.name || 'HR Strap', id: picked.mac, connected: false });
+        await nativeDeadline(window.HRMNativeHrSession.connect(picked.mac), NATIVE_CONNECT_MS, 'connect');
+      }
       // First-run battery optimization prompt. Without an exemption,
       // stock Android Doze and Samsung One UI both kill the FGS during
       // long screen-off periods. Asked once per device; user can re-prompt
@@ -4085,6 +4240,7 @@
     }
     } finally {
       connectInFlight = false;
+      updateSessionToggle();
     }
   }
 
@@ -6413,6 +6569,22 @@
     // the next Start is a fresh recording. Replaces the old three-button row.
     const sessionToggle = $('session-toggle');
     sessionToggle.addEventListener('click', onSessionToggleClick);
+    const strapCaret = $('strap-caret');
+    const strapMenu = $('strap-menu');
+    if (strapCaret && strapMenu) {
+      strapCaret.addEventListener('click', onStrapCaretClick);
+      strapMenu.addEventListener('click', (e) => e.stopPropagation());
+      strapMenu.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeStrapMenu(true); return; }
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        const items = Array.from(strapMenu.querySelectorAll('button'));
+        const i = items.indexOf(document.activeElement);
+        e.preventDefault();
+        const next = items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
+        if (next) next.focus();
+      });
+      document.addEventListener('click', () => closeStrapMenu(false));
+    }
     const stopKeep = $('stop-confirm-keep');
     function keepRecording() {
       hideStopConfirm();
