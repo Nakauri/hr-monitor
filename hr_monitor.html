@@ -3624,23 +3624,29 @@
   const LS_LAST_STRAP = 'hr_monitor_last_strap';
   const LS_STRAPS = 'hr_monitor_straps';
   const STRAPS_MAX = 8;
+  function readJson(key) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
+  }
   function getStraps() {
+    let raw = null;
+    try { raw = localStorage.getItem(LS_STRAPS); } catch (e) { return []; }
+    if (raw != null) {
+      const list = readJson(LS_STRAPS);
+      return Array.isArray(list) ? list.filter((x) => x && typeof x.name === 'string' && x.name) : [];
+    }
+    const old = readJson(LS_LAST_STRAP);
+    const list = old && old.name ? [{ name: String(old.name), mac: old.mac || null }] : [];
     try {
-      const raw = localStorage.getItem(LS_STRAPS);
-      if (raw != null) {
-        const list = JSON.parse(raw);
-        return Array.isArray(list) ? list.filter((x) => x && x.name) : [];
-      }
-      const old = JSON.parse(localStorage.getItem(LS_LAST_STRAP) || 'null');
-      const list = old && old.name ? [{ name: old.name, mac: old.mac || null }] : [];
       localStorage.setItem(LS_STRAPS, JSON.stringify(list));
       localStorage.removeItem(LS_LAST_STRAP);
-      return list;
-    } catch (e) { return []; }
+    } catch (e) {}
+    return list;
   }
   function sameStrap(a, b) {
-    if (a.mac || b.mac) return !!a.mac && !!b.mac && a.mac.toUpperCase() === b.mac.toUpperCase();
-    return a.name === b.name;
+    const am = a && a.mac ? String(a.mac).toUpperCase() : '';
+    const bm = b && b.mac ? String(b.mac).toUpperCase() : '';
+    if (am || bm) return am === bm;
+    return !!a && !!b && a.name === b.name;
   }
   function setStraps(list) {
     try { localStorage.setItem(LS_STRAPS, JSON.stringify(list.slice(0, STRAPS_MAX))); } catch (e) {}
@@ -3689,6 +3695,11 @@
     if (currentPicker) {
       btn.setAttribute('data-state', 'connecting');
       btn.textContent = 'Cancel search';
+      return;
+    }
+    if (strapStartBusy && state.connState === 'idle') {
+      btn.setAttribute('data-state', 'connecting');
+      btn.textContent = 'Connecting';
       return;
     }
     // Native: neutral until the engine has answered once, so a running session never reads as Reconnect.
@@ -3816,6 +3827,7 @@
       if (ranMs >= STOP_CONFIRM_AFTER_MS) { showStopConfirm(ranMs); return; }
       await stopSessionNow();
     } else {
+      if (strapStartBusy || connectInFlight) return;
       await startFromIdle();
     }
   }
@@ -4037,6 +4049,13 @@
     if (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) {
       return connectNative(opts);
     }
+    if (connectInFlight) return;
+    connectInFlight = true;
+    try { await connectWeb(opts, pick); }
+    finally { connectInFlight = false; updateSessionToggle(); }
+  }
+
+  async function connectWeb(opts, pick) {
     if (!navigator.bluetooth) {
       setStatus('Web Bluetooth not supported. Use Chrome, Edge, or Opera.', 'error');
       return;
@@ -4181,7 +4200,7 @@
       } catch (e) {
         // The remembered strap did not answer (dead, out of range, replaced): offer the list.
         const why = (e && e.message) ? e.message : String(e);
-        if (!fromMemory || /already_active/.test(why)) throw e;
+        if (!fromMemory || /already_active|adapter unavailable|denied/i.test(why)) throw e;
         if (window.HRMLog) window.HRMLog.event('remembered strap failed, picker', why);
         try { await nativeDeadline(window.HRMNativeHrSession.disconnect(), NATIVE_STATUS_MS, 'disconnect'); } catch (e2) {}
         const failedName = picked.name;
@@ -6610,6 +6629,11 @@
         if (next) next.focus();
       });
       document.addEventListener('click', () => closeStrapMenu(false));
+      strapMenu.addEventListener('focusout', (e) => {
+        const to = e.relatedTarget;
+        if (to && (strapMenu.contains(to) || to === strapCaret)) return;
+        if (to) closeStrapMenu(false);
+      });
     }
     const stopKeep = $('stop-confirm-keep');
     function keepRecording() {

@@ -585,6 +585,15 @@
             if (!backdropEl) {
               backdropEl = document.createElement('div');
               backdropEl.className = 'hrm-pick-back';
+              backdropEl.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(new Error('cancelled')); return; }
+                if (e.key !== 'Tab' || !backdropEl) return;
+                const f = Array.prototype.filter.call(backdropEl.querySelectorAll('button:not([disabled]), summary'), function (n) { return n.offsetParent !== null; });
+                if (!f.length) return;
+                const i = f.indexOf(document.activeElement);
+                if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+                else if (!e.shiftKey && (i < 0 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+              });
               document.body.appendChild(backdropEl);
             }
             backdropEl.textContent = '';
@@ -605,6 +614,7 @@
             } else {
               const help = document.createElement('p');
               help.className = 'hrm-pick-help';
+              help.tabIndex = -1;
               help.textContent = 'No heart rate strap found. Wake the strap by wetting the pads, then scan again.';
               body.appendChild(help);
               const again = document.createElement('button');
@@ -636,6 +646,8 @@
             cancel.addEventListener('click', function () { finish(new Error('cancelled')); });
             modal.appendChild(cancel);
             backdropEl.appendChild(modal);
+            const first = body.querySelector(':scope > .hrm-pick-row') || body.querySelector('.hrm-pick-help');
+            if (first) { try { first.focus(); } catch (e) {} }
           }
           function runScan() {
             plugin.scan({ timeoutMs: 10000 }).then(function (r) {

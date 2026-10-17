@@ -7,7 +7,9 @@
 // that fails to connect opens the picker; (f) web: Find a strap requests the HR service, never the last name;
 // (g) the caret is hidden while a session runs.
 // Usage: node scripts/strap-switch.mjs [--mutant <name>] [--shots <dir>] [--ux <dir>]. Each mutant must FAIL.
-// Mutants: row-ignored, find-no-picker, forget-noop, no-migration, no-fallback, web-name-filter, caret-in-session.
+// Mutants: row-ignored, find-no-picker, forget-noop, no-migration, no-fallback, no-link-wait, no-disconnect,
+// web-name-filter, any-paired, caret-in-session, denied-picker, busy-label.
+// The Start guard during a menu start is backed by the connect in-flight flags, so removing it alone changes nothing.
 // Needs mobile/www from `npm run copy-web`. Runtime: about 40 seconds.
 
 import http from 'node:http';
@@ -32,8 +34,13 @@ const MUTANTS = {
   'row-ignored': ['const lastNative = (opts && opts.pick === true) ? null : ((opts && opts.strap) || getLastStrap());', 'const lastNative = (opts && opts.pick === true) ? null : getLastStrap();'],
   'find-no-picker': ["startWithStrap({ pick: true })", "startWithStrap({})"],
   'forget-noop': ['        forgetStrap(s);\n', ''],
-  'no-migration': ["const old = JSON.parse(localStorage.getItem(LS_LAST_STRAP) || 'null');", 'const old = null;'],
-  'no-fallback': ['if (!fromMemory || /already_active/.test(why)) throw e;', 'throw e;'],
+  'no-migration': ['const old = readJson(LS_LAST_STRAP);', 'const old = null;'],
+  'no-fallback': ['if (!fromMemory || /already_active|adapter unavailable|denied/i.test(why)) throw e;', 'throw e;'],
+  'no-link-wait': ["if (fromMemory && !(await waitForNativeLink(NATIVE_LINK_MS))) throw new Error('link_timeout');", ''],
+  'no-disconnect': ["try { await nativeDeadline(window.HRMNativeHrSession.disconnect(), NATIVE_STATUS_MS, 'disconnect'); } catch (e2) {}", ''],
+  'any-paired': ['      if (exact) return null;' + String.fromCharCode(10), ''],
+  'denied-picker': ['/already_active|adapter unavailable|denied/i', '/already_active/'],
+  'busy-label': ["      btn.textContent = 'Connecting';", "      btn.textContent = btn.textContent;"],
   'web-name-filter': ['const last = pick ? null : ((opts && opts.strap) || getLastStrap());', 'const last = getLastStrap();'],
   'caret-in-session': ["const show = !sessionOn && state.connState === 'idle' && !btn.disabled", 'const show = !btn.disabled'],
 };
@@ -71,14 +78,24 @@ const OLD = { name: '808S 0025153', mac: 'AA:BB:CC:DD:00:25' };
 const POLAR = { name: 'Polar H10 9A1B2C3D', mac: 'AA:BB:CC:DD:00:26' };
 const NEW = { name: 'Coospo H808S 7F2E', mac: 'AA:BB:CC:DD:00:27' };
 
-// Records connect macs, fails the macs in __failMacs, and answers showPicker with __pickResult.
+// Records connect macs and answers like the engine: connect always resolves; a live strap then reports its link
+// up, a dead one (__failMacs) never does; __rejectWith[mac] rejects with that message. showPicker answers
+// __pickResult, or rejects 'cancelled' when it is 'cancel'.
 const NATIVE_SPY = `(() => {
-  window.__connects = []; window.__pickerCalls = 0; window.__failMacs = []; window.__pickResult = ${JSON.stringify(NEW)};
+  window.__connects = []; window.__disconnects = 0; window.__pickerCalls = 0; window.__failMacs = []; window.__rejectWith = {}; window.__pickResult = ${JSON.stringify(NEW)};
   const h = window.Capacitor && window.Capacitor.Plugins.NativeHrSession; if (!h) return;
   const plugins = window.Capacitor.Plugins;
   const real = h;
   const spy = new Proxy(real, { get: (t, k) => {
-    if (k === 'connect') return (o) => { window.__connects.push(o && o.mac); return window.__failMacs.includes(o && o.mac) ? Promise.reject(new Error('connect failed: gatt 133')) : real.connect(o); };
+    if (k === 'connect') return (o) => {
+      const mac = o && o.mac; window.__connects.push(mac);
+      if (window.__rejectWith[mac]) return Promise.reject(new Error(window.__rejectWith[mac]));
+      return real.connect(o).then((r) => {
+        if (!window.__failMacs.includes(mac)) setTimeout(() => { const cb = window.__fake.listeners.state; if (cb) cb({ ble: true, linkUp: true, session: false }); }, 200);
+        return r;
+      });
+    };
+    if (k === 'disconnect') return () => { window.__disconnects++; return Promise.resolve({ disconnected: true }); };
     return t[k];
   } });
   const caps = window.Capacitor;
@@ -86,7 +103,7 @@ const NATIVE_SPY = `(() => {
   let shim;
   Object.defineProperty(window, 'HRMNativeHrSession', { configurable: true, get: () => shim, set: (v) => {
     shim = v;
-    if (v && v.showPicker) v.showPicker = () => { window.__pickerCalls++; const p = new Promise((r) => setTimeout(() => r(window.__pickResult), 100)); p.cancel = () => {}; return p; };
+    if (v && v.showPicker) v.showPicker = () => { window.__pickerCalls++; const p = new Promise((r, j) => setTimeout(() => (window.__pickResult === 'cancel' ? j(new Error('cancelled')) : r(window.__pickResult)), 100)); p.cancel = () => {}; return p; };
   } });
 })();`;
 
@@ -99,7 +116,11 @@ const WEB = `(() => {
     getPrimaryService: async (s) => { if (s === 'heart_rate' || s === 0x180d) return { getCharacteristic: async () => chr }; throw new Error('no service'); } };
   const device = { name: 'Polar H10 9A1B2C3D', id: 'fake', gatt, addEventListener: () => {}, removeEventListener: () => {}, watchAdvertisements: async () => {} };
   server.device = device;
-  Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { getDevices: async () => [],
+  // Paired devices by name (__paired); each is its own device so a wrong match shows in the remembered list.
+  const mk = (name) => { const g = { connected: false, connect: async () => { g.connected = true; return Object.assign({}, server, { device: d }); }, disconnect: () => { g.connected = false; } };
+    const d = { name, id: 'id-' + name, gatt: g, addEventListener: () => {}, removeEventListener: () => {}, watchAdvertisements: async () => {} }; return d; };
+  window.__paired = window.__paired || [];
+  Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { getDevices: async () => window.__paired.map(mk),
     requestDevice: async (o) => { window.__requests.push(JSON.parse(JSON.stringify(o))); return device; }, getAvailability: async () => true } });
 })();`;
 
@@ -109,7 +130,7 @@ const pass = (m) => console.log('ok   ' + m);
 const check = (ok, m, detail) => (ok ? pass(m) : fail(m + (detail ? ': ' + detail : '')));
 const browser = await chromium.launch().catch(() => chromium.launch({ channel: 'chrome' }));
 
-async function open({ web = false, scenario = 'start', straps = null, oldKey = true, width = 1440 } = {}) {
+async function open({ web = false, scenario = 'start', straps = null, oldKey = true, width = 1440, paired = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 } });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
@@ -122,6 +143,7 @@ async function open({ web = false, scenario = 'start', straps = null, oldKey = t
     ${straps ? `localStorage.setItem('hr_monitor_straps', ${JSON.stringify(JSON.stringify(straps))});` : ''}
     ${oldKey ? '' : `localStorage.removeItem('hr_monitor_last_strap');`} })();`;
   if (web) {
+    if (paired) await ctx.addInitScript(`window.__paired = ${JSON.stringify(paired)};`);
     await ctx.addInitScript(WEB);
     if (oldKey) await ctx.addInitScript(`localStorage.getItem('__s60') || localStorage.setItem('hr_monitor_last_strap', ${JSON.stringify(JSON.stringify({ name: OLD.name, mac: null }))});`);
   } else {
@@ -144,7 +166,7 @@ const straps = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('hr
 const label = (page) => page.evaluate(() => document.getElementById('session-toggle').textContent.trim());
 const caretShown = (page) => page.evaluate(() => { const c = document.getElementById('strap-caret'); return !!c && !c.hidden && c.getBoundingClientRect().width >= 44; });
 const menuRows = (page) => page.evaluate(() => Array.from(document.querySelectorAll('#strap-menu .strap-pick')).map((b) => b.textContent.trim()));
-const live = (page) => page.waitForFunction(() => document.body.classList.contains('conn-live'), null, { timeout: 8000 }).then(() => true, () => false);
+const live = (page, ms = 8000) => page.waitForFunction(() => document.body.classList.contains('conn-live'), null, { timeout: ms }).then(() => true, () => false);
 const done = async (o, tag) => { if (o.errs.length) fail(tag + ' page errors: ' + o.errs.join(' | ')); await o.ctx.close(); };
 
 // (d) migration from the old key, plus the caret at rest.
@@ -210,17 +232,68 @@ const done = async (o, tag) => { if (o.errs.length) fail(tag + ' page errors: ' 
   await done(o, '(c)');
 }
 
-// (e) the remembered strap fails to connect: the picker opens and the pick starts.
+// (e) the remembered strap never comes up (connect resolves, no link): disconnect, picker, start on the pick.
 {
   const o = await open({ straps: [OLD], oldKey: false });
   await o.page.evaluate((m) => { window.__failMacs = [m]; window.__pickResult = { name: 'Polar H10 9A1B2C3D', mac: 'AA:BB:CC:DD:00:26' }; }, OLD.mac);
   await o.page.click('#session-toggle');
-  const isLive = await live(o.page);
-  const r = await o.page.evaluate(() => ({ picks: window.__pickerCalls, conns: window.__connects }));
+  const isLive = await live(o.page, 16000);
+  const r = await o.page.evaluate(() => ({ picks: window.__pickerCalls, conns: window.__connects, disc: window.__disconnects, starts: window.__fake.calls.filter((c) => c === 'startSession').length }));
   const list = await straps(o.page);
-  check(r.picks === 1 && r.conns.join(',') === OLD.mac + ',' + POLAR.mac && isLive, '(e) a failed remembered strap opens the picker and starts with the pick', JSON.stringify(r) + ' live=' + isLive);
+  check(r.picks === 1 && r.conns.join(',') === OLD.mac + ',' + POLAR.mac && isLive, '(e) a remembered strap that never links opens the picker and starts with the pick', JSON.stringify(r) + ' live=' + isLive);
+  check(r.disc >= 1 && r.starts === 1, '(e) the dead strap is disconnected and no session starts on it', JSON.stringify(r));
   check(list && list[0].mac === POLAR.mac, '(e) the pick becomes the remembered strap', JSON.stringify(list));
   await done(o, '(e)');
+}
+
+// (e2) cancel the picker during the fallback: nothing starts, Start is back.
+{
+  const o = await open({ straps: [OLD], oldKey: false });
+  await o.page.evaluate((m) => { window.__failMacs = [m]; window.__pickResult = 'cancel'; }, OLD.mac);
+  await o.page.click('#session-toggle');
+  await o.page.waitForFunction(() => window.__pickerCalls === 1, null, { timeout: 16000 }).catch(() => {});
+  await o.page.waitForTimeout(600);
+  const r = await o.page.evaluate(() => ({ starts: window.__fake.calls.filter((c) => c === 'startSession').length, disc: window.__disconnects,
+    live: document.body.classList.contains('conn-live'), caret: !document.getElementById('strap-caret').hidden, label: document.getElementById('session-toggle').textContent.trim() }));
+  check(r.starts === 0 && r.disc >= 1 && !r.live && r.caret && r.label === 'Reconnect to ' + OLD.name, '(e2) cancelling the fallback picker starts nothing and restores Start', JSON.stringify(r));
+  await done(o, '(e2)');
+}
+
+// (e3) a denied connect shows the Bluetooth message, not the picker.
+{
+  const o = await open({ straps: [OLD], oldKey: false });
+  await o.page.evaluate((m) => { window.__rejectWith[m] = 'BLUETOOTH_CONNECT denied: test'; }, OLD.mac);
+  await o.page.click('#session-toggle');
+  await o.page.waitForTimeout(1500);
+  const r = await o.page.evaluate(() => ({ picks: window.__pickerCalls, conns: window.__connects }));
+  check(r.picks === 0 && r.conns.length === 1, '(e3) a denied connect does not open the picker', JSON.stringify(r));
+  await done(o, '(e3)');
+}
+
+// (h) a Start tap while a menu start runs does nothing, and Start reads Connecting.
+{
+  const o = await open({ straps: [OLD, POLAR], oldKey: false });
+  await o.page.click('#strap-caret');
+  await o.page.click('#strap-menu .strap-pick >> nth=1');
+  const lab = await label(o.page);
+  await o.page.click('#session-toggle');
+  const isLive = await live(o.page);
+  await o.page.waitForTimeout(500);
+  const r = await o.page.evaluate(() => ({ conns: window.__connects, starts: window.__fake.calls.filter((c) => c === 'startSession').length }));
+  check(lab === 'Connecting', '(h) during a menu start, Start reads Connecting', lab);
+  check(isLive && r.conns.length === 1 && r.starts === 1, '(h) a Start tap during a menu start adds no second connect or start', JSON.stringify(r));
+  await done(o, '(h)');
+}
+
+// (i) a hostile strap name renders as text.
+{
+  const EVIL = { name: '<img src=x onerror="window.__pwned=1">Evil', mac: 'AA:BB:CC:DD:00:66' };
+  const o = await open({ straps: [EVIL, OLD], oldKey: false });
+  await o.page.click('#strap-caret');
+  await o.page.waitForTimeout(300);
+  const r = await o.page.evaluate(() => ({ imgs: document.querySelectorAll('#strap-menu img').length, pwned: !!window.__pwned, text: document.querySelector('#strap-menu .strap-pick').textContent }));
+  check(r.imgs === 0 && !r.pwned && r.text === EVIL.name, '(i) a hostile strap name shows as text', JSON.stringify(r));
+  await done(o, '(i)');
 }
 
 // (f) web: Find a strap requests the HR service only; a known row keeps its name filter.
@@ -237,6 +310,28 @@ const done = async (o, tag) => { if (o.errs.length) fail(tag + ' page errors: ' 
   const list = await straps(o.page);
   check(list && list[0].name === 'Polar H10 9A1B2C3D' && list.length === 2, '(f) web: the found strap is remembered at the top', JSON.stringify(list));
   await done(o, '(f)');
+}
+
+// (f2) web: a known row for strap B never connects paired strap A.
+{
+  const A = 'Coospo H808S 7F2E', B = 'Polar H10 9A1B2C3D';
+  const o = await open({ web: true, straps: [{ name: A, mac: null }, { name: B, mac: null }], oldKey: false, paired: [A, B] });
+  await o.page.click('#strap-caret');
+  await o.page.click('#strap-menu .strap-pick >> nth=1');
+  const isLive = await live(o.page);
+  const list = await straps(o.page);
+  check(isLive && list && list[0].name === B, '(f2) web: the row for B connects B, not the first paired device', JSON.stringify(list));
+  await done(o, '(f2)');
+}
+{
+  const A = 'Coospo H808S 7F2E', B = 'Polar H10 9A1B2C3D';
+  const o = await open({ web: true, straps: [{ name: A, mac: null }, { name: B, mac: null }], oldKey: false, paired: [A] });
+  await o.page.click('#strap-caret');
+  await o.page.click('#strap-menu .strap-pick >> nth=1');
+  const isLive = await live(o.page);
+  const req = await o.page.evaluate(() => window.__requests);
+  check(isLive && req.length === 1 && req[0].filters[0].name === B, '(f2) web: B not paired asks the browser for B by name, never connects A', JSON.stringify(req));
+  await done(o, '(f2b)');
 }
 
 if (SHOTS) {

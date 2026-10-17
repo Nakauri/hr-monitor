@@ -6,7 +6,8 @@
 // (c) every row fits its text at 360 and 430; (d) no strap found: the help line, Scan again rescans, others open;
 // (e) BleScanner sets a bonded device's isHr from its cached UUIDs, never true for all (source check).
 // Usage: node scripts/strap-picker.mjs [--mutant <name>] [--shots <dir>] [--ux <dir>]. Each mutant must FAIL.
-// Mutants: all-straps, no-known, no-help, rows-shrink, bonded-all-hr. Needs mobile/www from `npm run copy-web`.
+// Mutants: all-straps, no-known, no-help, rows-shrink, no-escape, no-focus, bonded-all-hr. Also: focus starts on the first strap
+// (or the help line), Tab stays inside, Escape cancels, a hostile name renders as text. Needs mobile/www from `npm run copy-web`.
 // Runtime: about 15 seconds.
 
 import http from 'node:http';
@@ -32,12 +33,16 @@ const MUTANTS = {
   'no-known': ["const known = knownMacs();", 'const known = [];'],
   'no-help': ["help.textContent = 'No heart rate strap found. Wake the strap by wetting the pads, then scan again.';", ''],
   'rows-shrink': ['flex-shrink:0;width:100%;min-height:44px;padding:10px 12px;', 'flex-shrink:1;width:100%;min-height:0;padding:10px 12px;height:20px;overflow:hidden;'],
+  'no-escape': ["if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(new Error('cancelled')); return; }", ''],
+  'no-focus': ["const first = body.querySelector(':scope > .hrm-pick-row') || body.querySelector('.hrm-pick-help');", 'const first = null;'],
   'bonded-all-hr': ['HrEngine.putSafe(obj, "isHr", hasHrUuid(b));', 'HrEngine.putSafe(obj, "isHr", true);'],
 };
 const mutant = argVal('--mutant');
 if (mutant && !MUTANTS[mutant]) { console.log('FAIL unknown mutant ' + mutant); process.exit(2); }
-const mutate = (src, must) => {
+let hit = 0;
+const mutate = (src) => {
   if (!mutant || !src.includes(MUTANTS[mutant][0])) return src;
+  hit++;
   return src.replace(MUTANTS[mutant][0], MUTANTS[mutant][1]);
 };
 
@@ -47,7 +52,9 @@ const wwwShim = path.join(WWW, 'native-hr-session.js');
 if (!fs.existsSync(wwwShim) || !fs.readFileSync(wwwShim, 'utf8').includes('Other Bluetooth devices')) {
   console.log('FAIL mobile/www is stale: run npm run copy-web in mobile'); process.exit(1);
 }
-const javaSrc = mutate(fs.readFileSync(path.join(ROOT, 'mobile', 'android-overlay', 'app', 'src', 'main', 'java', 'com', 'nakauri', 'hrmonitor', 'BleScanner.java'), 'utf8').replace(/\r\n/g, '\n'));
+const javaSrc0 = mutate(fs.readFileSync(path.join(ROOT, 'mobile', 'android-overlay', 'app', 'src', 'main', 'java', 'com', 'nakauri', 'hrmonitor', 'BleScanner.java'), 'utf8').replace(/\r\n/g, '\n'));
+const javaSrc = javaSrc0;
+if (mutant && hit !== 1) { console.log('FAIL mutant anchor lost or doubled: ' + MUTANTS[mutant][0]); process.exit(1); }
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
 const server = http.createServer((req, res) => {
@@ -161,6 +168,35 @@ for (const width of [360, 430]) {
     check(calls === 2 && v2 && v2.straps.length === 3, '(d) Scan again rescans and lists the straps it finds', 'scans=' + calls + ' straps=' + (v2 && v2.straps.join('|')));
   }
   if (o.errs.length) fail('page errors: ' + o.errs.join(' | '));
+  await o.ctx.close();
+}
+
+// (f) focus, Tab trap, Escape, hostile name.
+{
+  const EVIL = { name: '<img src=x onerror="window.__pwned=1">Evil', mac: 'AA:BB:CC:DD:00:66', rssi: -60, isHr: true, bonded: false };
+  const o = await openPicker(430, [[EVIL].concat(MIX)]);
+  await o.page.waitForTimeout(200);
+  const f0 = await o.page.evaluate(() => ({ cls: document.activeElement && document.activeElement.className, idx: Array.from(document.querySelectorAll('.hrm-pick-body > .hrm-pick-row')).indexOf(document.activeElement),
+    imgs: document.querySelectorAll('.hrm-pick img').length, pwned: !!window.__pwned, first: document.querySelector('.hrm-pick-row .n').textContent }));
+  check(f0.cls === 'hrm-pick-row' && f0.idx === 0, '(f) focus starts on the first strap', JSON.stringify(f0));
+  check(f0.imgs === 0 && !f0.pwned && f0.first === EVIL.name, '(f) a hostile name renders as text', JSON.stringify(f0));
+  await o.page.focus('.hrm-pick-cancel');
+  await o.page.keyboard.press('Tab');
+  const inside = await o.page.evaluate(() => !!document.activeElement && !!document.activeElement.closest('.hrm-pick'));
+  check(inside, '(f) Tab from the last control stays inside the picker');
+  await o.page.keyboard.press('Escape');
+  await o.page.waitForTimeout(150);
+  const esc = await o.page.evaluate(() => ({ picked: window.__picked, open: !!document.querySelector('.hrm-pick-back') }));
+  check(esc.picked === 'err:cancelled' && !esc.open, '(f) Escape cancels and closes the picker', JSON.stringify(esc));
+  if (o.errs.length) fail('page errors: ' + o.errs.join(' | '));
+  await o.ctx.close();
+}
+{
+  const NONE = MIX.filter((d) => !d.isHr && d.mac !== 'AA:BB:CC:DD:00:27');
+  const o = await openPicker(360, [NONE]);
+  await o.page.waitForTimeout(200);
+  const cls = await o.page.evaluate(() => document.activeElement && document.activeElement.className);
+  check(cls === 'hrm-pick-help', '(f) with no strap, focus starts on the help line', cls);
   await o.ctx.close();
 }
 
