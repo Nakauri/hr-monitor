@@ -4174,11 +4174,14 @@
       device = buildNativeDevice({ name: picked.name || 'HR Strap', id: picked.mac, connected: false });
       try {
         await nativeDeadline(window.HRMNativeHrSession.connect(picked.mac), NATIVE_CONNECT_MS, 'connect');
+        // connect resolves before the strap answers; only a live link proves a remembered strap is there.
+        if (fromMemory && !(await waitForNativeLink(NATIVE_LINK_MS))) throw new Error('link_timeout');
       } catch (e) {
         // The remembered strap did not answer (dead, out of range, replaced): offer the list.
         const why = (e && e.message) ? e.message : String(e);
         if (!fromMemory || /already_active/.test(why)) throw e;
         if (window.HRMLog) window.HRMLog.event('remembered strap failed, picker', why);
+        try { await nativeDeadline(window.HRMNativeHrSession.disconnect(), NATIVE_STATUS_MS, 'disconnect'); } catch (e2) {}
         const failedName = picked.name;
         picked = await pickNativeStrap("Couldn't reach " + failedName + '. Pick a strap.');
         if (!picked || !picked.mac) {
@@ -4242,6 +4245,27 @@
       connectInFlight = false;
       updateSessionToggle();
     }
+  }
+
+  // Resolves true once the strap's link is up or a beat arrives, false after ms.
+  const NATIVE_LINK_MS = 10000;
+  function waitForNativeLink(ms) {
+    return new Promise((resolve) => {
+      const h = window.HRMNativeHrSession;
+      const offs = [];
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        offs.forEach((off) => { try { off(); } catch (e) {} });
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), ms);
+      try { offs.push(h.onState((d) => { if (d && d.linkUp === true) finish(true); })); } catch (e) {}
+      try { offs.push(h.onHr(() => finish(true))); } catch (e) {}
+      queryNativeStatus().then((st) => { if (st && st.linkUp === true) finish(true); });
+    });
   }
 
   // Ceilings on native calls; a call that never settles must not leave Start dead.
