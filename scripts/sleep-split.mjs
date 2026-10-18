@@ -2,15 +2,18 @@
 // of history), a clock prior, personal weights or any split reaching other people, printed times, an
 // in-progress day cached, a split that moves a moment off page 1, and a digest stored from a day whose file did not load
 // (S63-SPEC-skeptic3 MUST 1: the session cache holds 8 files, so a re-read can fail after a first read passed).
+// S64 (--part dayview): the Day view and the report disagree on sleep for the same day (S63-SPEC open question 1).
 // Files: hrv_viewer.html (S63 sleep block, rptModel, s63DayDigest, s63Sleep, rptSleepFigures, rptSleepRows, rptPage1,
-// rptPrepare, buildDaySession loadFailed), report.css, diagnostics.js. Spec: ux-audit redesign/s63-sleep/S63-SPEC.md.
-// Parts golden,replay,same,fit,share,copy (default golden,copy). Runtime: golden about 90 s, copy about 40 s, replay about
-// 60 s, same about 60 s, share about 10 s, fit about 60 to 150 s a month (--month 2026-08 runs one month).
+// rptPrepare, buildDaySession loadFailed, S64 s64Run, postureSleepSection), report.css, diagnostics.js. Spec: ux-audit
+// redesign/s63-sleep/S63-SPEC.md. Parts golden,replay,same,fit,share,copy,dayview (default golden,copy). Runtime: golden
+// about 30 s, copy about 40 s, replay about 30 s, same about 75 s, share about 5 s, dayview about 190 s, run as --only D1,D2,D3 (about 70 s) then
+// --only T (about 110 s, needs the manifest), fit about 60 to 150 s a month (--month 2026-08 runs one month).
 // replay, same, fit and copy need <ux>/redesign/s63-sleep/replay-manifest.json, replay-expect.json and the files they
 // name; a missing input exits 2 with its path, changed data exits 2 with "data changed, re-freeze". Expectations and
 // labels stay in those gitignored files; this script holds no personal number, date or time.
 // --mutants runs the negative controls of spec 6b, each must FAIL; with --part, only the mutants aimed at those parts;
-// --only G2,G13 runs those goldens. "same" and "fit" compare against main 02aef18. --shots <dir> writes page 1 pictures.
+// --only G2,G13 runs those goldens. "same" and "fit" compare against main 02aef18, "dayview" flag off against 77f8fca.
+// --shots <dir> writes page 1 pictures, and with dayview the Day chart of demo 04-24 before (77f8fca) and after.
 // Usage: node scripts/sleep-split.mjs [--part <list>] [--mutants] [--only <ids>] [--month <yyyy-mm>] [--ux <dir>] [--shots <dir>]
 process.env.TZ = 'America/Edmonton';
 import http from 'node:http';
@@ -34,6 +37,7 @@ const ONLY = argVal('--only') ? argVal('--only').split(',') : null;
 const MONTH = argVal('--month');
 const SHOTS = argVal('--shots');
 const BASE_REF = '02aef18';
+const S64_REF = '77f8fca';
 const HOME = os.homedir().split(path.sep).join('/');
 const S63 = path.join(UX, 'redesign', 's63-sleep');
 const MANIFEST = path.join(S63, 'replay-manifest.json');
@@ -162,9 +166,10 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 let SERVED = REAL;
 const SEED = new Map();   // name -> text or { file }
 const oldCache = new Map();
-function oldFile(rel) {
-  if (!oldCache.has(rel)) { try { oldCache.set(rel, execFileSync('git', ['-C', ROOT, 'show', BASE_REF + ':' + rel], { maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] })); } catch (e) { oldCache.set(rel, null); } }
-  return oldCache.get(rel);
+function oldFile(rel, ref = BASE_REF) {
+  const k = ref + ':' + rel;
+  if (!oldCache.has(k)) { try { oldCache.set(k, execFileSync('git', ['-C', ROOT, 'show', k], { maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] })); } catch (e) { oldCache.set(k, null); } }
+  return oldCache.get(k);
 }
 let server = null, BASE = null, browser = null;
 async function startServer() {
@@ -176,8 +181,8 @@ async function startServer() {
       if (v == null) { res.writeHead(404); res.end(); return; }
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end(typeof v === 'string' ? v : fs.readFileSync(v.file)); return;
     }
-    if (rel.startsWith('/old/')) {
-      const body = oldFile(rel.slice(5));
+    if (rel.startsWith('/old/') || rel.startsWith('/s64base/')) {
+      const s64 = rel.startsWith('/s64base/'), body = oldFile(rel.slice(s64 ? 9 : 5), s64 ? S64_REF : BASE_REF);
       if (!body) { res.writeHead(404); res.end(); return; }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(rel)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); res.end(body); return;
     }
@@ -196,7 +201,7 @@ async function getBrowser() {
   try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
   return browser;
 }
-const viewerUrl = (old) => BASE + (old ? '/old' : '') + '/hrv_viewer.html';
+const viewerUrl = (old) => BASE + (old === 's64base' ? '/s64base' : old ? '/old' : '') + '/hrv_viewer.html';
 async function setupCtx(ctx, o) {
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
@@ -705,20 +710,25 @@ async function partReplay(src) {
 }
 
 // ---------- same: 02aef18 beside the working file ----------
-const VIEW_PIECES = () => {
+// noSleep: the S64 sleep band, its markers and the Posture & sleep section left out (flag on, where S64 changes them).
+const VIEW_PIECES = (noSleep) => {
   const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
   const ch = Chart.getChart(document.querySelector('#view-day #session-chart'));
   const strip = (o) => JSON.stringify(o, (k, v) => typeof v === 'function' ? undefined : v);
   const view = document.querySelector('#view-day').cloneNode(true);
   view.querySelectorAll('#insight-text').forEach((e) => e.remove());
+  if (noSleep) view.querySelectorAll('#marker-list, #markers-toggle .n, #markers-open .n').forEach((e) => e.remove());
+  const ov = ch ? ch.config.options.plugins.hrOverlays : null;
   return {
     tiles: txt(document.querySelector('#view-day #summary-grid')),
     view: txt(view),
     datasets: ch ? ch.data.datasets.map((d) => (d.label || '') + ':' + strip(d.data)) : [],
-    overlays: ch ? strip(ch.config.options.plugins.hrOverlays) : '',
-    insight: [...document.querySelectorAll('#view-day #insight-text .insight-section[data-key]')].map((s) => s.dataset.key + ': ' + txt(s)),
+    overlays: !ov ? '' : noSleep ? strip({ overlays: (ov.overlays || []).filter((o) => !/^<b>Sleep window/.test(o.html)) }) : strip(ov),
+    insight: [...document.querySelectorAll('#view-day #insight-text .insight-section[data-key]')].filter((s) => !noSleep || s.dataset.key !== 'posture').map((s) => s.dataset.key + ': ' + txt(s)),
   };
 };
+// Waits for the S64 task of this Day to finish (applied, kept, cancelled or skipped); returns its outcome.
+const s64Done = (page, iso) => page.waitForFunction((k) => { const c = globalThis.__s64; return !!(c && c.done && c.done.startsWith(k + ' ')); }, 'day:' + iso, { timeout: 120000 }).then(() => page.evaluate(() => globalThis.__s64.done)).catch(() => null);
 const reportNoSplit = (html) => normIds(String(html).replace(/<tr class="slp">.*?<\/tr>/g, ''));
 async function partSame(src) {
   SERVED = src;
@@ -726,13 +736,13 @@ async function partSame(src) {
   for (const iso of ['2026-10-13', '2026-10-14']) cases.push({ id: iso.slice(5), iso, files: () => realWeek(iso) });
   let good = true;
   for (const c of cases) {
-    const open = async (old, flag) => { const p = c.demo ? await demoPage(c.iso, { old, flag }) : await seeded(c.files(), '#/day/' + c.iso, { old, flag }); await chartReady(p); await p.waitForTimeout(600); return p; };
+    const open = async (old, flag) => { const p = c.demo ? await demoPage(c.iso, { old, flag }) : await seeded(c.files(), '#/day/' + c.iso, { old, flag }); await chartReady(p); await p.waitForTimeout(600); if (!old) await s64Done(p, c.iso); return p; };
     const a = await open(false, true), b = await open(true, false);
-    const va = await a.evaluate(VIEW_PIECES), vb = await b.evaluate(VIEW_PIECES);
+    const va = await a.evaluate(VIEW_PIECES, true), vb = await b.evaluate(VIEW_PIECES, true);
     for (const k of Object.keys(va)) {
       const x = JSON.stringify(va[k]), y = JSON.stringify(vb[k]);
       let i = 0; while (i < x.length && x[i] === y[i]) i++;
-      good = ok(x === y, `same ${c.id}: Day view ${k} identical to ${BASE_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
+      good = ok(x === y, `same ${c.id}: Day view ${k} (sleep band, its markers and Posture & sleep left out, S64) identical to ${BASE_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
     }
     const ra = await prep(a, c.iso), rb = await prep(b, c.iso);
     const x = reportNoSplit(ra.html), y = normIds(rb.html);
@@ -853,6 +863,155 @@ async function partCopy(src) {
   return good;
 }
 
+// ---------- dayview (S64): the Day view and the report disagree on sleep for the same day ----------
+// Flag on and the split printing: after a report has stored the digests, the Day view band (chart overlays) adds up to the
+// report's Asleep minutes, one Posture and sleep line per run. Flag cleared after a report stored digests: the Day view is byte-identical to S64_REF. The Day
+// view never builds a digest: with nothing stored it keeps the old band and the S63 counters stay 0. Synthetic multi-sleep
+// day: the week with day 8 also at 55 from 14:00 to 16:00. Timing: a 6x Day open of the 10-14 week with nothing stored,
+// longest task against S64_REF (needs the gitignored manifest; skipped without it).
+// rec: the band's recorded minutes (report minutes with a mean); min: its span, which takes in joined strap gaps.
+const BAND = async () => {
+  const dm = await window.__aortiReport.model(null, { sleep: false });
+  const ch = Chart.getChart(document.querySelector('#view-day #session-chart'));
+  const ov = ((ch && ch.config.options.plugins.hrOverlays) || {}).overlays || [];
+  const band = ov.filter((o) => /^<b>Sleep window/.test(o.html));
+  const lines = [...document.querySelectorAll('#view-day #insight-text .insight-section[data-key="posture"] li')].map((li) => li.firstElementChild.textContent.trim()).filter((t) => /^Sleep window/.test(t));
+  const c = globalThis.__s64;
+  let rec = 0;
+  for (const o of band) for (let m = Math.round(o.xMin); m < Math.round(o.xMax); m++) if (dm && dm.hr[m] != null) rec++;
+  return { runs: band.length, min: Math.round(band.reduce((a, o) => a + (o.xMax - o.xMin), 0)), rec, lines, atPaint: c.atPaint, done: c.done, s63: { digest: globalThis.__s63.digest, detect: globalThis.__s63.detect } };
+};
+// Day 8: a 5 min strap gap at 02:00 inside the night, and a second sleep from 14:00 to 16:00.
+const multiSleep = () => weekFiles({ over: { 7: (i) => i >= 120 && i < 125 ? null : i < 480 ? 55 : i >= 840 && i < 960 ? 55 : pat(i) } });
+// Leaves the Day and comes back in the same document (demo digests live in that document's memory).
+async function reopenDay(p, iso) {
+  await p.evaluate(() => { globalThis.__s64.done = null; location.hash = '#/month'; });
+  await p.waitForTimeout(800);
+  await p.evaluate((d) => { location.hash = '#/day/' + d; }, iso);
+  await chartReady(p);
+  return s64Done(p, iso);
+}
+async function partDayview(src, only) {
+  SERVED = src;
+  const want = (g) => (!only || only.includes(g)) && (!ONLY || ONLY.includes(g));
+  let good = true;
+  if (want('D1')) for (const c of [{ id: 'demo 04-24', iso: '2026-04-24', demo: true }, { id: 'synthetic multi-sleep day', iso: D8, files: multiSleep }]) {
+    const p = c.demo ? await demoPage(c.iso, { flag: true }) : await seeded(c.files(), '#/day/' + c.iso, { flag: true });
+    await chartReady(p);
+    const first = await s64Done(p, c.iso), r = await prep(p, c.iso);
+    const done = await reopenDay(p, c.iso), b = await p.evaluate(BAND);
+    const asleep = r && r.slp[0] ? minsOf(r.slp[0][0]) : NaN;
+    const lineMin = b.lines.reduce((a, t) => { const m = /(\d+):(\d{2}):(\d{2})$/.exec(t) || /(\d+):(\d{2})$/.exec(t); return a + (m ? (m.length === 4 ? +m[1] * 60 + +m[2] + +m[3] / 60 : +m[1] + +m[2] / 60) : NaN); }, 0);
+    good = ok(first === 'day:' + c.iso + ' missing' && done === 'day:' + c.iso + ' applied' && r && r.rows && b.rec === asleep && b.min >= b.rec && (c.demo ? b.runs >= 1 : b.runs === 3 && b.min === b.rec + 5) && b.lines.length === b.runs && Math.round(lineMin) === b.min, `dayview D1 ${c.id}, flag on: first open ${first}, report made, reopened ${done}; Day view band ${b.rec} recorded min over a ${b.min} min span in ${b.runs} runs, ${b.lines.length} Sleep window lines (${Math.round(lineMin)} min); report Asleep ${asleep} min (want missing, applied, recorded = Asleep, ${c.demo ? '1 or more runs' : '3 runs, the 5 min strap gap joined into the night'}, one line per run)`) && good;
+    good = ok(!p.errors.length, `dayview D1 ${c.id}: no page errors ${p.errors.join(' | ')}`) && good;
+    if (SHOTS && c.demo) {
+      fs.mkdirSync(SHOTS, { recursive: true });
+      const shot = async (pg, name) => { await pg.evaluate(() => window.scrollTo(0, 0)); await pg.locator('#view-day .chart-panel').screenshot({ path: path.join(SHOTS, name) }); };
+      await shot(p, 's64-day-04-24-after.png');
+      const o = await demoPage(c.iso, { flag: true, old: 's64base' }); await chartReady(o);
+      await prep(o, c.iso); await o.evaluate(() => { location.hash = '#/month'; }); await o.waitForTimeout(800);
+      await o.evaluate((d) => { location.hash = '#/day/' + d; }, c.iso); await chartReady(o); await o.waitForTimeout(1500);
+      await shot(o, 's64-day-04-24-before.png');
+      await close(o);
+    }
+    await close(p);
+  }
+  if (want('D2')) {
+    // D2b: the band shown first, then the flag cleared and the Day reopened in the same page: back to the old band.
+    const iso = '2026-04-24';
+    const seq = async (old) => {
+      const p = await demoPage(iso, { old, flag: true }); await chartReady(p);
+      if (!old) await s64Done(p, iso);
+      await prep(p, iso);
+      const done1 = old ? null : await reopenDay(p, iso);
+      if (old) { await p.evaluate(() => { location.hash = '#/month'; }); await p.waitForTimeout(800); await p.evaluate((d) => { location.hash = '#/day/' + d; }, iso); await chartReady(p); }
+      await p.evaluate((k) => { localStorage.removeItem(k); if (globalThis.__s64) globalThis.__s64.done = null; location.hash = '#/month'; }, LS_FLAG);
+      await p.waitForTimeout(800);
+      await p.evaluate((d) => { location.hash = '#/day/' + d; }, iso); await chartReady(p); await p.waitForTimeout(1500);
+      p.done1 = done1;
+      return p;
+    };
+    const a = await seq(false), b = await seq('s64base');
+    const done = await s64Done(a, iso), va = await a.evaluate(VIEW_PIECES, false), vb = await b.evaluate(VIEW_PIECES, false);
+    const diff = Object.keys(va).filter((k) => JSON.stringify(va[k]) !== JSON.stringify(vb[k]));
+    good = ok(a.done1 === 'day:' + iso + ' applied' && done === 'day:' + iso + ' flag' && !diff.length, `dayview D2b demo 04-24: band ${a.done1}, then the flag cleared and the Day reopened: S64 ${done}, Day view differs from ${S64_REF} in ${diff.join(', ') || 'nothing'} (want applied, flag, nothing)`) && good;
+    good = ok(!a.errors.length && !b.errors.length, `dayview D2b: no page errors ${a.errors.concat(b.errors).join(' | ')}`) && good;
+    await close(a); await close(b);
+  }
+  if (want('D2')) for (const c of [{ id: 'demo 04-24', iso: '2026-04-24', demo: true }, { id: 'synthetic multi-sleep day', iso: D8, files: multiSleep }]) {
+    // A report with the flag on stores the digests, then the flag is cleared and the Day reopened: stored digests must not
+    // reach a flag-off Day view.
+    const open = async (old) => {
+      const p = c.demo ? await demoPage(c.iso, { old, flag: true }) : await seeded(c.files(), '#/day/' + c.iso, { old, flag: true });
+      await chartReady(p); await prep(p, c.iso);
+      p.c0 = await p.evaluate(() => globalThis.__s63 ? globalThis.__s63.digest : null);
+      await p.evaluate((k) => { localStorage.removeItem(k); if (globalThis.__s64) globalThis.__s64.done = null; location.hash = '#/month'; }, LS_FLAG);
+      await p.waitForTimeout(800);
+      await p.evaluate((d) => { location.hash = '#/day/' + d; }, c.iso); await chartReady(p); await p.waitForTimeout(1500);
+      return p;
+    };
+    const a = await open(false), b = await open('s64base');
+    const done = await s64Done(a, c.iso);
+    const va = await a.evaluate(VIEW_PIECES, false), vb = await b.evaluate(VIEW_PIECES, false);
+    for (const k of Object.keys(va)) {
+      const x = JSON.stringify(va[k]), y = JSON.stringify(vb[k]);
+      let i = 0; while (i < x.length && x[i] === y[i]) i++;
+      good = ok(x === y, `dayview D2 ${c.id}, flag off: Day view ${k} byte-identical to ${S64_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
+    }
+    const c63 = await a.evaluate(() => globalThis.__s63.digest);
+    good = ok(done === 'day:' + c.iso + ' flag' && a.c0 > 0 && c63 === a.c0, `dayview D2 ${c.id}, flag cleared after a report stored ${a.c0} digests: S64 ${done}, digests after the reopen ${c63} (want flag, no new digest)`) && good;
+    good = ok(!a.errors.length && !b.errors.length, `dayview D2 ${c.id}: no page errors ${a.errors.concat(b.errors).join(' | ')}`) && good;
+    await close(a); await close(b);
+  }
+  if (want('D3')) {
+    const p = await seeded(multiSleep(), '#/day/' + D8, { flag: true });
+    await chartReady(p);
+    const done = await s64Done(p, D8);
+    await p.waitForTimeout(3000);
+    const b = await p.evaluate(BAND), keys = await s63Keys(p);
+    const zero = (x) => !!(x && x.digest === 0 && x.detect === 0);
+    good = ok(zero(b.atPaint) && zero(b.s63) && keys.length === 0 && done === 'day:' + D8 + ' missing', `dayview D3 Day open with nothing stored, flag on: S63 counters at paint ${JSON.stringify(b.atPaint)}, 3 s later ${JSON.stringify(b.s63)}, s63 keys ${keys.length}, S64 ${done} (want 0 and 0, 0 and 0, 0, missing: no build, old band)`) && good;
+    const r = await prep(p, D8);
+    // A fresh document after the report: the stored digests give the band, still with no build.
+    await p.goto('about:blank'); await p.goto(viewerUrl() + '#/day/' + D8, { waitUntil: 'networkidle' });
+    await chartReady(p);
+    const done2 = await s64Done(p, D8), b2 = await p.evaluate(BAND);
+    const asleep = r && r.slp[0] ? minsOf(r.slp[0][0]) : NaN;
+    good = ok(done2 === 'day:' + D8 + ' applied' && zero(b2.atPaint) && b2.s63.digest === 0 && b2.s63.detect === 1 && b2.rec === asleep, `dayview D3 reopened after a report: S64 ${done2}, S63 counters ${JSON.stringify(b2.s63)}, band ${b2.rec} recorded min against Asleep ${asleep} (want applied, 0 digests and 1 detector run from the stored digests, equal)`) && good;
+    // A stored digest no longer matching (here deleted): the reopened Day goes back to the old band, not "kept".
+    await p.evaluate(async (k) => { const db = await new Promise((res) => { const q = indexedDB.open('hr_monitor_kv', 2); q.onsuccess = () => res(q.result); }); await new Promise((res) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').delete(k); tx.oncomplete = res; }); db.close(); }, 's63:real:' + D8);
+    const done3 = await reopenDay(p, D8), b3 = await p.evaluate(BAND);
+    const desc = await p.evaluate(() => { const e = document.querySelector('#view-day #insight-text .insight-section[data-key="posture"] .insight-desc'); return e ? e.textContent : ''; });
+    good = ok(done3 === 'day:' + D8 + ' missing' && b3.runs <= 1 && !/against its usual range/.test(desc), `dayview D3 band shown, then a stored digest gone and the Day reopened: S64 ${done3}, ${b3.runs} band runs (the old detector's), S64 description ${/against its usual range/.test(desc)} (want missing, 1 or fewer, false)`) && good;
+    good = ok(!p.errors.length, `dayview D3: no page errors ${p.errors.join(' | ')}`) && good;
+    await close(p);
+  }
+  if (want('T') && !QUIET && fs.existsSync(MANIFEST)) {
+    // 6x CPU Day open with nothing stored, flag on, working file against S64_REF, alternating, three opens each.
+    const iso = '2026-10-14', files = realWeek(iso);
+    const openAt6x = async (old) => {
+      const p = await newPage({ flag: true, init: () => { window.__lt = []; try { new PerformanceObserver((l) => l.getEntries().forEach((e) => window.__lt.push([e.startTime, e.duration]))).observe({ type: 'longtask', buffered: true }); } catch (e) {} } });
+      await seedInto(p, files);
+      await p.goto(viewerUrl(old) + '#/month', { waitUntil: 'networkidle' });
+      await p.waitForTimeout(1500);
+      const cdp = await p.ctx.newCDPSession(p);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+      const t0 = await p.evaluate((d) => { const t = performance.now(); location.hash = '#/day/' + d; return t; }, iso);
+      await chartReady(p);
+      await p.waitForTimeout(4000);
+      const r = await p.evaluate((t0) => ({ lt: window.__lt.filter(([t]) => t >= t0).map(([, d]) => Math.round(d)), done: globalThis.__s64 ? globalThis.__s64.done : null, c: globalThis.__s63 ? globalThis.__s63.digest : null }), t0);
+      await close(p);
+      return { longest: r.lt.length ? Math.max(...r.lt) : 0, n: r.lt.length, done: r.done, digest: r.c };
+    };
+    const runs = { now: [], base: [] };
+    for (let k = 0; k < 3; k++) { runs.base.push(await openAt6x('s64base')); runs.now.push(await openAt6x(false)); }
+    const mean = (a) => Math.round(a.reduce((s, x) => s + x.longest, 0) / a.length);
+    const mNow = mean(runs.now), mBase = mean(runs.base);
+    good = ok(mNow <= mBase * 1.2 + 50 && runs.now.every((x) => x.digest === 0), `dayview timing, 10-14 Day open with nothing stored, 1440 at 6x: longest task ${runs.now.map((x) => x.longest).join(' / ')} ms (mean ${mNow}) against ${S64_REF} ${runs.base.map((x) => x.longest).join(' / ')} ms (mean ${mBase}); S64 ${runs.now[0].done}, digests built ${runs.now.map((x) => x.digest).join(' / ')} (want within 20% plus 50 ms, 0 builds)`) && good;
+  }
+  return good;
+}
+
 // ---------- mutants (spec 6b) ----------
 const R = (a, b) => [a, b];
 const MUT = [
@@ -879,8 +1038,16 @@ const MUT = [
   ['20 failed load still stored', [R("      if (!entry || entry.loadFailed) return 'failed';", "      if (!entry) return 'failed';")], [['golden', ['G19', 'G19b']]]],
   ['21 sig without the empty file-list guard', [R('    const files = sessionsByDate[iso] || [];\n    if (!files.length) return null;\n    const w = dayWindow', '    const files = sessionsByDate[iso];\n    const w = dayWindow')], [['golden', ['G18']]]],
   ['22 d.sleep set on the shared memo', [R('    return Object.assign({}, d, { sleep });', '    d.sleep = sleep;\n    return d;')], [['golden', ['G21']]]],
+  // S64 (--part dayview).
+  ['S64a Day view keeps the longest sleep run only', [R('    const windows = s64Runs(sleep.mask, d.hr);', '    const windows = s64Runs(sleep.mask, d.hr).sort((p, q) => (q.end - q.start) - (p.end - p.start)).slice(0, 1);')], [['dayview', ['D1']]]],
+  ['S64b band from the mask whatever the flag and the print rule', [R("    if (!(s63Weights() === 'personal' || S63_PRINT_GENERAL)) return end('flag');\n", ''), R('    if (!d || !rptSleepFigures(Object.assign({}, d, { sleep }))) return back(\'old\');', "    if (!d) return back('old');")], [['dayview', ['D2']]]],
+  ['S64c an S63 digest of the open day before the chart draws', [R('    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);', "    if (s.__virtualDay && s63Weights() === 'personal') s63Digest(data.hr, data.rmssd, data.beats || [], 0, 60);\n    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);")], [['dayview', ['D3']]]],
+  ['S64e a cleared flag keeps the band on the same data', [R("    if (s.__detectedFor !== data || (s.__s64For && !(s63Weights() === 'personal' || S63_PRINT_GENERAL))) {", '    if (s.__detectedFor !== data) {')], [['dayview', ['D2']]]],
+  ['S64f strap gaps not joined', [R('  const S64_JOIN = 10;', '  const S64_JOIN = 0;')], [['dayview', ['D1']]]],
+  ['S64g a band kept after its digests stop matching', [R('    const shown = s.__s64For === data;', '    const shown = false;')], [['dayview', ['D3']]]],
+  ['S64d the Day view builds a missing digest', [R('      const hit = await s63DayDigest(day, Object.assign({ cacheOnly: true }, run));', '      const hit = await s63DayDigest(day, run);')], [['dayview', ['D3']]]],
 ];
-const PART_FN = { golden: partGolden, replay: partReplay, same: partSame, fit: partFit, share: partShare, copy: partCopy };
+const PART_FN = { golden: partGolden, replay: partReplay, same: partSame, fit: partFit, share: partShare, copy: partCopy, dayview: partDayview };
 async function runMutants() {
   let good = true;
   const list = MUT.filter(([, , parts]) => parts.some(([p]) => PARTS.includes(p)));

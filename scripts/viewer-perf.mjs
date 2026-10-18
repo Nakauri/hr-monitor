@@ -170,7 +170,8 @@ const ok = (cond, msg) => { if (cond) { passes++; console.log('PASS ' + msg); } 
 // Day open 2,531 ms (perf-2026-10-14/S49-RESULTS.md). Rows: V8 call counts during the Day open; the direct path
 // calls v2SessionCsv and parseCSV zero times, the round trip calls them (so the check can fail). Longest tasks are
 // printed, not budgeted: headless timings swing 15% run to run. S8 effect: 22 to 32% (S49-RESULTS.md). Runtime: 50 s.
-// S63 rows: no sleep split work runs on a Day open, flag on (hrv_viewer.html S63 block, rptModel).
+// S63 rows: no sleep split work runs on this Day open, flag on (hrv_viewer.html S63 block, rptModel); the device day has
+// under 4 days of files, so the S64 Day view band skips it too. S64's first-paint row: sleep-split.mjs --part dayview.
 if (args.includes('--cold')) {
   const SEGS = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'device-2026-10-10', 'segments');
   const segFiles = {};
