@@ -7640,8 +7640,9 @@
     setWeights: (w) => { try { if (w === 'personal') localStorage.setItem(LS_SLEEP_WEIGHTS, 'personal'); else localStorage.removeItem(LS_SLEEP_WEIGHTS); } catch (e) {} return s63Weights(); },
   };
   const s63DemoDigests = new Map();
-  // Today's digests (never stored) for this page's life, and builds in progress, by key; both match on the sig.
-  const s63Live = new Map(), s63Flight = new Map();
+  // Today's digests (never stored) for this page's life, by key, matched on the sig: a repeat report of yesterday skips
+  // today's build, and the Day view can read yesterday's margin.
+  const s63Live = new Map();
   // One day's digest: the cache when its sig matches, else a Day build. null for a day with no files; 'failed' when a file
   // did not load. Only days before today are stored; demo digests live in memory. run.cacheOnly: undefined on a miss.
   async function s63DayDigest(iso, run) {
@@ -7659,14 +7660,6 @@
     else { const hit = s63Live.get(key); if (hit && hit.sig === sig) return hit; }
     if (run.cacheOnly) return undefined;
     if (!run.toasted) { run.toasted = true; s63Toast = UI.toast('Making the report', { ms: 30000 }); }
-    // The Day view's idle build and a report share one build of a day.
-    const fly = s63Flight.get(key);
-    if (fly && fly.sig === sig) return fly.p;
-    const p = s63Build(iso, w, n, sig, key, store, demo);
-    s63Flight.set(key, { sig, p });
-    try { return await p; } finally { if ((s63Flight.get(key) || {}).p === p) s63Flight.delete(key); }
-  }
-  async function s63Build(iso, w, n, sig, key, store, demo) {
     const had = !!virtualSessions['day:' + iso];
     try {
       await buildDaySession(iso);
@@ -7712,16 +7705,15 @@
 
   // ---------- S64: the Day view's sleep band from the S63 mask, after the first paint ----------
   // Where the report prints the split, the band and the Posture & sleep lines take the mask's runs over recorded minutes;
-  // elsewhere the old detector stays. Cached digests first, else one build per idle wait; a route change cancels.
-  // checks: scripts/sleep-split.mjs --part dayview.
-  const S64_COUNT = globalThis.__s64 || (globalThis.__s64 = { atPaint: null, atPaintKey: null, built: 0, buildMs: [], done: null, doneT: null });
-  const S64_STALE = {};
+  // elsewhere the old detector stays. Stored digests only: the Day view never builds one (the report does, behind its
+  // toast), so a missing digest keeps the old band. checks: scripts/sleep-split.mjs --part dayview.
+  const S64_COUNT = globalThis.__s64 || (globalThis.__s64 = { atPaint: null, atPaintKey: null, done: null, doneT: null });
+  const S64_MISS = {};
   function s64AtPaint(key) {
     if (S64_COUNT.atPaintKey === key) return;
     const c = globalThis.__s63;
     S64_COUNT.atPaintKey = key; S64_COUNT.atPaint = { digest: c.digest, detect: c.detect }; S64_COUNT.atPaintT = performance.now();
   }
-  function s64Idle() { return new Promise(r => { if (typeof requestIdleCallback === 'function') requestIdleCallback(r, { timeout: 2000 }); else setTimeout(r, 0); }); }
   // Runs of asleep minutes that hold a report minute (d.hr), so the band adds up to the report's Asleep.
   function s64Runs(mask, hr) {
     const out = [];
@@ -7744,20 +7736,16 @@
     let withFiles = 0;
     for (let k = -6; k <= 0; k++) if ((sessionsByDate[isoAddDays(iso, k)] || []).length) withFiles++;
     if (withFiles < S63_O.floorDays) return end('gate');
-    const stale = () => currentData !== data || currentFilename !== key || s61RouteKey() !== key;
-    const wait = async () => { do { await s64Idle(); if (stale()) throw S64_STALE; } while (s61Pointers.size); };
     const run = { todayIso, toasted: true };
     const fetch = async (day) => {
       const hit = await s63DayDigest(day, Object.assign({ cacheOnly: true }, run));
-      if (hit !== undefined) return hit;
-      await wait();
-      const t0 = performance.now(), g = await s63DayDigest(day, run);
-      S64_COUNT.built++; S64_COUNT.buildMs.push(Math.round(performance.now() - t0));
-      return g;
+      if (hit === undefined) throw S64_MISS;
+      return hit;
     };
     let sleep = null;
-    try { sleep = await s63Sleep(iso, fetch); if (sleep) await wait(); }
-    catch (e) { if (e === S64_STALE) return end('cancelled'); console.warn('[S64] sleep band failed, old band kept', e); return end('failed'); }
+    try { sleep = await s63Sleep(iso, fetch); }
+    catch (e) { if (e === S64_MISS) return end('missing'); console.warn('[S64] sleep band failed, old band kept', e); return end('failed'); }
+    if (currentData !== data || currentFilename !== key || s61RouteKey() !== key) return end('cancelled');
     const d = sleep && s61Result(s, data).d;
     if (!d || !rptSleepFigures(Object.assign({}, d, { sleep }))) return end('old');
     s.sleepWindows = s64Runs(sleep.mask, d.hr);
