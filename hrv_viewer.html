@@ -1632,6 +1632,7 @@
       tx.objectStore(store).put(value, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('idb abort'));
     });
   }
   async function idbDelete(key, store = IDB_STORE) {
@@ -4604,9 +4605,10 @@
     const { start: startOfDay, end: dayEndMs } = dayWindow(iso);
     const DAY_MAX = (dayEndMs - startOfDay) / 60000;
 
+    let loadFailed = 0;
     const raw = await Promise.all(files.map(async fn => {
       try { return await loadFullSession(fn); }
-      catch (e) { console.warn('[buildDaySession] load failed', fn, e); return null; }
+      catch (e) { loadFailed++; console.warn('[buildDaySession] load failed', fn, e); return null; }
     }));
     const memoKey = [JSON.stringify(QUADRANT_THRESH), marksVersion];
     for (let i = 0; i < files.length; i++) memoKey.push(files[i], sessionsIndex[files[i]], raw[i]);
@@ -4818,7 +4820,8 @@
       __virtualDay: iso,
       __sourceFiles: files.slice(),
     };
-    const entry = { summary, data: { hr, rmssd, beats: raw.map(d => d && d.beats).filter(Boolean) } };
+    // loadFailed: files that did not load; S63 never stores a digest built from such a day.
+    const entry = { summary, data: { hr, rmssd, beats: raw.map(d => d && d.beats).filter(Boolean) }, loadFailed };
     virtualSessions['day:' + iso] = entry;
     _dayMemo.set(iso, { key: memoKey, entry });
     return summary;
@@ -7159,6 +7162,145 @@
     return all.sort((p, q) => p.t - q.t);
   }
   // ---- S61 moments end ----
+  // ---- S63 sleep ----
+  // Hours asleep and awake from heart rate, for the Day report Summary. Pure: no DOM, no clock, no storage; the only global is
+  // the call counter. Spec ux-audit s63-sleep/S63-SPEC.md; checks: scripts/sleep-split.mjs.
+  const S63_V = 1;
+  const S63_PRINT_GENERAL = false;
+  const S63_W = { personal: [7.65, -8.67, -7.13], general: [3.22, -4.17] };
+  const S63_O = { hi: 0.6, lo: 0.3, minLen: 90, fill: 20, gap: 30, smooth: 15, margin: 360, floorMin: 240, floorDays: 4, baseMin: 600, rowMin: 30 };
+  const S63_COUNT = globalThis.__s63 || (globalThis.__s63 = { digest: 0, detect: 0 });
+
+  // One viewer day as minute HR and RMSSD (NaN = missing) plus their rounded histograms; n = minutes of the day window.
+  function s63Digest(hrPoints, rmPoints, beats, dayStartEp, n) {
+    S63_COUNT.digest++;
+    const secs = n * 60, H = secondsFromPoints(hrPoints, dayStartEp, secs), R = secondsFromPoints(rmPoints, dayStartEp, secs);
+    const J = beatJunk(beats, dayStartEp, secs);
+    const hr = new Float32Array(n).fill(NaN), rm = new Float32Array(n).fill(NaN);
+    const hrHist = new Uint32Array(200), rmHist = new Uint32Array(200);
+    const bin = (v) => Math.max(0, Math.min(199, Math.round(v)));
+    let valid = 0;
+    for (let m = 0; m < n; m++) {
+      let c = 0, sum = 0;
+      const r = [];
+      for (let i = m * 60; i < m * 60 + 60; i++) {
+        if (H[i] !== H[i] || J[i]) continue;
+        c++; sum += H[i];
+        if (R[i] === R[i]) r.push(R[i]);
+      }
+      if (c < 20) continue;
+      hr[m] = sum / c; valid++; hrHist[bin(hr[m])]++;
+      if (r.length >= 10) { r.sort((p, q) => p - q); rm[m] = r[r.length >> 1]; rmHist[bin(rm[m])]++; }
+    }
+    return { hr, rm, hrHist, rmHist, valid };
+  }
+  function s63Pct(h, f) {
+    let t = 0;
+    for (let i = 0; i < 200; i++) t += h[i];
+    if (t < S63_O.baseMin) return null;
+    let c = 0;
+    for (let i = 0; i < 200; i++) { c += h[i]; if (c >= f * t) return i; }
+    return null;
+  }
+  // Digests of D-6..D (a missing day is null): HR 5th and 50th percentile bins and the RMSSD median bin, or null.
+  function s63Baseline(digests) {
+    const H = new Float64Array(200), R = new Float64Array(200);
+    for (const g of digests) if (g) for (let i = 0; i < 200; i++) { H[i] += g.hrHist[i]; R[i] += g.rmHist[i]; }
+    const p5 = s63Pct(H, 0.05);
+    return p5 == null ? null : { p5, p50: s63Pct(H, 0.5), rmd: s63Pct(R, 0.5) };
+  }
+  // A day is completed when it is before today and its next-day margin (6 h) is recorded or past.
+  function s63Completed(iso, todayIso, minutesIntoToday) {
+    if (!(iso < todayIso)) return false;
+    const t = new Date(iso + 'T12:00:00Z');
+    t.setUTCDate(t.getUTCDate() + 1);
+    return t.toISOString().slice(0, 10) < todayIso || minutesIntoToday >= S63_O.margin;
+  }
+  // History floor: 4 of D-6..D hold 4 h of valid minutes.
+  function s63Gate(validMins) { return validMins.filter(v => v >= S63_O.floorMin).length >= S63_O.floorDays; }
+  // States of a score series (NaN = unscored): 1 asleep, 0 awake, -1 unscored.
+  function s63States(p) {
+    const O = S63_O, N = p.length, sm = new Float64Array(N).fill(NaN), st = new Int8Array(N).fill(-1);
+    for (let m = 0; m < N; m++) {
+      if (p[m] !== p[m]) continue;
+      let s = 0, c = 0;
+      for (let k = Math.max(0, m - O.smooth); k <= Math.min(N - 1, m + O.smooth); k++) if (p[k] === p[k]) { s += p[k]; c++; }
+      sm[m] = s / c;
+    }
+    let cur = 0, last = -1e9;
+    for (let m = 0; m < N; m++) {
+      if (sm[m] !== sm[m]) continue;
+      if (m - last > O.gap) cur = sm[m] >= O.hi ? 1 : 0;
+      else if (cur === 0 && sm[m] >= O.hi) cur = 1;
+      else if (cur === 1 && sm[m] < O.lo) cur = 0;
+      st[m] = cur; last = m;
+    }
+    let lv = -1;
+    for (let m = 0; m < N; m++) {
+      if (st[m] < 0) continue;
+      if (lv >= 0 && m - lv > 1 && m - lv <= O.gap && st[lv] === st[m]) for (let k = lv + 1; k < m; k++) st[k] = st[m];
+      lv = m;
+    }
+    const runs = () => {
+      const r = [];
+      let a = -1;
+      for (let m = 0; m <= N; m++) {
+        const v = m < N ? st[m] : -2;
+        if (a >= 0 && v !== st[a]) { r.push([a, m - 1, st[a]]); a = -1; }
+        if (a < 0 && v >= 0) a = m;
+      }
+      return r;
+    };
+    const R = runs();
+    for (let i = 1; i + 1 < R.length; i++) {
+      const [a, b, s] = R[i];
+      if (s === 0 && b - a + 1 < O.fill && R[i - 1][2] === 1 && R[i + 1][2] === 1 && R[i - 1][1] === a - 1 && R[i + 1][0] === b + 1) for (let k = a; k <= b; k++) st[k] = 1;
+    }
+    for (const [a, b, s] of runs()) if (s === 1 && b - a + 1 < O.minLen) for (let k = a; k <= b; k++) st[k] = 0;
+    return st;
+  }
+  // Asleep mask of D from the last 6 h of D-1, D and the first 6 h of D+1. D-1 minutes use D-1's baseline.
+  function s63Detect(days, bases, weights) {
+    S63_COUNT.detect++;
+    const O = S63_O, parts = [];
+    if (days.prev) parts.push({ g: days.prev, from: Math.max(0, days.prev.hr.length - O.margin), to: days.prev.hr.length, b: bases.prev });
+    const curStart = parts.reduce((s, q) => s + q.to - q.from, 0);
+    parts.push({ g: days.cur, from: 0, to: days.cur.hr.length, b: bases.cur });
+    if (days.next) parts.push({ g: days.next, from: 0, to: Math.min(O.margin, days.next.hr.length), b: bases.cur });
+    const hr = [], rm = [], base = [];
+    for (const q of parts) for (let i = q.from; i < q.to; i++) { hr.push(q.g.hr[i]); rm.push(q.g.rm[i]); base.push(q.b); }
+    const N = hr.length, p = new Float64Array(N).fill(NaN);
+    const med = (v) => { v.sort((a, b) => a - b); return v[v.length >> 1]; };
+    const win = (m, lo, hi, arr) => { const v = []; for (let k = Math.max(0, m + lo); k <= Math.min(N - 1, m + hi); k++) if (hr[k] === hr[k] && arr[k] === arr[k]) v.push(arr[k]); return v; };
+    for (let m = 0; m < N; m++) {
+      const b = base[m];
+      if (hr[m] !== hr[m] || !b) continue;
+      const w15 = win(m, -7, 7, hr);
+      if (w15.length < 5) continue;
+      const rel = (med(w15) - b.p5) / Math.max(5, b.p50 - b.p5);
+      const r10 = win(m, -5, 4, rm);
+      let z;
+      if (weights === 'personal' && r10.length >= 5 && b.rmd) z = S63_W.personal[0] + S63_W.personal[1] * rel + S63_W.personal[2] * Math.log(Math.max(0.2, med(r10) / b.rmd));
+      else z = S63_W.general[0] + S63_W.general[1] * rel;
+      p[m] = 1 / (1 + Math.exp(-z));
+    }
+    const st = s63States(p), n = days.cur.hr.length, mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) mask[i] = st[curStart + i] === 1 ? 1 : 0;
+    return mask;
+  }
+  // Report figures per state over the report's minute means; Awake is Recorded minus Asleep.
+  function s63Figures(d, mask) {
+    const asl = [], awk = [], aslV = [], awkV = [];
+    for (let m = 0; m < d.hr.length; m++) {
+      if (d.hr[m] == null) continue;
+      const on = mask[m] === 1;
+      (on ? asl : awk).push(d.hr[m]);
+      if (d.hrv[m] != null) (on ? aslV : awkV).push(d.hrv[m]);
+    }
+    const r = (v) => v == null ? null : Math.round(v);
+    return { asleepMin: asl.length, awakeMin: d.recorded - asl.length, asleep: { hr: r(rptMedian(asl)), hrv: r(rptMedian(aslV)) }, awake: { hr: r(rptMedian(awk)), hrv: r(rptMedian(awkV)) } };
+  }
+  // ---- S63 sleep end ----
   // S61 moments on screen: one detection task after the first paint, memoised per data object; the report reads the same memo.
   const s61Memo = new WeakMap();
   let s61Shown = { key: null, res: null };
@@ -7392,7 +7534,7 @@
 
   // ===== Day report (S44) BEGIN =====
   // REPORT-SPEC page 1 plus moment pages two per page, built from the Day view's memoised day (buildDaySession), never a
-  // re-parse. Sleep is not validated (S13), so one Whole day column; gap causes wait for S14, so gaps list times only.
+  // re-parse. S63 adds Asleep and Awake rows (hours only) under the whole-day Summary; gap causes wait for S14, so gaps list times only.
   // Web prints the pages (the browser saves a PDF); the app draws the same pages to canvases for native-pdf.js.
   const RPT_ZONES = [70, 90, 110, 130];
   const RPT_ZC = ['var(--rp-z1)', 'var(--rp-z2)', 'var(--rp-z3)', 'var(--rp-z4)', 'var(--rp-z5)'];
@@ -7469,11 +7611,87 @@
   }
 
   // Everything the report prints for one day, from the memoised Day build plus marks; moments from the S61 memo.
-  async function rptModel(iso) {
+  // o.sleep: true detects the S63 split when it can print, false skips it, an object is a supplied source (it wins).
+  // A shallow copy carries d.sleep, so a concurrent call never changes the object an in-flight report renders.
+  async function rptModel(iso, o) {
+    const want = o && o.sleep != null ? o.sleep : true;
     const summary = await buildDaySession(iso);
     const entry = virtualSessions['day:' + iso];
     if (!summary || !entry) return null;
-    return s61Result(summary, entry.data).d;
+    const d = s61Result(summary, entry.data).d;
+    if (!d) return null;
+    let sleep = null;
+    if (want && typeof want === 'object') sleep = want;
+    else if (want && (s63Weights() === 'personal' || S63_PRINT_GENERAL)) {
+      try { sleep = await s63Sleep(iso); } catch (e) { console.warn('[S63] split failed, Summary row only', e); sleep = null; }
+      finally { if (s63Toast) { s63Toast.close(); s63Toast = null; } }
+    }
+    return Object.assign({}, d, { sleep });
+  }
+
+  // ---------- S63: the sleep split's digests, cache and gate (the rules are in the S63 block) ----------
+  const LS_SLEEP_WEIGHTS = 'hrv_viewer_sleep_weights';
+  function s63Weights() { try { return localStorage.getItem(LS_SLEEP_WEIGHTS) === 'personal' ? 'personal' : 'general'; } catch (e) { return 'general'; } }
+  // Set once per device from the console: window.__aortiSleep.setWeights('personal' | null).
+  window.__aortiSleep = {
+    weights: s63Weights,
+    setWeights: (w) => { try { if (w === 'personal') localStorage.setItem(LS_SLEEP_WEIGHTS, 'personal'); else localStorage.removeItem(LS_SLEEP_WEIGHTS); } catch (e) {} return s63Weights(); },
+  };
+  const s63DemoDigests = new Map();
+  // One day's digest: the cache when its sig matches, else a Day build. null for a day with no files; 'failed' when a file
+  // did not load. Only days before today are stored; demo digests live in memory.
+  async function s63DayDigest(iso, run) {
+    const files = sessionsByDate[iso] || [];
+    if (!files.length) return null;
+    const w = dayWindow(iso), n = Math.round((w.end - w.start) / 60000);
+    const sig = hashStr(JSON.stringify([S63_V, w.start, files.map(fn => { const s = sessionsIndex[fn] || {}; return [fn, s.hrCount, s.duration, s.startEpoch]; })]));
+    const demo = isDemoMode(), key = (demo ? 's63:demo:' : 's63:real:') + iso, store = iso < run.todayIso;
+    if (store) {
+      let hit = null;
+      if (demo) hit = s63DemoDigests.get(key);
+      else { try { hit = await idbGet(key); } catch (e) {} }
+      if (hit && hit.sig === sig) return hit;
+    }
+    if (!run.toasted) { run.toasted = true; s63Toast = UI.toast('Making the report', { ms: 30000 }); }
+    const had = !!virtualSessions['day:' + iso];
+    try {
+      await buildDaySession(iso);
+      const entry = virtualSessions['day:' + iso];
+      if (!entry || entry.loadFailed) return 'failed';
+      const g = s63Digest(entry.data.hr, entry.data.rmssd, entry.data.beats, w.start, n);
+      g.sig = sig;
+      if (store) {
+        if (demo) s63DemoDigests.set(key, g);
+        else { try { await idbSet(key, g); } catch (e) { console.warn('[S63] digest not stored', iso, e); } }
+      }
+      return g;
+    } finally {
+      if (!had && s61RouteKey() !== 'day:' + iso) { delete virtualSessions['day:' + iso]; _dayMemo.delete(iso); }
+    }
+  }
+  // d.sleep for a completed day the history gate opens, or null.
+  let s63Toast = null;
+  async function s63Sleep(iso) {
+    const now = Date.now(), todayIso = localDateKeyToday();
+    if (!s63Completed(iso, todayIso, (now - dayWindow(todayIso).start) / 60000)) return null;
+    const run = { todayIso, toasted: false }, g = {};
+    const get = async (k) => { const day = isoAddDays(iso, k); if (!(k in g)) g[k] = await s63DayDigest(day, run); return g[k]; };
+    for (let k = -6; k <= 0; k++) if (await get(k) === 'failed') return null;
+    const valid = [];
+    for (let k = -6; k <= 0; k++) valid.push(g[k] ? g[k].valid : 0);
+    const cur = g[0], bCur = s63Baseline([-6, -5, -4, -3, -2, -1, 0].map(k => g[k]));
+    if (!cur || !s63Gate(valid) || !bCur) return null;
+    if (await get(-7) === 'failed' || await get(1) === 'failed') return null;
+    const bPrev = s63Baseline([-7, -6, -5, -4, -3, -2, -1].map(k => g[k]));
+    const weights = s63Weights();
+    return { source: 'detected', weights, mask: s63Detect({ prev: g[-1], cur, next: g[1] }, { prev: bPrev, cur: bCur }, weights) };
+  }
+  function s63Prints(s) { return !!s && (s.source !== 'detected' || s.weights === 'personal' || S63_PRINT_GENERAL); }
+  // The Summary's Asleep and Awake figures, or null when they do not print (each state under 30 min included).
+  function rptSleepFigures(d) {
+    if (!s63Prints(d.sleep)) return null;
+    const f = s63Figures(d, d.sleep.mask);
+    return f.asleepMin >= S63_O.rowMin && f.awakeMin >= S63_O.rowMin ? f : null;
   }
 
   // The base model of a Day or of one recording: minute bins, clock, gaps, marks and taps (S61 split from rptModel).
@@ -7779,7 +7997,7 @@
     return s;
   }
 
-  function rptPage1(d, listed, rest, pageOf) {
+  function rptPage1(d, listed, rest, pageOf, rows) {
     const stands = listed.filter(x => x.stand);
     let h = rptRunhead(d) + '<h1 class="title">' + rptEsc(d.longDate) + '</h1>';
     const q = [];
@@ -7820,7 +8038,7 @@
       rest.forEach(x => { (byKind[x.kind] = byKind[x.kind] || []).push(d.clock(x.t)); });
       h += '<p class="more">Also on this day: ' + Object.keys(byKind).map(k => k.toLowerCase() + ' at ' + byKind[k].join(', ')).join('; ') + '.</p>';
     }
-    // Whole day only: sleep is not validated yet (S13), so no Awake and Asleep split.
+    // S63: Asleep and Awake rows under the whole-day row, only when rptPrepare has room for them.
     const vals = d.hr.filter(v => v != null), hv = d.hrv.filter(v => v != null);
     let lo = null, hi = null;
     d.hr.forEach((v, m) => { if (v == null) return; if (!lo || v < lo.v) lo = { m, v }; if (!hi || v > hi.v) hi = { m, v }; });
@@ -7829,10 +8047,21 @@
     if (vals.length) figs.push(['Typical (median), bpm', Math.round(rptMedian(vals))]);
     if (hi) figs.push(['Highest, bpm', Math.round(hi.v) + ' <span class="d">at ' + d.clock(hi.m) + '</span>']);
     if (hv.length) figs.push(['HRV typical (median), ms', Math.round(rptMedian(hv))]);
-    h += '<h2 class="sec">Summary</h2><table class="readouts sum"><thead><tr>' + figs.map(f => '<th>' + f[0] + '</th>').join('') + '</tr></thead><tbody><tr>' + figs.map(f => '<td>' + f[1] + '</td>').join('') + '</tr></tbody></table>';
+    h += '<h2 class="sec">Summary</h2><table class="readouts sum"><thead><tr>' + figs.map(f => '<th>' + f[0] + '</th>').join('') + '</tr></thead><tbody><tr>' + figs.map(f => '<td>' + f[1] + '</td>').join('') + '</tr>' + (rows ? rptSleepRows(d, figs) : '') + '</tbody></table>';
     const met = stands.some(x => x.stand.met);
     const note = d.personal && met ? '<sup>1</sup> Adult POTS heart rate rule: a rise of 30 bpm or more within 10 min of standing.' : null;
     return h + rptFoot(note);
+  }
+
+  // Asleep then Awake: exact minutes in the first cell, typical HR and HRV under their own headers.
+  function rptSleepRows(d, figs) {
+    const f = rptSleepFigures(d);
+    if (!f) return '';
+    return [['asleep', f.asleepMin, f.asleep], ['awake', f.awakeMin, f.awake]].map(([w, min, v]) => '<tr class="slp">' + figs.map((g, i) => {
+      if (!i) return '<th scope="row">' + rptDur(min) + ' <span class="d">' + w + '</span></th>';
+      const x = g[0] === 'Typical (median), bpm' ? v.hr : g[0] === 'HRV typical (median), ms' ? v.hrv : null;
+      return '<td>' + (x == null ? '' : x) + '</td>';
+    }).join('') + '</tr>').join('');
   }
 
   function rptLocator(d, x) {
@@ -7952,11 +8181,11 @@
   }
 
   // All pages as HTML for one listing; page numbers filled in last.
-  function rptPagesHtml(d, keep) {
+  function rptPagesHtml(d, keep, rows) {
     const { listed, rest } = rptListed(d, keep);
     const z = listed.filter(x => x.zoom);
     const pageOf = (x) => 2 + Math.floor(x.zi / 2);
-    const pages = [rptPage('rpg1', rptPage1(d, listed, rest, pageOf))];
+    const pages = [rptPage('rpg1', rptPage1(d, listed, rest, pageOf, rows))];
     if (z.length) {
       let lo = Infinity, hi = 0;
       z.forEach(x => { const w = rptWindow(d, x.a, x.b); if (w.low) lo = Math.min(lo, w.low.v); if (w.peak) hi = Math.max(hi, w.peak.v); });
@@ -7987,8 +8216,9 @@
   }
 
   // Builds the pages into #report-print and fits page 1: moments without a page drop to one text line, latest first.
-  async function rptPrepare(iso) {
-    const d = await rptModel(iso);
+  // S63: the fit runs with the sleep rows off; the rows then print only if page 1 still has room, so no moment moves.
+  async function rptPrepare(iso, o) {
+    const d = await rptModel(iso, o);
     if (!d) return null;
     d.longDate = new Date(d.dayStart).toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     d.shortDate = new Date(d.dayStart).toLocaleDateString('en-CA', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
@@ -8004,7 +8234,13 @@
       if (keep === 0) { console.warn('[report] page 1 runs into its footer by', 8 - room, 'px'); break; }
       keep--;
     }
-    return { d, host, count: host.querySelectorAll('.page').length, zoomed: d.moments.filter(x => x.zoom).length };
+    let rows = false;
+    if (rptSleepFigures(d)) {
+      host.innerHTML = rptPagesHtml(d, keep, true);
+      rows = rptRoom(host.querySelector('#rpg1')) >= 8;
+      if (!rows) host.innerHTML = rptPagesHtml(d, keep, false);
+    }
+    return { d, host, count: host.querySelectorAll('.page').length, zoomed: d.moments.filter(x => x.zoom).length, keep, rows };
   }
   function rptClear() {
     const host = document.getElementById('report-print');
@@ -8151,7 +8387,7 @@
     if (!iso) return;
     let count = 1;
     rptOpening = true;
-    try { const d = await rptModel(iso); if (d) count = rptPageCount(d); } catch (e) { console.warn('[report] count failed', e); } finally { rptOpening = false; }
+    try { const d = await rptModel(iso, { sleep: false }); if (d) count = rptPageCount(d); } catch (e) { console.warn('[report] count failed', e); } finally { rptOpening = false; }
     const native = rptNativeOk();
     const m0 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
     const label = new Date(+m0[1], +m0[2] - 1, +m0[3], 12).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
@@ -8200,7 +8436,7 @@
     btn.setAttribute('aria-expanded', 'true');
     buttons[0].focus({ preventScroll: true });
   }
-  window.__aortiReport = { model: (iso) => rptModel(iso || rptDayIso()), recordingModel: async (fn) => { const s = sessionsIndex[fn]; return s ? s61Result(s, await loadFullSession(fn)).d : null; }, prepare: (iso) => rptPrepare(iso || rptDayIso()), pageCount: async (iso) => rptPageCount(await rptModel(iso || rptDayIso())), dayIso: () => rptDayIso(), clear: rptClear, share: (iso) => rptShare(iso || rptDayIso(), 'share'), save: (iso) => rptShare(iso || rptDayIso(), 'save') };
+  window.__aortiReport = { model: (iso, o) => rptModel(iso || rptDayIso(), o), recordingModel: async (fn) => { const s = sessionsIndex[fn]; return s ? s61Result(s, await loadFullSession(fn)).d : null; }, prepare: (iso, o) => rptPrepare(iso || rptDayIso(), o), pageCount: async (iso) => rptPageCount(await rptModel(iso || rptDayIso(), { sleep: false })), dayIso: () => rptDayIso(), clear: rptClear, share: (iso) => rptShare(iso || rptDayIso(), 'share'), save: (iso) => rptShare(iso || rptDayIso(), 'save') };
   // ===== Day report (S44) END =====
 
   // ===== Keyboard nav: ← / → move between adjacent sessions or days =====

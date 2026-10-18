@@ -68,6 +68,8 @@ async function openDay(base, iso, o = {}) {
     if (/fonts\.(googleapis|gstatic)\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com/.test(u)) return route.continue();
     return route.fulfill({ status: 204, body: '' });
   });
+  // S63: the sleep split forced on (weights flag 'personal'), so the paper checks see the Asleep and Awake rows.
+  await ctx.addInitScript(() => { try { localStorage.setItem('hrv_viewer_sleep_weights', 'personal'); } catch (e) {} });
   if (o.app) {
     await ctx.addInitScript(fakeBridge({ scenario: 'idle' }));
     await ctx.addInitScript(NATIVE_PDF);
@@ -212,13 +214,15 @@ async function webDay(base, label, iso, o = {}) {
   const okChart = JSON.stringify(nums.chart) === JSON.stringify(nums.idx.map((r) => r.n).sort((a, b) => a - b));
   check(`${tag} moment numbers on page 1 match their pages`, okLinks && okChart && nums.onPages.length <= 6, `${linked.length} linked, ${nums.onPages.length} on pages, chart ${nums.chart.join(',')}`);
   // S62 (Khal 10-18, half-width "Whole day" table): Summary is one full-width row of figures, each on one line.
+  // S63: plus the Asleep and Awake rows (two, or none), each cell on one line.
   const sum = await page.evaluate(() => {
     const t = document.querySelector('#rpg1 table.sum'); if (!t) return null;
     const lines = (el) => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; };
-    return { labels: [...t.querySelectorAll('th')].map((th) => th.textContent.trim()), rows: t.querySelectorAll('tbody tr').length,
-      w: Math.round(t.getBoundingClientRect().width), sec: Math.round(t.previousElementSibling.getBoundingClientRect().width), lines: [...t.querySelectorAll('th')].map(lines).concat([...t.querySelectorAll('td')].map((td) => getComputedStyle(td).whiteSpace === 'nowrap' && td.scrollWidth <= td.clientWidth ? 1 : 2)) };
+    const one = (c) => getComputedStyle(c).whiteSpace === 'nowrap' && c.scrollWidth <= c.clientWidth ? 1 : 2;
+    return { labels: [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim()), rows: t.querySelectorAll('tbody tr').length, split: t.querySelectorAll('tbody tr.slp').length,
+      w: Math.round(t.getBoundingClientRect().width), sec: Math.round(t.previousElementSibling.getBoundingClientRect().width), lines: [...t.querySelectorAll('thead th')].map(lines).concat([...t.querySelectorAll('tbody th, td')].map(one)) };
   });
-  check(`${tag} Summary one full-width row of figures`, !!sum && sum.rows === 1 && sum.labels[0] === 'Recorded' && sum.labels.length === 5 && Math.abs(sum.w - sum.sec) <= 1 && sum.lines.every((n) => n === 1), JSON.stringify(sum));
+  check(`${tag} Summary one full-width row of figures`, !!sum && sum.rows === 1 + sum.split && (sum.split === 0 || sum.split === 2) && sum.labels[0] === 'Recorded' && sum.labels.length === 5 && Math.abs(sum.w - sum.sec) <= 1 && sum.lines.every((n) => n === 1), JSON.stringify(sum));
   // Type sizes.
   const type = await page.evaluate(() => {
     const small = [], pt = (px) => +(px * 0.75).toFixed(2);

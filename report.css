@@ -106,7 +106,9 @@
 .rpt .readouts th { font-size: 7pt; font-weight: 500; color: var(--rp-ink-2); text-align: left; padding: 0 8px 2px 0; }
 .rpt .readouts td { padding: 2px 8px 0 0; font-weight: 600; font-size: 10pt; white-space: nowrap; }
 .rpt .readouts.sum { table-layout: fixed; }
-.rpt .readouts td .d { font-weight: 400; font-size: 7pt; color: var(--rp-ink-2); margin-left: 4px; }
+.rpt .readouts td .d, .rpt .readouts th[scope="row"] .d { font-weight: 400; font-size: 7pt; color: var(--rp-ink-2); margin-left: 4px; }
+/* S63 Asleep and Awake rows: the row label reads as a cell. */
+.rpt .readouts th[scope="row"] { padding: 2px 8px 0 0; font-weight: 600; font-size: 10pt; color: var(--rp-ink); white-space: nowrap; }
 .rpt .timeline { display: grid; grid-template-columns: 40px 1fr; gap: 2px 8px; margin: 8px 0 0; font-size: 8pt; }
 .rpt .timeline .tm { font-weight: 600; }
 .rpt .mnote { margin: 8px 0 0; font-size: 8pt; }

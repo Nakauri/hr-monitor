@@ -152,6 +152,10 @@
           return Object.keys(JSON.parse(raw)).length;
         } catch (e) { return -1; }
       })(),
+      // S63: the Day report's sleep split weights, set once per device from the console.
+      sleepWeights: (function () {
+        try { return localStorage.getItem('hrv_viewer_sleep_weights') === 'personal' ? 'personal' : 'general'; } catch (e) { return 'general'; }
+      })(),
       marks: (function () {
         if (isDemoView() || !window.AortiMarksPage || typeof window.AortiMarksPage.diag !== 'function') return null;
         try { return window.AortiMarksPage.diag(); } catch (e) { return null; }
@@ -719,6 +723,7 @@
     lines.push('  plugin:   ' + (d.wakeLockGotPlugin ? 'yes' : 'no'));
     lines.push('  error:    ' + (d.wakeLockLastError || 'none'));
     lines.push('Broadcast:  ' + (d.localBroadcastKey ? 'key set' : 'no key'));
+    lines.push('Sleep weights: ' + d.sleepWeights);
     lines.push('User agent: ' + d.userAgent);
     const events = readLog();
     if (events.length) {
