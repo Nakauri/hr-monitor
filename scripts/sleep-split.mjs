@@ -2,15 +2,18 @@
 // of history), a clock prior, personal weights or any split reaching other people, printed times, an
 // in-progress day cached, a split that moves a moment off page 1, and a digest stored from a day whose file did not load
 // (S63-SPEC-skeptic3 MUST 1: the session cache holds 8 files, so a re-read can fail after a first read passed).
+// S64 (--part dayview): the Day view and the report disagree on sleep for the same day (S63-SPEC open question 1).
 // Files: hrv_viewer.html (S63 sleep block, rptModel, s63DayDigest, s63Sleep, rptSleepFigures, rptSleepRows, rptPage1,
-// rptPrepare, buildDaySession loadFailed), report.css, diagnostics.js. Spec: ux-audit redesign/s63-sleep/S63-SPEC.md.
-// Parts golden,replay,same,fit,share,copy (default golden,copy). Runtime: golden about 90 s, copy about 40 s, replay about
-// 60 s, same about 60 s, share about 10 s, fit about 60 to 150 s a month (--month 2026-08 runs one month).
+// rptPrepare, buildDaySession loadFailed, S64 s64Run, postureSleepSection), report.css, diagnostics.js. Spec: ux-audit
+// redesign/s63-sleep/S63-SPEC.md. Parts golden,replay,same,fit,share,copy,dayview (default golden,copy). Runtime: golden
+// about 30 s, copy about 40 s, replay about 30 s, same about 75 s, share about 5 s, dayview about 55 s (20 s without the
+// manifest), fit about 60 to 150 s a month (--month 2026-08 runs one month).
 // replay, same, fit and copy need <ux>/redesign/s63-sleep/replay-manifest.json, replay-expect.json and the files they
 // name; a missing input exits 2 with its path, changed data exits 2 with "data changed, re-freeze". Expectations and
 // labels stay in those gitignored files; this script holds no personal number, date or time.
 // --mutants runs the negative controls of spec 6b, each must FAIL; with --part, only the mutants aimed at those parts;
-// --only G2,G13 runs those goldens. "same" and "fit" compare against main 02aef18. --shots <dir> writes page 1 pictures.
+// --only G2,G13 runs those goldens. "same" and "fit" compare against main 02aef18, "dayview" flag off against 77f8fca.
+// --shots <dir> writes page 1 pictures, and with dayview the Day chart of demo 04-24 before (77f8fca) and after.
 // Usage: node scripts/sleep-split.mjs [--part <list>] [--mutants] [--only <ids>] [--month <yyyy-mm>] [--ux <dir>] [--shots <dir>]
 process.env.TZ = 'America/Edmonton';
 import http from 'node:http';
@@ -34,6 +37,7 @@ const ONLY = argVal('--only') ? argVal('--only').split(',') : null;
 const MONTH = argVal('--month');
 const SHOTS = argVal('--shots');
 const BASE_REF = '02aef18';
+const S64_REF = '77f8fca';
 const HOME = os.homedir().split(path.sep).join('/');
 const S63 = path.join(UX, 'redesign', 's63-sleep');
 const MANIFEST = path.join(S63, 'replay-manifest.json');
@@ -162,9 +166,10 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 let SERVED = REAL;
 const SEED = new Map();   // name -> text or { file }
 const oldCache = new Map();
-function oldFile(rel) {
-  if (!oldCache.has(rel)) { try { oldCache.set(rel, execFileSync('git', ['-C', ROOT, 'show', BASE_REF + ':' + rel], { maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] })); } catch (e) { oldCache.set(rel, null); } }
-  return oldCache.get(rel);
+function oldFile(rel, ref = BASE_REF) {
+  const k = ref + ':' + rel;
+  if (!oldCache.has(k)) { try { oldCache.set(k, execFileSync('git', ['-C', ROOT, 'show', k], { maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] })); } catch (e) { oldCache.set(k, null); } }
+  return oldCache.get(k);
 }
 let server = null, BASE = null, browser = null;
 async function startServer() {
@@ -176,8 +181,8 @@ async function startServer() {
       if (v == null) { res.writeHead(404); res.end(); return; }
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end(typeof v === 'string' ? v : fs.readFileSync(v.file)); return;
     }
-    if (rel.startsWith('/old/')) {
-      const body = oldFile(rel.slice(5));
+    if (rel.startsWith('/old/') || rel.startsWith('/s64base/')) {
+      const s64 = rel.startsWith('/s64base/'), body = oldFile(rel.slice(s64 ? 9 : 5), s64 ? S64_REF : BASE_REF);
       if (!body) { res.writeHead(404); res.end(); return; }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(rel)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); res.end(body); return;
     }
@@ -196,7 +201,7 @@ async function getBrowser() {
   try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
   return browser;
 }
-const viewerUrl = (old) => BASE + (old ? '/old' : '') + '/hrv_viewer.html';
+const viewerUrl = (old) => BASE + (old === 's64base' ? '/s64base' : old ? '/old' : '') + '/hrv_viewer.html';
 async function setupCtx(ctx, o) {
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
@@ -337,13 +342,14 @@ const BROWSER_GOLDENS = {
       let p = await newPage({ dir, flag: true });
       await seedInto(p, weekFiles(base));
       await p.goto(viewerUrl() + '#/day/' + D8, { waitUntil: 'networkidle' }); await chartReady(p);
+      const sigs = async () => p.evaluate(async () => { const db = await new Promise((res) => { const q = indexedDB.open('hr_monitor_kv', 2); q.onsuccess = () => res(q.result); }); const st = db.transaction('kv').objectStore('kv'); const keys = await new Promise((res) => { const r = st.getAllKeys(); r.onsuccess = () => res(r.result.filter((k) => String(k).startsWith('s63:'))); }); const out = {}; for (const k of keys) out[k] = await new Promise((res) => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => res(r.result.sig); }); db.close(); return out; });
       const r1 = await prep(p, D8), c1 = await counter(p);
+      const s1 = await sigs();
       const old4 = fileOfDay(weekFiles(base), 3)[0], new4 = weekFiles(grown);
       await p.evaluate(async (n) => { const db = await new Promise((res) => { const q = indexedDB.open('hr_monitor_kv', 2); q.onsuccess = () => res(q.result); }); await new Promise((res) => { const tx = db.transaction('drive-cache', 'readwrite'); tx.objectStore('drive-cache').delete(n); tx.oncomplete = res; }); db.close(); }, old4);
       await seedInto(p, { [fileOfDay(new4, 3)[0]]: new4[fileOfDay(new4, 3)[0]] });
       await p.goto(viewerUrl() + '#/day/' + D8, { waitUntil: 'networkidle' }); await chartReady(p);
-      const sigs = async () => p.evaluate(async () => { const db = await new Promise((res) => { const q = indexedDB.open('hr_monitor_kv', 2); q.onsuccess = () => res(q.result); }); const st = db.transaction('kv').objectStore('kv'); const keys = await new Promise((res) => { const r = st.getAllKeys(); r.onsuccess = () => res(r.result.filter((k) => String(k).startsWith('s63:'))); }); const out = {}; for (const k of keys) out[k] = await new Promise((res) => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => res(r.result.sig); }); db.close(); return out; });
-      const s1 = await sigs();
+      await s64Done(p, D8);
       const r2 = await prep(p, D8), c2 = await counter(p), s2 = await sigs();
       const changed = Object.keys(s2).filter((k) => s1[k] !== s2[k]);
       good = ok(r1 && r1.rows && c1.digest === 9 && c2.digest === 1 && changed.length === 1 && changed[0] === 's63:real:' + WD(3), `G10 a day-4 file grows by 60 rows: first report ${c1.digest} digests, second ${c2.digest}, changed keys ${changed.map((k) => k.slice(-5)).join(', ')} (want 9, 1, day 4 only)`) && good;
@@ -414,26 +420,34 @@ const BROWSER_GOLDENS = {
   // G19: a day whose file does not load is never stored; the next report after it loads stores it.
   G19: async () => {
     const files = weekFiles(), n4 = fileOfDay(files, 3)[0];
-    const p = await seeded(files, '#/day/' + D8, { flag: true }); await chartReady(p);
+    // S64 builds the digests on a Day open: the file goes before the Day opens, so the Day view's build fails first.
+    const p = await seeded(files, '#/month', { flag: true });
+    await p.waitForFunction(() => window.__aortiReport && window.__aortiReport.dayIso(), null, { timeout: 60000 });
     const del = (n) => p.evaluate(async (n) => { const db = await new Promise((res) => { const q = indexedDB.open('hr_monitor_kv', 2); q.onsuccess = () => res(q.result); }); await new Promise((res) => { const tx = db.transaction('drive-cache', 'readwrite'); tx.objectStore('drive-cache').delete(n); tx.oncomplete = res; }); db.close(); }, n);
     const put = (n, v) => p.evaluate(async ({ n, v }) => { const db = await new Promise((res) => { const q = indexedDB.open('hr_monitor_kv', 2); q.onsuccess = () => res(q.result); }); await new Promise((res) => { const tx = db.transaction('drive-cache', 'readwrite'); tx.objectStore('drive-cache').put(v, n); tx.oncomplete = res; }); db.close(); }, { n, v });
     await del(n4);
+    await p.evaluate((iso) => { location.hash = '#/day/' + iso; }, D8); await chartReady(p);
+    const band = await s64Done(p, D8);
     const r1 = await prep(p, D8), k1 = await s63Keys(p), failedSeen = p.warns.some((w) => w.includes('[buildDaySession] load failed') && w.includes(n4));
     await put(n4, files[n4]);
     const r2 = await prep(p, D8), k2 = await s63Keys(p);
     const key = 's63:real:' + WD(3);
-    const good = ok(failedSeen && r1 && !r1.rows && !r1.sleep && !k1.includes(key) && r2 && r2.rows && k2.includes(key), `G19 day 4's file removed from the Drive cache then restored: load failure seen ${failedSeen}, first rows ${r1 && r1.rows} key ${k1.includes(key)}, second rows ${r2 && r2.rows} key ${k2.includes(key)} (want true, false false, true true)`);
+    const good = ok(band === 'day:' + D8 + ' old' && failedSeen && r1 && !r1.rows && !r1.sleep && !k1.includes(key) && r2 && r2.rows && k2.includes(key), `G19 day 4's file removed from the Drive cache then restored: Day view band ${band}, load failure seen ${failedSeen}, first rows ${r1 && r1.rows} key ${k1.includes(key)}, second rows ${r2 && r2.rows} key ${k2.includes(key)} (want old, true, false false, true true)`);
     await close(p);
     return good;
   },
   // G19b: a 12-file day; the first file's second read fails (the cache holds 8, so it was evicted after the Day view read it).
   G19b: async () => {
     const files = weekFiles({ split12: 7 }), n1 = fileOfDay(files, 7)[0];
-    const p = await seeded(files, '#/day/' + D8, { flag: true }); await chartReady(p);
+    // The Day opens at 01:00 the next day, so S64 waits (day not completed) and the report at 07:00 does the second read.
+    const at = (h) => dayStart(WD(8)) + h * 3600000;
+    const p = await seeded(files, '#/day/' + D8, { flag: true, clock: at(1) }); await chartReady(p);
     await p.evaluate(async (n) => { const db = await new Promise((res) => { const q = indexedDB.open('hr_monitor_kv', 2); q.onsuccess = () => res(q.result); }); await new Promise((res) => { const tx = db.transaction('drive-cache', 'readwrite'); tx.objectStore('drive-cache').delete(n); tx.oncomplete = res; }); db.close(); }, n1);
+    const band = await s64Done(p, D8);
+    await p.clock.setFixedTime(new Date(at(7)));
     const r = await prep(p, D8), keys = await s63Keys(p), failedSeen = p.warns.some((w) => w.includes('[buildDaySession] load failed') && w.includes(n1));
     const key = 's63:real:' + D8;
-    const good = ok(fileOfDay(files, 7).length === 12 && failedSeen && r && !r.rows && !keys.includes(key), `G19b day 8 in ${fileOfDay(files, 7).length} files, first file gone before its second read: failure seen ${failedSeen}, rows ${r && r.rows}, day 8 key ${keys.includes(key)} (want 12, true, false, false)`);
+    const good = ok(fileOfDay(files, 7).length === 12 && band === 'day:' + D8 + ' open day' && failedSeen && r && !r.rows && !keys.includes(key), `G19b day 8 in ${fileOfDay(files, 7).length} files, first file gone before its second read: Day view band ${band}, failure seen ${failedSeen}, rows ${r && r.rows}, day 8 key ${keys.includes(key)} (want 12, open day, true, false, false)`);
     await close(p);
     return good;
   },
@@ -705,20 +719,25 @@ async function partReplay(src) {
 }
 
 // ---------- same: 02aef18 beside the working file ----------
-const VIEW_PIECES = () => {
+// noSleep: the S64 sleep band, its markers and the Posture & sleep section left out (flag on, where S64 changes them).
+const VIEW_PIECES = (noSleep) => {
   const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
   const ch = Chart.getChart(document.querySelector('#view-day #session-chart'));
   const strip = (o) => JSON.stringify(o, (k, v) => typeof v === 'function' ? undefined : v);
   const view = document.querySelector('#view-day').cloneNode(true);
   view.querySelectorAll('#insight-text').forEach((e) => e.remove());
+  if (noSleep) view.querySelectorAll('#marker-list, #markers-toggle .n, #markers-open .n').forEach((e) => e.remove());
+  const ov = ch ? ch.config.options.plugins.hrOverlays : null;
   return {
     tiles: txt(document.querySelector('#view-day #summary-grid')),
     view: txt(view),
     datasets: ch ? ch.data.datasets.map((d) => (d.label || '') + ':' + strip(d.data)) : [],
-    overlays: ch ? strip(ch.config.options.plugins.hrOverlays) : '',
-    insight: [...document.querySelectorAll('#view-day #insight-text .insight-section[data-key]')].map((s) => s.dataset.key + ': ' + txt(s)),
+    overlays: !ov ? '' : noSleep ? strip({ overlays: (ov.overlays || []).filter((o) => !/^<b>Sleep window/.test(o.html)) }) : strip(ov),
+    insight: [...document.querySelectorAll('#view-day #insight-text .insight-section[data-key]')].filter((s) => !noSleep || s.dataset.key !== 'posture').map((s) => s.dataset.key + ': ' + txt(s)),
   };
 };
+// Waits for the S64 task of this Day to finish (applied, kept, cancelled or skipped); returns its outcome.
+const s64Done = (page, iso) => page.waitForFunction((k) => { const c = globalThis.__s64; return !!(c && c.done && c.done.startsWith(k + ' ')); }, 'day:' + iso, { timeout: 120000 }).then(() => page.evaluate(() => globalThis.__s64.done)).catch(() => null);
 const reportNoSplit = (html) => normIds(String(html).replace(/<tr class="slp">.*?<\/tr>/g, ''));
 async function partSame(src) {
   SERVED = src;
@@ -726,13 +745,13 @@ async function partSame(src) {
   for (const iso of ['2026-10-13', '2026-10-14']) cases.push({ id: iso.slice(5), iso, files: () => realWeek(iso) });
   let good = true;
   for (const c of cases) {
-    const open = async (old, flag) => { const p = c.demo ? await demoPage(c.iso, { old, flag }) : await seeded(c.files(), '#/day/' + c.iso, { old, flag }); await chartReady(p); await p.waitForTimeout(600); return p; };
+    const open = async (old, flag) => { const p = c.demo ? await demoPage(c.iso, { old, flag }) : await seeded(c.files(), '#/day/' + c.iso, { old, flag }); await chartReady(p); await p.waitForTimeout(600); if (!old) await s64Done(p, c.iso); return p; };
     const a = await open(false, true), b = await open(true, false);
-    const va = await a.evaluate(VIEW_PIECES), vb = await b.evaluate(VIEW_PIECES);
+    const va = await a.evaluate(VIEW_PIECES, true), vb = await b.evaluate(VIEW_PIECES, true);
     for (const k of Object.keys(va)) {
       const x = JSON.stringify(va[k]), y = JSON.stringify(vb[k]);
       let i = 0; while (i < x.length && x[i] === y[i]) i++;
-      good = ok(x === y, `same ${c.id}: Day view ${k} identical to ${BASE_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
+      good = ok(x === y, `same ${c.id}: Day view ${k} (sleep band, its markers and Posture & sleep left out, S64) identical to ${BASE_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
     }
     const ra = await prep(a, c.iso), rb = await prep(b, c.iso);
     const x = reportNoSplit(ra.html), y = normIds(rb.html);
@@ -794,8 +813,12 @@ async function partFit(src) {
 // ---------- share: the busy toast while digests build ----------
 async function partShare(src) {
   SERVED = src;
-  const p = await seeded(weekFiles(), '#/day/' + D8, { flag: true, init: () => { window.print = () => { window.__printed = (window.__printed || 0) + 1; }; } });
+  // The Day opens at 01:00 the next day, so S64 builds nothing (day not completed); at 07:00 the report must build.
+  const at = (h) => dayStart(WD(8)) + h * 3600000;
+  const p = await seeded(weekFiles(), '#/day/' + D8, { flag: true, clock: at(1), init: () => { window.print = () => { window.__printed = (window.__printed || 0) + 1; }; } });
   await chartReady(p);
+  await s64Done(p, D8);
+  await p.clock.setFixedTime(new Date(at(7)));
   await p.click('#export-report');
   await p.waitForSelector('#share-menu [data-act="download"]', { timeout: 10000 });
   const pre = await p.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent));
@@ -853,6 +876,94 @@ async function partCopy(src) {
   return good;
 }
 
+// ---------- dayview (S64): the Day view and the report disagree on sleep for the same day ----------
+// Flag on and the split printing: the Day view band (chart overlays) adds up to the report's Asleep minutes, one Posture
+// and sleep line per run. Flag off: the Day view is byte-identical to S64_REF. At the first paint the S63 counters are 0
+// and the band's digests build after it. Synthetic multi-sleep day: the week with day 8 also at 55 from 14:00 to 16:00.
+const BAND = () => {
+  const ch = Chart.getChart(document.querySelector('#view-day #session-chart'));
+  const ov = ((ch && ch.config.options.plugins.hrOverlays) || {}).overlays || [];
+  const band = ov.filter((o) => /^<b>Sleep window/.test(o.html));
+  const lines = [...document.querySelectorAll('#view-day #insight-text .insight-section[data-key="posture"] li')].map((li) => li.firstElementChild.textContent.trim()).filter((t) => /^Sleep window/.test(t));
+  const c = globalThis.__s64;
+  return { runs: band.length, min: Math.round(band.reduce((a, o) => a + (o.xMax - o.xMin), 0)), lines, atPaint: c.atPaint, built: c.built, buildMs: c.buildMs.slice(), done: c.done, paintToDone: Math.round(c.doneT - c.atPaintT), s63: { digest: globalThis.__s63.digest, detect: globalThis.__s63.detect } };
+};
+const multiSleep = () => weekFiles({ over: { 7: (i) => i < 480 ? 55 : i >= 840 && i < 960 ? 55 : pat(i) } });
+async function partDayview(src, only) {
+  SERVED = src;
+  const want = (g) => !only || only.includes(g);
+  let good = true;
+  if (want('D1')) for (const c of [{ id: 'demo 04-24', iso: '2026-04-24', demo: true }, { id: 'synthetic multi-sleep day', iso: D8, files: multiSleep }]) {
+    const p = c.demo ? await demoPage(c.iso, { flag: true }) : await seeded(c.files(), '#/day/' + c.iso, { flag: true });
+    await chartReady(p);
+    const done = await s64Done(p, c.iso), b = await p.evaluate(BAND), r = await prep(p, c.iso);
+    const asleep = r && r.slp[0] ? minsOf(r.slp[0][0]) : NaN;
+    const lineMin = b.lines.reduce((a, t) => { const m = /(\d+):(\d{2}):(\d{2})$/.exec(t) || /(\d+):(\d{2})$/.exec(t); return a + (m ? (m.length === 4 ? +m[1] * 60 + +m[2] + +m[3] / 60 : +m[1] + +m[2] / 60) : NaN); }, 0);
+    good = ok(done === 'day:' + c.iso + ' applied' && r && r.rows && b.min === asleep && b.runs >= (c.demo ? 1 : 2) && b.lines.length === b.runs && Math.round(lineMin) === b.min, `dayview D1 ${c.id}, flag on: S64 ${done}; Day view band ${b.min} min in ${b.runs} runs, ${b.lines.length} Sleep window lines (${Math.round(lineMin)} min); report Asleep ${asleep} min, rows ${r && r.rows} (want applied, band = Asleep, ${c.demo ? '1' : '2'} or more runs, one line per run)`) && good;
+    good = ok(!p.errors.length, `dayview D1 ${c.id}: no page errors ${p.errors.join(' | ')}`) && good;
+    if (SHOTS && c.demo) {
+      fs.mkdirSync(SHOTS, { recursive: true });
+      const shot = async (pg, name) => { await pg.evaluate(() => { const l = document.querySelector('#view-day #layer-chips, #view-day .chart-panel'); if (l) l.scrollIntoView(); }); await pg.locator('#view-day .chart-panel').screenshot({ path: path.join(SHOTS, name) }); };
+      await shot(p, 's64-day-04-24-after.png');
+      const o = await demoPage(c.iso, { flag: true, old: 's64base' }); await chartReady(o); await o.waitForTimeout(1500);
+      await shot(o, 's64-day-04-24-before.png');
+      await close(o);
+    }
+    await close(p);
+  }
+  if (want('D2')) for (const c of [{ id: 'demo 04-24', iso: '2026-04-24', demo: true }, { id: 'synthetic multi-sleep day', iso: D8, files: multiSleep }]) {
+    const open = async (old) => { const p = c.demo ? await demoPage(c.iso, { old, flag: false }) : await seeded(c.files(), '#/day/' + c.iso, { old, flag: false }); await chartReady(p); await p.waitForTimeout(1500); return p; };
+    const a = await open(false), b = await open('s64base');
+    const done = await s64Done(a, c.iso);
+    const va = await a.evaluate(VIEW_PIECES, false), vb = await b.evaluate(VIEW_PIECES, false);
+    for (const k of Object.keys(va)) {
+      const x = JSON.stringify(va[k]), y = JSON.stringify(vb[k]);
+      let i = 0; while (i < x.length && x[i] === y[i]) i++;
+      good = ok(x === y, `dayview D2 ${c.id}, flag off: Day view ${k} byte-identical to ${S64_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
+    }
+    const c63 = await a.evaluate(() => ({ digest: globalThis.__s63.digest, detect: globalThis.__s63.detect }));
+    good = ok(done === 'day:' + c.iso + ' flag' && c63.digest === 0 && c63.detect === 0, `dayview D2 ${c.id}, flag off: S64 ${done}, S63 counters ${JSON.stringify(c63)} (want flag, 0 and 0)`) && good;
+    good = ok(!a.errors.length && !b.errors.length, `dayview D2 ${c.id}: no page errors ${a.errors.concat(b.errors).join(' | ')}`) && good;
+    await close(a); await close(b);
+  }
+  if (want('D3')) {
+    const p = await seeded(multiSleep(), '#/day/' + D8, { flag: true });
+    await chartReady(p);
+    const done = await s64Done(p, D8), b = await p.evaluate(BAND);
+    const zero = b.atPaint && b.atPaint.digest === 0 && b.atPaint.detect === 0;
+    good = ok(zero && b.built === 9 && b.s63.digest === 9 && done === 'day:' + D8 + ' applied', `dayview D3 first paint, no digests cached: S63 counters at paint ${JSON.stringify(b.atPaint)}, then ${b.built} digests built one per idle wait, ${b.paintToDone} ms paint to band (want 0 and 0, 9, applied)`) && good;
+    // A fresh document on the same day reads the stored digests: no build.
+    await p.goto('about:blank'); await p.goto(viewerUrl() + '#/day/' + D8, { waitUntil: 'networkidle' });
+    await chartReady(p);
+    const done2 = await s64Done(p, D8), b2 = await p.evaluate(BAND);
+    good = ok(done2 === 'day:' + D8 + ' applied' && b2.built === 0 && b2.min === b.min, `dayview D3 reopened: ${b2.built} digests built, band ${b2.min} min (want 0, ${b.min})`) && good;
+    good = ok(!p.errors.length, `dayview D3: no page errors ${p.errors.join(' | ')}`) && good;
+    await close(p);
+  }
+  if (want('T') && !QUIET) {
+    // Desktop timing at 6x CPU: the idle digest builds for a Day with no digests cached (information only). The real week
+    // needs the gitignored manifest and is skipped without it.
+    const cases = [['synthetic week', D8, multiSleep]];
+    if (fs.existsSync(MANIFEST)) cases.push(['10-14 week', '2026-10-14', () => realWeek('2026-10-14')]);
+    for (const [id, iso, files] of cases) {
+      const p = await newPage({ flag: true, init: () => { window.__lt = []; try { new PerformanceObserver((l) => l.getEntries().forEach((e) => window.__lt.push([e.startTime, e.duration]))).observe({ type: 'longtask', buffered: true }); } catch (e) {} } });
+      await seedInto(p, files());
+      await p.goto(viewerUrl() + '#/month', { waitUntil: 'networkidle' });
+      await p.waitForTimeout(1500);
+      const cdp = await p.ctx.newCDPSession(p);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+      await p.evaluate((d) => { location.hash = '#/day/' + d; }, iso);
+      await chartReady(p);
+      const done = await s64Done(p, iso), b = await p.evaluate(BAND);
+      const ms = b.buildMs, sum = ms.reduce((a, x) => a + x, 0);
+      const lt = await p.evaluate(() => window.__lt.filter(([t]) => t > globalThis.__s64.atPaintT && t < globalThis.__s64.doneT).map(([, d]) => Math.round(d)));
+      console.log(`dayview timing ${id}, 1440 at 6x: ${done}; ${ms.length} idle digest builds, each ${ms.join(', ')} ms (median ${ms.slice().sort((x, y) => x - y)[ms.length >> 1]}, total ${sum}); first paint to band ${b.paintToDone} ms; longest main-thread task in that span ${lt.length ? Math.max(...lt) : 0} ms over ${lt.length} long tasks (information only)`);
+      await close(p);
+    }
+  }
+  return good;
+}
+
 // ---------- mutants (spec 6b) ----------
 const R = (a, b) => [a, b];
 const MUT = [
@@ -879,8 +990,12 @@ const MUT = [
   ['20 failed load still stored', [R("      if (!entry || entry.loadFailed) return 'failed';", "      if (!entry) return 'failed';")], [['golden', ['G19', 'G19b']]]],
   ['21 sig without the empty file-list guard', [R('    const files = sessionsByDate[iso] || [];\n    if (!files.length) return null;\n    const w = dayWindow', '    const files = sessionsByDate[iso];\n    const w = dayWindow')], [['golden', ['G18']]]],
   ['22 d.sleep set on the shared memo', [R('    return Object.assign({}, d, { sleep });', '    d.sleep = sleep;\n    return d;')], [['golden', ['G21']]]],
+  // S64 (--part dayview).
+  ['S64a Day view keeps the longest sleep run only', [R('    s.sleepWindows = s64Runs(sleep.mask, d.hr);', '    s.sleepWindows = s64Runs(sleep.mask, d.hr).sort((p, q) => (q.end - q.start) - (p.end - p.start)).slice(0, 1);')], [['dayview', ['D1']]]],
+  ['S64b band from the mask whatever the flag and the print rule', [R("    if (!(s63Weights() === 'personal' || S63_PRINT_GENERAL)) return end('flag');\n", ''), R('    if (!d || !rptSleepFigures(Object.assign({}, d, { sleep }))) return end(\'old\');', "    if (!d) return end('old');")], [['dayview', ['D2']]]],
+  ['S64c an S63 digest of the open day before the chart draws', [R('    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);', "    if (s.__virtualDay && s63Weights() === 'personal') s63Digest(data.hr, data.rmssd, data.beats || [], 0, 60);\n    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);")], [['dayview', ['D3']]]],
 ];
-const PART_FN = { golden: partGolden, replay: partReplay, same: partSame, fit: partFit, share: partShare, copy: partCopy };
+const PART_FN = { golden: partGolden, replay: partReplay, same: partSame, fit: partFit, share: partShare, copy: partCopy, dayview: partDayview };
 async function runMutants() {
   let good = true;
   const list = MUT.filter(([, , parts]) => parts.some(([p]) => PARTS.includes(p)));
