@@ -1632,6 +1632,7 @@
       tx.objectStore(store).put(value, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('idb abort'));
     });
   }
   async function idbDelete(key, store = IDB_STORE) {
@@ -7621,7 +7622,10 @@
     if (!d) return null;
     let sleep = null;
     if (want && typeof want === 'object') sleep = want;
-    else if (want && (s63Weights() === 'personal' || S63_PRINT_GENERAL)) sleep = await s63Sleep(iso);
+    else if (want && (s63Weights() === 'personal' || S63_PRINT_GENERAL)) {
+      try { sleep = await s63Sleep(iso); } catch (e) { console.warn('[S63] split failed, Summary row only', e); sleep = null; }
+      finally { if (s63Toast) { s63Toast.close(); s63Toast = null; } }
+    }
     return Object.assign({}, d, { sleep });
   }
 
@@ -7648,7 +7652,7 @@
       else { try { hit = await idbGet(key); } catch (e) {} }
       if (hit && hit.sig === sig) return hit;
     }
-    if (!run.toasted) { run.toasted = true; UI.toast('Making the report'); }
+    if (!run.toasted) { run.toasted = true; s63Toast = UI.toast('Making the report', { ms: 30000 }); }
     const had = !!virtualSessions['day:' + iso];
     try {
       await buildDaySession(iso);
@@ -7666,6 +7670,7 @@
     }
   }
   // d.sleep for a completed day the history gate opens, or null.
+  let s63Toast = null;
   async function s63Sleep(iso) {
     const now = Date.now(), todayIso = localDateKeyToday();
     if (!s63Completed(iso, todayIso, (now - dayWindow(todayIso).start) / 60000)) return null;
