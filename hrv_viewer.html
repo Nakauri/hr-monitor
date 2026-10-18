@@ -6422,9 +6422,11 @@
     currentData = data;
     currentQuadRanges = computeQuadrantRanges(data);
     // Sleep windows need the full data; a summary reopened on the same data keeps them.
-    if (s.__detectedFor !== data) {
+    // A cleared sleep weights flag drops an S64 band kept on the same data.
+    if (s.__detectedFor !== data || (s.__s64For && !(s63Weights() === 'personal' || S63_PRINT_GENERAL))) {
       s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
       s.__detectedFor = data;
+      s.__s64For = null;
     }
     // Reset toggles + brush state on every new session open so prior values don't
     // carry across (previously caused out-of-range zoom glitches on short sessions).
@@ -7714,7 +7716,8 @@
     const c = globalThis.__s63;
     S64_COUNT.atPaintKey = key; S64_COUNT.atPaint = { digest: c.digest, detect: c.detect }; S64_COUNT.atPaintT = performance.now();
   }
-  // Runs of asleep minutes that hold a report minute (d.hr), so the band adds up to the report's Asleep.
+  // Runs of asleep minutes that hold a report minute (d.hr), so the band's recorded minutes add up to the report's Asleep;
+  // runs apart by 10 unrecorded minutes or less (a strap drop inside a night) join.
   function s64Runs(mask, hr) {
     const out = [];
     let a = -1;
@@ -7723,19 +7726,35 @@
       if (on && a < 0) a = m;
       else if (!on && a >= 0) { out.push({ start: a, end: m }); a = -1; }
     }
-    return out;
+    const joined = [];
+    for (const r of out) {
+      const prev = joined[joined.length - 1];
+      let gap = !!prev && r.start - prev.end <= S64_JOIN;
+      for (let m = prev ? prev.end : 0; gap && m < r.start; m++) if (hr[m] != null) gap = false;
+      if (gap) prev.end = r.end; else joined.push(r);
+    }
+    return joined;
   }
+  const S64_JOIN = 10;
   async function s64Run(s, data, key) {
     const end = (how) => { S64_COUNT.done = key + ' ' + how; S64_COUNT.doneT = performance.now(); };
     const iso = s.__virtualDay;
     if (!iso || key !== 'day:' + iso) return end('not a day');
-    if (s.__s64For === data) return end('kept');
     if (!(s63Weights() === 'personal' || S63_PRINT_GENERAL)) return end('flag');
+    const shown = s.__s64For === data;
+    // A band shown from digests that no longer match goes back to the old detector.
+    const back = (how) => {
+      if (shown && currentData === data && currentFilename === key) {
+        s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd); s.__s64For = null;
+        if (currentSummary === s) s64Paint(s, data);
+      }
+      return end(how);
+    };
     const todayIso = localDateKeyToday();
-    if (!s63Completed(iso, todayIso, (Date.now() - dayWindow(todayIso).start) / 60000)) return end('open day');
+    if (!s63Completed(iso, todayIso, (Date.now() - dayWindow(todayIso).start) / 60000)) return back('open day');
     let withFiles = 0;
     for (let k = -6; k <= 0; k++) if ((sessionsByDate[isoAddDays(iso, k)] || []).length) withFiles++;
-    if (withFiles < S63_O.floorDays) return end('gate');
+    if (withFiles < S63_O.floorDays) return back('gate');
     const run = { todayIso, toasted: true };
     const fetch = async (day) => {
       const hit = await s63DayDigest(day, Object.assign({ cacheOnly: true }, run));
@@ -7744,21 +7763,25 @@
     };
     let sleep = null;
     try { sleep = await s63Sleep(iso, fetch); }
-    catch (e) { if (e === S64_MISS) return end('missing'); console.warn('[S64] sleep band failed, old band kept', e); return end('failed'); }
+    catch (e) { if (e === S64_MISS) return back('missing'); console.warn('[S64] sleep band failed, old band kept', e); return back('failed'); }
     if (currentData !== data || currentFilename !== key || s61RouteKey() !== key) return end('cancelled');
     const d = sleep && s61Result(s, data).d;
-    if (!d || !rptSleepFigures(Object.assign({}, d, { sleep }))) return end('old');
-    s.sleepWindows = s64Runs(sleep.mask, d.hr);
+    if (!d || !rptSleepFigures(Object.assign({}, d, { sleep }))) return back('old');
+    const windows = s64Runs(sleep.mask, d.hr);
+    if (shown && JSON.stringify(windows) === JSON.stringify(s.sleepWindows)) return end('kept');
+    s.sleepWindows = windows;
     s.__s64For = data;
     if (currentSummary === s) s64Paint(s, data);
     end('applied');
   }
+  // Filters the person set in this page; S64 never turns those on.
+  const s64PersonFilters = new Set();
   // Layers, markers, chart and the Posture & sleep section; a layer that just gained data starts on.
   function s64Paint(s, data) {
     const had = filterAvailability.sleep;
     filterAvailability.sleep = (getEffectiveSleepWindows(s) || []).length > 0;
     if (!filterAvailability.sleep) activeFilters.sleep = false;
-    else if (!had) activeFilters.sleep = true;
+    else if (!had && !s64PersonFilters.has('sleep')) activeFilters.sleep = true;
     syncFilterUI();
     renderMarkerList(s);
     drawSessionChart(s, data);
@@ -9078,7 +9101,7 @@
   // Posture & sleep. With the S64 band (sleep from the S63 mask) every sleep run gets a line; otherwise the first only.
   function postureSleepSection(s) {
     const lines = [];
-    const s64 = !!s.__s64For && s.__s64For === s.__detectedFor;
+    const s64 = !!s.__s64For && s.__s64For === s.__detectedFor && !(currentSummary && getOverride(currentSummary.filename, 'sleep')) && !viewMarks(s).sleep.length;
     const sleepForInsight = getEffectiveSleepWindows(s);
     if (sleepForInsight && sleepForInsight.length) {
       for (const w of s64 ? sleepForInsight : [sleepForInsight[0]]) {
@@ -10200,6 +10223,7 @@
     if (!(type in activeFilters)) return;
     if (!filterAvailability[type]) return; // can't toggle something with no data
     activeFilters[type] = !!on;
+    s64PersonFilters.add(type);
     syncFilterUI();
     if (currentSummary) {
       renderMarkerList(currentSummary);
