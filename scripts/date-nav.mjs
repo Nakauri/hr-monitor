@@ -11,7 +11,7 @@
 //   leaves its column, values use tabular figures; at 1440, 360 (open and collapsed) and 360 with 200% text.
 // --mutants: a title-sized caret track, the KPI gap removed, the KPI fit removed, unbalanced KPI rows and a calendar that never opens each
 //   must FAIL their part. --shots <dir> shoots the headers, the picker and the KPI strip.
-// Usage: node scripts/date-nav.mjs [--part carets,picker,week,month,kpi] [--mutants] [--shots <dir>] [--ux <ux-audit dir>]
+// Usage: node scripts/date-nav.mjs [--part carets,picker,week,month,kpi] [--mutants [--only 0,1]] [--shots <dir>] [--ux <ux-audit dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,6 +33,7 @@ const PART = argVal('--part');
 const want = (p) => !PART || PART.split(',').includes(p);
 const MUTANTS = args.includes('--mutants');
 
+// MUTATE = [from, to, file = '/hrv_viewer.html']
 let MUTATE = null;
 let anchorMissing = false;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.csv': 'text/csv' };
@@ -41,7 +42,7 @@ const server = http.createServer((req, res) => {
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
   let body = fs.readFileSync(file);
-  if (MUTATE && rel === '/hrv_viewer.html') {
+  if (MUTATE && rel === (MUTATE[2] || '/hrv_viewer.html')) {
     const text = body.toString('utf8').replace(/\r\n/g, '\n');
     if (!text.includes(MUTATE[0])) { anchorMissing = true; console.log('MUTANT ANCHOR MISSING: ' + MUTATE[0].slice(0, 70)); }
     body = text.replace(MUTATE[0], MUTATE[1]);
@@ -260,7 +261,7 @@ async function partMonth() {
 async function partKpi() {
   for (const [w, scale, collapsed] of [[1440, 1, false], [360, 1, false], [360, 1, true], [360, 2, false]]) {
     const { ctx, page } = await open(w, '#/day/2026-04-21', 1);
-    await page.waitForSelector('#summary-bar .summary-stat', { timeout: 30000 }).catch(() => {});
+    await page.waitForSelector('#summary-bar .kpi', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(600);
     await page.evaluate((c) => { const b = document.getElementById('summary-bar'); if (b) b.classList.toggle('collapsed', c); }, collapsed);
     if (scale !== 1) await page.evaluate((f) => {
@@ -269,7 +270,7 @@ async function partKpi() {
       els.forEach((e, i) => e.style.setProperty('font-size', sizes[i] * f + 'px', 'important'));
     }, scale);
     await page.evaluate(() => {
-      const v = document.querySelector('#summary-bar [data-stat="duration"] .summary-stat-value');
+      const v = document.querySelector('#summary-grid [data-stat="duration"] .kpi-value');
       if (v) v.textContent = '24:00:00';
       window.dispatchEvent(new Event('resize'));
     });
@@ -281,7 +282,7 @@ async function partKpi() {
       const stats = [...grid.children].filter((e) => e.offsetParent !== null).map((e) => {
         const b = e.getBoundingClientRect();
         const kids = [...e.children].filter((k) => k.offsetParent !== null).map((k) => { const rg = document.createRange(); rg.selectNodeContents(k); const t = rg.getBoundingClientRect(); return { right: t.right, w: t.width }; });
-        const v = e.querySelector('.summary-stat-value');
+        const v = e.querySelector('.kpi-value');
         return { key: e.dataset.stat, left: b.left, right: b.right, top: Math.round(b.top), inside: kids.every((k) => k.right <= b.right + 0.5), tab: v ? getComputedStyle(v).fontVariantNumeric.includes('tabular-nums') : true, vright: v ? (() => { const rg = document.createRange(); rg.selectNodeContents(v); return rg.getBoundingClientRect().right; })() : b.right };
       });
       const gaps = [], overlaps = [];
@@ -313,13 +314,15 @@ const RUN = { carets: partCarets, picker: partPicker, week: partWeek, month: par
 if (MUTANTS) {
   const M = [
     ['title-sized caret track', 'carets', ['.datenav-h { flex: 0 0 auto; width: 16.5em;', '.datenav-h { flex: 0 0 auto; width: auto;']],
-    ['KPI gap removed', 'kpi', ['gap: var(--s4) var(--kpi-gap);', 'gap: var(--s4) 0;']],
+    ['KPI gap removed', 'kpi', ['gap: var(--s4) var(--kpi-gap);', 'gap: var(--s4) 0;', '/ui.css']],
     ['KPI fit removed', 'kpi', ["    if (!w) return;\n    const col", "    return;\n    const col"]],
     ['KPI rows unbalanced', 'kpi', ["const cols = Math.ceil(stats.length / Math.ceil(stats.length / fit));", "const cols = fit;"]],
     ['calendar never opens', 'picker', ["g('-pick').addEventListener('click',", "g('-pick').addEventListener('dblclick',"]],
   ];
   const results = [];
-  for (const [name, part, swap] of M) {
+  // --only <n,n> runs those mutants by index (the whole set runs past one 170 s run).
+  const only = argVal('--only') ? argVal('--only').split(',').map(Number) : null;
+  for (const [name, part, swap] of M.filter((m, i) => !only || only.includes(i))) {
     MUTATE = swap; anchorMissing = false;
     const before = fails;
     console.log(`-- mutant: ${name} (part ${part})`);

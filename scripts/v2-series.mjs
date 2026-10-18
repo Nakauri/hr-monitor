@@ -1,6 +1,7 @@
 // Guards: S50 Day open without the CSV round trip. Named bug: S8 cold Day open 2,531 ms (2026-10-14 trace,
 // ux-audit/redesign/perf-2026-10-14/S49-RESULTS.md), a third of it writing v2 rows out as CSV and parsing them back.
-// The direct path (v2SeriesFromRows) must give loadFullSession output deep-equal to the CSV path on every v2 key.
+// The direct path (v2SeriesFromRows) must give loadFullSession output deep-equal to the CSV path on every v2 key, the four
+// series compared by name; the direct path also carries S61 `beats`, one per h row, and the CSV path none.
 // Files: hrv_viewer.html (v2SeriesFromRows, loadFullSession). Runtime: about 60 s; run when either changes.
 // Fixtures: the device segments (docs/audit-2026-10-09/device-2026-10-10/segments) and variants built from them:
 // first row over 10 min after the session start, rows before it, symptom, event, warning, palpitation and context
@@ -108,7 +109,11 @@ async function compare(files) {
     for (const key of window.__hrmV2.keys()) {
       const a = await window.__hrmV2.load(key, true);
       const b = await window.__hrmV2.load(key, false);
-      const sa = JSON.stringify(a), sb = JSON.stringify(b);
+      // The four series by name; the direct path also carries `beats` (S61), checked below.
+      const pick = (o) => ({ hr: o.hr, rmssd: o.rmssd, sdnnMatch: o.sdnnMatch, sdnn5min: o.sdnn5min });
+      const sa = JSON.stringify(pick(a)), sb = JSON.stringify(pick(b));
+      const hRows = await window.__hrmV2.hRowCount(key);
+      const beats = { direct: b.beats ? b.beats.ep.length : null, csv: 'beats' in a, hRows };
       let where = '';
       if (sa !== sb) for (const k of ['hr', 'rmssd', 'sdnnMatch', 'sdnn5min']) {
         if (a[k].length !== b[k].length) { where = `${k} length ${a[k].length} vs ${b[k].length}`; break; }
@@ -117,7 +122,7 @@ async function compare(files) {
       }
       // NaN survives the comparison: JSON writes it as null on both sides, so count it separately.
       const nan = (o) => ['hr', 'rmssd', 'sdnnMatch', 'sdnn5min'].map((k) => o[k].filter((p) => Number.isNaN(p.y) || Number.isNaN(p.x)).length).join('/');
-      out.push({ key, same: sa === sb && nan(a) === nan(b), n: ['hr', 'rmssd', 'sdnnMatch', 'sdnn5min'].map((k) => a[k].length).join('/'), where });
+      out.push({ key, same: sa === sb && nan(a) === nan(b), n: ['hr', 'rmssd', 'sdnnMatch', 'sdnn5min'].map((k) => a[k].length).join('/'), where, beats });
     }
     return out;
   });
@@ -135,6 +140,7 @@ for (const [name, files] of VARIANTS.filter((v, i) => !MUT && (!ONLY || ONLY.inc
   console.log(`${name}: ${Math.round((Date.now() - t0) / 1000)} s`);
   ok(r.length > 0, `${name}: v2 sessions found (${r.length})`);
   for (const x of r) ok(x.same, `${name}: ${x.key} direct path equals the CSV path (hr/rmssd/sdnnMatch/sdnn5min ${x.n})${x.where ? ' first difference ' + x.where : ''}`);
+  for (const x of r) ok(x.beats.direct === x.beats.hRows && x.beats.hRows > 0 && !x.beats.csv, `${name}: ${x.key} direct path beats one per h row (${x.beats.direct} of ${x.beats.hRows}), CSV path has none (${!x.beats.csv})`);
   ok(!errors.length, `${name}: no page errors ` + errors.join(' | '));
 }
 

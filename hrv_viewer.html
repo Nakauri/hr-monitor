@@ -50,11 +50,11 @@
   button.primary:where(:not(.ui *)) { background: var(--action); color: var(--on-fill); border-color: var(--action); font-weight: 600; }
 
   /* Stage colors (shared with live app) */
-  .stage-low { color: #7DB8E8; }
-  .stage-normal { color: #B8D97E; }
-  .stage-elevated { color: #F0C75E; }
-  .stage-high { color: #E89858; }
-  .stage-critical { color: #E24B4A; }
+  .stage-low { color: var(--stage-1); }
+  .stage-normal { color: var(--stage-2); }
+  .stage-elevated { color: var(--stage-3); }
+  .stage-high { color: var(--stage-4); }
+  .stage-critical { color: var(--stage-5); }
 
   /* App bar: wordmark, Monitor, view tabs (view select under 768 px), Drive cloud, gear, Share. */
   .vbar { position: relative; z-index: 1000; display: flex; align-items: center; height: 56px; box-sizing: border-box; gap: var(--s1); padding: 0 var(--s4) 0 var(--s5); background: var(--bg); border-bottom: 1px solid var(--border); }
@@ -248,7 +248,7 @@
     position: relative;
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-card);
     padding: var(--card-pad);
     cursor: pointer;
     transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
@@ -287,32 +287,14 @@
     font-size: 15px;
   }
   .session-card-cont { margin-left: var(--s2); vertical-align: middle; font-weight: 500; color: var(--text-dim); }
-  .session-card-stats {
-    display: flex;
-    gap: 18px;
-    font-size: 12px;
-    flex-wrap: wrap;
-  }
-  .session-card-stat {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-  }
-  .session-card-stat-label {
-    color: var(--text-dim);
-    font-size: 12px;
-    font-weight: 500;
-    /* Keep labels on a single line so the number row below always sits at a
-       consistent y position across the card grid. */
-    white-space: nowrap;
-  }
-  .session-card-stat-value {
-    font-size: 18px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-  }
+  .session-card { container-type: inline-size; font-size: var(--t14); }
+  .session-card .kpi-grid { --kpi-gap: var(--s3); --kpi-min: 4.5em; --kpi-cols: 3; row-gap: var(--s3); }
+  .session-card .kpi-grid[data-n="7"] { --kpi-cols: 4; }
+  /* Four columns need 4 x 4.5em plus 3 gaps; below that 7 tiles go to 2 columns, never 3 + 3 + 1. */
+  @container (max-width: calc(18em + 36px)) { .session-card .kpi-grid[data-n="7"] { --kpi-cols: 2; } }
+  /* One row where every tile fits at its narrowest (measured 24em for 7 tiles, 18em for 5, plus room for wider values). */
+  @container (min-width: 26em) { .session-card .kpi-grid[data-n="7"] { grid-template-columns: repeat(7, auto); justify-content: space-between; } }
+  @container (min-width: 20em) { .session-card .kpi-grid[data-n="5"] { grid-template-columns: repeat(5, auto); justify-content: space-between; } }
 
   /* MONTH CALENDAR */
   .cal-header {
@@ -351,9 +333,9 @@
   }
   .cal-cell {
     aspect-ratio: 1;
-    background: #0a0a0a;
+    background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-card);
     padding: 12px;
     display: flex;
     flex-direction: column;
@@ -399,20 +381,14 @@
   }
   .cal-cell.has-sessions .cal-day-num { color: var(--text); }
   .cal-cell .cal-hr {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-size: 28px;
+    font-family: var(--num-face);
+    font-size: var(--t28);
     font-weight: 900;
     line-height: 1;
     font-variant-numeric: tabular-nums;
   }
-  .cal-cell .cal-hr-unit {
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-top: 3px;
-    font-weight: 600;
-  }
+  .cal-cell .cal-hr-label { font-size: var(--t12); font-weight: 500; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cal-cell .cal-hr .kpi-nodata { display: block; font-size: var(--t12); line-height: 1.15; }
   .cal-cell .cal-badges {
     display: flex;
     gap: 6px;
@@ -434,20 +410,18 @@
     height: 5px;
     border-radius: 50%;
   }
-  .cal-badge.palp { background: rgba(215,108,186,0.14); color: var(--warn-palp); }
+  .cal-badge.palp { background: var(--warn-palp-tint); color: var(--warn-palp); }
   .cal-badge.palp .cal-badge-dot { background: var(--warn-palp); }
-  .cal-badge.warn { background: rgba(226,75,74,0.14); color: var(--warn-high); }
+  .cal-badge.warn { background: var(--warn-high-tint); color: var(--warn-high); }
   .cal-badge.warn .cal-badge-dot { background: var(--warn-high); }
-  .cal-badge.flush { background: rgba(232,168,88,0.14); color: #E8A858; }
-  .cal-badge.flush .cal-badge-dot { background: #E8A858; }
-  .cal-badge.chills { background: rgba(133,183,235,0.14); color: #85B7EB; }
-  .cal-badge.chills .cal-badge-dot { background: #85B7EB; }
+  .cal-badge.flush { background: var(--ev-flush-tint); color: var(--ev-flush); }
+  .cal-badge.flush .cal-badge-dot { background: var(--ev-flush); }
+  .cal-badge.chills { background: var(--ev-chills-tint); color: var(--ev-chills); }
+  .cal-badge.chills .cal-badge-dot { background: var(--ev-chills); }
   .cal-cell .cal-session-count {
-    font-size: 11px;
+    font-size: var(--t12);
     color: var(--text-dim);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 600;
+    font-weight: 500;
   }
 
   /* DAY VIEW */
@@ -515,7 +489,7 @@
   .week-col {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-card);
     padding: 16px 14px;
     display: flex;
     flex-direction: column;
@@ -534,13 +508,13 @@
   }
   .week-dow { font-size: 11px; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
   .week-date { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .week-col-hr {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-size: 28px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-  .week-col-hr-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
+  .week-col-hr { font-family: var(--num-face); font-weight: 900; font-size: var(--t28); line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-top: var(--s1); }
+  @media (max-width: 768px) { .week-col-hr { font-size: var(--t22); } }
+  /* bpm beside a Week or Month headline; dropped where the columns are narrow. */
+  .hl-unit { margin-left: var(--s1); font-family: var(--ui-face); font-size: var(--t12); font-weight: 500; letter-spacing: 0; color: var(--text-dim); }
+  @media (min-width: 769px) and (max-width: 1199px) { .week-col-hr .hl-unit { display: none; } }
+  @media (max-width: 1100px) { .cal-hr .hl-unit { display: none; } }
+  .week-col-hr-label { font-size: var(--t12); font-weight: 500; color: var(--text-dim); }
   .week-col-spark {
     height: 44px;
     position: relative;
@@ -552,9 +526,13 @@
     .week-col-spark { height: 72px; }
     .week-col { min-height: 260px; }
   }
-  .week-col-stats { display: flex; gap: 12px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .week-col-stat { display: flex; flex-direction: column; gap: 2px; }
-  .week-col-stat-label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+  /* Always 2 by 2; one column where seven columns leave under about 112 px each. */
+  .week-col-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); margin: 0; font-size: var(--t12); }
+  @media (min-width: 769px) and (max-width: 1199px) { .week-col-stats { grid-template-columns: minmax(0, 1fr); } }
+  .week-col-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .week-col-stat-label { font-weight: 500; color: var(--text-dim); }
+  .week-col-stat dd { margin: 0; font-family: var(--num-face); font-weight: 900; font-size: var(--t14); font-variant-numeric: tabular-nums; }
+  .week-col-empty { margin-top: var(--s3); font-size: var(--t12); color: var(--text-dim); }
 
   /* ALL-TIME TRENDS */
   .all-granularity { width: fit-content; max-width: 100%; margin-bottom: 16px; }
@@ -566,7 +544,7 @@
   .all-card {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-card);
     padding: 18px 22px;
     display: flex;
     flex-direction: column;
@@ -602,13 +580,6 @@
   }
   .all-chart-wrap { height: 220px; position: relative; }
   .all-polar-wrap { height: 280px; position: relative; }
-  .all-headline {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-size: 26px;
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-    margin-top: 2px;
-  }
 
   /* SESSION DETAIL VIEW */
   /* Day cards: one padding and one gap. */
@@ -626,7 +597,7 @@
   .session-sidebar {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-card);
     padding: var(--s3) var(--card-pad) var(--card-pad);
     overflow: hidden;
     display: flex;
@@ -653,17 +624,9 @@
   .summary-bar {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-card);
     padding: var(--card-pad) calc(var(--card-pad) + 48px) var(--card-pad) var(--card-pad);
     position: relative;
-  }
-  /* Every column is as wide as the widest visible stat (--kpi-col, set by fitSummaryStats), so one gap token sits between every pair. */
-  .summary-grid {
-    --kpi-gap: var(--s5);
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(var(--kpi-col, 7.5em), 100%), 1fr));
-    gap: var(--s4) var(--kpi-gap);
-    font-size: var(--t14);
   }
   .summary-bar-title {
     background: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; text-align: left;
@@ -698,33 +661,6 @@
   .menu-tags { display: flex; flex-wrap: wrap; gap: var(--s2); padding: var(--s1) var(--s3) var(--s2); }
   .menu-tags #tags-current { display: contents; }
   .menu-tags .field { flex: 1 1 100%; }
-  .summary-stat {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .summary-stat-label {
-    font-size: var(--t12);
-    color: var(--text-dim);
-    font-weight: 500;
-  }
-  .summary-stat-value {
-    font-family: var(--num-face);
-    font-weight: 900;
-    font-size: 28px;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-    margin-top: 4px;
-  }
-  .summary-stat-value.hrv { color: var(--hrv); }
-  .summary-stat-value .nodata { font-family: var(--ui-face); font-size: var(--t14); font-weight: 500; letter-spacing: 0; color: var(--text-dim); }
-  .summary-stat-value .pct { font-size: var(--t16); }
-  .summary-stat-unit {
-    font-size: var(--t12);
-    color: var(--text-dim);
-    margin-top: 2px;
-  }
 
   /* Chart container
      Fixed height so sibling panels (autonomic interpretation, etc.) expanding
@@ -733,7 +669,7 @@
   .chart-panel {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-card);
     padding: var(--card-pad);
     display: flex;
     flex-direction: column;
@@ -827,9 +763,9 @@
   .sw-warning { color: var(--warn-crash); }
   .sw-disconnect { color: var(--missing-mark); border-style: dashed; }
   .sw-palp { color: var(--warn-palp); border-radius: 50%; }
-  .sw-delta { color: #B48CFF; }
-  .sw-flush { color: #E8A858; }
-  .sw-chills { color: #85B7EB; }
+  .sw-delta { color: var(--ev-shift); }
+  .sw-flush { color: var(--ev-flush); }
+  .sw-chills { color: var(--ev-chills); }
   .sw-posture { color: #c8a8e6; }
   .sw-sleep { color: #6E8CC8; border-style: dashed; }
 
@@ -896,7 +832,7 @@
   .interp-panel {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-card);
     font-size: 13px;
     line-height: 1.55;
   }
@@ -1000,7 +936,7 @@
   .insight-box {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-card);
     overflow: hidden;
   }
   .insight-master-head {
@@ -1128,40 +1064,6 @@
   /* Export reports unconditionally open the body so nothing is hidden in print. */
   body.printing .insight-box.collapsed .insight-body { display: block !important; }
 
-  /* POTS panel */
-  .pots-panel {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 10px;
-  }
-  .pots-card {
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px 14px;
-  }
-  .pots-card-label {
-    font-size: 9px;
-    color: var(--text-dim);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    font-weight: 600;
-  }
-  .pots-card-value {
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
-    font-size: 22px;
-    font-weight: 900;
-    line-height: 1.1;
-    margin-top: 4px;
-  }
-  .pots-card-subtext {
-    font-size: 11px;
-    color: var(--text-dim);
-    margin-top: 3px;
-  }
-  .pots-card-value.bad { color: var(--warn-high); }
-  .pots-card-value.good { color: #B8D97E; }
-
   /* Sidebar */
   .sidebar-head { margin: 0 0 12px; font-size: var(--t14); font-weight: 600; color: var(--text); }
   .marker-list {
@@ -1252,7 +1154,7 @@
   .marker-item.type-event { --strip: var(--text); }
   .marker-item.type-warning { --strip: var(--warn-crash); }
   .marker-item.type-palp { --strip: var(--warn-palp); }
-  .marker-item.type-delta { --strip: #B48CFF; }
+  .marker-item.type-delta { --strip: var(--ev-shift); }
   .marker-item.type-disconnect { --strip: var(--text-dim); }
   .marker-time {
     color: var(--text-dim);
@@ -1277,7 +1179,7 @@
   .stub-panel {
     background: var(--bg-raised);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-card);
     padding: 40px;
     text-align: center;
     color: var(--text-dim);
@@ -1303,8 +1205,8 @@
   .session-top-row .back-link { margin: 0; }
 
   /* Auto-detected autonomic-event markers (chills-like volatility, sympathetic flush) */
-  .marker-item.type-flush { --strip: #E8A858; }
-  .marker-item.type-chills { --strip: #85B7EB; }
+  .marker-item.type-flush { --strip: var(--ev-flush); }
+  .marker-item.type-chills { --strip: var(--ev-chills); }
   .marker-item.type-posture { --strip: #c8a8e6; }
   .marker-item.type-sleep { --strip: #6E8CC8; }
   /* Chills sensitivity slider (session view sidebar) */
@@ -1380,11 +1282,11 @@
     margin-bottom: 12px;
   }
   body.printing .chart-legend { color: #444 !important; border-bottom-color: #aaa !important; }
-  body.printing .summary-stat-value,
+  body.printing .kpi-value,
   body.printing .interp-current,
   body.printing .cal-hr { color: #111 !important; }
-  body.printing .summary-stat-label,
-  body.printing .summary-stat-unit,
+  body.printing .kpi-label,
+  body.printing .kpi-unit,
   body.printing .insight-box,
   body.printing .interp-cell { color: #222 !important; }
   body.printing .interp-panel.collapsed .interp-body { display: block !important; }
@@ -1400,14 +1302,16 @@
     .datenav .btn, .interp-edit, .interp-kebab { display: none !important; }
   }
 
-  /* fitBar() drops the Syncing word, the Share word, the wordmark text, the Monitor word, the logo, then Monitor, so every control stays 44 px. */
-  .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark, .vbar.tight-0 .sync .sync-lbl, .vbar.tight-3 .brand { display: none; }
-  .vbar.tight-3 .vsel { margin-left: 0; }
+  /* fitBar() drops the Syncing word, the Share word, the wordmark text, the Monitor word, the bar and select padding, then Monitor, so every control stays 44 px. The logo mark always stays. */
+  .vbar.tight-1 .share-btn .lbl, .vbar.tight-2 .wordmark, .vbar.tight-0 .sync .sync-lbl { display: none; }
   .vbar.tight-1 .share-btn, .vbar.tight-0.syncing .sync { width: 44px; padding: 0; }
   .vbar.tight-mon .monitor-link { width: 44px; padding: 0; }
   .vbar.tight-mon .monitor-link .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .vbar.tight-mon .monitor-link:not(.is-live) .ico { display: inline-block; }
   .vbar.tight-4 .monitor-link { display: none; }
+  .vbar.tight-5 { padding-left: var(--s1); }
+  .vbar.tight-5 .vsel select { padding: 0 24px 0 var(--s2); }
+  .vbar.tight-5 .vsel .select::after { right: 6px; }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -1450,25 +1354,18 @@
     .summary-bar { padding: var(--card-pad); cursor: pointer; min-height: 60px; }
     .summary-bar-kebab { top: var(--card-pad); }
     .summary-grid { --kpi-gap: var(--s3); row-gap: var(--s3); margin-top: 4px; }
-    .summary-stat-value { font-size: 22px; }
-    /* Phone: the unit sits on the value's line, so every row is one height and the chart starts higher. The kebab
-       lives in the title row, so the grid takes the full width: two columns, one when large text makes them tight. */
-    .summary-bar { container-type: inline-size; }
-    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    @container (max-width: 22em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @container (max-width: 17em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: minmax(0, 1fr); } }
+    /* Phone: three columns, fewer when large text makes them tight (ui.css --kpi-fit). The kebab lives in the title row. */
+    .summary-bar:not(.collapsed) .summary-grid { --kpi-cols: 3; grid-template-columns: var(--kpi-fit); }
     .summary-grid [data-stat="duration"] { display: none; }
-    .summary-stat-unit .more { display: none; }
-    .summary-bar:not(.collapsed) .summary-stat { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }
-    .summary-bar:not(.collapsed) .summary-stat-label { flex: 0 0 100%; }
-    /* A unit that does not fit beside its value wraps to the next line whole (flex-wrap), not mid-phrase. */
-    .summary-bar:not(.collapsed) .summary-stat-unit { margin-top: 0; }
     .summary-bar-title { display: flex; }
     /* Collapsed: the key numbers stay, without their sub-lines. */
     .summary-bar.collapsed { min-height: 56px; }
     .summary-bar.collapsed .summary-grid { grid-template-columns: repeat(auto-fit, minmax(min(var(--kpi-col, 3.75em), 100%), 1fr)); row-gap: var(--s2); margin-top: 0; }
-    .summary-bar.collapsed .summary-stat:not([data-stat="hrAvg"], [data-stat="hrMax"], [data-stat="hrMin"], [data-stat="rmssdAvg"]),
-    .summary-bar.collapsed .summary-stat-unit { display: none; }
+    .summary-bar.collapsed .kpi:not([data-stat="hrAvg"], [data-stat="hrMax"], [data-stat="hrMin"], [data-stat="rmssdAvg"]),
+    .summary-bar.collapsed .kpi-unit { display: none; }
+    /* Label over value, so fitSummaryStats measures the wider of the two, not both side by side. */
+    .summary-bar.collapsed .kpi { flex-direction: column; flex-wrap: nowrap; }
+    .summary-bar.collapsed .kpi-label { flex: none; }
     .chart-wrap { min-height: 260px; }
     /* One tools row: Clock and Duration, then Layers; Reset zoom sits on the chart's top corner while zoomed. */
     .chart-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--s3) var(--s1); }
@@ -1512,12 +1409,12 @@
       order: 10;
     }
     .cal-grid { gap: 4px; }
-    .cal-cell { padding: 6px; border-radius: 8px; --strip-w: 3px; }
-    .cal-cell .cal-hr { font-size: 18px; }
+    .cal-cell { padding: 6px; border-radius: var(--r-menu); --strip-w: 3px; }
+    .cal-cell .cal-hr { font-size: var(--t20); }
     .cal-day-num { font-size: 12px; }
-    .cal-hr-unit { font-size: 9px; }
+    .cal-hr-label .more { display: none; }
     .cal-session-count { display: none; }
-    .cal-badges { display: none; }
+    .cal-cell .cal-badges { display: none; }
     .cal-dow { font-size: 9px; padding: 4px 0; letter-spacing: 0.08em; }
     .week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .chart-legend { font-size: 10px; gap: 10px; }
@@ -1532,13 +1429,12 @@
 
   @media (max-width: 480px) {
     .view { padding: 12px 10px; }
-    .summary-stat-value { font-size: 20px; }
     .session-top-row { flex-direction: column; align-items: flex-start; gap: 8px; }
     .week-grid { grid-template-columns: 1fr; }
-    .cal-cell { padding: 4px; border-radius: 6px; }
-    .cal-cell .cal-hr { font-size: 14px; }
+    .cal-cell { padding: 4px; border-radius: var(--r-ctl); }
+    .cal-cell .cal-hr { font-size: var(--t14); }
     .cal-day-num { font-size: 10px; }
-    .cal-hr-unit { display: none; }
+    .cal-hr-label { display: none; }
     .cal-dow { font-size: 8px; }
   }
 
@@ -1548,15 +1444,15 @@
      and pills either overflow the cell or clip mid-chip. HR number stays. */
   @media (max-width: 1100px) and (min-width: 769px) {
     .cal-cell { padding: 8px; }
-    .cal-cell .cal-hr { font-size: 22px; }
-    .cal-cell .cal-hr-unit { font-size: 9px; }
+    .cal-cell .cal-hr { font-size: var(--t22); }
+    .cal-hr-label .more { display: none; }
     .cal-day-num { font-size: 13px; }
     .cal-session-count { display: none; }
-    .cal-badges { display: none; }
+    .cal-cell .cal-badges { display: none; }
   }
   @media (max-width: 900px) and (min-width: 769px) {
     .cal-cell { padding: 6px; }
-    .cal-cell .cal-hr { font-size: 18px; }
+    .cal-cell .cal-hr { font-size: var(--t20); }
   }
   /* Wide desktop: pills shown, but guarantee they never half-clip. If the
      container is narrower than the pill-row's content, hide whatever overflow
@@ -1832,7 +1728,7 @@
   })();
   let watchLiveSocket = null;
   let watchLiveLastTick = 0;
-  // The bar's Monitor link reads "Watch live" and opens the stream while a broadcast is live.
+  // While a broadcast is live the bar's Monitor link reads "Watch live" and opens the stream on the web; in the app it stays Monitor with the live light.
   function updateWatchLiveUI() {
     const link = document.getElementById('monitor-link');
     if (!link) return;
@@ -1841,11 +1737,12 @@
     if (link.classList.contains('is-live') === live && link.dataset.wired) return;
     link.dataset.wired = '1';
     link.classList.toggle('is-live', live);
-    link.href = live ? './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark' : './hr_monitor.html';
-    if (live) { link.target = '_blank'; link.rel = 'noopener'; } else { link.removeAttribute('target'); link.removeAttribute('rel'); }
-    link.querySelector('.lbl').textContent = live ? 'Watch live' : 'Monitor';
+    const watch = live && !(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+    link.href = watch ? './overlay.html?key=' + encodeURIComponent(key) + '&bg=dark' : './hr_monitor.html';
+    if (watch) { link.target = '_blank'; link.rel = 'noopener'; } else { link.removeAttribute('target'); link.removeAttribute('rel'); }
+    link.querySelector('.lbl').textContent = watch ? 'Watch live' : 'Monitor';
     const opt = document.getElementById('view-select-monitor');
-    if (opt) opt.textContent = live ? 'Watch live' : 'Monitor';
+    if (opt) opt.textContent = watch ? 'Watch live' : 'Monitor';
     fitBar();
   }
   // Relay listener: opens once, stays open while the viewer is in the
@@ -1909,13 +1806,15 @@
   // Drive cloud in the bar: synced, syncing or off. Work is the OR of the connection state, a running
   // driveSync (setDriveProgress), the sync loader and waiting marks. The syncing look waits until work has
   // run for SYNC_SHOW_MS, so a quick freshness check on open never spins; it leaves as soon as work ends.
-  const cloud = { conn: 'off', label: 'off', sync: false, loader: false, marks: false, frac: 0, watch: null, shown: false, timer: null };
+  // signin: set when sign-in completes, held until that folder and sync run ends; it shows syncing at once.
+  const cloud = { conn: 'off', label: 'off', sync: false, loader: false, marks: false, signin: false, frac: 0, watch: null, shown: false, timer: null };
   const SYNC_SHOW_MS = 1000;
   function paintCloud() {
     const bar = document.getElementById('app-bar');
     const btn = document.getElementById('drive-cloud');
     if (!bar || !btn) return;
-    const busy = cloud.conn === 'syncing' || cloud.sync || ((cloud.loader || cloud.marks) && cloud.conn !== 'off');
+    const busy = cloud.signin || cloud.conn === 'syncing' || cloud.sync || ((cloud.loader || cloud.marks) && cloud.conn !== 'off');
+    if (busy && cloud.signin && !cloud.shown) { clearTimeout(cloud.timer); cloud.timer = null; cloud.shown = true; }
     if (!busy) {
       clearTimeout(cloud.timer);
       cloud.timer = null;
@@ -2047,6 +1946,7 @@
     } finally {
       _ensureRunning = false;
       hideLoader();
+      if (cloud.signin) { cloud.signin = false; paintCloud(); }
     }
   }
 
@@ -2068,10 +1968,29 @@
     return true;
   }
 
+  // One timestamped console line per Drive phase; times count from the last sign-in.
+  let syncPhaseT0 = 0;
+  function syncPhase(name, start) {
+    const now = Date.now();
+    if (start) syncPhaseT0 = now;
+    console.info('[sync-phase] ' + name + ' ' + new Date(now).toISOString() + (syncPhaseT0 ? ' +' + (now - syncPhaseT0) + ' ms' : ''));
+  }
+
+  function viewerAuthTrace(step, payload) {
+    try { if (window.aortiAuth && typeof window.aortiAuth.trace === 'function') window.aortiAuth.trace(step, payload); } catch (e) {}
+  }
+
   function initDriveUI() {
     if (!window.aortiAuth) { setTimeout(initDriveUI, 120); return; }
     window.aortiAuth.onAuthChange((record) => {
+      const was = !!driveAccessToken;
       syncAuthStateLocal();
+      if (record && !was) {
+        syncPhase('signed in', true);
+        cloud.signin = !driveFolderId;
+        paintCloud();
+        if (cloud.signin && !Object.keys(sessionsIndex).length) showLoader(0, -1, 'Syncing with Drive');
+      }
       if (record) {
         if (!driveFolderId) {
           ensureFolderSyncAndRender()
@@ -2081,10 +2000,15 @@
         driveFolderId = null;
         driveFilesByName = new Map();
         setDriveProgress('');
+        if (cloud.signin) { cloud.signin = false; hideLoader(); paintCloud(); }
       }
       driveUpdateUI();
     });
     syncAuthStateLocal();
+    viewerAuthTrace('viewer_start', (() => {
+      const c = window.aortiAuth.getCachedToken();
+      return { has: !!c, expired: c ? Date.now() >= c.expires_at : null, leftS: c ? Math.round((c.expires_at - Date.now()) / 1000) : null, native: !!window.aortiAuth.isNative };
+    })());
     driveUpdateUI();
     window.addEventListener('online', () => {
       if (driveAccessToken && !driveFolderId) {
@@ -2131,9 +2055,12 @@
       uiTimer = setTimeout(() => { driveRefreshing = true; driveUpdateUI(); }, 500);
     }
     let token;
+    if (needsRefresh) viewerAuthTrace('viewer_refresh_start', { has: !!cached, leftS: cached ? Math.round((cached.expires_at - Date.now()) / 1000) : null });
     try {
       token = await window.aortiAuth.getValidAccessToken();
+      if (needsRefresh) viewerAuthTrace('viewer_refresh_ok');
     } catch (e) {
+      if (needsRefresh) viewerAuthTrace('viewer_refresh_failed', (e && e.message) ? e.message : String(e));
       setDriveError('session expired');
       throw e;
     } finally {
@@ -2316,7 +2243,7 @@
     if (driveSyncInFlight && driveSyncFolderId === driveFolderId) return driveSyncInFlight;
     const prior = driveSyncInFlight;
     const run = prior ? prior.catch(() => {}).then(() => driveSyncRun(opts)) : driveSyncRun(opts);
-    const p = run.finally(() => { if (driveSyncInFlight === p) driveSyncInFlight = null; });
+    const p = run.finally(() => { syncPhase('sync done'); if (driveSyncInFlight === p) driveSyncInFlight = null; });
     driveSyncInFlight = p;
     driveSyncFolderId = driveFolderId;
     return p;
@@ -2328,7 +2255,10 @@
       return { pulled: 0, uploaded: 0, written: 0, skipped: 0 };
     }
     setDriveProgress('syncing…');
+    syncPhase('list start');
     const driveFiles = await driveListSessions(opts);
+    syncPhase('list done');
+    syncPhase('sync start');
     const cacheSize = Object.keys(driveMetaCache).length;
     console.info('[driveSync] start: drive=' + driveFiles.size + ' files, cache=' + cacheSize + ' entries');
 
@@ -3213,8 +3143,9 @@
       const sig = hashStr(JSON.stringify([S.parts, S.segs.map(n => sizes[n] == null ? null : String(sizes[n]))]));
       const hit = cache ? cache.get('sess:' + S.key) : null;
       let summary = null;
-      if (hit && hit.sig === sig && hit.summary && hit.summary.__schemaV === SUMMARY_SCHEMA_V && !yFixSuspect(hit.summary)) summary = hit.summary;
+      if (hit && hit.sig === sig && hit.summary && hit.summary.__schemaV === SUMMARY_SCHEMA_V && !yFixSuspect(hit.summary) && postureStampReady(hit.summary)) summary = hit.summary;
       else {
+        if (globalThis.__s61) { const rs = globalThis.__s61.v2Resummarized; rs.push(S.key); if (rs.length > 200) rs.splice(0, rs.length - 200); }
         try {
           const parsed = await v2ParseParts(S, readText, memo);
           summary = await summarizeCSVAsync(S.key, v2SessionCsv(S.sid, v2SessionRows(S, parsed)));
@@ -3578,6 +3509,10 @@
     return !!c && !c.__incomplete && !c.__yfix && c.__schemaV === SUMMARY_SCHEMA_V && Number.isFinite(c.startEpoch)
       && c.startEpoch < YFIX_TO && c.startEpoch + (c.duration || 0) * 60000 > YFIX_FROM;
   }
+  // S61: summaries from before the posture start stamp flag rebuild once; the prec: cache is left as is (no v1 file has a stamp).
+  function postureStampReady(c) {
+    return !c || !c.postureSpans || c.postureSpans.every(sp => typeof sp.stamp === 'boolean');
+  }
   let s35Logged = false;
   async function upgradeStaleSummaries(list) {
     try {
@@ -3629,7 +3564,7 @@
       return !c || c.__incomplete
         || c.__schemaV !== SUMMARY_SCHEMA_V
         || !('flushes' in c) || !('chillsWindows' in c) || !('hrDeltas' in c)
-        || !('quadPct' in c) || !('restingHR' in c);
+        || !('quadPct' in c) || !('restingHR' in c) || !postureStampReady(c);
     }
     // One schema version behind with every field present: shown now, upgraded in the background.
     function staleOnly(fn) {
@@ -3804,6 +3739,8 @@
       window.__hrmV2ViaCsv = !!viaCsv;
       try { return await loadFullSession(key); } finally { window.__hrmV2ViaCsv = prev; _sessionCache.delete(key); }
     },
+    // S61: the session's h row count, for the beats check.
+    hRowCount: async (key) => { const S = v2Model.byKey.get(key); return S ? v2SessionRows(S, await v2ParseParts(S, readRecordingText, null)).filter(r => r.k === 'h').length : -1; },
   };
 
   async function parseSessionFile(filename) {
@@ -3906,7 +3843,7 @@
   // that monotonically advances, keeping the amortised cost O(1) per call.
   function nearestRmssdAt(rmssd, t, hint) {
     while (hint.idx + 1 < rmssd.length && rmssd[hint.idx + 1].t <= t) hint.idx++;
-    let j = hint.idx;
+    let j = Math.min(hint.idx, rmssd.length - 1);
     while (j >= 0 && rmssd[j].v == null) j--;
     return j >= 0 ? rmssd[j].v : null;
   }
@@ -4516,8 +4453,9 @@
     // Posture: convert change points into contiguous spans (carry forward until next change)
     if (postureLog.length) {
       const spans = [];
+      // S61: the file's first posture row under 0.02 min (1.2 s) is the start stamp, not a press.
       for (let i = 0; i < postureLog.length; i++) {
-        spans.push({ start: postureLog[i].t, end: i + 1 < postureLog.length ? postureLog[i + 1].t : hr[hr.length - 1].t, posture: postureLog[i].posture });
+        spans.push({ start: postureLog[i].t, end: i + 1 < postureLog.length ? postureLog[i + 1].t : hr[hr.length - 1].t, posture: postureLog[i].posture, stamp: i === 0 && postureLog[i].t < 0.02 });
       }
       summary.postureSpans = spans;
     }
@@ -4568,6 +4506,9 @@
     const rule = elapsedRule(T.length, (i) => T[i], (i) => E[i]);
     const elapsed = rule.mode === 0 ? (i) => T[i] : (i) => rule.at(T[i], E[i]);
     const hr = [], rmssd = [], sdnnMatch = [], sdnn5min = [];
+    // S61: every h row's epoch, HR byte and raw RR cell, for the detector's beat check only.
+    const beats = { ep: new Float64Array(hRows.length), hr: new Uint16Array(hRows.length), rr: new Array(hRows.length) };
+    hRows.forEach((r, i) => { beats.ep[i] = r.ep; beats.hr[i] = +r.f[0] || 0; beats.rr[i] = r.f[2]; });
     for (let i = 0; i < T.length; i++) {
       const t = elapsed(i);
       if (isNaN(t)) continue;
@@ -4581,7 +4522,7 @@
       if (s.match != null) { const v = toFixedNum(s.match, 100, 2); if (!isNaN(v) && v > 0) sdnnMatch.push({ x: t, y: v, ep }); }
       if (s.fiveMin != null) { const v = toFixedNum(s.fiveMin, 100, 2); if (!isNaN(v) && v > 0) sdnn5min.push({ x: t, y: v, ep }); }
     }
-    return { hr, rmssd, sdnnMatch, sdnn5min };
+    return { hr, rmssd, sdnnMatch, sdnn5min, beats };
   }
 
   async function loadFullSession(filename) {
@@ -4877,7 +4818,7 @@
       __virtualDay: iso,
       __sourceFiles: files.slice(),
     };
-    const entry = { summary, data: { hr, rmssd } };
+    const entry = { summary, data: { hr, rmssd, beats: raw.map(d => d && d.beats).filter(Boolean) } };
     virtualSessions['day:' + iso] = entry;
     _dayMemo.set(iso, { key: memoKey, entry });
     return summary;
@@ -4951,7 +4892,7 @@
     if (sel) sel.value = cur;
     fitBar();
   }
-  // Drop the Syncing word, the Share word, the wordmark text, the Monitor word, the logo, then Monitor (the select has it), until the bar fits.
+  // Drop the Syncing word, the Share word, the wordmark text, the Monitor word, the bar and select padding, then Monitor (the select has it), until the bar fits.
   function fitBar() {
     const bar = document.getElementById('app-bar');
     if (!bar) return;
@@ -4962,9 +4903,9 @@
       share.classList.toggle('primary', !phone);
       share.classList.toggle('ghost', phone);
     }
-    bar.classList.remove('tight-0', 'tight-1', 'tight-2', 'tight-mon', 'tight-3', 'tight-4');
-    for (const c of ['tight-0', 'tight-1', 'tight-2', 'tight-mon', 'tight-3', 'tight-4']) {
-      if (bar.scrollWidth <= bar.clientWidth + 1) break;
+    bar.classList.remove('tight-0', 'tight-1', 'tight-2', 'tight-mon', 'tight-4', 'tight-5');
+    for (const c of ['tight-0', 'tight-1', 'tight-2', 'tight-mon', 'tight-5', 'tight-4']) {
+      if (bar.scrollWidth <= bar.clientWidth) break;
       if (c === 'tight-0' && !bar.classList.contains('syncing')) continue;
       bar.classList.add(c);
     }
@@ -5071,28 +5012,13 @@
           ${sessionCardActions(encodeURIComponent(fn))}
           <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${escape(sessionLocalDateKey(s, meta) || fn)}</div>
           <div class="session-card-date">${meta && meta.date ? `${formatClockRange(sessionStartEpoch(s, meta), s.duration)} <span class="session-card-dur">(${dur})</span>` : `${dur} session`}</div>
-          <div class="session-card-stats">
-            <div class="session-card-stat">
-              <span class="session-card-stat-label">Avg HR</span>
-              <span class="session-card-stat-value ${hrStage}">${s.hrAvg}</span>
-            </div>
-            <div class="session-card-stat">
-              <span class="session-card-stat-label">Avg HRV</span>
-              <span class="session-card-stat-value" style="color: var(--hrv);">${s.rmssdAvg ?? '—'}</span>
-            </div>
-            <div class="session-card-stat">
-              <span class="session-card-stat-label">Palps</span>
-              <span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-dim)'};">${s.palpCount}</span>
-            </div>
-            <div class="session-card-stat">
-              <span class="session-card-stat-label">Warn</span>
-              <span class="session-card-stat-value" style="color: ${s.warnCount ? 'var(--warn-crash)' : 'var(--text-dim)'};">${s.warnCount}</span>
-            </div>
-            <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable.">
-              <span class="session-card-stat-label">Uptime</span>
-              <span class="session-card-stat-value" style="color: ${uptimeColor(upPct)};">${upPct != null ? upPct + '%' : '—'}</span>
-            </div>
-          </div>
+          <dl class="kpi-grid cols" data-n="5">
+            ${kpiTile('hrAvg', 'Avg HR', UI.kpi(s.hrAvg), 'bpm', { sm: true, cls: hrStage })}
+            ${kpiTile('rmssdAvg', 'Avg HRV', UI.kpi(s.rmssdAvg), 'ms<span class="more">, RMSSD</span>', { sm: true, cls: 'hrv' })}
+            ${kpiTile('palpCount', 'Palps', UI.kpi(s.palpCount), '', { sm: true })}
+            ${kpiTile('warnCount', 'Warnings', UI.kpi(s.warnCount), '', { sm: true })}
+            ${kpiTile('uptime', 'Uptime', UI.kpi(upPct, { pct: true }), '', { sm: true, title: UPTIME_TIP })}
+          </dl>
         </div>`;
     }).join('');
 
@@ -5178,12 +5104,10 @@
     const up = Math.max(0, s.duration - gap);
     return Math.min(100, Math.round(100 * up / s.duration));
   }
-  function uptimeColor(pct) {
-    if (pct == null) return 'var(--text-dim)';
-    if (pct >= 95) return '#B8D97E';
-    if (pct >= 80) return 'var(--text)';
-    return 'var(--warn-crash)';
-  }
+  const kpiTile = UI.kpiTile, UPTIME_TIP = UI.UPTIME_TIP;
+  // Week, Month and Day card headlines: only HR-valued metrics take the stage colour; Tachy and Range read neutral.
+  function headlineStyle(h) { return headlineMetric === 'avg' || headlineMetric === 'rest' ? `color: ${h.color};` : ''; }
+  function headlineValue(h) { return UI.kpi(h.value, { pct: h.unit === '%' }) + (h.unit === 'bpm' && h.value != null ? '<span class="hl-unit">bpm</span>' : ''); }
 
   // ===== Headline metric selector (Month + Week) =====
   // POTS-friendly metrics — flat "avg HR" mixes lying + standing HR which is
@@ -5249,7 +5173,7 @@
       else if (v < 35) color = STAGE_COLORS['stage-elevated'];
       else if (v < 55) color = STAGE_COLORS['stage-high'];
       else color = STAGE_COLORS['stage-critical'];
-      return { value: v, label: 'HR Range', unit: 'Δbpm', stage: 'stage-normal', color };
+      return { value: v, label: 'HR range', unit: 'bpm', stage: 'stage-normal', color };
     }
     return { value: null, label: '', unit: '', stage: 'stage-normal', color: STAGE_COLORS['stage-normal'] };
   }
@@ -5505,8 +5429,8 @@
             <span class="cal-session-count">${stats.sessionCount} session${stats.sessionCount === 1 ? '' : 's'}</span>
           </div>
           <div>
-            <div class="cal-hr" style="color: ${headline.color};">${headline.value ?? '—'}${headline.unit === '%' ? '<span style="font-size: 16px;">%</span>' : ''}</div>
-            <div class="cal-hr-unit">${headline.label}${headlineMetric === 'rest' && stats.avgHR != null ? ` · avg ${stats.avgHR}` : ''}</div>
+            <div class="cal-hr-label">${escape(headline.label || 'HR')}${headlineMetric === 'rest' && stats.avgHR != null ? `<span class="more"> · avg ${stats.avgHR}</span>` : ''}</div>
+            <div class="cal-hr"${headlineStyle(headline) ? ` style="${headlineStyle(headline)}"` : ''}>${headlineValue(headline)}</div>
           </div>
           <div class="cal-badges">${palpBadge}${warnBadge}${flushBadge}${chillsBadge}</div>
         </div>`;
@@ -5515,11 +5439,11 @@
     // Legend for cell colors
     const legend = `
       <div class="cal-legend-strip">
-        <div class="chart-legend-item"><span class="legend-swatch" style="background: #7DB8E8;"></span>Low</div>
-        <div class="chart-legend-item"><span class="legend-swatch" style="background: #B8D97E;"></span>Normal</div>
-        <div class="chart-legend-item"><span class="legend-swatch" style="background: #F0C75E;"></span>Elevated</div>
-        <div class="chart-legend-item"><span class="legend-swatch" style="background: #E89858;"></span>High</div>
-        <div class="chart-legend-item"><span class="legend-swatch" style="background: #E24B4A;"></span>Critical</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-1);"></span>Low</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-2);"></span>Normal</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-3);"></span>Elevated</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-4);"></span>High</div>
+        <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-5);"></span>Critical</div>
       </div>`;
 
     // Collect every session filename that falls inside this month for the
@@ -5629,12 +5553,16 @@
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);
       const head = computeHeadline(headlineMetric, [fn]);
-      const headValue = head.value != null ? head.value : '—';
-      const headUnit = head.unit || '';
-      const headColor = head.color || STAGE_COLORS['stage-normal'];
-      const autonomicCols = autonomicOn ? `
-            <div class="session-card-stat"><span class="session-card-stat-label">Flush</span><span class="session-card-stat-value" style="color: ${s.flushes && s.flushes.length ? '#E8A858' : 'var(--text-dim)'};">${(s.flushes || []).length}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Chills</span><span class="session-card-stat-value" style="color: ${s.chillsWindows && s.chillsWindows.length ? '#85B7EB' : 'var(--text-dim)'};">${(s.chillsWindows || []).length}</span></div>` : '';
+      const tiles = [
+        kpiTile('head', escape(head.label || 'HR'), UI.kpi(head.value, { pct: head.unit === '%' }), head.unit === 'bpm' ? 'bpm' : '', { sm: true, style: headlineStyle(head) }),
+        kpiTile('rmssdAvg', 'Avg HRV', UI.kpi(s.rmssdAvg), 'ms<span class="more">, RMSSD</span>', { sm: true, cls: 'hrv' }),
+        kpiTile('palpCount', 'Palps', UI.kpi(s.palpCount), '', { sm: true }),
+        kpiTile('shifts', 'Shifts', UI.kpi((s.hrDeltas || []).length), '', { sm: true }),
+        kpiTile('uptime', 'Uptime', UI.kpi(computeUptimePct(s), { pct: true }), '', { sm: true, title: UPTIME_TIP }),
+      ];
+      if (autonomicOn) tiles.push(
+        kpiTile('flushes', 'Flush', UI.kpi((s.flushes || []).length), '', { sm: true }),
+        kpiTile('chills', 'Chills', UI.kpi((s.chillsWindows || []).length), '', { sm: true }));
       // A recording that started the day before shows only its part of this day.
       const portion = sessionDayPortion(s, iso);
       const usePortion = portion && portion.durationMin > 0;
@@ -5648,13 +5576,7 @@
           ${sessionCardActions(encodeURIComponent(fn))}
           <div class="session-card-time" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${formatDuration(cardDurMin)} ${contNote}</div>
           <div class="session-card-date">${meta && meta.date ? formatClockRange(cardStart, cardDurMin) : (meta ? meta.isoTime : fn)}</div>
-          <div class="session-card-stats">
-            <div class="session-card-stat"><span class="session-card-stat-label">${escape(head.label || 'HR')}</span><span class="session-card-stat-value" style="color: ${headColor};">${headValue}${headUnit === '%' ? '<span style="font-size:13px;">%</span>' : ''}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Avg HRV</span><span class="session-card-stat-value" style="color: var(--hrv);">${s.rmssdAvg ?? '—'}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Palps</span><span class="session-card-stat-value" style="color: ${s.palpCount ? 'var(--warn-palp)' : 'var(--text-dim)'};">${s.palpCount}</span></div>
-            <div class="session-card-stat"><span class="session-card-stat-label">Shifts</span><span class="session-card-stat-value" style="color: ${s.hrDeltas && s.hrDeltas.length ? '#B48CFF' : 'var(--text-dim)'};">${(s.hrDeltas || []).length}</span></div>
-            <div class="session-card-stat" title="Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable."><span class="session-card-stat-label">Uptime</span><span class="session-card-stat-value" style="color: ${uptimeColor(computeUptimePct(s))};">${computeUptimePct(s) != null ? computeUptimePct(s) + '%' : '—'}</span></div>${autonomicCols}
-          </div>
+          <dl class="kpi-grid cols" data-n="${tiles.length}">${tiles.join('')}</dl>
         </div>`;
     }).join('');
     const foot = `
@@ -5756,11 +5678,11 @@
         <button class="btn cal-today-btn" id="week-today" type="button">This week</button>
         ${metricSwitchHTML()}
         <div class="cal-legend-strip">
-          <div class="chart-legend-item"><span class="legend-swatch" style="background: #7DB8E8;"></span>Low</div>
-          <div class="chart-legend-item"><span class="legend-swatch" style="background: #B8D97E;"></span>Normal</div>
-          <div class="chart-legend-item"><span class="legend-swatch" style="background: #F0C75E;"></span>Elevated</div>
-          <div class="chart-legend-item"><span class="legend-swatch" style="background: #E89858;"></span>High</div>
-          <div class="chart-legend-item"><span class="legend-swatch" style="background: #E24B4A;"></span>Critical</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-1);"></span>Low</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-2);"></span>Normal</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-3);"></span>Elevated</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-4);"></span>High</div>
+          <div class="chart-legend-item"><span class="legend-swatch" style="background: var(--stage-5);"></span>Critical</div>
         </div>
       </div>
       ${buildAggregateReport('Weekly', weekFiles)}
@@ -5777,17 +5699,17 @@
               </div>
               ${hasData ? `
                 <div>
-                  <div class="week-col-hr" style="color: ${headline.color};">${headline.value ?? '—'}${headline.unit === '%' ? '<span style="font-size: 14px;">%</span>' : ''}</div>
-                  <div class="week-col-hr-label">${headline.label}</div>
+                  <div class="week-col-hr-label">${escape(headline.label || 'HR')}</div>
+                  <div class="week-col-hr"${headlineStyle(headline) ? ` style="${headlineStyle(headline)}"` : ''}>${headlineValue(headline)}</div>
                 </div>
                 <div class="week-col-spark"><canvas data-spark="${c.iso}"></canvas></div>
-                <div class="week-col-stats">
-                  <div class="week-col-stat"><span class="week-col-stat-label">Sess</span><span>${c.files.length}</span></div>
-                  <div class="week-col-stat"><span class="week-col-stat-label">Palp</span><span style="color: ${c.totalPalp ? 'var(--warn-palp)' : 'var(--text-dim)'};">${c.totalPalp}</span></div>
-                  <div class="week-col-stat"><span class="week-col-stat-label">Flush</span><span style="color: ${c.totalFlush ? '#E8A858' : 'var(--text-dim)'};">${c.totalFlush}</span></div>
-                  <div class="week-col-stat"><span class="week-col-stat-label">Chill</span><span style="color: ${c.totalChills ? '#85B7EB' : 'var(--text-dim)'};">${c.totalChills}</span></div>
-                </div>
-              ` : `<div style="font-size: 11px; color: var(--text-dim); font-style: italic; margin-top: 12px;">no sessions</div>`}
+                <dl class="week-col-stats">
+                  <div class="week-col-stat"><dt class="week-col-stat-label">Sessions</dt><dd>${c.files.length}</dd></div>
+                  <div class="week-col-stat"><dt class="week-col-stat-label">Palps</dt><dd>${c.totalPalp}</dd></div>
+                  <div class="week-col-stat"><dt class="week-col-stat-label">Flush</dt><dd>${c.totalFlush}</dd></div>
+                  <div class="week-col-stat"><dt class="week-col-stat-label">Chills</dt><dd>${c.totalChills}</dd></div>
+                </dl>
+              ` : `<div class="week-col-empty">no sessions</div>`}
             </div>`;
         }).join('')}
       </div>
@@ -6496,10 +6418,9 @@
     const data = await loadFullSession(filename);
     currentData = data;
     currentQuadRanges = computeQuadrantRanges(data);
-    // Sleep and noteworthy windows need the full data; a summary reopened on the same data keeps them.
+    // Sleep windows need the full data; a summary reopened on the same data keeps them.
     if (s.__detectedFor !== data) {
       s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
-      s.noteworthy = detectNoteworthyMoments(data.hr, data.rmssd);
       s.__detectedFor = data;
     }
     // Reset toggles + brush state on every new session open so prior values don't
@@ -6552,17 +6473,16 @@
     // Short date ("18 Apr") fits the number row; year and start time go underneath.
     const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const dateObj = meta ? meta.date : null;
-    // A missing value reads as words, not a dash glyph (screen readers say "em dash").
-    const NODATA = '<span class="nodata">no data</span>';
     // h:mm:ss with the seconds in .more, so the phone shows h:mm.
     const hmMore = (t) => { const f = formatDuration(t); const i = f.lastIndexOf(':'); return f.split(':').length === 3 ? f.slice(0, i) + '<span class="more">' + f.slice(i) + '</span>' : f; };
-    const dateBig = dateObj ? `${dateObj.getDate()} ${MONTHS_SHORT[dateObj.getMonth()]}` : '—';
+    const dateBig = dateObj ? `${dateObj.getDate()} ${MONTHS_SHORT[dateObj.getMonth()]}` : null;
+    const durKpi = UI.kpi(dur === 'no data' ? null : dur);
     const dateSub = dateObj ? `${dateObj.getFullYear()} · ${meta.isoTime.slice(0, 5)}` : '';
     const uptime = computeUptimePct(s);
     el.innerHTML = `
       ${opts.head || `<div class="session-top-row ui"><a class="back-link" href="#/index">${UI.icon('prev')}All sessions</a></div>`}
       <div class="summary-bar ui" id="summary-bar">
-        <button type="button" class="summary-bar-title" id="summary-toggle" aria-expanded="true" aria-controls="summary-grid" aria-label="Summary, duration ${dur}"><span>Summary</span><span class="summary-title-dur" data-stat="duration">${dur}</span><svg class="summary-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
+        <button type="button" class="summary-bar-title" id="summary-toggle" aria-expanded="true" aria-controls="summary-grid"><span>Summary</span><span class="summary-title-dur" data-stat="duration"><span class="sr-only">duration </span>${durKpi}</span><svg class="summary-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
         <button class="btn icon summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Stats and tags" aria-haspopup="true" aria-expanded="false">${UI.icon('kebab')}</button>
         <div class="menu summary-bar-menu" id="summary-bar-menu" hidden>
           <div class="summary-bar-menu-head">Show stats</div>
@@ -6578,7 +6498,7 @@
           <label><input type="checkbox" data-stat="palpCount" /> Palps</label>
           <label><input type="checkbox" data-stat="warnCount" /> Warnings</label>
           <label><input type="checkbox" data-stat="uptime" /> Uptime</label>
-          <label><input type="checkbox" data-stat="tachyPct" /> Tachy %</label>
+          <label><input type="checkbox" data-stat="tachyPct" /> Tachy</label>
           <div role="separator"></div>
           <button class="summary-bar-menu-reset" id="summary-bar-menu-reset" type="button">Reset to defaults</button>
           <div role="separator"></div>
@@ -6588,71 +6508,21 @@
             <span class="field"><input id="tag-input" placeholder="Add a tag" aria-label="Add a tag" enterkeyhint="done" /></span>
           </div>
         </div>
-        <div class="summary-grid" id="summary-grid">
-        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="date">
-          <span class="summary-stat-label">Date</span>
-          <span class="summary-stat-value" title="${meta && meta.tooltip ? escape(meta.tooltip) : ''}">${dateBig}</span>
-          <span class="summary-stat-unit">${dateSub}</span>
-        </div>`}
-        <div class="summary-stat" data-stat="duration">
-          <span class="summary-stat-label">Duration</span>
-          <span class="summary-stat-value">${dur}</span>
-        </div>
-        <div class="summary-stat" data-stat="hrAvg">
-          <span class="summary-stat-label">Avg HR</span>
-          <span class="summary-stat-value ${hrStage}">${s.hrAvg}</span>
-          <span class="summary-stat-unit">bpm</span>
-        </div>
-        <div class="summary-stat" data-stat="hrMax">
-          <span class="summary-stat-label">Max HR</span>
-          <span class="summary-stat-value ${maxStage}">${s.hrMax.v}</span>
-          <span class="summary-stat-unit">at ${hmMore(s.hrMax.t)}</span>
-        </div>
-        <div class="summary-stat" data-stat="hrMin">
-          <span class="summary-stat-label">Min HR</span>
-          <span class="summary-stat-value ${minStage}">${s.hrMin.v}</span>
-          <span class="summary-stat-unit">at ${hmMore(s.hrMin.t)}</span>
-        </div>
-        <div class="summary-stat" data-stat="rmssdAvg">
-          <span class="summary-stat-label">Avg HRV</span>
-          <span class="summary-stat-value hrv">${s.rmssdAvg ?? NODATA}</span>
-          <span class="summary-stat-unit">${s.rmssdAvg != null ? 'ms<span class="more">, RMSSD</span>' : ''}</span>
-        </div>
-        <div class="summary-stat" data-stat="sdnnMatchAvg" title="SDNN over the same 30 s rolling window as RMSSD.">
-          <span class="summary-stat-label">Avg SDNN, 30 s</span>
-          <span class="summary-stat-value">${s.sdnnMatchAvg ?? NODATA}</span>
-          <span class="summary-stat-unit">${s.sdnnMatchAvg != null ? 'ms' : ''}</span>
-        </div>
-        <div class="summary-stat" data-stat="sdnn5minAvg" title="SDNN over a 5 min rolling window.">
-          <span class="summary-stat-label">Avg SDNN, 5 min</span>
-          <span class="summary-stat-value">${s.sdnn5minAvg ?? NODATA}</span>
-          <span class="summary-stat-unit">${s.sdnn5minAvg != null ? 'ms' : ''}</span>
-        </div>
-        ${isVirtualDay ? '' : `<div class="summary-stat" data-stat="sdnnFull" title="SDNN across every RR interval in the session.">
-          <span class="summary-stat-label">SDNN, session</span>
-          <span class="summary-stat-value">${s.sdnnFull ?? NODATA}</span>
-          <span class="summary-stat-unit">${s.sdnnFull != null ? 'ms' : ''}</span>
-        </div>`}
-        <div class="summary-stat" data-stat="palpCount">
-          <span class="summary-stat-label">Palps</span>
-          <span class="summary-stat-value">${s.palpCount}</span>
-          <span class="summary-stat-unit">${s.palpClusters.length ? s.palpClusters.length + ' cluster' + (s.palpClusters.length === 1 ? '' : 's') : ''}</span>
-        </div>
-        <div class="summary-stat" data-stat="warnCount">
-          <span class="summary-stat-label">Warnings</span>
-          <span class="summary-stat-value">${s.warnCount}</span>
-        </div>
-        <div class="summary-stat" data-stat="uptime" title="Share of the time with live HR data.">
-          <span class="summary-stat-label">Uptime</span>
-          <span class="summary-stat-value">${uptime != null ? uptime + '<span class="pct">%</span>' : NODATA}</span>
-          <span class="summary-stat-unit">${s.connGaps.length ? '<span class="more">' + formatDuration(s.gapTotalMin) + ' in </span>' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps'}</span>
-        </div>
-        <div class="summary-stat" data-stat="tachyPct">
-          <span class="summary-stat-label">Tachy %</span>
-          <span class="summary-stat-value">${s.tachyPct}<span class="pct">%</span></span>
-          <span class="summary-stat-unit"><span class="more">HR over 100</span></span>
-        </div>
-        </div>
+        <dl class="kpi-grid summary-grid" id="summary-grid">
+        ${isVirtualDay ? '' : kpiTile('date', 'Date', UI.kpi(dateBig), dateSub, { vtitle: meta && meta.tooltip ? escape(meta.tooltip) : '' })}
+        ${kpiTile('duration', 'Duration', durKpi, '')}
+        ${kpiTile('hrAvg', 'Avg HR', UI.kpi(s.hrAvg), 'bpm', { cls: hrStage })}
+        ${kpiTile('hrMax', 'Max HR', UI.kpi(s.hrMax.v), `at ${hmMore(s.hrMax.t)}`, { cls: maxStage })}
+        ${kpiTile('hrMin', 'Min HR', UI.kpi(s.hrMin.v), `at ${hmMore(s.hrMin.t)}`, { cls: minStage })}
+        ${kpiTile('rmssdAvg', 'Avg HRV', UI.kpi(s.rmssdAvg), s.rmssdAvg != null ? 'ms<span class="more">, RMSSD</span>' : '', { cls: 'hrv' })}
+        ${kpiTile('sdnnMatchAvg', 'Avg SDNN, 30 s', UI.kpi(s.sdnnMatchAvg), s.sdnnMatchAvg != null ? 'ms' : '', { title: 'SDNN over the same 30 s rolling window as RMSSD.' })}
+        ${kpiTile('sdnn5minAvg', 'Avg SDNN, 5 min', UI.kpi(s.sdnn5minAvg), s.sdnn5minAvg != null ? 'ms' : '', { title: 'SDNN over a 5 min rolling window.' })}
+        ${isVirtualDay ? '' : kpiTile('sdnnFull', 'SDNN, session', UI.kpi(s.sdnnFull), s.sdnnFull != null ? 'ms' : '', { title: 'SDNN across every RR interval in the session.' })}
+        ${kpiTile('palpCount', 'Palps', UI.kpi(s.palpCount), s.palpClusters.length ? s.palpClusters.length + ' cluster' + (s.palpClusters.length === 1 ? '' : 's') : '')}
+        ${kpiTile('warnCount', 'Warnings', UI.kpi(s.warnCount), '')}
+        ${kpiTile('uptime', 'Uptime', UI.kpi(uptime, { pct: true }), s.connGaps.length ? '<span class="more">' + formatDuration(s.gapTotalMin) + ' in </span>' + s.connGaps.length + ' gap' + (s.connGaps.length === 1 ? '' : 's') : 'no gaps', { title: UPTIME_TIP })}
+        ${kpiTile('tachyPct', 'Tachy', UI.kpi(s.tachyPct, { pct: true }), '<span class="more">HR over 100</span>')}
+        </dl>
       </div>
 
       <div class="session-layout" id="session-layout">
@@ -6753,6 +6623,7 @@
     renderMarkerList(s);
     renderInterpretation(s);
     drawSessionChart(s, data);
+    s61AfterPaint(s, data, filename);
     drawContextChart(s, data);
     wireBrush(s);
     wireChartGestures();
@@ -7000,88 +6871,421 @@
     return spans.length ? [spans[0]] : [];
   }
 
-  // Noteworthy-moments detector — surface windows where HR or HRV sustained a
-  // meaningful departure from the session's own baseline. Purely statistical:
-  // we take the session-wide median + MAD (median absolute deviation, which is
-  // robust to outliers) and flag windows where the rolling median is >kMad
-  // standard-ish units away, with a floor so trivial shifts don't trigger.
-  //
-  // Returns up to 5 windows: { start, end, kind, metric, sessionMedian,
-  // windowMedian, delta, direction } sorted by |delta| desc. `kind` is 'hr_low'
-  // / 'hr_high' / 'hrv_low' / 'hrv_high' so the report can speak about each
-  // deviation in the appropriate direction.
-  function detectNoteworthyMoments(hrSeries, rmssdSeries) {
-    const out = [];
-    if (!hrSeries || hrSeries.length < 20) return out;
-    // K_MAD was 1.5 — too loose. At 1.5 MADs, any sleep-vs-wake comparison
-    // on an overnight session is statistically "noteworthy" and the top-5
-    // list reads as "you were asleep between X and Y." 2.5 is the standard
-    // robust-z significance threshold and surfaces real excursions only.
-    // HR / HRV floors also raised so drifts that are within normal
-    // physiological range don't reach the report.
-    const WINDOW_MIN = 3;             // rolling-window length (minutes)
-    const MIN_HR_DELTA = 15;          // floor in bpm (was 10)
-    const MIN_RMSSD_DELTA_PCT = 0.45; // floor for HRV deviations (was 0.35)
-    const K_MAD = 2.5;                // robust-z threshold (was 1.5)
-    const seriesScan = (series, key, minDelta, minDeltaIsPct) => {
-      if (!series || series.length < 20) return;
-      const vals = series.map(p => p.v).filter(v => isFinite(v));
-      if (!vals.length) return;
-      const median = medianOf(vals);
-      const mad = medianOf(vals.map(v => Math.abs(v - median))) || 1;
-      const windows = [];
-      let cur = null;
-      for (let i = 0; i < series.length; i++) {
-        // Walk a rolling-median over a WINDOW_MIN-long tail ending at series[i].
-        const endT = series[i].t;
-        const startT = endT - WINDOW_MIN;
-        // Find a reasonable slice — binary search would be faster but the data
-        // size here is small enough that a linear scan is clearer to read.
-        let j = i;
-        while (j > 0 && series[j - 1].t >= startT) j--;
-        if (i - j < 10) continue; // need enough samples for a stable median
-        const sliceVals = [];
-        for (let k = j; k <= i; k++) sliceVals.push(series[k].v);
-        const wMedian = medianOf(sliceVals);
-        const diff = wMedian - median;
-        const absDiff = Math.abs(diff);
-        const zish = absDiff / mad; // rough robust-z
-        const floor = minDeltaIsPct ? Math.max(minDelta * median, 1) : minDelta;
-        const significant = zish >= K_MAD && absDiff >= floor;
-        if (significant) {
-          const direction = diff > 0 ? 'high' : 'low';
-          if (cur && cur.direction === direction) {
-            cur.end = endT;
-            cur.windowMedian = wMedian; // update to most recent
-            if (absDiff > Math.abs(cur.delta)) cur.delta = diff;
-          } else {
-            if (cur) windows.push(cur);
-            cur = { start: startT, end: endT, direction, delta: diff, sessionMedian: median, windowMedian: wMedian, metric: key };
+  // ---- S61 moments ----
+  // Moments from heart rate alone, one rule for the Day report and the Day view. Pure: no DOM, no clock; the only
+  // global is the call counter. checks: scripts/day-moments.mjs.
+  // PARITY CRITICAL: beatJunk mirrors signalFeed in hr_monitor.html; scripts/junk-parity.test.cjs.
+  const S61_BEAT = { windowMs: 60000, minBeats: 30, tolBpm: 40, short: 0.30, long: 0.15, share: 0.20 };
+  const S61_COVER_S = 6;
+  const S61_RUN = { bridge: 3, floor: 10, minLen: 10, merge: 10 };
+  const S61_T = 100;
+  // The strap reads high for its first minutes after a reconnect: detection skips 3 min after any gap of 60 s or more.
+  const S61_SETTLE = { gapS: 60, skipS: 180 };
+  const S61_COUNT = globalThis.__s61 || (globalThis.__s61 = { rptBase: 0, secondsFromPoints: 0, beatJunk: 0, detectDayMoments: 0, atPaint: null, atPaintKey: null, v2Resummarized: [] });
+
+  // One value per second from ep0; a reading (y > 0) covers its own second and up to 5 more, first reading per second wins.
+  function secondsFromPoints(points, ep0, secs) {
+    S61_COUNT.secondsFromPoints++;
+    const out = new Float32Array(secs).fill(NaN);
+    let list = [];
+    for (const p of points || []) { const y = p && p.y; if (y > 0 && Number.isFinite(p.ep)) list.push(p); }
+    for (let i = 1; i < list.length; i++) if (list[i].ep < list[i - 1].ep) { list = list.slice().sort((a, b) => a.ep - b.ep); break; }
+    const idx = [], val = [];
+    for (const p of list) {
+      const s = Math.round((p.ep - ep0) / 1000);
+      if (idx.length && idx[idx.length - 1] === s) continue;
+      idx.push(s); val.push(p.y);
+    }
+    s61Fill(out, idx, val, secs);
+    return out;
+  }
+  function s61Fill(out, idx, val, secs) {
+    for (let j = 0; j < idx.length; j++) {
+      const s = idx[j], next = j + 1 < idx.length ? idx[j + 1] : Infinity;
+      const end = Math.min(s + S61_COVER_S, next, secs);
+      for (let i = Math.max(0, s); i < end; i++) out[i] = val[j];
+    }
+  }
+
+  // The S59 strap check per second: a packet is junk when its 60 s window holds 30 or more beats and 20% or more are junk.
+  function beatJunk(beatsList, ep0, secs) {
+    S61_COUNT.beatJunk++;
+    const out = new Uint8Array(secs);
+    const lists = (beatsList || []).filter(b => b && b.ep && b.ep.length);
+    if (!lists.length) return out;
+    let total = 0;
+    for (const b of lists) total += b.ep.length;
+    const L = new Int32Array(total), I = new Int32Array(total);
+    let k = 0, sorted = true, prev = -Infinity;
+    for (let li = 0; li < lists.length; li++) for (let i = 0; i < lists[li].ep.length; i++) {
+      const e = lists[li].ep[i];
+      if (e < prev) sorted = false;
+      prev = e; L[k] = li; I[k] = i; k++;
+    }
+    let order = null;
+    if (!sorted) { order = Array.from({ length: total }, (_, j) => j); order.sort((a, b) => lists[L[a]].ep[I[a]] - lists[L[b]].ep[I[b]]); }
+    const B = S61_BEAT, startMs = ep0 - 2 * B.windowMs, endMs = ep0 + secs * 1000;
+    const qt = [], qj = [];
+    let head = 0, jc = 0, pend = null, last = null;
+    const idx = [], val = [];
+    const push = (t, j) => { qt.push(t); qj.push(j ? 1 : 0); if (j) jc++; };
+    for (let n0 = 0; n0 < total; n0++) {
+      const j = order ? order[n0] : n0, bl = lists[L[j]], i = I[j];
+      const ep = bl.ep[i];
+      if (!(ep >= startMs) || ep >= endMs) continue;
+      if (last != null && ep - last > 10000) { qt.length = 0; qj.length = 0; head = 0; jc = 0; pend = null; }
+      last = ep;
+      const cut = ep - B.windowMs;
+      while (head < qt.length && qt[head] < cut) { if (qj[head]) jc--; head++; }
+      if (head > 4096) { qt.splice(0, head); qj.splice(0, head); head = 0; }
+      const hr = bl.hr[i];
+      if (hr > 0) {
+        const base = 60000 / hr, cell = bl.rr[i];
+        const rrs = cell ? String(cell).split(';') : [];
+        for (const c of rrs) {
+          const rr = Number(c);
+          if (!(rr > 0)) continue;
+          if (pend) {
+            const p = pend;
+            pend = null;
+            const pair = (rr - p.base) / p.base >= B.long && Math.abs(p.rr + rr - 2 * p.base) <= 0.3 * p.base;
+            push(ep, !pair);
+            if (pair) { push(ep, false); continue; }
           }
-        } else if (cur) {
-          windows.push(cur);
-          cur = null;
+          if (!(rr >= 250 && rr <= 2500)) { push(ep, true); continue; }
+          if (Math.abs(60000 / rr - hr) <= B.tolBpm) { push(ep, false); continue; }
+          if ((base - rr) / base >= B.short) { pend = { rr, base }; continue; }
+          push(ep, true);
         }
       }
-      if (cur) windows.push(cur);
-      // Merge: drop windows shorter than 90 sec (too fleeting to surface).
-      for (const w of windows) {
-        if (w.end - w.start < 1.5) continue;
-        out.push(Object.assign({ kind: key + '_' + w.direction }, w));
-      }
+      const n = qt.length - head;
+      const flag = n >= B.minBeats && jc / n >= B.share ? 1 : 0;
+      const s = Math.round((ep - ep0) / 1000);
+      if (idx.length && idx[idx.length - 1] === s) continue;
+      idx.push(s); val.push(flag);
+    }
+    s61Fill(out, idx, val, secs);
+    return out;
+  }
+
+  // "Above T" stretches on clean minute medians (40 covered clean seconds); bridge 3 min not under T - 10; 10 min or
+  // more with a mean at or above T; runs 10 min apart merge when no minute between is under T - 10.
+  function detectStretches(hr, junk, T, skip) {
+    const M = Math.floor(hr.length / 60), med = new Float32Array(M).fill(NaN), buf = new Float32Array(60);
+    for (let m = 0; m < M; m++) {
+      let c = 0;
+      for (let i = m * 60; i < m * 60 + 60; i++) { const v = hr[i]; if (v === v && !junk[i]) buf[c++] = v; }
+      if (c >= 40) { const s = buf.subarray(0, c).sort(); med[m] = s[c >> 1]; }
+    }
+    const R = S61_RUN, low = T - R.floor;
+    const calmBetween = (a, b) => { for (let k = a; k < b; k++) if (med[k] === med[k] && med[k] < low) return false; return true; };
+    const sk = (a, b) => { let c = 0; if (skip) for (let k = a; k < b; k++) if (skip[k]) c++; return c; };
+    let runs = [], s = -1, last = -1;
+    const close = (a, b) => { if (b - a + 1 >= R.minLen) runs.push({ s: a, e: b }); };
+    for (let m = 0; m <= M; m++) {
+      const up = m < M && med[m] >= T;
+      if (up) {
+        if (s < 0) s = m;
+        else if (m - last > 1 && !(m - last - 1 - sk(last + 1, m) <= R.bridge && calmBetween(last + 1, m))) { close(s, last); s = m; }
+        last = m;
+      } else if (s >= 0 && (m - last - sk(last + 1, m + 1) > R.bridge || m === M)) { close(s, last); s = -1; }
+    }
+    const stat = (r) => {
+      let pk = 0, sum = 0, c = 0, ar = 0;
+      r.mins = [];
+      for (let k = r.s; k <= r.e; k++) { const v = med[k]; if (v !== v) continue; r.mins.push(k); pk = Math.max(pk, v); sum += v; c++; ar += v - T; }
+      r.len = r.e - r.s + 1; r.peak = pk; r.avg = c ? sum / c : 0; r.area = ar;
+      return r;
     };
-    seriesScan(hrSeries, 'hr', MIN_HR_DELTA, false);
-    seriesScan(rmssdSeries, 'hrv', MIN_RMSSD_DELTA_PCT, true);
-    // Rank by largest |delta| relative to baseline (percent), keep top 5.
-    out.sort((a, b) => Math.abs(b.delta / b.sessionMedian) - Math.abs(a.delta / a.sessionMedian));
-    return out.slice(0, 5);
+    runs = runs.map(stat).filter(r => r.avg >= T);
+    const out = [];
+    for (const r of runs) {
+      const p = out[out.length - 1];
+      if (p && r.s - p.e - 1 - sk(p.e + 1, r.s) <= R.merge && calmBetween(p.e + 1, r.s)) { p.e = r.e; stat(p); continue; }
+      out.push(r);
+    }
+    out.med = med;
+    return out;
   }
-  function medianOf(values) {
-    const s = values.slice().sort((a, b) => a - b);
-    const n = s.length;
-    if (!n) return 0;
-    return n % 2 ? s[(n - 1) >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2;
+
+  // Sudden rises (S61 study rule): 4 min baseline, spread 12 or less, 100 or less; +25 within 60 s; one pass over the day.
+  function detectRises(hr, junk) {
+    const n = hr.length;
+    // Medians of sorted values v: v[n >> 1]; small windows use an insertion sort.
+    const sortedMedian = (w, c) => { for (let a = 1; a < c; a++) { const x = w[a]; let z = a - 1; while (z >= 0 && w[z] > x) { w[z + 1] = w[z]; z--; } w[z + 1] = x; } return w[c >> 1]; };
+    const m10 = new Float32Array(n).fill(NaN), b = new Float32Array(10);
+    for (let i = 0; i < n; i++) {
+      if (hr[i] !== hr[i]) continue;
+      let c = 0;
+      for (let k = i - 4; k <= i + 5; k++) if (k >= 0 && k < n && hr[k] === hr[k]) b[c++] = hr[k];
+      if (c < 5) continue;
+      m10[i] = sortedMedian(b, c);
+    }
+    const m30v = new Float32Array(n), m30d = new Uint8Array(n), w30 = new Float32Array(30);
+    const m30 = (i) => {
+      if (i < 0 || i >= n) return NaN;
+      if (m30d[i]) return m30v[i];
+      let v = NaN;
+      if (hr[i] === hr[i]) {
+        let c = 0;
+        for (let k = i - 15; k <= i + 14; k++) if (k >= 0 && k < n && hr[k] === hr[k]) w30[c++] = hr[k];
+        if (c >= 15) v = sortedMedian(w30, c);
+      }
+      m30d[i] = 1; m30v[i] = v;
+      return v;
+    };
+    const maxGap = (a, z) => { let g = 0, r = 0; for (let i = Math.max(0, a); i <= Math.min(n - 1, z); i++) { if (hr[i] !== hr[i]) { r++; if (r > g) g = r; } else r = 0; } return g; };
+    const cov = (a, z) => { let c = 0; for (let i = a; i <= z; i++) if (i >= 0 && i < n && hr[i] === hr[i]) c++; return c / (z - a + 1); };
+    const jshare = (a, z) => { let c = 0, j = 0; for (let i = Math.max(0, a); i <= Math.min(n - 1, z); i++) if (hr[i] === hr[i]) { c++; if (junk[i]) j++; } return c ? j / c : 0; };
+    const q = (v, f) => v[Math.min(v.length - 1, Math.floor(f * v.length))];
+    const rises = [], vals = [];
+    let blips = 0;
+    for (let o = 240; o < n - 60; o += 5) {
+      const v0 = m10[o];
+      if (v0 !== v0) continue;
+      let hit = false;
+      for (let k = 1; k <= 60; k++) if (m10[o + k] >= v0 + 19) { hit = true; break; }
+      if (!hit) continue;
+      vals.length = 0;
+      for (let k = 5; k <= 240; k += 5) { const v = m10[o - k]; if (v === v) vals.push(v); }
+      if (vals.length < 39) continue;
+      vals.sort((x, y) => x - y);
+      const base = vals[vals.length >> 1], spread = q(vals, 0.9) - q(vals, 0.1);
+      if (spread > 12 || base > 100 || v0 > base + 5) continue;
+      let u = -1;
+      for (let k = 1; k <= 60; k++) if (m10[o + k] >= base + 25) { u = o + k; break; }
+      if (u < 0) continue;
+      let on = u;
+      while (on > o && !(m10[on] <= base + 5)) on--;
+      if (maxGap(o - 60, u + 60) > 10 || 1 - cov(o - 60, u + 120) > 0.1) { o = u; continue; }
+      let peak = -1, held = 0;
+      for (let s = u; s <= Math.min(n - 1, u + 600); s++) { if (m10[s] > peak) peak = m10[s]; const v = m30(s); if (v === v && v >= base + 30) held++; }
+      let back = -1;
+      for (let s = u + 1; s <= Math.min(n - 1, u + 3600); s++) { const v = m30(s); if (v === v && v <= base + 10) { back = s; break; } }
+      let above = 0;
+      for (let s = u; s <= Math.min(n - 1, back > 0 ? back : u + 1800); s++) { const v = m30(s); if (v === v && v >= base + 20) above++; }
+      if (jshare(on - 240, u + 300) <= 0.10) {
+        const e = { on, u, base: Math.round(base), peak: Math.round(peak), aboveMin: above / 60, heldMin: held / 60, back: back < 0 ? null : back, backMin: back < 0 ? null : (back - u) / 60 };
+        e.kind = e.heldMin >= 5 ? 'held' : (e.backMin == null || e.backMin > 10) ? 'slow' : 'short';
+        if (e.aboveMin >= 1) rises.push(e); else blips++;
+      }
+      o = Math.max(o, back > 0 ? back + 60 : u + 600);
+    }
+    return { rises, blips };
   }
+
+  // The settled series, and per minute whether it holds skipped seconds (a stretch bridges those minutes for free).
+  function s61Settle(hr) {
+    const out = hr.slice(), skip = new Uint8Array(Math.ceil(hr.length / 60));
+    let run = 0;
+    for (let i = 0; i < hr.length; i++) {
+      if (hr[i] !== hr[i]) { run++; continue; }
+      if (run >= S61_SETTLE.gapS) for (let k = i; k < Math.min(hr.length, i + S61_SETTLE.skipS); k++) { out[k] = NaN; skip[Math.floor(k / 60)] = 1; }
+      run = 0;
+    }
+    out.skip = skip;
+    return out;
+  }
+
+  const s61JunkMemo = new WeakMap(), S61_NO_BEATS = [];
+  // The one entry the detection task and rptModel call.
+  function detectDayMoments(d, data) {
+    S61_COUNT.detectDayMoments++;
+    const secs = d.n * 60;
+    const hr = secondsFromPoints(data.hr, d.dayStart, secs);
+    // A Day carries a list of recordings' beats, a recording its own; memoised per beats object.
+    const key = data.beats || S61_NO_BEATS, bl = Array.isArray(data.beats) ? data.beats : data.beats ? [data.beats] : [];
+    let jm = s61JunkMemo.get(key);
+    if (!jm || jm.ep0 !== d.dayStart || jm.secs !== secs) { jm = { ep0: d.dayStart, secs, junk: beatJunk(bl, d.dayStart, secs) }; s61JunkMemo.set(key, jm); }
+    const T = d.line != null ? d.line : S61_T;
+    const settled = s61Settle(hr);
+    const stretches = detectStretches(settled, jm.junk, T, settled.skip);
+    const r = detectRises(settled, jm.junk);
+    const parts = { T, stretches, rises: r.rises, blips: r.blips };
+    parts.moments = dayMoments(d, parts);
+    return parts;
+  }
+
+  // Later activity step: context text and routing. Today every moment is a moment and carries no context.
+  function momentContextText(m) { return m && m.context ? String(m.context.activity || '') : ''; }
+  function momentRoute(m) { return 'moment'; }
+
+  // Moments for one day or recording: taps (merged as before), stretches, rises (a rise joins the stretch it overlaps).
+  function dayMoments(d, parts) {
+    const T = parts.T, taps = [];
+    d.taps.map(t => t.kind === 'Standing' ? { a: t.m - 5, b: t.m + 10, t: t.m, taps: [t] } : { a: t.m - 10, b: t.m + 20, t: t.m, taps: [t] })
+      .sort((p, q) => p.a - q.a).forEach(w => {
+        const last = taps[taps.length - 1];
+        if (last && w.a <= last.b) { last.b = Math.max(last.b, w.b); last.taps.push(...w.taps); last.t = Math.min(last.t, w.t); }
+        else taps.push(w);
+      });
+    const above = parts.stretches.map(st => ({ kind: 'Above ' + T, auto: 'above', T, st, s: st.s, e: st.e + 1, t: st.s, a: st.s - 10, b: st.e + 11, wa: st.s - 10, wb: st.e + 11, taps: [], rises: [] }));
+    const lone = [];
+    parts.rises.forEach(r => {
+      const on = Math.round(r.on / 60), back = r.back != null ? Math.round(r.back / 60) : null;
+      const a = on - 10, b = back == null ? on + 50 : Math.min(on + 50, Math.max(on + 20, back + 5));
+      const w = { r, on, back, a, b };
+      let best = null, bestOv = -1;
+      for (const m of above) {
+        if (!(a <= m.wb && m.wa <= b)) continue;
+        const ov = Math.min(b, m.wb) - Math.max(a, m.wa);
+        if (ov > bestOv) { best = m; bestOv = ov; }
+      }
+      if (best) { best.rises.push(w); best.a = Math.min(best.a, a); best.b = Math.max(best.b, b); best.kind = 'Above ' + T + ' · Sudden rise'; }
+      else lone.push({ kind: 'Sudden rise', auto: 'rise', T, rise: w, s: on, t: on, a, b, taps: [], rises: [w] });
+    });
+    const all = taps.concat(above, lone).filter(x => momentRoute(x) === 'moment');
+    parts.routed = taps.concat(above, lone).filter(x => momentRoute(x) !== 'moment');
+    all.forEach(x => {
+      x.context = null;
+      x.a = Math.max(0, Math.round(x.a)); x.b = Math.min(d.n - 1, Math.round(x.b));
+      x.taps.sort((p, q) => p.m - q.m);
+      if (!x.kind) x.kind = [...new Set(x.taps.map(t => t.kind))].join(' · ');
+      x.slot = x.auto === 'above' ? 'Above' : x.auto === 'rise' ? 'Rise' : x.taps.some(t => t.kind === 'Symptom') ? 'Symptom' : 'Standing';
+      rptDescribe(d, x);
+    });
+    const byChange = (p, q) => q.change - p.change || p.t - q.t;
+    const riseRank = { held: 0, slow: 1, short: 2 };
+    const rises = all.filter(x => x.slot === 'Rise').sort((p, q) => riseRank[p.rise.r.kind] - riseRank[q.rise.r.kind] || q.rise.r.aboveMin - p.rise.r.aboveMin || p.t - q.t);
+    const queue = [].concat(
+      all.filter(x => x.slot === 'Symptom').sort(byChange),
+      all.filter(x => x.slot === 'Standing').sort(byChange),
+      rises.filter(x => x.rise.r.kind === 'held'),
+      all.filter(x => x.slot === 'Above').sort((p, q) => q.st.area - p.st.area || q.st.len - p.st.len || p.t - q.t),
+      rises.filter(x => x.rise.r.kind !== 'held'));
+    const cap = { Symptom: 2, Standing: 2, Above: 3, Rise: 2 }, used = { Symptom: 0, Standing: 0, Above: 0, Rise: 0 };
+    let total = 0;
+    queue.forEach(x => { x.zoom = used[x.slot] < cap[x.slot] && total < 6; if (x.zoom) { used[x.slot]++; total++; } });
+    return all.sort((p, q) => p.t - q.t);
+  }
+  // ---- S61 moments end ----
+  // S61 moments on screen: one detection task after the first paint, memoised per data object; the report reads the same memo.
+  const s61Memo = new WeakMap();
+  let s61Shown = { key: null, res: null };
+  // Pointers held down; a lost release clears on blur or when the page hides.
+  const s61Pointers = new Set();
+  document.addEventListener('pointerdown', (e) => { s61Pointers.add(e.pointerId); }, true);
+  ['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, (e) => { s61Pointers.delete(e.pointerId); }, true));
+  window.addEventListener('blur', () => s61Pointers.clear());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) s61Pointers.clear(); });
+  function s61Cached(summary, data) {
+    const hit = data && s61Memo.get(data);
+    return hit && hit.summary === summary && hit.line === rptLine() && hit.marks === marksVersion && hit.personal === isAutonomicOn() ? hit : null;
+  }
+  // Synchronous: a memo hit, or rptBase and detectDayMoments now (the report and the detection task).
+  function s61Result(summary, data) {
+    const hit = s61Cached(summary, data);
+    if (hit) return hit;
+    const res = { summary, line: rptLine(), marks: marksVersion, personal: isAutonomicOn(), d: null };
+    const d = rptBase(summary, data);
+    if (d) {
+      // A detector failure keeps the report: tap moments only.
+      try { d.parts = detectDayMoments(d, data); }
+      catch (e) { console.warn('[S61] detection failed, tap moments only', e); d.parts = { T: d.line != null ? d.line : S61_T, stretches: [], rises: [], blips: 0 }; d.parts.moments = dayMoments(d, d.parts); }
+      d.moments = d.parts.moments; res.d = d;
+    }
+    s61Memo.set(data, res);
+    return res;
+  }
+  function s61RouteKey() {
+    const { view, arg } = parseHash();
+    if (view === 'day' && arg) return 'day:' + arg;
+    if (view === 'session' && arg) return decodeURIComponent(arg);
+    return null;
+  }
+  // Called right after the chart draws: the counter is copied at the first paint of a route, then detection waits for idle.
+  function s61AfterPaint(s, data, key) {
+    requestAnimationFrame(() => {
+      const c = globalThis.__s61;
+      if (c.atPaintKey !== key) { c.atPaintKey = key; c.atPaint = { rptBase: c.rptBase, secondsFromPoints: c.secondsFromPoints, beatJunk: c.beatJunk, detectDayMoments: c.detectDayMoments }; c.atPaintT = performance.now(); }
+      s61Schedule(s, data, key);
+    });
+  }
+  function s61Schedule(s, data, key) {
+    const stale = () => currentData !== data || currentFilename !== key || s61RouteKey() !== key;
+    const run = () => {
+      if (stale()) return;
+      if (s61Pointers.size) { s61Schedule(s, data, key); return; }
+      let res;
+      const t0 = performance.now();
+      try { res = s61Result(s, data); } catch (e) { console.warn('[S61] moments failed', e); return; }
+      // Timing for viewer-perf --cold and the S8 notes.
+      globalThis.__s61.taskMs = performance.now() - t0; globalThis.__s61.doneT = performance.now();
+      if (stale()) return;
+      s61Paint(res, key);
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 }); else setTimeout(run, 0);
+  }
+  // The Day view row for one moment: the report index's items and numbers, times on the 12 h clock.
+  function s61DayText(d, x) {
+    if (x.dayText) return x.dayText + s61Ctx(x);
+    const bits = [x.kind + ' at ' + formatClockTime(d.dayStart + x.t * 60000)];
+    if (x.hrText) bits.push(x.hrText);
+    if (x.note) bits.push(x.note);
+    return bits.join(', ') + s61Ctx(x);
+  }
+  // The Moments section from a detection result, or null (no moments and no short rises).
+  function s61SectionFrom(res, key) {
+    const d = res && res.d;
+    if (!d) return null;
+    const blips = d.parts.blips;
+    if (!d.moments.length && !blips) return null;
+    const day = rptEsc(key.replace(/^day:/, ''));
+    const lines = d.moments.map(x => {
+      const ms = x.ms != null ? x.ms : x.t, me = x.me != null ? x.me : x.t;
+      return { text: s61DayText(d, x), attrs: ' data-s="' + ms + '" data-e="' + me + '" data-day="' + day + '" data-kind="' + rptEsc(x.kind) + '"', at: { t: ms, label: 'jump to ' + formatClockTime(d.dayStart + ms * 60000) } };
+    });
+    if (blips) lines.push({ text: 'Short rises under a minute: ' + blips });
+    return { key: 'moments', title: 'Moments', count: d.moments.length, lines };
+  }
+  // renderInsight reads the memo only; a same-route reload keeps the rows already shown until the new result lands.
+  function s61Section(s) {
+    const key = currentFilename;
+    const hit = s61Cached(s, currentData);
+    if (hit) { s61Shown = { key, res: hit }; return s61SectionFrom(hit, key); }
+    if (s61Shown.key === key) return s61SectionFrom(s61Shown.res, key);
+    return null;
+  }
+  function s61Paint(res, key) {
+    const box = document.getElementById('insight-text');
+    const body = box && box.querySelector('.insight-body');
+    if (!body) return;
+    s61Shown = { key, res };
+    const sec = s61SectionFrom(res, key);
+    const old = body.querySelector('.insight-section[data-key="moments"]');
+    if (!sec) { if (old) old.remove(); return; }
+    const tmp = document.createElement('div');
+    tmp.innerHTML = insightSectionHtml(sec, isAutonomicOn());
+    const el = tmp.firstElementChild;
+    if (old) { el.classList.toggle('collapsed', old.classList.contains('collapsed')); old.replaceWith(el); }
+    else {
+      const ov = body.querySelector('.insight-section[data-key="overview"]');
+      if (ov) ov.after(el); else body.prepend(el);
+    }
+    wireInsightSection(el);
+  }
+  // checks: scripts/day-moments.mjs (nav reload case, synthetic goldens).
+  window.__s61Test = {
+    reload: async () => {
+      const before = currentData;
+      await loadSessions({ reusePhone: true });
+      if (document.querySelector('.mark-editor')) return false;
+      await route();
+      return currentData !== before;
+    },
+    synth: (points, o) => {
+      o = o || {};
+      const n = o.n || 1440;
+      const data = { hr: points.map(p => ({ x: (p.ep - o.ep0) / 60000, y: p.y, ep: p.ep })), rmssd: [], beats: o.beats || [] };
+      const summary = { filename: 'synth', duration: n, connGaps: [], events: [], hrDeltas: [], __sourceFiles: [] };
+      const d = rptBase(summary, data);
+      if (o.line !== undefined) d.line = o.line;
+      d.parts = detectDayMoments(d, data);
+      d.moments = d.parts.moments;
+      return { T: d.parts.T, blips: d.parts.blips, stretches: d.parts.stretches.length, rises: d.parts.rises.map(r => r.kind),
+        moments: d.moments.map(x => ({ kind: x.kind, when: x.when, hrText: x.hrText, a: x.a, b: x.b, zoom: x.zoom, window: d.clock(x.a) + ' to ' + d.clock(x.b), avg: x.avg })) };
+    },
+  };
 
   function sameWindows(a, b) {
     if (!a || !b || a.length !== b.length) return false;
@@ -7264,18 +7468,24 @@
     return { peak, low, lowHrv };
   }
 
-  // Everything the report prints for one day, from the memoised Day build plus marks.
+  // Everything the report prints for one day, from the memoised Day build plus marks; moments from the S61 memo.
   async function rptModel(iso) {
     const summary = await buildDaySession(iso);
     const entry = virtualSessions['day:' + iso];
     if (!summary || !entry) return null;
-    // The Day build's own window: every point carries x = minutes from the day start and its epoch.
-    const p0 = (entry.data.hr || []).find(p => p && p.ep != null && isFinite(p.x));
+    return s61Result(summary, entry.data).d;
+  }
+
+  // The base model of a Day or of one recording: minute bins, clock, gaps, marks and taps (S61 split from rptModel).
+  function rptBase(summary, data) {
+    if (globalThis.__s61) globalThis.__s61.rptBase++;
+    // The build's own window: every point carries x = minutes from the start and its epoch.
+    const p0 = (data.hr || []).find(p => p && p.ep != null && isFinite(p.x));
     if (!p0) return null;
-    const dayStart = Math.round(p0.ep - p0.x * 60000), n = Math.round(summary.duration), dayEnd = dayStart + n * 60000;
-    const d = { iso, n, dayStart, dayEnd, summary, line: rptLine(), personal: isAutonomicOn() };
-    d.hr = rptBin(entry.data.hr, n);
-    d.hrv = rptBin(entry.data.rmssd, n);
+    const dayStart = Math.round(p0.ep - p0.x * 60000), n = Math.ceil(summary.duration), dayEnd = dayStart + n * 60000;
+    const d = { iso: summary.__virtualDay || summary.filename, n, dayStart, dayEnd, summary, line: rptLine(), personal: isAutonomicOn() };
+    d.hr = rptBin(data.hr, n);
+    d.hrv = rptBin(data.rmssd, n);
     for (const g of summary.connGaps || []) for (let m = Math.ceil(g.start); m < Math.floor(g.end); m++) if (m >= 0 && m < n) { d.hr[m] = null; d.hrv[m] = null; }
     d.clock = (m) => { if (m >= n) return '24:00'; const t = new Date(dayStart + Math.round(m) * 60000); return rptPad(t.getHours()) + ':' + rptPad(t.getMinutes()); };
     d.recorded = d.hr.filter(v => v != null).length;
@@ -7295,15 +7505,15 @@
       else d.ticks.push({ m: Math.round(e.t), word: (pm.label || 'Note').toLowerCase() });
     }
     // Standing taps: the posture log's switches to standing; a span clipped at the day start is not a tap.
+    // A recording's start stamp (S61) is never a tap but stays the prior posture.
     const spans = (summary.postureSpans || []).slice().sort((p, q) => p.start - q.start);
     spans.forEach((sp, i) => {
-      if (sp.posture !== 'standing' || sp.start < 0.5 || sp.start >= n) return;
+      if (sp.stamp === true || sp.posture !== 'standing' || sp.start < 0.5 || sp.start >= n) return;
       const prev = spans[i - 1];
       if (!prev || prev.posture === 'standing' || sp.start - prev.end > 1) return;
       d.taps.push({ m: Math.min(n - 1, Math.round(sp.start)), kind: 'Standing', from: prev.posture });
     });
     d.taps.sort((p, q) => p.m - q.m);
-    d.moments = rptMoments(d);
     return d;
   }
 
@@ -7319,48 +7529,7 @@
     return { t, base, baseHrv: baseHrv == null ? null : Math.round(baseHrv), r1: at(1), r3: at(3), r5: at(5), r10: at(10), peak: w.peak, lowHrv: w.lowHrv, held, met: held > 0, end };
   }
 
-  // Slots per REPORT-SPEC: up to 2 Standing, up to 2 Symptom (largest HR change), 1 Rise or Above line; Calm waits for
-  // validated sleep. Overlaps merge; page slots go Symptom and Standing first, cap 6; numbers follow time.
-  function rptMoments(d) {
-    const list = [];
-    d.taps.map(t => t.kind === 'Standing' ? { a: t.m - 5, b: t.m + 10, t: t.m, taps: [t] } : { a: t.m - 10, b: t.m + 20, t: t.m, taps: [t] })
-      .sort((p, q) => p.a - q.a).forEach(w => {
-        const last = list[list.length - 1];
-        if (last && w.a <= last.b) { last.b = Math.max(last.b, w.b); last.taps.push(...w.taps); last.t = Math.min(last.t, w.t); }
-        else list.push(w);
-      });
-    const free = (a, b) => !list.some(x => x.a <= b && a <= x.b);
-    if (d.line != null) {
-      let best = null, s = -1;
-      for (let m = 0; m <= d.n; m++) {
-        const up = m < d.n && d.hr[m] != null && d.hr[m] > d.line;
-        if (up && s < 0) s = m;
-        if (!up && s >= 0) { if (m - s >= 10 && (!best || m - s > best.e - best.s)) best = { s, e: m }; s = -1; }
-      }
-      const b1 = best ? Math.min(best.e + 20, best.s + 110) : 0;
-      if (best && free(best.s - 10, b1)) list.push({ kind: 'Above line', s: best.s, e: best.e, t: best.s, a: best.s - 10, b: b1, taps: [] });
-    }
-    if (!list.some(x => x.kind === 'Above line')) {
-      const rises = (d.summary.hrDeltas || []).filter(h => h.direction === 'rise' && h.start >= 0 && h.start < d.n && free(h.start - 10, h.start + 20))
-        .sort((p, q) => q.delta - p.delta || p.start - q.start);
-      if (rises[0]) list.push({ kind: 'Rise', t: rises[0].start, a: rises[0].start - 10, b: rises[0].start + 20, taps: [] });
-    }
-    list.forEach(x => {
-      x.a = Math.max(0, Math.round(x.a)); x.b = Math.min(d.n - 1, Math.round(x.b));
-      x.taps.sort((p, q) => p.m - q.m);
-      if (!x.kind) x.kind = [...new Set(x.taps.map(t => t.kind))].join(' · ');
-      x.slot = x.taps.some(t => t.kind === 'Symptom') ? 'Symptom' : x.taps.some(t => t.kind === 'Standing') ? 'Standing' : 'RS';
-      rptDescribe(d, x);
-    });
-    const cap = { Standing: 2, Symptom: 2, RS: 1 };
-    const rank = { Symptom: 0, Standing: 0, RS: 1 };
-    const pick = list.slice().sort((p, q) => rank[p.slot] - rank[q.slot] || q.change - p.change || p.t - q.t);
-    const used = { Standing: 0, Symptom: 0, RS: 0 };
-    let total = 0;
-    pick.forEach(x => { x.zoom = used[x.slot] < cap[x.slot] && total < 6; if (x.zoom) { used[x.slot]++; total++; } });
-    return list.sort((p, q) => p.t - q.t);
-  }
-
+  // Slots and windows: dayMoments in the S61 moments block (REPORT-SPEC Moment pages).
   function rptDescribe(d, x) {
     const w = rptWindow(d, x.a, x.b);
     x.peak = w.peak || { m: x.t, v: null }; x.lowHrv = w.lowHrv || { m: x.t, v: null }; x.low = w.low;
@@ -7368,20 +7537,59 @@
     x.stand = st ? Object.assign(rptStanding(d, st.m), { from: st.from }) : null;
     if (x.stand) { x.start = x.stand.base; x.startHrv = x.stand.baseHrv; }
     else { x.start = rptAt(d.hr, x.t, 2); x.startHrv = rptAt(d.hrv, x.t, 3); }
-    if (x.kind === 'Above line') {
-      const sw = rptWindow(d, x.s, x.e - 1); x.peak = sw.peak || x.peak; x.lowHrv = sw.lowHrv || x.lowHrv;
-      x.hrText = x.start + ' to ' + x.peak.v + ', ' + (x.e - x.s) + ' min';
-      x.when = d.clock(x.s) + ' to ' + d.clock(x.e);
-    } else {
-      x.hrText = x.start != null && x.peak.v != null ? x.start + ' to ' + x.peak.v : '';
-      x.when = d.clock(x.t);
-    }
+    x.hrText = x.start != null && x.peak.v != null ? x.start + ' to ' + x.peak.v : '';
+    x.when = d.clock(x.t);
     x.hrvText = x.startHrv != null && x.lowHrv.v != null ? x.startHrv + ' to ' + x.lowHrv.v + ' ms' : '';
     x.change = x.start != null && x.peak.v != null ? x.peak.v - x.start : 0;
     const words = x.taps.filter(t => t.kind === 'Symptom' && t.label && t.label.toLowerCase() !== 'symptom').map(t => t.label);
     x.note = [...new Set(words)].join(', ');
+    if (x.auto) s61Describe(d, x);
+    // Auto moments read "back under" against T (the line, or 100); taps keep the person's line.
+    const lineFor = x.auto ? x.T : d.line;
+    x.lineFor = lineFor;
     x.back = null;
-    if (d.line != null && x.peak.v != null) for (let m = x.peak.m + 1; m < d.n; m++) if (d.hr[m] != null && d.hr[m] < d.line) { x.back = m; break; }
+    // A stretch reads "under" from its end, never at a bridged dip inside it.
+    if (lineFor != null && x.peak.v != null && x.auto !== 'rise') for (let m = x.auto === 'above' ? x.e : x.peak.m + 1; m < d.n; m++) if (d.hr[m] != null && d.hr[m] < lineFor) { x.back = m; break; }
+    // A stretch that ends at a recording gap names the gap instead of a minute under the line after it.
+    x.gapAfter = x.auto === 'above' ? (d.gaps || []).find(g => g[0] >= x.e - 1 && g[0] <= x.e + S61_RUN.bridge) || null : null;
+    if (x.gapAfter && x.back != null && x.back < x.gapAfter[0]) x.gapAfter = null;
+    if (x.gapAfter) x.back = null;
+  }
+  // Numbers of an auto moment (S61): a stretch prints from the minute bins over its present minutes only.
+  function s61Describe(d, x) {
+    // Every joined rise gets its numbers; the sub line names the first.
+    (x.rises || []).forEach(w => {
+      const r = w.r, last = w.back != null ? w.back : x.b;
+      let pk = null;
+      for (let m = Math.max(0, w.on); m <= Math.min(d.n - 1, last); m++) if (d.hr[m] != null && (!pk || d.hr[m] > pk.v)) pk = { m, v: Math.round(d.hr[m]) };
+      w.start = r.base; w.peak = pk || { m: Math.floor(r.u / 60), v: r.peak }; w.held = Math.round(r.aboveMin);
+      w.text = w.start + ' to ' + w.peak.v + ', held ' + w.held + ' min';
+    });
+    const rise = x.rises && x.rises[0];
+    const riseText = rise ? 'Sudden rise ' + rise.text : '';
+    if (x.auto === 'above') {
+      let pk = null, sum = 0, c = 0;
+      for (const m of x.st.mins) { const v = d.hr[m]; if (v == null) continue; sum += v; c++; if (!pk || v > pk.v) pk = { m, v: Math.round(v) }; }
+      if (!c) { for (const m of x.st.mins) { const v = d.parts.stretches.med[m]; sum += v; c++; if (!pk || v > pk.v) pk = { m, v: Math.round(v) }; } }
+      x.avg = Math.round(sum / c); x.peak = pk;
+      const dur = rptDur(x.e - x.s);
+      x.when = d.clock(x.s) + ' to ' + d.clock(x.e);
+      x.hrText = dur + ', average ' + x.avg + ', peak ' + x.peak.v;
+      x.subText = 'Above ' + x.T + ' for ' + dur + ', ' + x.when + ', average ' + x.avg + ', peak ' + x.peak.v + (riseText ? ' · ' + riseText : '');
+      const end = new Date(d.dayStart + x.e * 60000);
+      x.dayText = x.kind + ' for ' + dur + ', ' + formatClockTime(d.dayStart + x.s * 60000) + ' to ' + (end.getHours() || end.getMinutes() ? formatClockTime(end.getTime()) : 'midnight') + ', average ' + x.avg + ', peak ' + x.peak.v;
+      const sw = rptWindow(d, x.s, x.e - 1); x.lowHrv = sw.lowHrv || x.lowHrv;
+    } else {
+      x.start = rise.start; x.peak = rise.peak;
+      x.hrText = rise.text;
+      x.subText = riseText;
+      x.dayText = 'Sudden rise ' + rise.start + ' to ' + rise.peak.v + ' at ' + formatClockTime(d.dayStart + x.t * 60000) + ', held ' + rise.held + ' min';
+      if (rise.back != null) x.backTo = { m: rise.back, v: rptAt(d.hr, rise.back, 1) };
+    }
+    x.ms = x.s; x.me = x.auto === 'above' ? x.e : rise.back != null ? rise.back : x.t;
+    x.startHrv = rptAt(d.hrv, x.t, 3);
+    x.hrvText = x.startHrv != null && x.lowHrv && x.lowHrv.v != null ? x.startHrv + ' to ' + x.lowHrv.v + ' ms' : '';
+    x.change = x.start != null && x.peak && x.peak.v != null ? x.peak.v - x.start : 0;
   }
 
   // The listed moments for this render: every zoomed one plus the first `keep` others; the rest go to one text line.
@@ -7473,7 +7681,9 @@
     out.push(d.n);
     return out;
   }
-  function rptCircleX(x) { return x.kind === 'Above line' ? x.s : x.peak && x.peak.m != null ? x.peak.m : x.t; }
+  // The context renderer's text after a moment's numbers, or nothing (S61).
+  function s61Ctx(x) { const c = momentContextText(x); return c ? ', ' + c : ''; }
+  function rptCircleX(x) { return x.auto === 'above' ? x.s : x.peak && x.peak.m != null ? x.peak.m : x.t; }
 
   // Page 1 chart: HR zone-coloured, HRV dashed beneath, one clock axis, gaps hatched, the person's line if set.
   function rptDayChart(d, listed) {
@@ -7597,32 +7807,29 @@
     h += '<h2 class="sec">The day</h2><div class="chart">' + rptDayChart(d, listed) + '</div>' + rptLegend(d);
     h += '<h2 class="sec">Moments</h2>';
     if (listed.length) {
-      h += '<table class="t idx"><colgroup><col style="width:30px"><col style="width:84px"><col style="width:110px"><col style="width:116px"><col style="width:84px"><col><col style="width:80px"></colgroup><thead><tr><th>No.</th><th>Time</th><th>Kind</th><th>HR, bpm</th><th>HRV</th><th>Note</th><th class="r">Page</th></tr></thead><tbody>';
+      h += '<table class="t idx"><colgroup><col style="width:30px"><col style="width:84px"><col style="width:148px"><col style="width:184px"><col style="width:72px"><col><col style="width:80px"></colgroup><thead><tr><th>No.</th><th>Time</th><th>Kind</th><th>HR, bpm</th><th>HRV</th><th>Note</th><th class="r">Page</th></tr></thead><tbody>';
       listed.forEach(x => {
         h += '<tr><td>' + rptMn(x.n, { off: !x.zoom }) + '</td><td class="num">' + x.when + '</td><td><span class="k">' + rptEsc(x.kind) + '</span></td>' +
-          '<td class="num">' + x.hrText + '</td><td class="num">' + x.hrvText + '</td><td>' + rptEsc(x.note) + '</td>' +
+          '<td class="num">' + x.hrText + rptEsc(s61Ctx(x)) + '</td><td class="num">' + x.hrvText + '</td><td>' + rptEsc(x.note) + '</td>' +
           '<td class="r pg">' + (x.zoom ? '<a href="#rpg' + pageOf(x) + '">' + pageOf(x) + '</a>' : '<span class="dim">not zoomed</span>') + '</td></tr>';
       });
       h += '</tbody></table>';
-    } else h += '<p class="more">No symptom or standing taps, and no rise to list.</p>';
+    } else h += '<p class="more">No stretch above ' + (d.parts ? d.parts.T : 100) + ' of 10 min or more, and no sudden rise.</p>';
     if (rest.length) {
       const byKind = {};
       rest.forEach(x => { (byKind[x.kind] = byKind[x.kind] || []).push(d.clock(x.t)); });
       h += '<p class="more">Also on this day: ' + Object.keys(byKind).map(k => k.toLowerCase() + ' at ' + byKind[k].join(', ')).join('; ') + '.</p>';
     }
-    // One Whole day column: sleep is not validated yet (S13), so no Awake and Asleep split.
+    // Whole day only: sleep is not validated yet (S13), so no Awake and Asleep split.
     const vals = d.hr.filter(v => v != null), hv = d.hrv.filter(v => v != null);
     let lo = null, hi = null;
     d.hr.forEach((v, m) => { if (v == null) return; if (!lo || v < lo.v) lo = { m, v }; if (!hi || v > hi.v) hi = { m, v }; });
-    const above = d.line != null ? vals.filter(v => v > d.line).length : null;
-    h += '<h2 class="sec">Summary</h2><table class="t sum"><thead><tr><th></th><th class="r">Whole day</th></tr></thead><tbody>' +
-      '<tr><td>Recorded</td><td class="r num">' + rptDur(d.recorded) + '</td></tr>' +
-      (lo ? '<tr><td>Lowest, bpm</td><td class="r num">' + Math.round(lo.v) + ' <span class="dim">at ' + d.clock(lo.m) + '</span></td></tr>' : '') +
-      (vals.length ? '<tr><td>Typical (median), bpm</td><td class="r num">' + Math.round(rptMedian(vals)) + '</td></tr>' : '') +
-      (hi ? '<tr><td>Highest, bpm</td><td class="r num">' + Math.round(hi.v) + ' <span class="dim">at ' + d.clock(hi.m) + '</span></td></tr>' : '') +
-      (above != null ? '<tr><td>Above your line, ' + d.line + ' bpm</td><td class="r num">' + rptDur(above) + (vals.length ? ' <span class="dim">' + Math.round(above / vals.length * 100) + '%</span>' : '') + '</td></tr>' : '') +
-      (hv.length ? '<tr><td>HRV typical (median), ms</td><td class="r num">' + Math.round(rptMedian(hv)) + '</td></tr>' : '') +
-      '</tbody></table>';
+    const figs = [['Recorded', rptDur(d.recorded)]];
+    if (lo) figs.push(['Lowest, bpm', Math.round(lo.v) + ' <span class="d">at ' + d.clock(lo.m) + '</span>']);
+    if (vals.length) figs.push(['Typical (median), bpm', Math.round(rptMedian(vals))]);
+    if (hi) figs.push(['Highest, bpm', Math.round(hi.v) + ' <span class="d">at ' + d.clock(hi.m) + '</span>']);
+    if (hv.length) figs.push(['HRV typical (median), ms', Math.round(rptMedian(hv))]);
+    h += '<h2 class="sec">Summary</h2><table class="readouts sum"><thead><tr>' + figs.map(f => '<th>' + f[0] + '</th>').join('') + '</tr></thead><tbody><tr>' + figs.map(f => '<td>' + f[1] + '</td>').join('') + '</tr></tbody></table>';
     const met = stands.some(x => x.stand.met);
     const note = d.personal && met ? '<sup>1</sup> Adult POTS heart rate rule: a rise of 30 bpm or more within 10 min of standing.' : null;
     return h + rptFoot(note);
@@ -7646,10 +7853,11 @@
     const yOf = (v) => hrB - (v - ax.bot) / (ax.top - ax.bot) * hrH, vOf = (v) => vB - Math.min(v, ax.vtop) / ax.vtop * vH;
     const gid = 'rmg' + (++rptUid), hid = 'rmh' + rptUid;
     let s = '<defs>' + rptZoneGrad(gid, yOf) + rptHatch(hid) + '</defs>';
-    if (x.kind === 'Above line') {
-      const s0 = Math.max(a, x.s), s1 = Math.min(b, x.e);
+    // Every stretch inside the window gets its outline, on auto and tap moments alike (S61).
+    ((d.parts && d.parts.stretches) || []).forEach(st => {
+      const s0 = Math.max(a, st.s), s1 = Math.min(b, st.e + 1);
       if (s1 > s0) s += rptEl('rect', { x: xOf(s0).toFixed(1), y: hrT, width: (xOf(s1) - xOf(s0)).toFixed(1), height: hrH, fill: 'none', stroke: 'var(--rp-ink-3)', 'stroke-width': 0.75, 'stroke-dasharray': '2 2' });
-    }
+    });
     rptGapsAll(d).forEach(g => { const g0 = Math.max(a, g[0]), g1 = Math.min(b, g[1]); if (g1 > g0) s += rptEl('rect', { x: xOf(g0).toFixed(1), y: hrT, width: (xOf(g1) - xOf(g0)).toFixed(1), height: hrH, fill: 'url(#' + hid + ')' }); });
     const ticks = []; for (let v = Math.ceil((ax.bot + 1) / 20) * 20; v < ax.top; v += 20) ticks.push(v);
     ticks.forEach(v => { s += rptEl('line', { x1: G, x2: G + PW, y1: yOf(v).toFixed(1), y2: yOf(v).toFixed(1), stroke: 'var(--rp-grid)', 'stroke-width': 0.75 }); });
@@ -7678,16 +7886,17 @@
     const standEnd = x.stand && x.stand.end && x.stand.end.m <= b;
     const endM = standEnd ? x.stand.end.m : x.back != null && x.back <= b ? x.back : null;
     const pts = [];
-    if (x.start != null) pts.push({ m: startM, v: d.hr[Math.round(startM)] != null ? d.hr[Math.round(startM)] : x.start, t: 'start ' + x.start, dy: 14 });
+    // An auto moment that peaks at its first minute shows the peak callout only.
+    if (x.start != null && !(x.auto && x.peak && x.peak.m === Math.round(startM))) pts.push({ m: startM, v: d.hr[Math.round(startM)] != null ? d.hr[Math.round(startM)] : x.start, t: 'start ' + x.start, dy: 14 });
     if (x.peak && x.peak.v != null) pts.push({ m: x.peak.m, v: x.peak.v, t: 'peak ' + x.peak.v + ' at ' + d.clock(x.peak.m), dy: -7 });
-    if (endM != null && d.hr[endM] != null) pts.push({ m: endM, v: d.hr[endM], t: standEnd ? 'end of rise ' + Math.round(d.hr[endM]) + ' at ' + d.clock(endM) : 'under ' + d.line + ' at ' + d.clock(endM), dy: -7 });
+    if (endM != null && d.hr[endM] != null) pts.push({ m: endM, v: d.hr[endM], t: standEnd ? 'end of rise ' + Math.round(d.hr[endM]) + ' at ' + d.clock(endM) : 'under ' + x.lineFor + ' at ' + d.clock(endM), dy: -7 });
     pts.forEach(p => {
       if (p.m < a || p.m > b) return;
       const px = xOf(p.m), py = yOf(p.v);
       s += rptEl('circle', { cx: px.toFixed(1), cy: py.toFixed(1), r: 2.6, fill: 'var(--rp-paper)', stroke: 'var(--rp-ink)', 'stroke-width': 1.25 });
       s += rptLabelBox(px, py + p.dy, p.t, px > G + PW - 90 ? 'end' : px < G + 40 ? 'start' : 'middle');
     });
-    const step = b - a > 60 ? 15 : b - a > 45 ? 10 : 5;
+    const step = b - a > 180 ? 60 : b - a > 90 ? 30 : b - a > 60 ? 15 : b - a > 45 ? 10 : 5;
     for (let m = Math.ceil(a / step) * step; m <= b; m += step) {
       const px = xOf(m);
       s += rptEl('line', { x1: px.toFixed(1), x2: px.toFixed(1), y1: vB, y2: vB + 3, stroke: 'var(--rp-ink-3)', 'stroke-width': 0.75 });
@@ -7705,7 +7914,10 @@
       rows.push([x.peak.m, 'Peak ' + x.peak.v + ' bpm, up ' + (x.peak.v - (x.start || x.peak.v)) + hrvBit]);
       if (x.lowHrv.m !== x.peak.m && drop != null && drop > 0) rows.push([x.lowHrv.m, 'HRV ' + x.lowHrv.v + ' ms, down ' + drop + '%']);
     }
-    if (x.back != null && x.back <= x.b + 30) rows.push([x.back, 'Under ' + d.line + ' bpm']);
+    if (x.back != null && x.back <= x.b + 30) rows.push([x.back, 'Under ' + x.lineFor + ' bpm']);
+    if (x.gapAfter) rows.push([x.gapAfter[0], 'Recording gap ' + d.clock(x.gapAfter[0]) + ' to ' + d.clock(x.gapAfter[1])]);
+    if (x.auto === 'above') (x.rises || []).forEach(w => rows.push([w.on, 'Sudden rise ' + w.text]));
+    if (x.backTo && x.backTo.v != null && x.backTo.m <= x.b + 30) rows.push([x.backTo.m, 'Back to ' + x.backTo.v + ' bpm']);
     x.taps.filter(t => t.kind === 'Symptom').forEach(t => rows.push([t.m, 'Symptom tap']));
     d.ticks.forEach(c => { if (c.m >= x.a && c.m <= x.b) rows.push([c.m, rptEsc(c.word.charAt(0).toUpperCase() + c.word.slice(1))]); });
     rows.sort((p, q) => p[0] - q[0]);
@@ -7716,6 +7928,8 @@
     let h = '<div class="moment" data-n="' + x.n + '">';
     h += '<div class="mhead">' + rptMn(x.n, { big: true }) + '<span class="kind">' + rptEsc(x.kind) + '</span><span class="when">' + x.when + '</span><a class="back" href="#rpg1">Page 1</a></div>';
     const sub = x.taps.map(t => t.kind + ' tap ' + d.clock(t.m));
+    if (x.subText) sub.push(x.subText + s61Ctx(x));
+    else if (s61Ctx(x)) sub.push(momentContextText(x));
     sub.push('Window ' + d.clock(x.a) + ' to ' + d.clock(x.b));
     h += '<p class="msub">' + sub.join(' · ') + '</p>';
     h += '<div class="chart">' + rptLocator(d, x) + '</div><div class="chart" style="margin-top:4px">' + rptMomentChart(d, x, ax) + '</div>';
@@ -7750,7 +7964,7 @@
       const ax = { bot: Math.max(30, Math.floor((lo - 4) / 10) * 10), top: Math.max(110, Math.ceil((hi + 1) / 5) * 5), vtop };
       for (let i = 0; i < z.length; i += 2) {
         let inner = rptRunhead(d);
-        if (i === 0) inner += '<p class="axisnote">HR ' + ax.bot + ' to ' + ax.top + ' bpm and HRV 0 to ' + ax.vtop + ' ms on every moment</p>';
+        if (i === 0) inner += '<p class="axisnote">Chart scale: HR ' + ax.bot + ' to ' + ax.top + ' bpm, HRV 0 to ' + ax.vtop + ' ms</p>';
         inner += rptMomentBlock(d, z[i], ax) + (z[i + 1] ? rptMomentBlock(d, z[i + 1], ax) : '');
         const st = (z[i].stand && z[i].stand.met) || (z[i + 1] && z[i + 1].stand && z[i + 1].stand.met);
         pages.push(rptPage('rpg' + (2 + i / 2), inner + rptFoot(st && d.personal ? '<sup>1</sup> Rise of 30 bpm or more within 10 min of standing.' : null)));
@@ -7986,7 +8200,7 @@
     btn.setAttribute('aria-expanded', 'true');
     buttons[0].focus({ preventScroll: true });
   }
-  window.__aortiReport = { prepare: (iso) => rptPrepare(iso || rptDayIso()), pageCount: async (iso) => rptPageCount(await rptModel(iso || rptDayIso())), dayIso: () => rptDayIso(), clear: rptClear, share: (iso) => rptShare(iso || rptDayIso(), 'share'), save: (iso) => rptShare(iso || rptDayIso(), 'save') };
+  window.__aortiReport = { model: (iso) => rptModel(iso || rptDayIso()), recordingModel: async (fn) => { const s = sessionsIndex[fn]; return s ? s61Result(s, await loadFullSession(fn)).d : null; }, prepare: (iso) => rptPrepare(iso || rptDayIso()), pageCount: async (iso) => rptPageCount(await rptModel(iso || rptDayIso())), dayIso: () => rptDayIso(), clear: rptClear, share: (iso) => rptShare(iso || rptDayIso(), 'share'), save: (iso) => rptShare(iso || rptDayIso(), 'save') };
   // ===== Day report (S44) END =====
 
   // ===== Keyboard nav: ← / → move between adjacent sessions or days =====
@@ -8276,6 +8490,43 @@
     });
   }
 
+  // One insight section as HTML; lines may carry `attrs` (already escaped) for their <li>.
+  function insightSectionHtml(sec, autonomicOn) {
+    const childChevron = `<svg class="insight-child-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
+        const countHtml = sec.count != null ? `<span class="insight-count">${sec.count}</span>` : '';
+        const descHtml = sec.desc ? `<div class="insight-desc">${escape(sec.desc)}</div>` : '';
+        const listHtml = sec.lines.map(l => {
+          const atHtml = (l.at && isFinite(l.at.t))
+            ? `<button class="ui btn ghost insight-jump" type="button" data-t="${l.at.t}" aria-label="Zoom to ${escape(l.at.label)}">${escape(l.at.label)}</button>`
+            : '';
+          const subParts = [];
+          if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
+          if (atHtml) subParts.push(atHtml);
+          const subHtml = subParts.length ? `<div class="insight-sub">${subParts.join(' · ')}</div>` : '';
+          // `what` inline explainers count as autonomic / educational overlay —
+          // hidden when the toggle is OFF so the report becomes pure numbers.
+          const whatHtml = (autonomicOn && l.what) ? `<div class="insight-what">${escape(l.what)}</div>` : '';
+          return `<li${l.attrs || ''}><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
+        }).join('');
+        // Every session open starts with Overview expanded and everything
+        // else collapsed — keeps the report from overpowering the chart.
+        // User toggles are session-local only (not persisted) so the next
+        // open always starts clean.
+        const collapsedCls = sec.key === 'overview' ? '' : ' collapsed';
+        return `<div class="insight-section${collapsedCls}" data-key="${sec.key}">
+          <div class="insight-section-title">${childChevron}<span>${escape(sec.title)}</span>${countHtml}</div>
+          <div class="insight-section-body">${descHtml}<ul>${listHtml}</ul></div>
+        </div>`;
+  }
+  // Section title toggles its body; jump buttons zoom the chart to their time.
+  function wireInsightSection(sec) {
+    const title = sec.querySelector('.insight-section-title');
+    title.addEventListener('click', () => {
+      sec.classList.toggle('collapsed');
+      setSectionCollapsed(sec.dataset.key, sec.classList.contains('collapsed'));
+    });
+    sec.querySelectorAll('.insight-jump').forEach(wireInsightJump);
+  }
   function renderInsight(s) {
     // Build an ordered list of accordion sections. Each entry:
     //   { key, title, desc?, count?, lines: [{ text, sub?, at? }] }
@@ -8316,48 +8567,8 @@
       sections.push({ key: 'overview', title: 'Overview', lines });
     }
 
-    // 2. Noteworthy moments — windows where HR or HRV held a sustained departure
-    // from this session's own median. Plain-English neutral phrasing so no one
-    // reads it as a diagnosis. Autonomic ON adds a short pattern descriptor.
-    if (s.noteworthy && s.noteworthy.length) {
-      const lines = s.noteworthy.slice(0, 4).map(n => {
-        const dur = formatDuration(n.end - n.start);
-        const when = formatDuration(n.start) + ' to ' + formatDuration(n.end);
-        const winMed = Math.round(n.windowMedian);
-        const sessMed = Math.round(n.sessionMedian);
-        const delta = Math.round(Math.abs(n.delta));
-        let text, sub;
-        if (n.kind === 'hr_low') {
-          text = 'HR dipped to around ' + winMed + ' bpm for ' + dur + '.';
-          sub = 'Roughly ' + delta + ' bpm below the rest of the session (typical ' + sessMed + ').';
-        } else if (n.kind === 'hr_high') {
-          text = 'HR climbed to around ' + winMed + ' bpm for ' + dur + '.';
-          sub = 'Roughly ' + delta + ' bpm above the rest of the session (typical ' + sessMed + ').';
-        } else if (n.kind === 'hrv_low') {
-          text = 'HRV dropped to around ' + winMed + ' ms for ' + dur + '.';
-          sub = 'Noticeably lower than your session median (' + sessMed + ' ms).';
-        } else {
-          text = 'HRV rose to around ' + winMed + ' ms for ' + dur + '.';
-          sub = 'Noticeably higher than your session median (' + sessMed + ' ms).';
-        }
-        let what = null;
-        if (autonomicOn) {
-          if (n.kind === 'hr_low' || n.kind === 'hrv_high') {
-            what = 'Low HR or rising HRV usually shows up during rest or recovery. The body is in a calmer, parasympathetic state.';
-          } else {
-            what = 'High HR or dropping HRV usually shows up during activity, stress, standing up, or an autonomic flare. The body is in a more activated, sympathetic state.';
-          }
-        }
-        return { text, sub, what, at: { t: n.start, label: 'jump to ' + formatDuration(n.start) } };
-      });
-      sections.push({
-        key: 'noteworthy',
-        title: 'Noteworthy moments',
-        desc: 'Stretches where your HR or HRV behaved noticeably differently from the rest of the session. Each callout is a window where the rolling-window median sat more than 1.5 MAD (a robust standard-deviation substitute) away from the session baseline, with a floor of 10 bpm for HR and 35% for HRV so small drifts don\'t trigger. These are pattern callouts based on your own data; they don\'t diagnose anything.',
-        count: s.noteworthy.length,
-        lines,
-      });
-    }
+    // 2. Moments (S61): rendered from the detection memo only; the first open gets them from the idle task.
+    { const sec = s61Section(s); if (sec) sections.push(sec); }
 
     // 3. Palpitations — neutral terminology (ectopic beat = a heartbeat that
     // fires off-rhythm). Always shown when present, no autonomic gating needed.
@@ -8549,36 +8760,10 @@
     }
     const summaryText = summaryBits.join(' · ');
 
-    const childChevron = `<svg class="insight-child-chevron" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>`;
     const sectionCollapsed = getCollapsedSections();
     const bodyHtml = sections.length === 0
       ? '<div class="insight-empty">Nothing notable detected in this session.</div>'
-      : sections.map(sec => {
-          const countHtml = sec.count != null ? `<span class="insight-count">${sec.count}</span>` : '';
-          const descHtml = sec.desc ? `<div class="insight-desc">${escape(sec.desc)}</div>` : '';
-          const listHtml = sec.lines.map(l => {
-            const atHtml = (l.at && isFinite(l.at.t))
-              ? `<button class="ui btn ghost insight-jump" type="button" data-t="${l.at.t}" aria-label="Zoom to ${escape(l.at.label)}">${escape(l.at.label)}</button>`
-              : '';
-            const subParts = [];
-            if (l.sub) subParts.push(`<span>${escape(l.sub)}</span>`);
-            if (atHtml) subParts.push(atHtml);
-            const subHtml = subParts.length ? `<div class="insight-sub">${subParts.join(' · ')}</div>` : '';
-            // `what` inline explainers count as autonomic / educational overlay —
-            // hidden when the toggle is OFF so the report becomes pure numbers.
-            const whatHtml = (autonomicOn && l.what) ? `<div class="insight-what">${escape(l.what)}</div>` : '';
-            return `<li><div>${escape(l.text)}</div>${subHtml}${whatHtml}</li>`;
-          }).join('');
-          // Every session open starts with Overview expanded and everything
-          // else collapsed — keeps the report from overpowering the chart.
-          // User toggles are session-local only (not persisted) so the next
-          // open always starts clean.
-          const collapsedCls = sec.key === 'overview' ? '' : ' collapsed';
-          return `<div class="insight-section${collapsedCls}" data-key="${sec.key}">
-            <div class="insight-section-title">${childChevron}<span>${escape(sec.title)}</span>${countHtml}</div>
-            <div class="insight-section-body">${descHtml}<ul>${listHtml}</ul></div>
-          </div>`;
-        }).join('');
+      : sections.map(sec => insightSectionHtml(sec, autonomicOn)).join('');
 
     const collapsed = isInsightCollapsed();
     const box = document.getElementById('insight-text');
@@ -8595,30 +8780,23 @@
       box.classList.toggle('collapsed');
       setInsightCollapsed(box.classList.contains('collapsed'));
     });
-    // Each sub-section is independently collapsible. Clicking its title toggles
-    // the section's `.collapsed` class and persists the per-section state.
-    box.querySelectorAll('.insight-section[data-key]').forEach(sec => {
-      const title = sec.querySelector('.insight-section-title');
-      title.addEventListener('click', () => {
-        sec.classList.toggle('collapsed');
-        setSectionCollapsed(sec.dataset.key, sec.classList.contains('collapsed'));
-      });
-    });
-    box.querySelectorAll('.insight-jump').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation(); // don't collapse the accordion via the wrapping section title
-        const t = parseFloat(btn.dataset.t);
-        if (isFinite(t) && typeof zoomTo === 'function') zoomTo(t);
-        // Close the report and scroll the chart into view — otherwise on mobile
-        // (and even on desktop in a tall session) the user clicks a moment and
-        // then has to manually scroll back up to see what happened.
-        const report = btn.closest('.insight-box');
-        if (report) report.classList.add('collapsed');
-        const chart = document.querySelector('.chart-wrap');
-        if (chart) {
-          requestAnimationFrame(() => chart.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-        }
-      });
+    // Each sub-section is independently collapsible; its state persists per section.
+    box.querySelectorAll('.insight-section[data-key]').forEach(wireInsightSection);
+  }
+  function wireInsightJump(btn) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't collapse the accordion via the wrapping section title
+      const t = parseFloat(btn.dataset.t);
+      if (isFinite(t) && typeof zoomTo === 'function') zoomTo(t);
+      // Close the report and scroll the chart into view — otherwise on mobile
+      // (and even on desktop in a tall session) the user clicks a moment and
+      // then has to manually scroll back up to see what happened.
+      const report = btn.closest('.insight-box');
+      if (report) report.classList.add('collapsed');
+      const chart = document.querySelector('.chart-wrap');
+      if (chart) {
+        requestAnimationFrame(() => chart.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }
     });
   }
 
@@ -9522,7 +9700,7 @@
   }
   function applySummaryStatVisibility() {
     const hidden = getSummaryHiddenSet();
-    document.querySelectorAll('#summary-bar .summary-stat[data-stat], #summary-bar .summary-title-dur[data-stat]').forEach(el => {
+    document.querySelectorAll('#summary-bar .kpi[data-stat], #summary-bar .summary-title-dur[data-stat]').forEach(el => {
       el.style.display = hidden.has(el.getAttribute('data-stat')) ? 'none' : '';
     });
     fitSummaryStats();
@@ -10170,12 +10348,11 @@
       for (const c of s.chillsWindows) {
         let body;
         if (c.kind === 'vagal' && c.peakRmssd != null && c.baseRmssd != null) {
-          const mult = c.baseRmssd > 0 ? (c.peakRmssd / c.baseRmssd).toFixed(1) : '—';
-          body = `<b>Vagal burst</b><br/>RMSSD spiked to ${Math.round(c.peakRmssd)} ms (${mult}× baseline)<br/><span style='color: var(--text-dim);'>Frisson, cold onset, or ectopic-driven vagal surge</span>`;
+          const mult = c.baseRmssd > 0 ? ` (${(c.peakRmssd / c.baseRmssd).toFixed(1)}× baseline)` : '';
+          body = `<b>Vagal burst</b><br/>RMSSD spiked to ${Math.round(c.peakRmssd)} ms${mult}<br/><span style='color: var(--text-dim);'>Frisson, cold onset, or ectopic-driven vagal surge</span>`;
         } else {
-          const std = typeof c.std === 'number' ? c.std.toFixed(1) : '—';
-          const ratio = typeof c.ratio === 'number' ? c.ratio.toFixed(1) : '—';
-          body = `<b>Chills signature</b><br/>High HR volatility (std ${std} bpm, ${ratio}× session baseline)<br/><span style='color: var(--text-dim);'>Possible shivering or thermoregulatory event</span>`;
+          const detail = typeof c.std === 'number' && typeof c.ratio === 'number' ? ` (std ${c.std.toFixed(1)} bpm, ${c.ratio.toFixed(1)}× session baseline)` : '';
+          body = `<b>Chills signature</b><br/>High HR volatility${detail}<br/><span style='color: var(--text-dim);'>Possible shivering or thermoregulatory event</span>`;
         }
         hrOverlays.push({
           xMin: c.start, xMax: c.end,
@@ -10254,7 +10431,7 @@
                 if (d && Array.isArray(d.warnings)) {
                   d.warnings
                     .filter(w => Math.abs((w.t || 0) - xAt) < 10 / 60)
-                    .forEach(w => extras.push('Warning: ' + (w.type || '—')));
+                    .forEach(w => extras.push(w.type ? 'Warning: ' + w.type : 'Warning'));
                 }
                 return extras;
               },
@@ -11082,7 +11259,7 @@
 
   // ===== Utilities =====
   function formatDuration(min) {
-    if (min == null || isNaN(min)) return '—';
+    if (min == null || isNaN(min)) return 'no data';
     const totalSec = Math.round(min * 60);
     const h = Math.floor(totalSec / 3600);
     const m = Math.floor((totalSec % 3600) / 60);
@@ -11094,7 +11271,7 @@
   // Absolute wall-clock time for an epoch, 12-hour format with AM/PM so it's
   // visually distinct from the MM:SS duration format.
   function formatClockTime(epochMs) {
-    if (!epochMs || isNaN(epochMs)) return '—';
+    if (!epochMs || isNaN(epochMs)) return 'no data';
     const d = new Date(epochMs);
     let h = d.getHours();
     const m = d.getMinutes();
@@ -11377,6 +11554,8 @@
     const fill = document.getElementById('viewer-loading-fill');
     const text = document.getElementById('viewer-loading-text');
     if (!banner) return;
+    // total -1: work under way with no count yet (the Drive listing after sign-in).
+    if (total === -1) { banner.classList.add('shown'); if (fill) fill.style.width = '0%'; if (text) text.textContent = (label || 'Parsing sessions') + '…'; return; }
     if (total <= 0) { banner.classList.remove('shown'); return; }
     banner.classList.add('shown');
     if (fill) fill.style.width = (total > 0 ? (current / total * 100) : 0) + '%';

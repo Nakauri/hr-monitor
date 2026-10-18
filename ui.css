@@ -146,9 +146,41 @@
 
 /* Card */
 .card { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-card); padding: var(--s4); }
-.card.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: var(--s3) var(--s4); }
-.card.stats .k { display: block; font-size: var(--t12); color: var(--text-dim); }
-.card.stats .v { display: block; font-size: var(--t20); font-weight: 600; color: var(--text); }
+
+/* Stat tiles: dl.kpi-grid > div.kpi[data-stat] > dt.kpi-label + dd.kpi-value (+ dd.kpi-unit). Values inherit colour:
+   neutral, a stage class on HR only, .hrv on HRV. */
+.kpi-grid {
+  --kpi-gap: var(--s5);
+  --kpi-fit: repeat(auto-fill, minmax(min(100%, max(var(--kpi-min, 6.75em), (100% - (var(--kpi-cols, 3) - 1) * var(--kpi-gap)) / var(--kpi-cols, 3))), 1fr));
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--kpi-col, 7.5em), 100%), 1fr));
+  gap: var(--s4) var(--kpi-gap);
+  margin: 0; padding: 0;
+  font-size: var(--t14);
+}
+/* At most --kpi-cols columns, fewer when one would drop under --kpi-min (em, so large text drops columns). */
+.kpi-grid.cols { grid-template-columns: var(--kpi-fit); }
+.kpi { display: flex; flex-direction: column; min-width: 0; margin: 0; }
+.kpi-label { margin: 0; font-size: var(--t12); font-weight: 500; color: var(--text-dim); }
+.kpi-value { margin: var(--s1) 0 0; font-family: var(--num-face); font-weight: 900; font-size: var(--t28); line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.kpi.sm .kpi-value { font-size: var(--t20); }
+.kpi-value.hrv { color: var(--hrv); }
+.kpi-unit { margin: 2px 0 0; font-size: var(--t12); color: var(--text-dim); }
+.kpi-pct { font-size: max(var(--t12), .6em); }
+.kpi-nodata { font-family: var(--ui-face); font-size: var(--t14); font-weight: 500; letter-spacing: 0; color: var(--text-dim); }
+.kpi:has(.kpi-nodata) .kpi-unit { display: none; }
+/* Beside 28 px numbers, baseline-aligned words look low; lift them toward the digits' middle. */
+@media (min-width: 769px) { .kpi:not(.sm) .kpi-nodata { position: relative; top: -3px; } }
+@media (max-width: 768px) {
+  .kpi-value { font-size: var(--t22); }
+  /* The unit sits on the value's line; one that does not fit wraps whole to the next line. */
+  .kpi { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }
+  .kpi-label { flex: 0 0 100%; }
+  .kpi-unit { margin-top: 0; }
+  .kpi-unit .more { display: none; }
+}
+@media (max-width: 480px) { .kpi-value { font-size: var(--t20); } }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Badge, chips */
 .badge { display: inline-flex; align-items: center; gap: var(--s1); min-height: 20px; padding: 0 var(--s2); border: 1px solid var(--border-control); border-radius: var(--r-pill); font-size: var(--t12); font-weight: 600; color: var(--text); white-space: nowrap; }

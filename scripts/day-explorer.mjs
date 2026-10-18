@@ -40,10 +40,12 @@ const PART = argVal('--part');
 const want = (p) => !PART || PART.split(',').includes(p);
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.csv': 'text/csv' };
-function serve(viewerHtml) {
+// over: { '/ui.css': text } serves a mutated file in place of the real one.
+function serve(viewerHtml, over = {}) {
   const server = http.createServer((req, res) => {
     const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (viewerHtml && rel === '/hrv_viewer.html') { res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' }); res.end(viewerHtml); return; }
+    if (over[rel] != null) { res.writeHead(200, { 'Content-Type': MIME[path.extname(rel)] || 'text/plain', 'Cache-Control': 'no-store' }); res.end(over[rel]); return; }
     const file = path.join(ROOT, rel);
     if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
@@ -174,10 +176,10 @@ async function seeded(base, kind) {
   await page.goto('about:blank');
   return { ctx, page };
 }
-const readStats = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#summary-bar .summary-stat[data-stat]')].map((e) => [
+const readStats = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#summary-bar :is(.summary-stat, .kpi)[data-stat]')].map((e) => [
   e.dataset.stat,
-  { v: (e.querySelector('.summary-stat-value') || {}).textContent?.replace(/\s+/g, ' ').trim() || '',
-    u: ((e.querySelector('.summary-stat-unit') || {}).textContent || '').match(/\d+(?::\d+)*/g) || [] },
+  { v: (e.querySelector(':is(.summary-stat-value, .kpi-value)') || {}).textContent?.replace(/\s+/g, ' ').trim() || '',
+    u: ((e.querySelector(':is(.summary-stat-unit, .kpi-unit)') || {}).textContent || '').match(/\d+(?::\d+)*/g) || [] },
 ])));
 const legacyRef = {};
 for (const kind of (want('parity') ? ['legacy', 'v2'] : [])) {
@@ -804,8 +806,8 @@ const LAYOUT = {
     const { ctx, page } = await openDemo(base, 360, 1, () => { try { localStorage.setItem('hrv_summary_collapsed', '1'); } catch (e) {} });
     const sum = await page.evaluate(() => {
       const bar = document.getElementById('summary-bar');
-      const shown = [...bar.querySelectorAll('.summary-stat')].filter((s) => s.getBoundingClientRect().height > 0).map((s) => s.dataset.stat);
-      const vals = [...bar.querySelectorAll('.summary-stat-value')].filter((v) => v.getBoundingClientRect().height > 0).length;
+      const shown = [...bar.querySelectorAll('.kpi')].filter((s) => s.getBoundingClientRect().height > 0).map((s) => s.dataset.stat);
+      const vals = [...bar.querySelectorAll('.kpi-value')].filter((v) => v.getBoundingClientRect().height > 0).length;
       return { collapsed: bar.classList.contains('collapsed'), shown, vals, h: Math.round(bar.getBoundingClientRect().height) };
     });
     rows.push([sum.collapsed && ['hrAvg', 'hrMax', 'hrMin', 'rmssdAvg'].every((k) => sum.shown.includes(k)) && sum.vals === 4 && sum.h <= 160, `360: collapsed Summary shows Avg HR, Max, Min and Avg HRV (${JSON.stringify(sum)})`]);
@@ -823,17 +825,17 @@ const LAYOUT = {
     for (const scale of [1, 2]) {
       const { ctx, page } = await openDemo(base, 360, scale, () => { try { localStorage.setItem('hrv_summary_collapsed', '0'); } catch (e) {} });
       const k = await page.evaluate(() => {
-        const stats = [...document.querySelectorAll('#summary-bar .summary-stat')].filter((e) => e.offsetParent);
+        const stats = [...document.querySelectorAll('#summary-bar .kpi')].filter((e) => e.offsetParent);
         const rows = {}; for (const s of stats) { const t = Math.round(s.getBoundingClientRect().top); (rows[t] = rows[t] || []).push(s); }
-        const unitOf = (s) => { const u = s.querySelector('.summary-stat-unit'); return u && u.textContent.trim() ? u : null; };
+        const unitOf = (s) => { const u = s.querySelector('.kpi-unit'); return u && u.textContent.trim() ? u : null; };
         return {
           // Widths of the text itself (a Range), not of boxes a column layout stretches.
-          ownLine: stats.filter((s) => { const v = s.querySelector('.summary-stat-value'), u = unitOf(s);
+          ownLine: stats.filter((s) => { const v = s.querySelector('.kpi-value'), u = unitOf(s);
             if (!u) return false;
             const tw = (el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width; };
             return u.getBoundingClientRect().top >= v.getBoundingClientRect().bottom - 2 && tw(v) + 4 + tw(u) <= s.clientWidth; }).map((s) => s.dataset.stat),
           broken: stats.map(unitOf).filter((u) => u && u.getClientRects().length > 1).map((u) => u.textContent),
-          misaligned: Object.values(rows).filter((r) => { const t = r.map((s) => s.querySelector('.summary-stat-value').getBoundingClientRect().top); return Math.max(...t) - Math.min(...t) > 2; }).length,
+          misaligned: Object.values(rows).filter((r) => { const t = r.map((s) => s.querySelector('.kpi-value').getBoundingClientRect().top); return Math.max(...t) - Math.min(...t) > 2; }).length,
           cols: getComputedStyle(document.querySelector('#summary-bar .summary-grid')).gridTemplateColumns.split(' ').length,
           over: stats.filter((s) => s.scrollWidth > s.clientWidth + 1).map((s) => s.dataset.stat),
           h: Math.round(document.getElementById('summary-bar').getBoundingClientRect().height),
@@ -979,9 +981,9 @@ if (want('layout-mutants')) {
     ['phone', 'none-here Layers rows not dimmed', '  .layer-rows .chip:disabled { opacity: .6; }\n', '  .layer-rows .chip:disabled { opacity: 1; }\n'],
     ['phone', 'Layers rows without the drawn box (on read from the ring)', '  .layer-rows .chip[aria-pressed=\"true\"]::after { background: var(--action); border-color: var(--action); }\n', ''],
     ['phone', 'Max and Min labels unclamped', '      const clampX = (x) => Math.min(Math.max(x, a.left + w / 2 + 2), a.right - w / 2 - 2);\n      const cx = clampX(px);\n      let cy = below ? py + gap + h / 2 : py - gap - h / 2;\n      if (cy - h / 2 < a.top + 2) cy = py + gap + h / 2;\n      if (cy + h / 2 > a.bottom - 2) cy = py - gap - h / 2;\n', '      const clampX = (x) => x;\n      const cx = px;\n      const cy = below ? py + gap + h / 2 : py - gap - h / 2;\n'],
-    ['phone', 'Summary units back on their own line', '    .summary-bar:not(.collapsed) .summary-stat { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }\n', ''],
-    ['phone', 'Summary keeps several columns at 200% text', '    @container (max-width: 17em) { .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: minmax(0, 1fr); } }\n', ''],
-    ['phone', 'Summary back to two columns', '    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }\n', '    .summary-bar:not(.collapsed) .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }\n'],
+    ['phone', 'Summary units back on their own line', '  .kpi { flex-direction: row; flex-wrap: wrap; align-items: baseline; align-content: flex-start; column-gap: var(--s1); }\n', '', 'ui.css'],
+    ['phone', 'Summary keeps several columns at 200% text', 'max(var(--kpi-min, 6.75em),', 'max(0px,', 'ui.css'],
+    ['phone', 'Summary back to two columns', '--kpi-cols: 3; grid-template-columns: var(--kpi-fit);', '--kpi-cols: 2; grid-template-columns: var(--kpi-fit);'],
     ['phone', 'Summary without the caret', '<svg class="summary-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>', ''],
     ['laptop', 'Max label unclamped', "        place: labelInPlot(s.hrMax.t, s.hrMax.v, `Max ${s.hrMax.v}`, false) },", '        place: () => ({ dx: 0, dy: -4 }) },'],
     ['laptop', 'markers panel back in the row (empty band)', '    position: absolute; z-index: 5; right: var(--card-pad); bottom: var(--card-pad); width: var(--drawer-w);\n', '    position: static; width: var(--drawer-w);\n'],
@@ -990,9 +992,11 @@ if (want('layout-mutants')) {
   ];
   // --only <n,n> runs those layout mutants by index (the whole set runs past one 170 s run).
   const only = argVal('--only') ? argVal('--only').split(',').map(Number) : null;
-  for (const [sub, name, a, b] of L_MUTANTS.filter((m, i) => !only || only.includes(i))) {
-    if (!real.includes(a)) { ok(false, `layout mutant ${name}: anchor missing`); continue; }
-    const m = await serve(real.replace(a, b));
+  const srcOf = (file) => file === 'hrv_viewer.html' ? real : fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
+  for (const [sub, name, a, b, file = 'hrv_viewer.html'] of L_MUTANTS.filter((m, i) => !only || only.includes(i))) {
+    const src = srcOf(file);
+    if (!src.includes(a)) { ok(false, `layout mutant ${name}: anchor missing`); continue; }
+    const m = file === 'hrv_viewer.html' ? await serve(src.replace(a, b)) : await serve(null, { ['/' + file]: src.replace(a, b) });
     const rows = await runLayout(sub, m.base);
     m.server.close();
     const failed = rows.filter((r) => !r[0]);

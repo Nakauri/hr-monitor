@@ -38,7 +38,9 @@ const VIEWER = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8');
 const NATIVE_PDF = fs.readFileSync(path.join(ROOT, 'mobile', 'src', 'native-pdf.js'), 'utf8');
 const SHOT_DIR = path.join(UX, 'redesign', 'build-shots');
 const DAYS = [['showcase', '2026-04-24'], ['sparse', '2026-04-26']];
-const FORBIDDEN = [/\bcase\b/i, /\bevidence\b/i, /\bflare/i, /diagnos/i, /sympathetic/i, /\bclinician/i, /\binterpretations? are estimate/i, /\bdisorder\b/i, /\babnormal/i];
+// S61 adds the moment words (stood up, standing up, exercise, tachycardia, orthostatic, episode); POTS only in the footnote.
+const FORBIDDEN = [/\bcase\b/i, /\bevidence\b/i, /\bflare/i, /diagnos/i, /sympathetic/i, /\bclinician/i, /\binterpretations? are estimate/i, /\bdisorder\b/i, /\babnormal/i, /stood up/i, /standing up/i, /\bexercise/i, /tachycardia/i, /orthostatic/i, /\bepisode/i];
+const FORBIDDEN_CASE = [/\bPOTS\b/];
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.csv': 'text/csv' };
 
 function serve(viewerHtml) {
@@ -209,6 +211,14 @@ async function webDay(base, label, iso, o = {}) {
   const okLinks = linked.every((r) => nums.onPages.some((p) => p.n === r.n && p.page === r.page)) && nums.onPages.every((p) => p.head === p.n && linked.some((r) => r.n === p.n && r.page === p.page));
   const okChart = JSON.stringify(nums.chart) === JSON.stringify(nums.idx.map((r) => r.n).sort((a, b) => a - b));
   check(`${tag} moment numbers on page 1 match their pages`, okLinks && okChart && nums.onPages.length <= 6, `${linked.length} linked, ${nums.onPages.length} on pages, chart ${nums.chart.join(',')}`);
+  // S62 (Khal 10-18, half-width "Whole day" table): Summary is one full-width row of figures, each on one line.
+  const sum = await page.evaluate(() => {
+    const t = document.querySelector('#rpg1 table.sum'); if (!t) return null;
+    const lines = (el) => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; };
+    return { labels: [...t.querySelectorAll('th')].map((th) => th.textContent.trim()), rows: t.querySelectorAll('tbody tr').length,
+      w: Math.round(t.getBoundingClientRect().width), sec: Math.round(t.previousElementSibling.getBoundingClientRect().width), lines: [...t.querySelectorAll('th')].map(lines).concat([...t.querySelectorAll('td')].map((td) => getComputedStyle(td).whiteSpace === 'nowrap' && td.scrollWidth <= td.clientWidth ? 1 : 2)) };
+  });
+  check(`${tag} Summary one full-width row of figures`, !!sum && sum.rows === 1 && sum.labels[0] === 'Recorded' && sum.labels.length === 5 && Math.abs(sum.w - sum.sec) <= 1 && sum.lines.every((n) => n === 1), JSON.stringify(sum));
   // Type sizes.
   const type = await page.evaluate(() => {
     const small = [], pt = (px) => +(px * 0.75).toFixed(2);
@@ -224,7 +234,8 @@ async function webDay(base, label, iso, o = {}) {
   check(`${tag} captions 7 pt or more, body 9 pt`, !type.small.length && type.body === 9 && type.span === 9, `${type.small.length} under 7 pt ${type.small.slice(0, 3).join('; ')}; body ${type.body} pt`);
   // Words.
   const text = await page.evaluate(() => document.getElementById('report-print').innerText + '\n' + 'Share with my doctor Download report (PDF) Save to phone Share report');
-  const hits = FORBIDDEN.flatMap((re) => (text.match(new RegExp(re.source, 'gi')) || []));
+  const noFoot = await page.evaluate(() => { const c = document.getElementById('report-print').cloneNode(true); c.querySelectorAll('.foot .note').forEach((e) => e.remove()); return c.textContent; });
+  const hits = FORBIDDEN.flatMap((re) => (text.match(new RegExp(re.source, 'gi')) || [])).concat(FORBIDDEN_CASE.flatMap((re) => (noFoot.match(new RegExp(re.source, 'g')) || [])));
   check(`${tag} forbidden words 0`, hits.length === 0, hits.join(', '));
   const dashes = (text.match(/[–—]/g) || []).length;
   check(`${tag} no dashes in report text`, dashes === 0, String(dashes));

@@ -209,16 +209,39 @@ if (args.includes('--cold')) {
     const calls = {};
     for (const sc of cov) if (sc.url.endsWith('hrv_viewer.html')) for (const f of sc.functions) if (['v2SessionCsv', 'parseCSV', 'v2SeriesFromRows'].includes(f.functionName)) calls[f.functionName] = (calls[f.functionName] || 0) + f.ranges[0].count;
     const longest = await page.evaluate(() => Math.round(Math.max(0, ...window.__perf.lt.map((x) => x[1]))));
+    // S61: the entry counter copied at the first paint, then detection within 3 s of it.
+    const s61 = await page.evaluate(async () => {
+      const c = globalThis.__s61, t0 = performance.now();
+      while (c && !c.atPaint && performance.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 50));
+      while (c && c.atPaint && !(c.detectDayMoments >= 1 && c.doneT) && performance.now() - c.atPaintT < 3500) await new Promise((r) => setTimeout(r, 50));
+      return c ? { atPaint: c.atPaint, key: c.atPaintKey, det: c.detectDayMoments, after: c.doneT ? Math.round(c.doneT - c.atPaintT) : null, taskMs: c.taskMs != null ? Math.round(c.taskMs) : null } : null;
+    });
     if (args.includes('--tasks')) console.log((viaCsv ? 'csv   ' : 'direct') + ' tasks: ' + (await page.evaluate(() => window.__perf.lt.map((x) => Math.round(x[1])).join(' '))));
     await ctx.close();
-    return { longest, errs, calls };
+    return { longest, errs, calls, s61 };
   };
   const a = await coldOpen(false), b = await coldOpen(true);
+  // S61 negative controls: detection work before the first paint must fail the counter row.
+  const s61Row = (r) => !!(r.s61 && r.s61.atPaint && r.s61.key === 'day:2026-10-10' && Object.values(r.s61.atPaint).every((v) => v === 0) && r.s61.det >= 1 && r.s61.after != null && r.s61.after <= 3000);
+  const S61_MUTANTS = [
+    ['beatJunk inside renderSession before the chart', '    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);', '    beatJunk(data.beats || [], 0, 60);\n    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);'],
+    ['rptBase called from renderInsight', '    { const sec = s61Section(s); if (sec) sections.push(sec); }', '    { rptBase(s, currentData); const sec = s61Section(s); if (sec) sections.push(sec); }'],
+  ];
+  const mres = [];
+  for (const [name, x, y] of S61_MUTANTS) {
+    if (!REAL.includes(x)) { mres.push([name, null]); continue; }
+    SERVED = REAL.replace(x, y);
+    mres.push([name, await coldOpen(false)]);
+    SERVED = REAL;
+  }
   const errs = [...a.errs, ...b.errs];
   console.log(`cold Day open 360 6x, longest task: direct ${a.longest} ms, CSV round trip ${b.longest} ms (information only)`);
   const n = (c, k) => c[k] || 0;
   ok(n(a.calls, 'v2SessionCsv') === 0 && n(a.calls, 'parseCSV') === 0 && n(a.calls, 'v2SeriesFromRows') > 0, `cold v2 Day open builds the series directly: v2SessionCsv ${n(a.calls, 'v2SessionCsv')}, parseCSV ${n(a.calls, 'parseCSV')}, v2SeriesFromRows ${n(a.calls, 'v2SeriesFromRows')} calls`);
   ok(n(b.calls, 'v2SessionCsv') > 0 && n(b.calls, 'parseCSV') > 0, `negative control, the round trip is seen: v2SessionCsv ${n(b.calls, 'v2SessionCsv')}, parseCSV ${n(b.calls, 'parseCSV')} calls`);
+  ok(s61Row(a), `S61 counter at the first paint all 0 and detection within 3 s: ${JSON.stringify(a.s61)}`);
+  console.log(`S61 detection task ${a.s61 && a.s61.taskMs} ms at 6x (information only)`);
+  for (const [name, r] of mres) ok(r && !s61Row(r), `S61 mutant ${name}: ${r ? 'counter row fails ' + JSON.stringify(r.s61.atPaint) : 'ANCHOR MISSING'}`);
   ok(!errs.length, 'cold: no page errors ' + errs.join(' | '));
   await browser.close(); server.close();
   console.log(`viewer-perf --cold: ${passes} pass, ${fails} fail`);

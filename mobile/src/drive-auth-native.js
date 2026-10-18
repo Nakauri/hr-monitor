@@ -24,7 +24,7 @@ try { window.__hrMonitorDriveAuthLoaded = true; } catch (e) {}
       let arr = [];
       try { arr = JSON.parse(localStorage.getItem('hrm_auth_trace') || '[]') || []; } catch {}
       arr.push(entry);
-      if (arr.length > 30) arr = arr.slice(-30);
+      if (arr.length > 100) arr = arr.slice(-100);
       localStorage.setItem('hrm_auth_trace', JSON.stringify(arr));
       console.info('[auth-trace]', step, payload || '');
     } catch (e) { /* ignore */ }

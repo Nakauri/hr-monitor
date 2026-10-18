@@ -68,7 +68,9 @@
     return record;
   }
 
-  function clearToken() {
+  // reason: refresh_null, refresh_401 or sign_out, kept in the trace ring so a lost sign-in can be explained.
+  function clearToken(reason) {
+    trace('clear_token', { reason: reason || 'unknown', had: !!localStorage.getItem(LS_KEY_V2) });
     localStorage.removeItem(LS_KEY_V2);
     sessionStorage.removeItem(LS_OAUTH_STATE);
   }
@@ -235,7 +237,7 @@
       let arr = [];
       try { arr = JSON.parse(localStorage.getItem('hrm_auth_trace') || '[]') || []; } catch {}
       arr.push(entry);
-      if (arr.length > 30) arr = arr.slice(-30);
+      if (arr.length > 100) arr = arr.slice(-100);
       localStorage.setItem('hrm_auth_trace', JSON.stringify(arr));
       console.info('[auth-trace]', 'auth:' + step, payload || '');
     } catch { /* ignore */ }
@@ -285,15 +287,22 @@
       try {
         if (isNative) {
           if (typeof window.__hrMonitorNativeDriveRefresh !== 'function') {
+            trace('native_refresh_unavailable');
             throw new Error('native_refresh_unavailable');
           }
+          const before = loadToken();
+          trace('native_refresh_start', { has: !!before, leftS: before ? Math.round((before.expires_at - Date.now()) / 1000) : null });
           // A thrown error here is transient (network/5xx): keep the token
           // and let it propagate so the caller retries, mirroring the web
           // path's non-401 branch. Only a null return means the token is
           // dead, which clears auth below.
-          const out = await window.__hrMonitorNativeDriveRefresh();
+          let out;
+          try { out = await window.__hrMonitorNativeDriveRefresh(); } catch (e) {
+            trace('native_refresh_threw', (e && e.message) ? e.message : String(e));
+            throw e;
+          }
           if (!out || !out.accessToken) {
-            clearToken();
+            clearToken('refresh_null');
             notifyChange(null);
             throw new Error('refresh_token_invalid');
           }
@@ -305,11 +314,12 @@
             scope: existing ? existing.scope : SCOPES,
           });
           notifyChange(record);
+          trace('native_refresh_ok', { expiresInS: Math.round((record.expires_at - Date.now()) / 1000) });
           return record;
         }
         const { ok, status, data } = await postAuthApi('/api/auth/refresh', null);
         if (status === 401) {
-          clearToken();
+          clearToken('refresh_401');
           notifyChange(null);
           throw new Error('refresh_token_invalid');
         }
@@ -354,7 +364,7 @@
       }
     }
     if (options.local) {
-      clearToken();
+      clearToken('sign_out');
       notifyChange(null);
     }
   }
@@ -390,6 +400,8 @@
     getEmail() { const t = loadToken(); return t ? t.email : null; },
     getCachedToken() { return loadToken(); },
     isNative,
+    // Pages add their own auth steps to the same hrm_auth_trace ring.
+    trace,
     // UI hooks for Stage 5 loading states — callers can subscribe.
     REFRESH_UI_DELAY_MS,
   };

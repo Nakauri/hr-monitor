@@ -243,7 +243,7 @@
   body.watch-mode .section-watch-empty { display: block; }
   body.watch-mode .posture-block { display: none; }
   body.watch-mode #overlay-zone .popout-hint { display: none; }
-  body.watch-mode [data-section="stats"] .stats-grid,
+  body.watch-mode [data-section="stats"] .kpi-grid,
   body.watch-mode [data-section="chart"] .main-chart-wrap,
   body.watch-mode [data-section="events"] .events,
   body.watch-mode [data-section="settings"] .tabs,
@@ -422,7 +422,6 @@
   .signal-chip:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; border-radius: 4px; }
   .signal-detail { display: none; margin: 0 0 var(--s1); color: var(--text-dim); font-size: var(--t14); line-height: 1.45; }
   .signal-chip[aria-expanded="true"] + .signal-detail { display: block; }
-  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .battery-display {
     font-size: 11px;
     color: #8a8a8a;
@@ -815,27 +814,6 @@
   .status.connected { color: var(--hrv); }
   .status.error { color: var(--warn-high); }
 
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-  }
-  .stat {
-    background: var(--bg-input);
-    border-radius: 6px;
-    padding: 10px;
-  }
-  .stat-label {
-    font-size: var(--t12);
-    color: var(--text-dim);
-    margin-bottom: 4px;
-  }
-  .stat-value {
-    font-size: 18px;
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-  }
-
   .main-chart-wrap {
     position: relative;
     height: 180px;
@@ -859,6 +837,7 @@
   #sec-settings-body .tabs { margin-bottom: var(--s4); }
   #sec-settings-body .tab-panel .settings-note + .thresh-grid { margin-top: var(--s3); }
   .stats-foot { display: flex; justify-content: flex-end; margin-top: var(--s3); }
+  [data-section="stats"] .kpi-grid { --kpi-gap: var(--s3); --kpi-min: 6em; --kpi-cols: 4; row-gap: var(--s3); }
   input:is([type="number"], [type="text"], [type="password"]):where(:not(.ui *)) {
     background: var(--bg-input);
     color: var(--text);
@@ -1115,7 +1094,6 @@
     .widget { padding: 12px 14px; }
     .big-number { font-size: 64px; }
     .big-number.medium { font-size: 48px; }
-    .pots-quick-grid { grid-template-columns: repeat(2, 1fr); }
     .autosave-row, .controls { flex-wrap: wrap; }
     .controls button { flex: 1 1 auto; }
   }
@@ -1317,16 +1295,23 @@
       </button>
       <div class="section-body" id="sec-stats-body">
         <div class="section-watch-empty">Only available on the broadcasting device.</div>
-        <div class="stats-grid">
-          <div class="stat"><div class="stat-label">Avg HR</div><div class="stat-value" id="avg-hr">—</div></div>
-          <div class="stat"><div class="stat-label">Avg RMSSD</div><div class="stat-value" id="avg-rmssd">—</div></div>
-          <div class="stat"><div class="stat-label">Max HR</div><div class="stat-value" id="max-hr">—</div></div>
-          <div class="stat"><div class="stat-label">Min HR</div><div class="stat-value" id="min-hr">—</div></div>
-          <div class="stat"><div class="stat-label">Palp / min</div><div class="stat-value" id="palp-rate">0</div></div>
-          <div class="stat"><div class="stat-label">Palp total</div><div class="stat-value" id="palp-total">0</div></div>
-          <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="warn-count">0</div></div>
-          <div class="stat" title="Fraction of the session where the strap was connected. Drops whenever the strap disconnects and auto-reconnect is in flight."><div class="stat-label">Uptime</div><div class="stat-value" id="uptime-pct">—</div></div>
-        </div>
+        <dl class="kpi-grid cols" id="stats-grid"></dl>
+        <script>
+          // Same tile builder as the viewer; every value starts as no data and updateStats fills it.
+          (function () {
+            const nd = UI.kpi(null), sm = { sm: true, keepUnit: true };
+            document.getElementById('stats-grid').innerHTML = [
+              UI.kpiTile('hrAvg', 'Avg HR', nd, 'bpm', Object.assign({ id: 'avg-hr' }, sm)),
+              UI.kpiTile('rmssdAvg', 'Avg HRV', nd, 'ms<span class="more">, RMSSD</span>', Object.assign({ id: 'avg-rmssd', cls: 'hrv' }, sm)),
+              UI.kpiTile('hrMax', 'Max HR', nd, 'bpm', Object.assign({ id: 'max-hr' }, sm)),
+              UI.kpiTile('hrMin', 'Min HR', nd, 'bpm', Object.assign({ id: 'min-hr' }, sm)),
+              UI.kpiTile('palpRate', 'Palps per min', nd, '', Object.assign({ id: 'palp-rate' }, sm)),
+              UI.kpiTile('palpCount', 'Palps', nd, '', Object.assign({ id: 'palp-total' }, sm)),
+              UI.kpiTile('warnCount', 'Warnings', nd, '', Object.assign({ id: 'warn-count' }, sm)),
+              UI.kpiTile('uptime', 'Uptime', nd, '', Object.assign({ id: 'uptime-pct', title: UI.UPTIME_TIP }, sm)),
+            ].join('');
+          })();
+        </script>
         <div class="ui stats-foot">
           <button type="button" class="btn" id="btn-export" title="Download the current session as CSV">Export CSV</button>
         </div>
@@ -1369,7 +1354,7 @@
              sync is handled by Drive: sign in on both devices and they end
              up on the same relay room automatically. OBS still works from
              the URL in Settings → Widgets (URL embeds the key). -->
-        <code id="broadcast-key-display" hidden>—</code>
+        <code id="broadcast-key-display" hidden></code>
         <!-- Single big toggle per save target. Label reflects current
              state; clicking in the "set" state confirms before clearing. -->
         <button type="button" id="autosave-toggle" class="btn save-target" data-state="unset">
@@ -2181,11 +2166,19 @@
   }
 
   function updateStats() {
+    const setHr = (id, v) => { const el = $(id); UI.setKpi(el, v); el.className = 'kpi-value' + (v != null ? ' ' + getHRStage(v) : ''); };
+    // Counts read no data until a session has a start time, so they never sit beside an empty Avg HR as 0.
+    const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;
+    const on = !!state.startTime;
+    const palpMin = on ? ectopicsPerMinute(nowMin) : null;
+    UI.setKpi($('warn-count'), on ? state.warnings.length : null);
+    UI.setKpi($('palp-rate'), palpMin);
+    UI.setKpi($('palp-total'), on ? state.ectopicEvents.length : null);
+    updateUptimeStat(nowMin);
     if (state.hrSeries.length === 0) {
-      $('avg-hr').textContent = '—';
-      $('avg-rmssd').textContent = '—';
-      $('max-hr').textContent = '—';
-      $('min-hr').textContent = '—';
+      ['avg-hr', 'max-hr', 'min-hr'].forEach((id) => setHr(id, null));
+      UI.setKpi($('avg-rmssd'), null);
+      updateSectionMeta();
       return;
     }
     // Math.max/min(...arr) spreads a 5000-element array as call arguments —
@@ -2200,22 +2193,18 @@
       sumH += v;
       nH++;
     }
-    $('avg-hr').textContent = nH ? Math.round(sumH / nH) : '—';
-    $('max-hr').textContent = nH ? maxH : '—';
-    $('min-hr').textContent = nH ? minH : '—';
+    setHr('avg-hr', nH ? Math.round(sumH / nH) : null);
+    setHr('max-hr', nH ? maxH : null);
+    setHr('min-hr', nH ? minH : null);
     if (state.rmssdSeries.length > 0) {
       const rmssds = state.rmssdSeries.map(p => p.v);
-      $('avg-rmssd').textContent = Math.round(rmssds.reduce((a,b) => a+b, 0) / rmssds.length);
-    }
-    $('warn-count').textContent = state.warnings.length;
-    const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;
-    const palpMin = ectopicsPerMinute(nowMin);
-    $('palp-rate').textContent = palpMin;
-    $('palp-total').textContent = state.ectopicEvents.length;
+      UI.setKpi($('avg-rmssd'), Math.round(rmssds.reduce((a,b) => a+b, 0) / rmssds.length));
+    } else UI.setKpi($('avg-rmssd'), null);
+    const chipMin = palpMin || 0;
     const chip = $('palp-chip');
-    chip.classList.toggle('active', palpMin > 0);
-    $('palp-chip-count').textContent = palpMin;
-    updateUptimeStat(nowMin);
+    chip.classList.toggle('active', chipMin > 0);
+    $('palp-chip-count').textContent = chipMin;
+    updateSectionMeta();
   }
 
   // Walk state.connectionEvents (an alternating log of connect/disconnect
@@ -2225,7 +2214,7 @@
   function updateUptimeStat(nowMin) {
     const el = $('uptime-pct');
     if (!el) return;
-    if (!state.startTime || nowMin <= 0) { el.textContent = '—'; return; }
+    if (!state.startTime || nowMin <= 0) { UI.setKpi(el, null); return; }
     let connectedMin = 0;
     let openConnect = null;
     for (const ev of state.connectionEvents) {
@@ -2237,7 +2226,7 @@
     }
     if (openConnect != null) connectedMin += Math.max(0, nowMin - openConnect);
     const pct = Math.max(0, Math.min(100, (connectedMin / nowMin) * 100));
-    el.textContent = pct.toFixed(pct >= 99.95 ? 0 : 1) + '%';
+    UI.setKpi(el, Math.round(pct), { pct: true });
   }
 
 
@@ -2556,9 +2545,9 @@
     el.innerHTML = state.events.slice().reverse().map(ev => {
       const sec = Math.max(0, Math.round(ev.t * 60));
       const ts = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
-      const hr = ev.hr != null ? ev.hr + ' bpm' : '—';
-      const rmssd = ev.rmssd != null ? Math.round(ev.rmssd) + ' ms' : '—';
-      return '<div class="event"><span class="event-label">' + escapeHtml(markLabel(ev.label)) + '</span><span class="event-time">' + ts + ' · ' + hr + ' · ' + rmssd + '</span></div>';
+      const hr = ev.hr != null ? ev.hr + ' bpm' : '';
+      const rmssd = ev.rmssd != null ? Math.round(ev.rmssd) + ' ms' : '';
+      return '<div class="event"><span class="event-label">' + escapeHtml(markLabel(ev.label)) + '</span><span class="event-time">' + [ts, hr, rmssd].filter(Boolean).join(' · ') + '</span></div>';
     }).join('');
   }
 
@@ -2703,6 +2692,7 @@
     else if (nowMs - signal.thinSince >= SIGNAL_SUSTAIN_MS) { signal.thinSince = 0; signalShow(false, null); }
   }
   // Junk: outside 250 to 2500 ms, or off the strap's own HR by over 40 bpm and not a short-long ectopic pair.
+  // PARITY CRITICAL: beatJunk in hrv_viewer.html (S61 moments block); scripts/junk-parity.test.cjs.
   function signalFeed(hr, rrs) {
     const nowMs = Date.now();
     if (signal.lastAt && nowMs - signal.lastAt > SIGNAL_GAP_MS) signalRestartShow();

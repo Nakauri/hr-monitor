@@ -1,4 +1,4 @@
-// Guards: dead hash routes, the select changing width per view and dropping Share (2026-10-11), the cloud spinning on every open (2026-10-11). Files: hrv_viewer.html bar and controls. Runtime: base about 55 s, --part s23 about 120 s; run by part.
+// Guards: dead hash routes, the select changing width per view and dropping Share (2026-10-11), the cloud spinning on every open (2026-10-11). Files: hrv_viewer.html bar and controls. Runtime: base about 55 s, --part s23 about 120 s, --part s62 about 45 s; run by part.
 // S8 viewer bar and navigation checks, on demo data (?demo=1), headless:
 // every old hash route resolves; the viewer opens on the latest day; day arrows and arrow keys skip
 // days without data; the Week tab opens the week holding the shown day; every bar control is wired
@@ -16,7 +16,8 @@
 // negative controls, each must FAIL (--part then picks one group: sweep, bar, actions, cloud).
 // S27 (AUDIT-NOTES 2026-10-11 item 4, "Tachy %" on 2 lines): every Month and Week headline pill label sits on one line,
 // the pills share one width (from the longest) and a wrapped set keeps its columns, at 1440, 360 and 360 at 200% text.
-// Usage: node scripts/viewer-nav.mjs [--part base|s23|s27] [--mutants [--part pills]] [--shots <dir>] [--ux <ux-audit dir>]
+// S62: with the relay live the logo stays and the app link is Monitor to hr_monitor.html, 360 and 430, up to 200% text; --part s62 --shots <dir> shoots the bar only.
+// Usage: node scripts/viewer-nav.mjs [--part base|s23|s27|s62] [--mutants [--part pills]] [--shots <dir>] [--ux <ux-audit dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +37,7 @@ const { FakeDrive } = createRequire(import.meta.url)('./marks-store.test.cjs');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const PART = argVal('--part');
 const MUTANTS_ONLY = args.includes('--mutants');
-const PARTS = MUTANTS_ONLY ? ['sweep', 'bar', 'actions', 'cloud', 'pills'] : ['base', 's23', 's27', 'shots'];
+const PARTS = MUTANTS_ONLY ? ['sweep', 'bar', 'actions', 'cloud', 'pills', 's62'] : ['base', 's23', 's27', 's62', 'shots'];
 if (PART && !PARTS.includes(PART)) { console.log('unknown --part ' + PART + ' (one of ' + PARTS.join(', ') + ')'); process.exit(2); }
 if (PART === 'shots' && !SHOTS) { console.log('--part shots needs --shots <dir>'); process.exit(2); }
 // Served-file overrides for the negative controls: { '/hrv_viewer.html': [find, replace] }.
@@ -57,6 +58,11 @@ const server = http.createServer((req, res) => {
     const [a, b] = MUTATE[rel];
     if (!text.includes(a)) { anchorMissing = true; console.log('MUTANT ANCHOR MISSING ' + rel + ': ' + a.slice(0, 60)); res.writeHead(500); res.end(); return; }
     body = text.replace(a, b);
+  }
+  if (rel === '/hrv_viewer.html' && u.searchParams.get('livetest') === '1') {
+    const text = body.toString('utf8');
+    if (!text.includes(LIVE_ANCHOR)) { anchorMissing = true; console.log('LIVETEST ANCHOR MISSING'); }
+    body = text.replace(LIVE_ANCHOR, 'const __viewerDemoFlag = false && (function () {');
   }
   if (rel === '/demo/manifest.json' && /gap=1/.test(req.headers.referer || '')) {
     const m = JSON.parse(body); m.files = m.files.filter((f) => !GAP_DROP.test(f)); body = JSON.stringify(m);
@@ -97,8 +103,20 @@ async function open(width, query = 'demo=1', hash = '', textScale = 1, drive = n
     return route.fulfill({ status: 204, body: '' });
   });
   await ctx.addInitScript(() => { window.__prints = 0; window.print = () => { window.__prints++; }; });
-  if (drive) await ctx.addInitScript(() => {
-    localStorage.setItem('aorti_auth_v2', JSON.stringify({ version: 2, access_token: 'fake', expires_at: Date.now() + 3600000, email: 'a@example.com', scope: 'drive.file', issued_at: Date.now() }));
+  if (/livetest=1/.test(query)) await ctx.addInitScript(() => {
+    localStorage.setItem('hr_monitor_broadcast_key', 'k-test');
+    window.WebSocket = class {
+      constructor() { this.l = []; this.t = setInterval(() => this.l.forEach((f) => f({ data: '{"type":"tick"}' })), 500); }
+      addEventListener(type, f) { if (type === 'message') this.l.push(f); }
+      send() {} close() { clearInterval(this.t); }
+    };
+  });
+  if (/app=1/.test(query)) await ctx.addInitScript(() => {
+    window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android', Plugins: {} };
+    window.__aortiNativePdf = { available: () => true };
+  });
+  if (drive) await ctx.addInitScript((signedOut) => {
+    if (!signedOut) localStorage.setItem('aorti_auth_v2', JSON.stringify({ version: 2, access_token: 'fake', expires_at: Date.now() + 3600000, email: 'a@example.com', scope: 'drive.file', issued_at: Date.now() }));
     // Every change of the bar's syncing class, with its time.
     window.__cloudLog = [];
     document.addEventListener('DOMContentLoaded', () => {
@@ -109,7 +127,7 @@ async function open(width, query = 'demo=1', hash = '', textScale = 1, drive = n
         if (now !== was) { was = now; window.__cloudLog.push({ at: Date.now(), syncing: now }); }
       }).observe(bar, { attributes: true, attributeFilter: ['class'] });
     });
-  });
+  }, !!drive.signedOut);
   const page = await ctx.newPage();
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -344,6 +362,91 @@ async function s27Pills() {
   return rows;
 }
 
+// S62 (Khal 2026-10-18, phone bar showed a green dot and no logo, tap opened overlay.html): with the relay live,
+// the logo stays and in the app the link is Monitor to hr_monitor.html. ?livetest=1 serves the page with the demo
+// guard off and a fake relay sending ticks; ?app=1 stands in the Capacitor bridge and the native PDF path.
+const LIVE_ANCHOR = 'const __viewerDemoFlag = (function () {';
+async function s62Open(w, scale, { app, live }) {
+  const { ctx, page } = await open(w, 'demo=1' + (live ? '&livetest=1' : '') + (app ? '&app=1' : ''), '#/day/2026-04-26', scale);
+  if (live) await page.waitForFunction(() => document.getElementById('monitor-link').classList.contains('is-live'), null, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  return { ctx, page };
+}
+async function s62Bar() {
+  const rows = [];
+  const cases = [[360, 1, true, true], [360, 1.3, true, true], [360, 1.5, true, true], [360, 2, true, true], [430, 1, true, true],
+    [360, 1, true, false], [360, 2, true, false], [430, 1, true, false], [360, 1, false, true], [430, 1, false, true], [360, 1, false, false]];
+  for (const [w, scale, app, live] of cases) {
+    const { ctx, page } = await s62Open(w, scale, { app, live });
+    const tag = `S62 ${w}${scale !== 1 ? ' at ' + Math.round(scale * 100) + '% text' : ''} ${app ? 'app' : 'web'} ${live ? 'live' : 'idle'}`;
+    const m = await page.evaluate(() => {
+      const box = (el) => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), l: Math.round(r.left), r: Math.round(r.right), cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; };
+      const brand = document.querySelector('.vbar .brand'), mark = brand.querySelector('svg');
+      const b = box(brand), k = box(mark);
+      const hit = document.elementFromPoint(k.cx, k.cy);
+      const link = document.getElementById('monitor-link'), lb = box(link);
+      const dot = link.querySelector('.live-dot');
+      const ctl = ['.vbar .brand', '#monitor-link', '#view-select', '#drive-cloud', '#export-report', '#viewer-settings-btn']
+        .map((s) => [s, document.querySelector(s)]).filter(([, e]) => e.getBoundingClientRect().width > 0)
+        .map(([s, e]) => { const r = box(e); return [s, r.w, r.h, r.r]; });
+      return { mark: k.w > 0 && k.h > 0 && getComputedStyle(mark).visibility !== 'hidden' && !!hit && brand.contains(hit), brand: [b.w, b.h],
+        href: link.getAttribute('href'), target: link.getAttribute('target'), lbl: link.querySelector('.lbl').textContent, link: [lb.w, lb.h],
+        dot: getComputedStyle(dot).display !== 'none', opt: document.getElementById('view-select-monitor').textContent, isLive: link.classList.contains('is-live'),
+        ctl, sw: document.documentElement.scrollWidth, tight: [...document.getElementById('app-bar').classList].filter((c) => c.startsWith('tight')).join(' ') };
+    });
+    const d = JSON.stringify(m);
+    rows.push([`${tag}: live state ${m.isLive === live ? 'reached' : 'NOT reached'}`, m.isLive === live, d]);
+    rows.push([`${tag}: logo mark visible and tappable (brand ${m.brand.join('x')}, ${m.tight || 'no tight'})`, m.mark && m.brand[0] >= 44 && m.brand[1] >= 44, d]);
+    if (app || !live) rows.push([`${tag}: Monitor goes to hr_monitor.html in the same tab, select says Monitor`, m.href === './hr_monitor.html' && !m.target && m.lbl === 'Monitor' && m.opt === 'Monitor', d]);
+    else rows.push([`${tag}: web keeps Watch live to the stream`, /^\.\/overlay\.html\?key=/.test(m.href) && m.target === '_blank' && m.lbl === 'Watch live' && m.opt === 'Watch live', d]);
+    rows.push([`${tag}: live light ${live ? 'on' : 'off'}`, m.dot === live && (m.link[0] === 0 || !live || m.dot), d]);
+    rows.push([`${tag}: every bar control at least 44 px inside ${w}, no page scroll`, m.ctl.every(([, cw, ch, r]) => cw >= 44 && ch >= 44 && r <= w) && m.sw <= w, d]);
+    if (SHOTS && (scale === 1 || scale === 1.3)) {
+      const top = await page.evaluate(() => Math.round(document.getElementById('app-bar').getBoundingClientRect().top));
+      await page.screenshot({ path: path.join(SHOTS, `bar-${app ? 'app' : 'web'}-${live ? 'live' : 'idle'}-${w}${scale === 1 ? '' : '-text130'}.png`), clip: { x: 0, y: Math.max(0, top - 8), width: w, height: 72 } });
+    }
+    rows.push([`${tag}: no page errors`, !page.errors.length, page.errors.join(' | ')]);
+    await ctx.close();
+  }
+  return rows;
+}
+
+// S62 item D (Khal 10-18: 18 s of nothing between sign-in and the sync starting): from signed out, sign-in shows
+// syncing at once and holds it through the Drive listing until the sync ends; each phase logs one timed line.
+async function s62SignIn() {
+  const rows = [];
+  const fake = new FakeDrive();
+  fake.folder('HR Monitor Sessions', null, '2025-01-01T00:00:00.000Z', 'root1');
+  const drive = { fake, log: [], signedOut: true, delay: () => 1200 };
+  const { ctx, page } = await open(1440, 'x=1', '', 1, drive);
+  const phases = [];
+  page.on('console', (m) => { const t = m.text(); if (t.startsWith('[sync-phase]')) phases.push(t); });
+  const t0 = await page.evaluate(() => {
+    localStorage.setItem('aorti_auth_v2', JSON.stringify({ version: 2, access_token: 'fake', expires_at: Date.now() + 3600000, email: 'a@example.com', scope: 'drive.file', issued_at: Date.now() }));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'aorti_auth_v2' }));
+    return Date.now();
+  });
+  // The page's own banner ("Syncing with Drive") on the empty page, early and mid-listing.
+  const banner = () => page.evaluate(() => { const b = document.getElementById('viewer-loading'); return b && b.classList.contains('shown') ? document.getElementById('viewer-loading-text').textContent : ''; });
+  await page.waitForTimeout(150); const b1 = await banner();
+  await page.waitForTimeout(1850); const b2 = await banner();
+  await page.waitForFunction(() => !document.getElementById('app-bar').classList.contains('syncing') && window.__cloudLog.length > 0, null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const log = (await page.evaluate(() => window.__cloudLog)).filter((x) => x.at >= t0);
+  const on = log.find((x) => x.syncing), off = log.find((x) => !x.syncing && on && x.at > on.at);
+  const lastCall = Math.max(...drive.log.filter((x) => x.done).map((x) => x.at));
+  rows.push([`S62 sign-in: syncing shows ${on ? on.at - t0 : -1} ms after sign-in (want 200 or less)`, !!on && on.at - t0 <= 200, JSON.stringify(log.map((x) => [x.at - t0, x.syncing]))]);
+  rows.push([`S62 sign-in: syncing held until the last Drive call answered (${drive.log.filter((x) => !x.done).length} calls; off ${off ? off.at - lastCall : 'never'} ms after the last)`,
+    !!off && log.filter((x) => x.at > on.at && x.at < off.at).length === 0 && off.at >= lastCall, JSON.stringify(log.map((x) => [x.at - t0, x.syncing]))]);
+  const want = ['signed in', 'list start', 'list done', 'sync start', 'sync done'];
+  const idx = want.map((w) => phases.findIndex((p) => p.startsWith('[sync-phase] ' + w + ' ')));
+  rows.push([`S62 sign-in: phase lines in order (${phases.map((p) => p.replace(/^\[sync-phase\] /, '').replace(/ \d{4}-\S+/, '')).join(', ')})`, idx.every((i) => i >= 0) && idx.every((i, k) => k === 0 || i > idx[k - 1]), phases.join(' | ')]);
+  rows.push([`S62 sign-in: the empty page says "${b1}" at 150 ms and "${b2}" at 2 s, mid-listing`, /^Syncing with Drive/.test(b1) && /^Syncing with Drive/.test(b2), b1 + ' / ' + b2]);
+  rows.push(['S62 sign-in: no page errors', !page.errors.length, page.errors.join(' | ')]);
+  await ctx.close();
+  return rows;
+}
+
 const S23_MUTANTS = [
   ['sweep', 'Sessions range select without .field', { '/hrv_viewer.html': ['<span class="field"><span class="select"><select id="index-range" aria-label="Date range">${rangeOptionsHtml}</select></span></span>', '<select id="index-range" aria-label="Date range">${rangeOptionsHtml}</select>'] },
     () => s23Sweep({ widths: [360], views: ['sessions'], quick: true })],
@@ -355,6 +458,10 @@ const S23_MUTANTS = [
   ['bar', 'Share hidden on Sessions', { '/hrv_viewer.html': ["exportBtn.hidden = isNativeApp || id === 'empty-state';", "exportBtn.hidden = isNativeApp || id === 'empty-state' || id === 'view-index';"] }, s23Bar],
   ['actions', 'Cancel and Save at content width', { '/ui.css': ['.action-row > .pair { flex: 1 1 14em; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }', '.action-row > .pair { display: flex; gap: var(--s2); margin-left: auto; }'] }, s23Actions],
   ['pills', 'pills sized to their own labels', { '/hrv_viewer.html': ['  .segmented.metric-switch { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }\n  .metric-switch > button { white-space: nowrap; }\n', ''] }, s27Pills],
+  ['s62', 'logo dropped with the Monitor word', { '/hrv_viewer.html': ['  .vbar.tight-mon .monitor-link { width: 44px; padding: 0; }', '  .vbar.tight-mon .brand { display: none; } .vbar.tight-mon .monitor-link { width: 44px; padding: 0; }'] }, s62Bar],
+  ['s62', 'app link opens the stream', { '/hrv_viewer.html': ['const watch = live && !(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());', 'const watch = live;'] }, s62Bar],
+  ['s62', 'sign-in waits the 1 s like open-time work', { '/hrv_viewer.html': ['    if (busy && cloud.signin && !cloud.shown) { clearTimeout(cloud.timer); cloud.timer = null; cloud.shown = true; }\n', ''] }, s62SignIn],
+  ['s62', 'no banner at sign-in', { '/hrv_viewer.html': ["if (cloud.signin && !Object.keys(sessionsIndex).length) showLoader(0, -1, 'Syncing with Drive');", ''] }, s62SignIn],
   ['cloud', 'no 1 s delay', { '/hrv_viewer.html': ['    const syncing = busy && cloud.shown;', '    const syncing = busy;'] }, s23Cloud],
 ];
 
@@ -448,16 +555,14 @@ try {
     const sizes = await page.evaluate(() => ['.vbar .brand', '#view-select', '#drive-cloud', '#export-report', '#viewer-settings-btn'].map((s) => {
       const r = document.querySelector(s).getBoundingClientRect(); return [s, Math.round(r.width), Math.round(r.height), Math.round(r.right)];
     }));
-    // S23: the logo is the last thing fitBar drops (tight-3), only when nothing else is left to drop.
-    const tight3 = await page.evaluate(() => document.getElementById('app-bar').classList.contains('tight-3'));
-    ok(scale === 2 || !tight3, `${tag}: logo ${tight3 ? 'dropped' : 'kept'}`);
+    // S62: fitBar never drops the logo mark.
     // S55: the Monitor link stays on the phone bar; only 200% text drops it to the select's Monitor option.
     const mon = await page.evaluate(() => { const l = document.getElementById('monitor-link'); const r = l.getBoundingClientRect();
       const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right), hit: !!(hit && l.contains(hit)), href: l.getAttribute('href'), name: l.textContent.trim() }; });
     if (scale === 1) ok(mon.w >= 44 && mon.h >= 44 && mon.right <= 360 && mon.hit && mon.href === './hr_monitor.html' && mon.name === 'Monitor', `${tag}: Monitor link ${mon.w}x${mon.h}, tappable, named ${mon.name}`);
     else ok(mon.w > 0 || (await page.$('#view-select-monitor')), `${tag}: Monitor reachable (link or select option)`);
-    for (const [s, w, h, right] of sizes) if (!(tight3 && s === '.vbar .brand')) ok(w >= 44 && h >= 44 && right <= 360, `${tag}: ${s} ${w}x${h} inside the bar (right ${right})`);
+    for (const [s, w, h, right] of sizes) ok(w >= 44 && h >= 44 && right <= 360, `${tag}: ${s} ${w}x${h} inside the bar (right ${right})`);
     const order = await page.evaluate(() => ['#drive-cloud', '#export-report', '#viewer-settings-btn'].map((s) => document.querySelector(s).getBoundingClientRect().left));
     ok(order[0] < order[1] && order[1] < order[2], `${tag}: cloud, Share, gear in order`);
     ok(await page.evaluate(() => document.documentElement.scrollWidth <= 360), `${tag}: no horizontal page scroll`);
@@ -584,6 +689,7 @@ try {
     report(await s23Cloud());
   }
   if (!MUTANTS_ONLY && (!PART || PART === 's27')) report(await s27Pills());
+  if (!MUTANTS_ONLY && (!PART || PART === 's62')) { report(await s62Bar()); report(await s62SignIn()); }
   if (MUTANTS_ONLY) {
     console.log('\nS23 negative controls (each must FAIL):');
     for (const [id, name, mut, fn] of S23_MUTANTS.filter((m) => !PART || m[0] === PART)) {
@@ -598,7 +704,7 @@ try {
   }
 
   // 8. Shots.
-  if (SHOTS) {
+  if (SHOTS && PART !== 's62') {
     const views = [['month', '#/month/2026-04'], ['week', '#/week/2026-04-26'], ['day', '#/day/2026-04-26'], ['sessions', '#/index'], ['trends', '#/all']];
     for (const [w, scale, tag] of [[1440, 1, '1440'], [360, 1, '360'], [360, 2, '360-text200']]) {
       for (const [name, h] of views) {

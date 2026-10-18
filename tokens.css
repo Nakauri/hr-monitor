@@ -29,6 +29,11 @@
   --warn-crash-tint: rgba(226, 75, 74, .12);
   --warn-crash-glow: rgba(226, 75, 74, .2);
   --warn-palp-tint: rgba(215, 108, 186, .14);
+  --ev-flush: #E8A858;
+  --ev-chills: #85B7EB;
+  --ev-shift: #B48CFF;
+  --ev-flush-tint: rgba(232, 168, 88, .14);
+  --ev-chills-tint: rgba(133, 183, 235, .14);
   --live: #5DCAA5;
   --reconnecting: #BA7517;
 
@@ -45,7 +50,7 @@
   --w-reconnect-tint: rgba(100, 100, 100, .14);
 
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
-  --t12: 12px; --t14: 14px; --t16: 16px; --t20: 20px; --t24: 24px; --t32: 32px; --t48: 48px; --t56: 56px;
+  --t12: 12px; --t14: 14px; --t16: 16px; --t20: 20px; --t22: 22px; --t24: 24px; --t28: 28px; --t32: 32px; --t48: 48px; --t56: 56px;
   --r-ctl: 6px; --r-menu: 8px; --r-card: 12px; --r-widget: 16px; --r-pill: 999px;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
   --shadow-2: 0 4px 12px rgba(0, 0, 0, .45);

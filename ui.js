@@ -330,5 +330,22 @@
     fade();
   }
 
-  window.UI = { icon, sheet, confirm, notice, toast, copyText, copyField, copySheet, tabFades };
+  // A missing stat reads as words; screen readers say "em dash" for the glyph. v is app-built, never user text.
+  const KPI_NODATA = '<span class="kpi-nodata">no data</span>';
+  function kpi(v, o) {
+    if (v == null || v === '' || (typeof v === 'number' && !isFinite(v))) return KPI_NODATA;
+    return String(v) + (o && o.pct ? '<span class="kpi-pct">%</span>' : '');
+  }
+  function setKpi(el, v, o) { if (!el) return; const h = kpi(v, o); if (el.innerHTML !== h) el.innerHTML = h; }
+  const UPTIME_TIP = 'Share of session time with live HR data. Low numbers mean the strap dropped beats, so averages are less reliable.';
+  // One stat tile (ui.css .kpi). value is HTML from kpi(); every argument is app-built. A no data value drops its unit,
+  // unless o.keepUnit (a tile filled later by setKpi, where ui.css hides the unit beside no data).
+  function kpiTile(key, label, value, unit, o = {}) {
+    if (value === KPI_NODATA && !o.keepUnit) unit = '';
+    return `<div class="kpi${o.sm ? ' sm' : ''}" data-stat="${key}"${o.title ? ` title="${o.title}"` : ''}><dt class="kpi-label">${label}</dt>` +
+      `<dd class="kpi-value${o.cls ? ' ' + o.cls : ''}"${o.id ? ` id="${o.id}"` : ''}${o.vtitle ? ` title="${o.vtitle}"` : ''}${o.style ? ` style="${o.style}"` : ''}>${value}</dd>` +
+      (unit ? `<dd class="kpi-unit">${unit}</dd>` : '') + '</div>';
+  }
+
+  window.UI = { icon, sheet, confirm, notice, toast, copyText, copyField, copySheet, tabFades, kpi, setKpi, kpiTile, UPTIME_TIP };
 })();

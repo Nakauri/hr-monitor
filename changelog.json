@@ -1,6 +1,12 @@
 {
   "items": [
     {
+      "date": "2026-10-17",
+      "area": "Viewer",
+      "title": "One look for every stat",
+      "body": "Session cards, Week, Month and the monitor's stats now match the Day summary: the label on top, the unit beside the number, and no data in words when a value is missing."
+    },
+    {
       "date": "2026-10-12",
       "area": "Site",
       "title": "New home page and changelog",
