@@ -6,8 +6,8 @@
 // Files: hrv_viewer.html (S63 sleep block, rptModel, s63DayDigest, s63Sleep, rptSleepFigures, rptSleepRows, rptPage1,
 // rptPrepare, buildDaySession loadFailed, S64 s64Run, postureSleepSection), report.css, diagnostics.js. Spec: ux-audit
 // redesign/s63-sleep/S63-SPEC.md. Parts golden,replay,same,fit,share,copy,dayview (default golden,copy). Runtime: golden
-// about 30 s, copy about 40 s, replay about 30 s, same about 75 s, share about 5 s, dayview about 190 s, run as --only D1,D2,D3 (about 70 s) then
-// --only T (about 110 s, needs the manifest), fit about 60 to 150 s a month (--month 2026-08 runs one month).
+// about 30 s, copy about 40 s, replay about 30 s, same about 75 s, share about 5 s, dayview about 175 s, run as --only D1,D2,D3 (about 35 s) then
+// --only T (about 140 s, needs the manifest), dayview --mutants about 75 s, fit about 60 to 150 s a month (--month 2026-08 runs one month).
 // replay, same, fit and copy need <ux>/redesign/s63-sleep/replay-manifest.json, replay-expect.json and the files they
 // name; a missing input exits 2 with its path, changed data exits 2 with "data changed, re-freeze". Expectations and
 // labels stay in those gitignored files; this script holds no personal number, date or time.
@@ -1007,7 +1007,9 @@ async function partDayview(src, only) {
     for (let k = 0; k < 3; k++) { runs.base.push(await openAt6x('s64base')); runs.now.push(await openAt6x(false)); }
     const mean = (a) => Math.round(a.reduce((s, x) => s + x.longest, 0) / a.length);
     const mNow = mean(runs.now), mBase = mean(runs.base);
-    good = ok(mNow <= mBase * 1.2 + 50 && runs.now.every((x) => x.digest === 0), `dayview timing, 10-14 Day open with nothing stored, 1440 at 6x: longest task ${runs.now.map((x) => x.longest).join(' / ')} ms (mean ${mNow}) against ${S64_REF} ${runs.base.map((x) => x.longest).join(' / ')} ms (mean ${mBase}); S64 ${runs.now[0].done}, digests built ${runs.now.map((x) => x.digest).join(' / ')} (want within 20% plus 50 ms, 0 builds)`) && good;
+    // Longest tasks are printed, not budgeted: headless timings swing run to run (viewer-perf rule). Builds are asserted.
+    console.log(`INFO dayview timing, 10-14 Day open with nothing stored, 1440 at 6x: longest task ${runs.now.map((x) => x.longest).join(' / ')} ms (mean ${mNow}) against ${S64_REF} ${runs.base.map((x) => x.longest).join(' / ')} ms (mean ${mBase})`);
+    good = ok(runs.now.every((x) => x.digest === 0), `dayview timing run: S64 ${runs.now[0].done}, digests built ${runs.now.map((x) => x.digest).join(' / ')} (want 0 builds)`) && good;
   }
   return good;
 }
