@@ -179,6 +179,8 @@ if (args.includes('--cold')) {
     await ctx.route('**/chart.umd*.js', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(CHART) }));
     await ctx.addInitScript(INIT);
     if (viaCsv) await ctx.addInitScript(() => { window.__hrmV2ViaCsv = true; });
+    // S63: the sleep weights flag on, so a split run on Day open would show in the counters.
+    await ctx.addInitScript(() => { try { localStorage.setItem('hrv_viewer_sleep_weights', 'personal'); } catch (e) {} });
     const page = await ctx.newPage();
     const errs = []; page.on('pageerror', (e) => errs.push(e.message));
     await page.goto(base + '/hrv_viewer.html#/month', { waitUntil: 'networkidle' });
@@ -216,9 +218,16 @@ if (args.includes('--cold')) {
       while (c && c.atPaint && !(c.detectDayMoments >= 1 && c.doneT) && performance.now() - c.atPaintT < 3500) await new Promise((r) => setTimeout(r, 50));
       return c ? { atPaint: c.atPaint, key: c.atPaintKey, det: c.detectDayMoments, after: c.doneT ? Math.round(c.doneT - c.atPaintT) : null, taskMs: c.taskMs != null ? Math.round(c.taskMs) : null } : null;
     });
+    // S63: no sleep split work on a Day open, at the first paint and 3 s later.
+    const s63 = await page.evaluate(async () => {
+      const g = () => globalThis.__s63 ? { digest: globalThis.__s63.digest, detect: globalThis.__s63.detect } : null;
+      const atOpen = g(), t0 = performance.now();
+      while (performance.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 100));
+      return { atOpen, later: g() };
+    });
     if (args.includes('--tasks')) console.log((viaCsv ? 'csv   ' : 'direct') + ' tasks: ' + (await page.evaluate(() => window.__perf.lt.map((x) => Math.round(x[1])).join(' '))));
     await ctx.close();
-    return { longest, errs, calls, s61 };
+    return { longest, errs, calls, s61, s63 };
   };
   const a = await coldOpen(false), b = await coldOpen(true);
   // S61 negative controls: detection work before the first paint must fail the counter row.
@@ -234,12 +243,19 @@ if (args.includes('--cold')) {
     mres.push([name, await coldOpen(false)]);
     SERVED = REAL;
   }
+  // S63 negative control: the split built on a Day open must fail the S63 row.
+  const S63_MUT = ['    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);', '    drawSessionChart(s, data);\n    s61AfterPaint(s, data, filename);\n    if (s.__virtualDay) s63Sleep(s.__virtualDay);'];
+  let m63 = null;
+  if (REAL.includes(S63_MUT[0])) { SERVED = REAL.replace(S63_MUT[0], S63_MUT[1]); m63 = await coldOpen(false); SERVED = REAL; }
   const errs = [...a.errs, ...b.errs];
   console.log(`cold Day open 360 6x, longest task: direct ${a.longest} ms, CSV round trip ${b.longest} ms (information only)`);
   const n = (c, k) => c[k] || 0;
   ok(n(a.calls, 'v2SessionCsv') === 0 && n(a.calls, 'parseCSV') === 0 && n(a.calls, 'v2SeriesFromRows') > 0, `cold v2 Day open builds the series directly: v2SessionCsv ${n(a.calls, 'v2SessionCsv')}, parseCSV ${n(a.calls, 'parseCSV')}, v2SeriesFromRows ${n(a.calls, 'v2SeriesFromRows')} calls`);
   ok(n(b.calls, 'v2SessionCsv') > 0 && n(b.calls, 'parseCSV') > 0, `negative control, the round trip is seen: v2SessionCsv ${n(b.calls, 'v2SessionCsv')}, parseCSV ${n(b.calls, 'parseCSV')} calls`);
   ok(s61Row(a), `S61 counter at the first paint all 0 and detection within 3 s: ${JSON.stringify(a.s61)}`);
+  const s63Zero = (x) => !!(x && x.digest === 0 && x.detect === 0);
+  ok(!!m63 && !(s63Zero(m63.s63.atOpen) && s63Zero(m63.s63.later)), `S63 mutant split built on a Day open: ${m63 ? 'counter row fails ' + JSON.stringify(m63.s63.later) : 'ANCHOR MISSING'}`);
+  ok(s63Zero(a.s63.atOpen) && s63Zero(a.s63.later), `S63 counters 0 after a Day open with the sleep weights flag on (counters only grow, so 0 later means 0 at paint), then 3 s later: ${JSON.stringify(a.s63)}`);
   console.log(`S61 detection task ${a.s61 && a.s61.taskMs} ms at 6x (information only)`);
   for (const [name, r] of mres) ok(r && !s61Row(r), `S61 mutant ${name}: ${r ? 'counter row fails ' + JSON.stringify(r.s61.atPaint) : 'ANCHOR MISSING'}`);
   ok(!errs.length, 'cold: no page errors ' + errs.join(' | '));
