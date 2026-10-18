@@ -874,7 +874,7 @@ const MUT = [
   ['16 rows inside the fit loop', [R('      host.innerHTML = rptPagesHtml(d, keep);', '      host.innerHTML = rptPagesHtml(d, keep, !!rptSleepFigures(d));')], [['golden', ['G20']]]],
   ['16b rows at keep0 without the room check', [R("      rows = rptRoom(host.querySelector('#rpg1')) >= 8;", '      rows = true;')], [['golden', ['G20']]]],
   ['17 demo writes IndexedDB', [R("    const demo = isDemoMode(), key = (demo ? 's63:demo:' : 's63:real:') + iso", "    const demo = false, key = (demo ? 's63:demo:' : 's63:real:') + iso")], [['golden', ['G15']]]],
-  ['18 no toast before the first digest build', [R("    if (!run.toasted) { run.toasted = true; UI.toast('Making the report'); }\n", '')], [['share']]],
+  ['18 no toast before the first digest build', [R("    if (!run.toasted) { run.toasted = true; s63Toast = UI.toast('Making the report', { ms: 30000 }); }\n", '')], [['share']]],
   ['19 Awake floor removed', [R('f.asleepMin >= S63_O.rowMin && f.awakeMin >= S63_O.rowMin ? f : null', 'f.asleepMin >= S63_O.rowMin ? f : null')], [['golden', ['G14b']]]],
   ['20 failed load still stored', [R("      if (!entry || entry.loadFailed) return 'failed';", "      if (!entry) return 'failed';")], [['golden', ['G19', 'G19b']]]],
   ['21 sig without the empty file-list guard', [R('    const files = sessionsByDate[iso] || [];\n    if (!files.length) return null;\n    const w = dayWindow', '    const files = sessionsByDate[iso];\n    const w = dayWindow')], [['golden', ['G18']]]],
