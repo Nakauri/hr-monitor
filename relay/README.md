@@ -1,6 +1,6 @@
 # HR Relay
 
-Minimal WebSocket fan-out relay for the HR Monitor app. Built on [PartyKit](https://partykit.io) (Cloudflare Workers + Durable Objects under the hood).
+Minimal WebSocket fan-out relay for the HR Monitor app. Built on [PartyServer](https://github.com/cloudflare/partykit/tree/main/packages/partyserver) (Cloudflare Workers + Durable Objects).
 
 ## What it does
 
@@ -8,28 +8,30 @@ Each user generates a unique "broadcast key" in the HR Monitor app (stored in th
 
 Different users = different keys = different Durable Object instances. No cross-contamination possible by design.
 
-## First-time deploy
+## Deploy
 
 ```bash
 cd relay
 npm install
-npx partykit login       # opens a browser, sign in with your Cloudflare account
-npx partykit deploy      # deploys; prints your wss URL
+npx wrangler login       # once per machine
+npx wrangler deploy      # prints https://hr-relay.<subdomain>.workers.dev
 ```
 
-After the first deploy you'll get a URL like `https://hr-relay.<your-cloudflare-name>.partykit.dev`. Convert `https://` to `wss://` and append `/parties/main/<broadcast-key>` for the WebSocket endpoint.
+WebSocket endpoint: `wss://hr-relay.<subdomain>.workers.dev/parties/main/<broadcast-key>`. The `Main` binding in `wrangler.jsonc` sets the `main` path segment.
 
-## Local dev
+## Local dev + check
 
 ```bash
-npx partykit dev
+npx wrangler dev --port 8787
+node scripts/probe.mjs                 # local
+node scripts/probe.mjs wss://<host>    # deployed
 ```
 
-Relay runs on `http://127.0.0.1:1999`. The HR Monitor client honours a `?relay=ws://127.0.0.1:1999` URL param to target it for local testing.
+The probe checks fan-out, no echo, the 32 KB cap, JSON-only, room isolation and wake after idle.
 
 ## Cost
 
 - Cloudflare Workers free tier: 100k requests/day baseline.
-- WebSocket hibernation means idle connections don't count as requests. Only connect / disconnect and actual active messages bill against the quota.
+- Hibernation (`static options = { hibernate: true }`) means idle connections don't count as requests. Only connect / disconnect and actual active messages bill against the quota.
 - Realistic usage for this app: far under 1% of free tier even with dozens of concurrent users.
 - No credit card required to deploy.

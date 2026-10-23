@@ -1755,7 +1755,7 @@
     const key = localStorage.getItem('hr_monitor_broadcast_key');
     if (!key) return;
     try {
-      watchLiveSocket = new WebSocket('wss://hr-relay.nakauri.partykit.dev/parties/main/' + encodeURIComponent(key));
+      watchLiveSocket = new WebSocket('wss://hr-relay.nakauri.workers.dev/parties/main/' + encodeURIComponent(key));
       watchLiveSocket.addEventListener('message', (ev) => {
         try {
           const m = JSON.parse(ev.data);
@@ -2099,7 +2099,7 @@
     }
     // Pull the shared broadcast key so this device can subscribe to whatever
     // device is currently recording. Any signed-in device ends up on the same
-    // PartyKit room.
+    // relay room.
     if (driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));
   }
 

@@ -18,7 +18,7 @@ import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 /**
- * Native WebSocket for the PartyKit relay. The original Capacitor build
+ * Native WebSocket for the relay. The original Capacitor build
  * used the WebView's built-in WebSocket — outbound `ws.send()` calls
  * buffered when the Activity was paused (screen off / app backgrounded),
  * causing the desktop overlay to go silent until the user returned to
@@ -33,7 +33,7 @@ import okio.ByteString;
  * per session.
  *
  * JS side: see mobile/src/native-relay-socket.js. It monkey-patches
- * window.WebSocket only for partykit URLs, so existing relay code paths
+ * window.WebSocket only for /parties/main/ URLs, so existing relay code paths
  * in hr_monitor.html are routed through here transparently.
  */
 @CapacitorPlugin(name = "NativeRelaySocket")

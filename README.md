@@ -23,7 +23,7 @@ Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recordin
 
 - No accounts needed. Anonymous mode keeps everything on the device.
 - Google sign-in is optional. When on, session CSVs sync to your Drive and the viewer reads them across devices.
-- Broadcasting to OBS is opt-in. When on, live ticks pass through a PartyKit relay to subscribers holding the broadcast key. The relay does not persist messages.
+- Broadcasting to OBS is opt-in. When on, live ticks pass through a Cloudflare Workers relay to subscribers holding the broadcast key. The relay does not persist messages.
 - Turn off broadcast and sign out of Google, and nothing leaves the device.
 - Not a medical device.
 
@@ -31,4 +31,4 @@ Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recordin
 
 Open `index.html` in any Chromium browser. No build step, no install. The three HTML files (`hr_monitor.html`, `hrv_viewer.html`, `overlay.html`) are self-contained.
 
-The relay is a small PartyKit project under `relay/`. The mobile Capacitor wrapper under `mobile/` builds the APK.
+The relay is a small PartyServer (Cloudflare Workers) project under `relay/`. The mobile Capacitor wrapper under `mobile/` builds the APK.

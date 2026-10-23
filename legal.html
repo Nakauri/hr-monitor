@@ -117,7 +117,7 @@
   <p>Sign-in is only for Drive. It asks for your email address and access to the app's own Drive files. To keep you signed in, the aorti.ca sign-in service swaps Google's one-time code for tokens. The long-lived token stays in an HttpOnly cookie in your browser, or in the Android Keystore in the app; the service does not store it. Signing out clears the access token.</p>
 
   <h3>Live sharing</h3>
-  <p>Share live HR is off until you turn it on. While it is on, the widget's live readings pass through a relay at <code>hr-relay.nakauri.partykit.dev</code> to your OBS overlay or anyone with your broadcast key. The relay keeps each message in memory only long enough to pass it on, and stores nothing.</p>
+  <p>Share live HR is off until you turn it on. While it is on, the widget's live readings pass through a relay at <code>hr-relay.nakauri.workers.dev</code> to your OBS overlay or anyone with your broadcast key. The relay keeps each message in memory only long enough to pass it on, and stores nothing.</p>
 
   <h3>Analytics</h3>
   <p>The web pages use Vercel Web Analytics, which counts page views. It never receives heart data. The Android app leaves it out.</p>
@@ -129,7 +129,7 @@
   <ul>
     <li><strong>Google</strong> for sign-in and the Drive API, under Google's privacy policy.</li>
     <li><strong>Google Fonts</strong> on the monitor and viewer pages. The font request carries normal browser headers.</li>
-    <li><strong>PartyKit</strong> (Cloudflare Workers) runs the relay for Share live HR.</li>
+    <li><strong>Cloudflare</strong> (Workers) runs the relay for Share live HR.</li>
     <li><strong>GitHub</strong> hosts the source code and the Android APK. The home page asks GitHub for the latest APK version.</li>
     <li><strong>Vercel</strong> hosts aorti.ca and the sign-in service.</li>
     <li><strong>Web3Forms</strong> delivers the contact form to my inbox.</li>

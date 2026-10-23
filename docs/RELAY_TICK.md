@@ -1,6 +1,6 @@
 # Relay tick wire format
 
-This is the JSON shape sent over the PartyKit relay (`wss://hr-relay.nakauri.partykit.dev/parties/main/<broadcastKey>`). It is the single contract between **senders** and **viewers**. Both senders must produce the same fields. All viewers read from one handler.
+This is the JSON shape sent over the relay (`wss://hr-relay.nakauri.workers.dev/parties/main/<broadcastKey>`). It is the single contract between **senders** and **viewers**. Both senders must produce the same fields. All viewers read from one handler.
 
 Keep this file **in sync with the code** when any tick field is added, removed, or renamed.
 

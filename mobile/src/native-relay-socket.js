@@ -1,6 +1,6 @@
 // Native relay-socket shim.
 //
-// Routes `new WebSocket(url)` for PartyKit relay URLs through a Capacitor
+// Routes `new WebSocket(url)` for relay URLs (/parties/main/) through a Capacitor
 // plugin backed by OkHttp on the native side. OkHttp runs on its own
 // dispatcher threads outside the WebView, so `ws.send()` never gets
 // buffered when the Activity is paused (screen off / backgrounded). This
@@ -36,7 +36,7 @@
   }
   markerSet(true);
 
-  const RELAY_URL_TEST = /partykit/i;
+  const RELAY_URL_TEST = //parties/main//;
   const OriginalWebSocket = window.WebSocket;
 
   function newSocketId() {
@@ -175,7 +175,7 @@
   NativeRelayWebSocket.CLOSING = 2;
   NativeRelayWebSocket.CLOSED = 3;
 
-  // Replace the global. PartyKit URLs go through the native plugin;
+  // Replace the global. Relay URLs go through the native plugin;
   // anything else is unchanged.
   function PatchedWebSocket(url, protocols) {
     if (typeof url === 'string' && RELAY_URL_TEST.test(url)) {

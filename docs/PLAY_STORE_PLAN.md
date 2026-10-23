@@ -109,7 +109,7 @@ This means we can soft-launch via Play's Internal/Closed Testing while verificat
 Host at `aorti.ca/privacy` (or wherever, but URL must be stable, public, and link from the Play listing). Must explicitly cover:
 
 - **What data is collected**: HR readings, HRV (RMSSD), session timestamps, optional events / posture markers, optional broadcast key.
-- **Where it goes**: only to the user's own Google Drive (if they sign in) and/or to a relay PartyKit server (only if broadcast is on, only HR/HRV ticks, no identity info beyond a self-generated device label).
+- **Where it goes**: only to the user's own Google Drive (if they sign in) and/or to a Cloudflare Workers relay (only if broadcast is on, only HR/HRV ticks, no identity info beyond a self-generated device label).
 - **What we don't collect**: no analytics, no third-party tracking, no ad SDKs, no health data shared with the developer or any third party.
 - **BLE permissions**: HR strap connection only; no location use.
 - **User rights**: how to delete (clear local cache button + delete files from their Drive folder).
@@ -133,7 +133,7 @@ Per Google's definition, **data sent to user's own Drive does not count as "coll
 So the realistic answers:
 
 - **Collected**: nothing under our control.
-- **Shared**: HR/HRV ticks are shared with the relay (PartyKit) only when broadcast is on. Mark this as user-controlled and optional.
+- **Shared**: HR/HRV ticks are shared with the relay (Cloudflare Workers) only when broadcast is on. Mark this as user-controlled and optional.
 - **Encryption in transit**: yes (HTTPS to Drive, WSS to relay).
 - **Deletion**: yes, via the "Clear local cache" button + user can delete their own Drive folder.
 

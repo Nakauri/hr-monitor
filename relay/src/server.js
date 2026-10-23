@@ -1,14 +1,17 @@
 /**
- * HR Monitor · WebSocket relay (PartyKit / Cloudflare Workers).
+ * HR Monitor · WebSocket relay (PartyServer on Cloudflare Workers).
  *
  * Each "room" is a user's broadcast key. Publishers (the live-monitor tab and
  * the native foreground service) send tick / presence messages. Read-only
  * surfaces (OBS overlay, viewer watch-live) subscribe and receive them. Zero
  * persistence — messages live only in memory, and only long enough to fan out.
  *
- * Deploy: `npx partykit deploy`
- * Dev:    `npx partykit dev`
+ * The binding is named `Main` so the route is /parties/main/<key>.
+ *
+ * Deploy: `npx wrangler deploy`
+ * Dev:    `npx wrangler dev`
  */
+import { routePartykitRequest, Server } from 'partyserver';
 
 // Flip to true only after the role-tagged APK has shipped and old installs are
 // retired. Until then non-publisher messages are logged, not dropped, so old
@@ -20,12 +23,10 @@ const ENFORCE_PUBLISHER_ROLE = false;
 const MAX_MESSAGE_BYTES = 32768;
 const encoder = new TextEncoder();
 
-export default class HRRelay {
-  constructor(room) {
-    this.room = room;
-    // Connection ids that declared role=publisher in their URL.
-    this.publishers = new Set();
-  }
+export class Main extends Server {
+  // Hibernation keeps idle rooms inside the free plan; fields on `this` do not
+  // survive it, so the publisher flag lives on connection state.
+  static options = { hibernate: true };
 
   onConnect(conn, ctx) {
     // Role comes from the connection URL: /parties/main/<key>?role=publisher.
@@ -33,16 +34,13 @@ export default class HRRelay {
     try {
       const url = new URL(ctx.request.url);
       if (url.searchParams.get('role') === 'publisher') {
-        this.publishers.add(conn.id);
+        conn.setState({ publisher: true });
       }
     } catch (e) { /* malformed URL — treat as subscriber */ }
   }
 
-  onClose(conn) {
-    this.publishers.delete(conn.id);
-  }
-
-  onMessage(message, sender) {
+  // PartyServer order is (connection, message).
+  onMessage(sender, message) {
     // Size cap + JSON-only, unconditional. String length counts UTF-16 units,
     // which undercounts non-ASCII, so measure encoded bytes. UTF-16 length is
     // never greater than the byte count, so it screens oversized junk first.
@@ -63,7 +61,7 @@ export default class HRRelay {
     } catch (e) { return; } // drop non-JSON
 
     // Role enforcement (flagged). When off, log the would-be-drop only.
-    if (!this.publishers.has(sender.id)) {
+    if (!sender.state?.publisher) {
       if (ENFORCE_PUBLISHER_ROLE) return;
       console.log('[relay] non-publisher message (log-only):', sender.id);
     }
@@ -71,8 +69,15 @@ export default class HRRelay {
     // Fan out to every OTHER connection in this room (not back to the sender).
     // Room id === broadcast key, so isolation between users is automatic:
     // different keys = different Durable Object instances = can't see each other.
-    this.room.broadcast(message, [sender.id]);
+    this.broadcast(message, [sender.id]);
   }
-
-  async onStart() {}
 }
+
+export default {
+  async fetch(request, env) {
+    return (
+      (await routePartykitRequest(request, env)) ||
+      new Response('Not Found', { status: 404 })
+    );
+  },
+};

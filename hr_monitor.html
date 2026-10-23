@@ -2873,10 +2873,10 @@
   }
 
   // ===== WebSocket relay =====
-  // PartyKit / Cloudflare Workers. Each user gets a unique broadcast key; publisher
+  // PartyServer on Cloudflare Workers. Each user gets a unique broadcast key; publisher
   // and subscriber (the OBS Browser Source) connect to the same room by key. Zero
   // server-side persistence — messages just fan out and vanish.
-  const RELAY_HOST = 'wss://hr-relay.nakauri.partykit.dev';
+  const RELAY_HOST = 'wss://hr-relay.nakauri.workers.dev';
   function getOrCreateBroadcastKey() {
     let k = localStorage.getItem('hr_monitor_broadcast_key');
     if (!k) {
@@ -5852,7 +5852,7 @@
 
   // Read (or create) .hr-monitor-config.json in the Drive folder. Today it
   // only holds the broadcast key, so phone + desktop signed into the same
-  // Google account end up on the same PartyKit room without any URL copying.
+  // Google account end up on the same relay room without any URL copying.
   async function driveSyncConfig() {
     if (!driveAccessToken || !driveFolderId) return;
     const q = encodeURIComponent(`'${driveFolderId}' in parents and name='.hr-monitor-config.json' and trashed=false`);

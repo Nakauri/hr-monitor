@@ -1,14 +1,17 @@
 {
   "name": "hr-relay",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Minimal WebSocket relay for HR Monitor — fans out broadcaster messages to subscribers on the same broadcast key. Runs on PartyKit (Cloudflare Workers + Durable Objects).",
+  "type": "module",
+  "description": "Minimal WebSocket relay for HR Monitor — fans out broadcaster messages to subscribers on the same broadcast key. Runs on PartyServer (Cloudflare Workers + Durable Objects).",
   "scripts": {
-    "dev": "partykit dev",
-    "deploy": "partykit deploy"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "partykit": "latest",
-    "partysocket": "latest"
+    "partyserver": "0.5.10"
+  },
+  "devDependencies": {
+    "wrangler": "4.152.0"
   }
 }

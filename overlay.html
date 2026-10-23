@@ -296,7 +296,7 @@
   const compactTrend = HRWidget.createCompactTrendChart($('compact-chart').getContext('2d'), zones.stageOf);
 
   const broadcastKey = params.get('key');
-  const RELAY_HOST = 'wss://hr-relay.nakauri.partykit.dev';
+  const RELAY_HOST = 'wss://hr-relay.nakauri.workers.dev';
 
   function setConnState(state) {
     document.body.classList.remove('conn-live', 'conn-reconnecting');

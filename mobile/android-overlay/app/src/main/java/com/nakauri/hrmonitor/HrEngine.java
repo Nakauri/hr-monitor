@@ -426,7 +426,7 @@ public final class HrEngine implements HrDevice.Callback {
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
         Request req = new Request.Builder()
-            .url("wss://hr-relay.nakauri.partykit.dev/parties/main/" + broadcastKey + "?role=publisher")
+            .url("wss://hr-relay.nakauri.workers.dev/parties/main/" + broadcastKey + "?role=publisher")
             .build();
         // Stale callbacks (from a socket we replaced or closed) compare ws to
         // the volatile relaySocket field and bail. Required because OkHttp
