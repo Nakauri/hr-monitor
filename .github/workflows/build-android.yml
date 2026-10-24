@@ -50,6 +50,12 @@ jobs:
         with:
           node-version: 22
 
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
       - name: Run ./check
         run: sh ./check
 
@@ -147,19 +153,31 @@ jobs:
         working-directory: mobile
         run: node scripts/inject-manifest.js
 
-      - name: Build debug APK
+      # The public APK is a release build: not debuggable, so USB access cannot read app files or
+      # attach a debugger. Same keystore as local debug builds, so Google sign-in and upgrades work.
+      # Without the keystore secret a release APK would be unsigned and uninstallable, so fall back.
+      - name: Build APK
         working-directory: mobile/android
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           HRM_TEST_HOOKS: "0"
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          if [ "${{ steps.check-signing.outputs.has_keystore }}" = "true" ]; then
+            ./gradlew assembleRelease --no-daemon
+          else
+            ./gradlew assembleDebug --no-daemon
+          fi
 
       - name: Rename APK for release
         run: |
           mkdir -p release
-          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk release/hr-monitor.apk
+          if [ -f mobile/android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp mobile/android/app/build/outputs/apk/release/app-release.apk release/hr-monitor.apk
+          else
+            cp mobile/android/app/build/outputs/apk/debug/app-debug.apk release/hr-monitor.apk
+          fi
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cat > release/version.json <<EOF
@@ -174,7 +192,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hr-monitor-debug-${{ github.sha }}
+          name: hr-monitor-${{ github.sha }}
           path: release/hr-monitor.apk
           if-no-files-found: error
           retention-days: 30
