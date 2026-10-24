@@ -271,12 +271,42 @@
   }
   .nav-feedback:hover { color: var(--text-dim) !important; }
 
+  /* --zone-w is set by fitZoneWidth: never narrower than the widget, wider if the user drags the edge. */
   #app {
     display: grid;
-    grid-template-columns: 340px 1fr;
+    grid-template-columns: var(--zone-w, 340px) 1fr;
     height: calc(100vh - 52px);
     gap: 0;
+    position: relative;
   }
+  .zone-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--zone-w, 340px) - 5px);
+    width: 10px;
+    z-index: 2;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .zone-resize::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 2px;
+    background: transparent;
+  }
+  .zone-resize:hover::after,
+  .zone-resize.dragging::after { background: var(--border-control); }
+  .zone-resize:focus-visible { outline: none; }
+  .zone-resize:focus-visible::after { background: var(--action); }
+  body.zone-dragging { cursor: col-resize; user-select: none; }
+  body.zone-dragging #watch-frame { pointer-events: none; }
+  #overlay-zone.copy-on-click #hr-widget { cursor: pointer; }
+  /* The column is never under 340 px and the widget keeps that inner box at any wider width, so the OBS size never moves. */
+  @media (min-width: 769px) { #overlay-zone > .widget-row { max-width: calc(340px - 29px); } }
 
 
   #overlay-zone {
@@ -1024,6 +1054,7 @@
       background: var(--bg);
     }
     #control-panel { --cp-pad: var(--s4); }
+    .zone-resize { display: none; }
     .widget {
       padding: 14px 16px;
     }
@@ -1220,6 +1251,7 @@
          tree so Chart.js initialisation doesn't break. -->
     <iframe id="watch-frame" class="watch-frame" hidden></iframe>
   </div>
+  <div class="zone-resize" id="zone-resize" role="separator" aria-orientation="vertical" aria-label="Widget preview width" tabindex="0" title="Drag to resize, double-click to reset"></div>
 
   <!-- RIGHT: Controls and details -->
   <div id="control-panel">
@@ -4464,6 +4496,7 @@
   // Pointer-event long-press detection: hold for 600 ms without moving
   // more than 10 px to trigger. Cancels on pointerup / pointercancel /
   // material drag. Same gesture across mobile and desktop.
+  let widgetHoldFired = false;
   (function wireLongPress() {
     syncPopoutHint();
     const widget = document.getElementById('hr-widget');
@@ -4478,9 +4511,11 @@
     widget.addEventListener('pointerdown', function (e) {
       startX = e.clientX;
       startY = e.clientY;
+      widgetHoldFired = false;
       cancel();
       timer = setTimeout(function () {
         timer = null;
+        widgetHoldFired = true;
         tryFloatingOverlay();
       }, HOLD_MS);
     });
@@ -6257,7 +6292,7 @@
         // can hold.
         const zoneEl = document.getElementById('overlay-zone');
         const zoneInner = zoneEl
-          ? Math.max(0, zoneEl.clientWidth - 2)  // minus 2 for flex safety
+          ? Math.max(0, Math.min(zoneEl.clientWidth, 339) - 2)  // 339 = the 340 px column; minus 2 for flex safety
           : Infinity;
         const capFor = (raw) => Math.max(0, Math.min(raw, zoneInner));
         if (allWidgetsVisible() && w > 0) {
@@ -6550,20 +6585,149 @@
     if (typeof initOemRow === 'function') initOemRow();
     // Top-nav "Copy OBS URL" shortcut — copies the same URL as the buried button.
     const navCopy = $('nav-copy-obs-url');
+    let navCopyTimer = null;
+    async function copyObsUrl() {
+      const url = buildObsSourceUrl();
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (e) {
+        UI.copySheet(url, { title: 'OBS URL', label: 'Browser source URL' });
+        return false;
+      }
+      if (navCopy) {
+        navCopy.classList.add('copied');
+        navCopy.textContent = '✓ Copied';
+        clearTimeout(navCopyTimer);
+        navCopyTimer = setTimeout(() => { navCopy.classList.remove('copied'); navCopy.textContent = 'Copy OBS URL'; }, 2500);
+      }
+      return true;
+    }
     if (navCopy) {
-      navCopy.addEventListener('click', async (ev) => {
-        ev.preventDefault();
-        const url = buildObsSourceUrl();
-        try {
-          await navigator.clipboard.writeText(url);
-          navCopy.classList.add('copied');
-          navCopy.textContent = '✓ Copied';
-          setTimeout(() => { navCopy.classList.remove('copied'); navCopy.textContent = 'Copy OBS URL'; }, 2500);
-        } catch (e) {
-          UI.copySheet(url, { title: 'OBS URL', label: 'Browser source URL' });
-        }
+      navCopy.addEventListener('click', (ev) => { ev.preventDefault(); copyObsUrl(); });
+    }
+    // Desktop web: clicking the widget preview copies the OBS URL. A hold opens the pop-out instead.
+    const widgetCopies = () => !NATIVE && window.matchMedia('(min-width: 769px)').matches;
+    async function onWidgetClick(ev) {
+      if (!widgetCopies()) return;
+      // Only the local widget has the hold gesture; its release click is not a copy.
+      if (ev.currentTarget === zoneEl && widgetHoldFired) { widgetHoldFired = false; return; }
+      if (!ev.target.closest('#hr-widget')) return;
+      if (await copyObsUrl()) showToast('OBS URL copied. Paste it into a Browser Source.');
+    }
+    const zoneEl = $('overlay-zone');
+    zoneEl.addEventListener('click', onWidgetClick);
+    const syncWidgetCopyCue = () => {
+      const on = widgetCopies();
+      zoneEl.classList.toggle('copy-on-click', on);
+      const w = $('hr-widget');
+      if (w) w.title = on ? 'Click to copy the OBS URL' : '';
+    };
+    syncWidgetCopyCue();
+    window.matchMedia('(min-width: 769px)').addEventListener('change', syncWidgetCopyCue);
+
+    // Preview column width: never narrower than the widget it shows (local or the watched stream),
+    // wider when the user drags its right edge. Saved per browser.
+    const ZONE_W_KEY = 'hr_monitor_zone_w';
+    const ZONE_BASE_W = 340;
+    const appEl = $('app');
+    const zoneHandle = $('zone-resize');
+    const watchFrame = $('watch-frame');
+    let zoneUserW = null;
+    try { const v = Number(localStorage.getItem(ZONE_W_KEY)); if (v > 0) zoneUserW = v; } catch (e) {}
+    function zoneFitW() {
+      let row = null;
+      if (document.body.classList.contains('watch-mode')) {
+        try { row = watchFrame.contentDocument && watchFrame.contentDocument.querySelector('.widget-row'); } catch (e) {}
+      } else {
+        row = zoneEl.querySelector('.widget-row');
+      }
+      const w = row ? Math.ceil(row.getBoundingClientRect().width) : 0;
+      // 14 px zone padding each side (both pages) plus the 1 px border.
+      return w > 0 ? w + 29 : ZONE_BASE_W;
+    }
+    function zoneBounds() {
+      // Never below 340: a narrower column would cramp the widget and move the OBS size.
+      const min = Math.max(ZONE_BASE_W, zoneFitW());
+      return { min, max: Math.max(min, Math.min(720, window.innerWidth - 420)) };
+    }
+    function setZoneW(w) {
+      const { min, max } = zoneBounds();
+      const px = Math.round(Math.min(max, Math.max(min, w)));
+      zoneHandle.setAttribute('aria-valuemin', String(min));
+      zoneHandle.setAttribute('aria-valuemax', String(max));
+      zoneHandle.setAttribute('aria-valuenow', String(px));
+      if (appEl.style.getPropertyValue('--zone-w') !== px + 'px') appEl.style.setProperty('--zone-w', px + 'px');
+      return px;
+    }
+    let zoneFitRaf = null;
+    function fitZoneWidth() {
+      if (zoneFitRaf) return;
+      zoneFitRaf = requestAnimationFrame(() => {
+        zoneFitRaf = null;
+        setZoneW(zoneUserW != null ? zoneUserW : ZONE_BASE_W);
       });
     }
+    // A width at the floor is not a preference: the floor follows whichever widget is showing.
+    function keepZoneW(px) { zoneUserW = px <= zoneBounds().min ? null : px; }
+    function saveZoneW() {
+      try { zoneUserW == null ? localStorage.removeItem(ZONE_W_KEY) : localStorage.setItem(ZONE_W_KEY, String(zoneUserW)); } catch (e) {}
+    }
+    zoneHandle.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      zoneHandle.setPointerCapture(ev.pointerId);
+      zoneHandle.classList.add('dragging');
+      document.body.classList.add('zone-dragging');
+      const left = appEl.getBoundingClientRect().left;
+      let pending = null, raf = null;
+      const move = (e) => {
+        pending = e.clientX - left;
+        if (raf) return;
+        raf = requestAnimationFrame(() => { raf = null; keepZoneW(setZoneW(pending)); });
+      };
+      const end = () => {
+        zoneHandle.removeEventListener('pointermove', move);
+        zoneHandle.classList.remove('dragging');
+        document.body.classList.remove('zone-dragging');
+        if (raf) { cancelAnimationFrame(raf); raf = null; if (pending != null) keepZoneW(setZoneW(pending)); }
+        saveZoneW();
+        resizeAllCharts();
+      };
+      zoneHandle.addEventListener('pointermove', move);
+      zoneHandle.addEventListener('lostpointercapture', end, { once: true });
+    });
+    zoneHandle.addEventListener('dblclick', () => { zoneUserW = null; saveZoneW(); fitZoneWidth(); resizeAllCharts(); });
+    zoneHandle.addEventListener('keydown', (ev) => {
+      const now = Number(zoneHandle.getAttribute('aria-valuenow')) || ZONE_BASE_W;
+      const { min, max } = zoneBounds();
+      const step = ev.shiftKey ? 64 : 16;
+      const next = ev.key === 'ArrowLeft' ? now - step : ev.key === 'ArrowRight' ? now + step
+        : ev.key === 'Home' ? min : ev.key === 'End' ? max : null;
+      if (next == null) return;
+      ev.preventDefault();
+      keepZoneW(setZoneW(next));
+      saveZoneW();
+      resizeAllCharts();
+    });
+    window.addEventListener('resize', fitZoneWidth);
+    if (typeof ResizeObserver !== 'undefined') {
+      const localRow = zoneEl.querySelector('.widget-row');
+      if (localRow) new ResizeObserver(fitZoneWidth).observe(localRow);
+    }
+    new MutationObserver(fitZoneWidth).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    // The watched widget grows once the first tick sets its width, so observe it inside the frame.
+    watchFrame.addEventListener('load', () => {
+      let doc = null, win = null;
+      try { doc = watchFrame.contentDocument; win = watchFrame.contentWindow; } catch (e) {}
+      if (!doc) return;
+      const row = doc.querySelector('.widget-row');
+      if (row && win.ResizeObserver) new win.ResizeObserver(fitZoneWidth).observe(row);
+      doc.addEventListener('click', onWidgetClick);
+      const card = doc.getElementById('hr-widget');
+      if (card && widgetCopies()) { card.style.cursor = 'pointer'; card.title = 'Click to copy the OBS URL'; }
+      fitZoneWidth();
+    });
+    fitZoneWidth();
     const copyObsBtn = $('copy-obs-url');
     if (copyObsBtn) {
       copyObsBtn.addEventListener('click', async () => {
