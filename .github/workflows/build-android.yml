@@ -35,7 +35,23 @@ permissions:
   contents: write
 
 jobs:
+  # The fast checks gate the public APK; .githooks/pre-push runs the same ./check before any push.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run ./check
+        run: sh ./check
+
   build:
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

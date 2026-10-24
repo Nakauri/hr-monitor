@@ -1,0 +1,25 @@
+#!/bin/sh
+# Every fast check, in one command. .githooks/pre-push and CI both run it; so can you.
+# Fast tier only (about 70 s): node tests that need no browser and no build. The Playwright
+# .mjs checks need `cd mobile && npm run copy-web` first and run before a release, by hand.
+# A check that cannot run is not a pass: if nothing ran, the script exits 2.
+set -e
+cd "$(dirname "$0")"
+ran=0
+run() { echo "== $*"; "$@"; ran=$((ran + 1)); }
+run node scripts/parse-check.cjs
+run node scripts/rmssd-parity.test.js
+run node scripts/junk-parity.test.cjs
+run node scripts/csv-format.test.cjs
+run node scripts/segment-format.test.cjs
+run node scripts/day-boundary.test.cjs
+run node scripts/avg-stats.test.cjs
+run node scripts/auth-trace.test.cjs
+run node scripts/bubble-tokens.test.cjs
+run node scripts/engine-boundary.test.cjs
+run node scripts/lifecycle-state.test.cjs
+run node scripts/lifecycle-deadline.test.cjs
+run node scripts/demo-synthetic.test.cjs
+run node scripts/marks-store.test.cjs
+if [ "$ran" -eq 0 ]; then echo "check: nothing ran"; exit 2; fi
+echo "check: all $ran passed"
