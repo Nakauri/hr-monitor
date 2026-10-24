@@ -6421,10 +6421,10 @@
     const data = await loadFullSession(filename);
     currentData = data;
     currentQuadRanges = computeQuadrantRanges(data);
-    // Sleep windows need the full data; a summary reopened on the same data keeps them.
+    // Sleep windows come only from the S64 band (s64Paint); without it there is none.
     // A cleared sleep weights flag drops an S64 band kept on the same data.
     if (s.__detectedFor !== data || (s.__s64For && !(s63Weights() === 'personal' || S63_PRINT_GENERAL))) {
-      s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd);
+      s.sleepWindows = [];
       s.__detectedFor = data;
       s.__s64For = null;
     }
@@ -6836,46 +6836,6 @@
     return marked.length ? AortiMarks.composeSleep(base || [], marked) : base;
   }
 
-  // Auto-detect sleep windows: sustained >=30 min of low HR + high RMSSD.
-  // "Low HR" = within 5 bpm of the session's resting baseline (or bottom quartile).
-  // "High RMSSD" = above the session median.
-  function detectSleepWindows(s, hrSeries, rmssdSeries) {
-    if (!hrSeries || !hrSeries.length || !rmssdSeries || !rmssdSeries.length) return [];
-    // Math.min(...arr.map(...)) on a long-session series spreads thousands of
-    // arguments per call. Manual reduction is allocation-free and skips the
-    // null gap markers that would otherwise coerce to 0 and corrupt restBase.
-    let computedMin = Infinity;
-    for (const p of hrSeries) {
-      const v = p.v;
-      if (v == null || isNaN(v)) continue;
-      if (v < computedMin) computedMin = v;
-    }
-    const restBase = s.restingHR || (isFinite(computedMin) ? computedMin : 0);
-    const rmssdVals = rmssdSeries.map(p => p.v).sort((a, b) => a - b);
-    const rmssdMedian = rmssdVals[Math.floor(rmssdVals.length / 2)];
-    // Walk samples; a sample "looks like sleep" if HR <= restBase+5 AND RMSSD >= median.
-    // Match RMSSD to HR by nearest-time.
-    let rmIdx = 0;
-    const spans = [];
-    let cur = null;
-    for (const p of hrSeries) {
-      while (rmIdx + 1 < rmssdSeries.length && Math.abs(rmssdSeries[rmIdx + 1].t - p.t) <= Math.abs(rmssdSeries[rmIdx].t - p.t)) rmIdx++;
-      const rmVal = rmssdSeries[rmIdx] ? rmssdSeries[rmIdx].v : null;
-      const isSleep = p.v <= restBase + 5 && rmVal != null && rmVal >= rmssdMedian;
-      if (isSleep) {
-        if (!cur) cur = { start: p.t, end: p.t };
-        else cur.end = p.t;
-      } else if (cur) {
-        if (cur.end - cur.start >= 30) spans.push(cur);
-        cur = null;
-      }
-    }
-    if (cur && cur.end - cur.start >= 30) spans.push(cur);
-    // Keep longest only (per user request — single dominant sleep window)
-    spans.sort((a, b) => (b.end - b.start) - (a.end - a.start));
-    return spans.length ? [spans[0]] : [];
-  }
-
   // ---- S61 moments ----
   // Moments from heart rate alone, one rule for the Day report and the Day view. Pure: no DOM, no clock; the only
   // global is the call counter. checks: scripts/day-moments.mjs.
@@ -7214,9 +7174,7 @@
   // A day is completed when it is before today and its next-day margin (6 h) is recorded or past.
   function s63Completed(iso, todayIso, minutesIntoToday) {
     if (!(iso < todayIso)) return false;
-    const t = new Date(iso + 'T12:00:00Z');
-    t.setUTCDate(t.getUTCDate() + 1);
-    return t.toISOString().slice(0, 10) < todayIso || minutesIntoToday >= S63_O.margin;
+    return isoAddDays(iso, 1) < todayIso || minutesIntoToday >= S63_O.margin;
   }
   // History floor: 4 of D-6..D hold 4 h of valid minutes.
   function s63Gate(validMins) { return validMins.filter(v => v >= S63_O.floorMin).length >= S63_O.floorDays; }
@@ -7742,10 +7700,10 @@
     if (!iso || key !== 'day:' + iso) return end('not a day');
     if (!(s63Weights() === 'personal' || S63_PRINT_GENERAL)) return end('flag');
     const shown = s.__s64For === data;
-    // A band shown from digests that no longer match goes back to the old detector.
+    // A band shown from digests that no longer match is dropped.
     const back = (how) => {
       if (shown && currentData === data && currentFilename === key) {
-        s.sleepWindows = detectSleepWindows(s, data.hr, data.rmssd); s.__s64For = null;
+        s.sleepWindows = []; s.__s64For = null;
         if (currentSummary === s) s64Paint(s, data);
       }
       return end(how);

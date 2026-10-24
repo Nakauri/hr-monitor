@@ -64,7 +64,7 @@ These live only in `hrv_viewer.html:summarizeCSV` and consume CSV data after the
 - `detectChillsWindows` — chills (sympathetic + vagal paths, same research doc)
 - `detectPalpitations` — ectopic beat clusters
 - `detectNoteworthyMoments` — statistical outliers
-- `detectSleepWindows` — known silently-broken (reads `.v`/`.t`; gets `{x,y}` on day sessions). Not parity-relevant; listed for the TODO fix
+- Sleep windows come only from the S64 band; the old `detectSleepWindows` (dead since it read `.v`/`.t` on `{x,y}` data) was removed 2026-10-24.
 
 ---
 

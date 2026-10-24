@@ -35,9 +35,10 @@ function loadMarks(src) {
 }
 
 function grabFrom(text, name) {
-  let i = text.indexOf('async function ' + name + '(');
-  if (i < 0) i = text.indexOf('function ' + name + '(');
-  if (i < 0) throw new Error('function not found: ' + name);
+  // Line-start match only: the parse worker carries one-line copies of some functions inside a string.
+  const m = new RegExp('^[ \\t]*(?:async )?function ' + name + '\\(', 'm').exec(text);
+  if (!m) throw new Error('function not found: ' + name);
+  const i = m.index + m[0].indexOf(m[0].trim());
   const j = text.indexOf('{', text.indexOf(')', i));
   let d = 0;
   for (let k = j; k < text.length; k++) {
@@ -351,7 +352,9 @@ CHECKS.M5 = async (src) => {
   const gets = U.match(/driveFiles\.get\([^;]*?\);/g) || [];
   out.push(['M5 NativeDriveUploader looks Drive names up only by local file names', gets.length >= 3 && gets.every(g => /^driveFiles\.get\((f\.getName\(\)|filename)\);$/.test(g)), gets.join(' ')]);
   out.push(['M5 NativeDriveUploader never iterates the Drive listing', !/for\s*\([^)]*:\s*driveFiles\b/.test(U) && (U.match(/\.keySet\(\)/g) || []).length === 1]);
-  out.push(['M5 NativeDriveUploader local loops keep .csv names only', (U.match(/getName\(\)\.endsWith\("\.csv"\)/g) || []).length >= 5]);
+  // The Clear cache loop moved into CacheClear.java (10-15), so both files count.
+  const UC = U + readJava('CacheClear.java');
+  out.push(['M5 NativeDriveUploader local loops keep .csv names only', (UC.match(/getName\(\)\.endsWith\("\.csv"\)/g) || []).length >= 5]);
   const SU = readJava('SegmentUploader.java');
   const qLines = SU.split('\n').filter(l => /trashed=false/.test(l));
   out.push(['M5 every SegmentUploader query names a file or hrv_session', qLines.length >= 4 && qLines.every(l => /name='|name contains 'hrv_session'/.test(l)), qLines.length + ' queries']);
