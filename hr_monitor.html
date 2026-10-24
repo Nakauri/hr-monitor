@@ -2197,6 +2197,21 @@
     }
   }
 
+  // Every average or extreme over a live series goes through here: dropout gap markers ({ v: null }) are skipped.
+  // A loop, not Math.max(...arr): a spread of a 5000-point series risks engine argument limits.
+  function seriesStats(series) {
+    let sum = 0, n = 0, max = -Infinity, min = Infinity;
+    for (const p of series) {
+      const v = p.v;
+      if (v == null || isNaN(v)) continue;
+      if (v > max) max = v;
+      if (v < min) min = v;
+      sum += v;
+      n++;
+    }
+    return { sum, n, max, min };
+  }
+
   function updateStats() {
     const setHr = (id, v) => { const el = $(id); UI.setKpi(el, v); el.className = 'kpi-value' + (v != null ? ' ' + getHRStage(v) : ''); };
     // Counts read no data until a session has a start time, so they never sit beside an empty Avg HR as 0.
@@ -2213,25 +2228,11 @@
       updateSectionMeta();
       return;
     }
-    // Math.max/min(...arr) spreads a 5000-element array as call arguments —
-    // both wasteful (allocates an arguments array per call) and risks engine
-    // limits at very large series. reduce is O(n) without the spread overhead.
-    let maxH = -Infinity, minH = Infinity, sumH = 0, nH = 0;
-    for (const p of state.hrSeries) {
-      const v = p.v;
-      if (v == null || isNaN(v)) continue;
-      if (v > maxH) maxH = v;
-      if (v < minH) minH = v;
-      sumH += v;
-      nH++;
-    }
-    setHr('avg-hr', nH ? Math.round(sumH / nH) : null);
-    setHr('max-hr', nH ? maxH : null);
-    setHr('min-hr', nH ? minH : null);
-    if (state.rmssdSeries.length > 0) {
-      const rmssds = state.rmssdSeries.map(p => p.v);
-      UI.setKpi($('avg-rmssd'), Math.round(rmssds.reduce((a,b) => a+b, 0) / rmssds.length));
-    } else UI.setKpi($('avg-rmssd'), null);
+    const hr = seriesStats(state.hrSeries), rm = seriesStats(state.rmssdSeries);
+    setHr('avg-hr', hr.n ? Math.round(hr.sum / hr.n) : null);
+    setHr('max-hr', hr.n ? hr.max : null);
+    setHr('min-hr', hr.n ? hr.min : null);
+    UI.setKpi($('avg-rmssd'), rm.n ? Math.round(rm.sum / rm.n) : null);
     const chipMin = palpMin || 0;
     const chip = $('palp-chip');
     chip.classList.toggle('active', chipMin > 0);
@@ -5298,6 +5299,8 @@
     state.lastAlertTime = 0;
     state.breathPhase = null;
     state.startTime = device && device.gatt.connected ? Date.now() : null;
+    // A reset while connected starts the new session connected, so Uptime has an open interval.
+    if (state.startTime) logConnectionEvent('connect');
     showWarningBanner(null);
     $('hr-big').textContent = '—';
     $('rmssd-big').textContent = '—';
