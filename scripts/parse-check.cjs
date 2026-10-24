@@ -65,9 +65,13 @@ ${(r.stderr || '').trim()}`);
 for (const file of TARGETS) {
   const full = path.join(ROOT, file);
   if (!fs.existsSync(full)) continue;
-  const tags = fs.readFileSync(full, 'utf8').match(/<script\b[^>]*\bsrc="https:\/\/[^"]*"[^>]*>/g) || [];
-  for (const tag of tags) {
-    const src = /src="([^"]*)"/.exec(tag)[1];
+  // Every src="https://...js", including ones built in strings ('<scr' + 'ipt ...' for an iframe), so the
+  // tag is the text from src= to the next '>' rather than a parsed element.
+  const text = fs.readFileSync(full, 'utf8');
+  const re = /src="(https:\/\/[^"]*\.js)"[^>]*>/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const tag = m[0], src = m[1];
     if (!/@\d+\.\d+\.\d+\/|\/\d+\.\d+\.\d+\//.test(src)) continue;
     if (!/\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/.test(tag) || !/\bcrossorigin="anonymous"/.test(tag)) {
       realFailures++;
