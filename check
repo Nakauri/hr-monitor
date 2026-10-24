@@ -15,11 +15,15 @@ run node scripts/segment-format.test.cjs
 run node scripts/day-boundary.test.cjs
 run node scripts/avg-stats.test.cjs
 run node scripts/auth-trace.test.cjs
+run node scripts/auth-api.test.mjs
+run node scripts/relay-server.test.mjs
 run node scripts/bubble-tokens.test.cjs
 run node scripts/engine-boundary.test.cjs
 run node scripts/lifecycle-state.test.cjs
 run node scripts/lifecycle-deadline.test.cjs
 run node scripts/demo-synthetic.test.cjs
 run node scripts/marks-store.test.cjs
+# The CLAUDE.md map checker is local-only (gitignored; the repo is public), so CI skips it.
+if [ -f .claude/docmap.py ]; then run python .claude/docmap.py; fi
 if [ "$ran" -eq 0 ]; then echo "check: nothing ran"; exit 2; fi
 echo "check: all $ran passed"
