@@ -59,6 +59,23 @@ ${(r.stderr || '').trim()}`);
   }
 }
 
+// A script from a version-pinned CDN path (lib@x.y.z or /x.y.z/) carries an integrity hash, so a
+// tampered CDN file is refused instead of run (added 2026-10-24). Evergreen scripts (Google sign-in,
+// Vercel analytics) change at the same URL and cannot be pinned.
+for (const file of TARGETS) {
+  const full = path.join(ROOT, file);
+  if (!fs.existsSync(full)) continue;
+  const tags = fs.readFileSync(full, 'utf8').match(/<script\b[^>]*\bsrc="https:\/\/[^"]*"[^>]*>/g) || [];
+  for (const tag of tags) {
+    const src = /src="([^"]*)"/.exec(tag)[1];
+    if (!/@\d+\.\d+\.\d+\/|\/\d+\.\d+\.\d+\//.test(src)) continue;
+    if (!/\bintegrity="sha(256|384|512)-[A-Za-z0-9+/=]+"/.test(tag) || !/\bcrossorigin="anonymous"/.test(tag)) {
+      realFailures++;
+      console.log(`[FAIL] ${file}: pinned CDN script without integrity + crossorigin: ${src}`);
+    }
+  }
+}
+
 if (realFailures > 0) {
   console.log(`\n${realFailures} file(s) failed parse-check. DO NOT PUSH.`);
   process.exit(1);
