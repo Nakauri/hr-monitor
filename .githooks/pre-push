@@ -4,17 +4,24 @@
 # then ./check. Scan adapted from Gabe's gsd/scripts/pre-push.sh. demo/*.csv is synthetic (scripts/demo-synthetic.test.cjs) and allowed.
 fail() { printf '\n  pre-push REFUSED: %s\n\n' "$1" >&2; exit 1; }
 
-# The checks run on the working tree, so it has to be the commit being pushed.
-[ -z "$(git status --porcelain)" ] || fail "uncommitted changes; commit or stash so the checks test what is pushed"
+# The checks run on the working tree, so tracked files must match the commit being pushed.
+[ -z "$(git status --porcelain --untracked-files=no)" ] || fail "uncommitted changes; commit or stash so the checks test what is pushed"
 
 # Git feeds one line per ref: local ref, local sha, remote ref, remote sha.
 zero=0000000000000000000000000000000000000000
 while read -r _ local_sha _ remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
-  if [ "$remote_sha" = "$zero" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
-  git log -p "$range" | grep -nEi 'BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|[sr]k_live_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|postgres(ql)?://[^:@/ ]+:[^@/ ]+@' \
+  # Scan only what this push adds. A new branch, or a remote tip this clone lacks, means
+  # "commits on no remote"; the whole history would re-flag files deleted long ago.
+  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    range="$remote_sha..$local_sha"
+  else
+    range="$local_sha --not --remotes"
+  fi
+  # $range is unquoted on purpose: it may hold several arguments.
+  git log -p $range | grep -nEi 'BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|[sr]k_live_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35}|postgres(ql)?://[^:@/ ]+:[^@/ ]+@' \
     && fail "something in the pushed commits looks like a secret; treat it as burned and rotate it"
-  git log --name-only --format= "$range" | grep -nE '(^|/)\.env($|\.)|\.csv$|CLAUDE\.md$|(^|/)MEMORY|\.(pem|key|jks|keystore)$' | grep -v '\.env\.example$' | grep -vE '^[0-9]+:demo/[^/]+\.csv$' \
+  git log --name-only --diff-filter=d --format= $range | grep -nE '(^|/)\.env($|\.)|\.csv$|CLAUDE\.md$|(^|/)MEMORY|\.(pem|key|jks|keystore)$' | grep -v '\.env\.example$' | grep -vE '^[0-9]+:demo/[^/.][^/]*\.csv$' \
     && fail "a pushed commit carries a file that must never be committed"
 done
 

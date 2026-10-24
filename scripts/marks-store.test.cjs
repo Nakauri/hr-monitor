@@ -352,9 +352,9 @@ CHECKS.M5 = async (src) => {
   const gets = U.match(/driveFiles\.get\([^;]*?\);/g) || [];
   out.push(['M5 NativeDriveUploader looks Drive names up only by local file names', gets.length >= 3 && gets.every(g => /^driveFiles\.get\((f\.getName\(\)|filename)\);$/.test(g)), gets.join(' ')]);
   out.push(['M5 NativeDriveUploader never iterates the Drive listing', !/for\s*\([^)]*:\s*driveFiles\b/.test(U) && (U.match(/\.keySet\(\)/g) || []).length === 1]);
-  // The Clear cache loop moved into CacheClear.java (10-15), so both files count.
-  const UC = U + readJava('CacheClear.java');
-  out.push(['M5 NativeDriveUploader local loops keep .csv names only', (UC.match(/getName\(\)\.endsWith\("\.csv"\)/g) || []).length >= 5]);
+  // The Clear cache loop moved into CacheClear.java (10-15); each file keeps its own filters.
+  const csvIn = (t) => (t.match(/getName\(\)\.endsWith\("\.csv"\)/g) || []).length;
+  out.push(['M5 NativeDriveUploader local loops keep .csv names only', csvIn(U) >= 4 && csvIn(readJava('CacheClear.java')) >= 1]);
   const SU = readJava('SegmentUploader.java');
   const qLines = SU.split('\n').filter(l => /trashed=false/.test(l));
   out.push(['M5 every SegmentUploader query names a file or hrv_session', qLines.length >= 4 && qLines.every(l => /name='|name contains 'hrv_session'/.test(l)), qLines.length + ' queries']);
