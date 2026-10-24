@@ -5299,8 +5299,6 @@
     state.lastAlertTime = 0;
     state.breathPhase = null;
     state.startTime = device && device.gatt.connected ? Date.now() : null;
-    // A reset while connected starts the new session connected, so Uptime has an open interval.
-    if (state.startTime) logConnectionEvent('connect');
     showWarningBanner(null);
     $('hr-big').textContent = '—';
     $('rmssd-big').textContent = '—';
