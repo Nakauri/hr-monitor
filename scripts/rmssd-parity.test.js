@@ -134,7 +134,7 @@ function run(html, engine, gatt) {
   try {
     fs.writeFileSync(path.join(dir, 'ParityHarness.java'), javaHarness(engine, gatt));
     const c = spawnSync(bin('javac'), ['-nowarn', '-d', dir, path.join(dir, 'ParityHarness.java')], { encoding: 'utf8' });
-    if (c.status !== 0) throw new Error('javac failed:\n' + c.stderr);
+    if (c.status !== 0) throw new Error('javac failed (JAVA_HOME=' + JDK + '):\n' + (c.error ? c.error.message : c.stderr));
     const input = [
       ...vectors.map((v) => 'rr ' + v.join(',')),
       ...RAWS.map((r) => 'conv ' + r),
@@ -142,7 +142,7 @@ function run(html, engine, gatt) {
       ...RMS.map(([v, c]) => `rm ${v} ${c}`),
     ].join('\n') + '\n';
     const r = spawnSync(bin('java'), ['-cp', dir, 'ParityHarness'], { input, encoding: 'utf8' });
-    if (r.status !== 0) throw new Error('java failed:\n' + r.stderr);
+    if (r.status !== 0) throw new Error('java failed:\n' + (r.error ? r.error.message : r.stderr));
     return { js, bad: compare(js, r.stdout) };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

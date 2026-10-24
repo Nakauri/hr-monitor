@@ -1,13 +1,8 @@
 name: Build Android APK
 
-# Capacitor wrapper of the HR Monitor web app. Resurrected 2026-04-21
-# after the native-Compose pivot proved unable to reproduce Capacitor's
-# already-working BLE in background. The known-broken bit (WebSocket
-# buffering during screen-off) is being addressed by a native Capacitor
-# plugin in mobile/android-overlay/, NOT by replacing the whole stack.
-#
-# Builds a debug-signed APK on every push to main and publishes it to a
-# rolling "android-latest" GitHub Release at:
+# Capacitor Android build of the HR Monitor web app plus the native plugin in mobile/android-overlay/.
+# On every push to main that touches the app: ./check, then a release APK (not debuggable, signed with
+# the app keystore) published to the rolling "android-latest" GitHub Release at:
 # https://github.com/Nakauri/hr-monitor/releases/latest/download/hr-monitor.apk
 
 on:

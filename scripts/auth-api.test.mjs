@@ -117,7 +117,7 @@ const MUTANTS = [
   ['any origin allowed', 'lib/oauth-helpers.js', "if (!origin) return false;", 'return true;'],
   ['refresh cookie loses HttpOnly', 'lib/oauth-helpers.js', '; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${COOKIE_MAX_AGE}', '; Secure; SameSite=Strict; Path=/; Max-Age=${COOKIE_MAX_AGE}'],
   ['dev origins allowed in production', 'lib/oauth-helpers.js', "process.env.VERCEL_ENV !== 'production' && DEV_ALLOWED_ORIGINS.has(origin)", 'DEV_ALLOWED_ORIGINS.has(origin)'],
-  ['refresh checks the origin after Google', 'api/auth/refresh.js', "  if (!isAllowedOrigin(req.headers.origin)) {\n    return res.status(403).json({ error: 'forbidden_origin' });\n  }\n", ''],
+  ['refresh drops its origin check', 'api/auth/refresh.js', "  if (!isAllowedOrigin(req.headers.origin)) {\n    return res.status(403).json({ error: 'forbidden_origin' });\n  }\n", ''],
   ['web exchange echoes the refresh token', 'api/auth/exchange.js', '    has_refresh: !!refresh_token,', '    has_refresh: !!refresh_token, refresh_token,'],
   ['invalid_grant keeps the cookie', 'api/auth/refresh.js', 'if (!isNative) res.setHeader(\'Set-Cookie\', clearRefreshCookie());', ''],
 ];
