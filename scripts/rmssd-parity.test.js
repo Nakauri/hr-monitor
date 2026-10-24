@@ -1,276 +1,188 @@
 #!/usr/bin/env node
-// Parity test — catches drift between the JS `computeRMSSD` in
-// hr_monitor.html and the Java `computeRmssd` in HrEngine.java.
-//
-// Why this exists: these two functions compute RMSSD from RR intervals
-// for the same user's data. The JS version powers the live widget; the
-// Java version powers the relay broadcast and the CSV writer. If they
-// diverge, the same strap shows different HRV numbers on phone vs
-// overlay vs viewer. This happened once (April 2026) — the Java side
-// was unfiltered, the JS side was ectopic-corrected. Readings differed
-// by 2-3x during palpitation bursts. Fixed by aligning both on the same
-// preprocessing.
-//
-// When either implementation changes:
-//   1. Mirror the change in the OTHER file.
-//   2. Update the port in this file to match.
-//   3. Run `node scripts/rmssd-parity.test.js` — must print OK, exit 0.
-//
-// The golden vector at the end is deliberately adversarial: it includes
-// out-of-range RRs, ectopic-sized jumps, and normal beats so any filter
-// change produces a different number.
+// Parity of the numbers both engines compute: RMSSD, SDNN, raw RR to ms, HR and RMSSD stage.
+// Reads the REAL functions from hr_monitor.html and HrEngine.java / GattHrDevice.java (the Java is
+// compiled into a small harness with javac), runs both on a golden vector plus 300 seeded random
+// vectors, then proves itself: a mutated JS copy and a mutated Java copy must each fail.
+// Guards the April 2026 bug (relay 133, monitor 86 on the same strap) and RMSSD=36 / HR=93 stage
+// colours that differed between the monitor and the overlay.
+// Run: node scripts/rmssd-parity.test.js   (exit 0 = parity holds AND every mutant fails; about 3 s)
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import vm from 'vm';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
 
-// -------- JS implementation (extracted verbatim from hr_monitor.html) ----
-function computeRMSSD_js(rrs) {
-  if (rrs.length < 2) return null;
-  const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
-  if (clean.length < 2) return null;
-  let sumSq = 0, count = 0;
-  for (let i = 1; i < clean.length; i++) {
-    const d = clean[i] - clean[i-1];
-    if (Math.abs(d) < 200) {
-      sumSq += d * d;
-      count++;
-    }
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const JAVA_DIR = path.join(ROOT, 'mobile', 'android-overlay', 'app', 'src', 'main', 'java', 'com', 'nakauri', 'hrmonitor');
+const JDK = process.env.JAVA_HOME || 'C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.10.7-hotspot';
+const bin = (n) => path.join(JDK, 'bin', n + (process.platform === 'win32' ? '.exe' : ''));
+const read = (p) => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+
+// Brace-matched block starting at the first line-start match of `head` (a regex source).
+function block(src, head, what) {
+  const m = new RegExp('^[ \\t]*' + head, 'm').exec(src);
+  if (!m) throw new Error('not found: ' + what);
+  const i = m.index, j = src.indexOf('{', i);
+  let d = 0;
+  for (let k = j; k < src.length; k++) {
+    if (src[k] === '{') d++;
+    else if (src[k] === '}' && --d === 0) return src.slice(i, k + 1);
   }
-  if (count < 1) return null;
-  return Math.sqrt(sumSq / count);
+  throw new Error('unbalanced: ' + what);
 }
 
-// -------- Java-equivalent implementation (JS port of HrEngine.java) ----
-// When the Java source changes, port the same changes here.
-function computeRMSSD_javaPort(rrs) {
-  if (rrs.length < 2) return null;
-  const clean = [];
-  for (const rr of rrs) {
-    if (rr >= 300 && rr <= 2000) clean.push(rr);
-  }
-  if (clean.length < 2) return null;
-  let sumSq = 0, count = 0;
-  for (let i = 1; i < clean.length; i++) {
-    const d = clean[i] - clean[i - 1];
-    if (Math.abs(d) < 200) {
-      sumSq += d * d;
-      count += 1;
-    }
-  }
-  if (count < 1) return null;
-  return Math.sqrt(sumSq / count);
+function jsEngine(html) {
+  const conv = /rrs\.push\((Math\.round\(raw[^;]*)\);/.exec(html);
+  if (!conv) throw new Error('not found: JS raw RR conversion');
+  const code = ['computeRMSSD', 'computeSDNN', 'getHRStage', 'getRMSSDStage'].map((n) => block(html, 'function ' + n + '\\(', n)).join('\n') +
+    '\nfunction rrConv(raw) { return ' + conv[1] + '; }';
+  const ctx = { Math, colorThresholds: {}, thresholds: {} };
+  vm.runInNewContext(code, ctx);
+  return {
+    rr: (rrs) => [ctx.computeRMSSD(rrs), ctx.computeSDNN(rrs)],
+    conv: (raw) => ctx.rrConv(raw),
+    hrStage: (hr, t) => { Object.assign(ctx.colorThresholds, { low: t.low, normal: t.normal, elevated: t.elevated }); ctx.thresholds.high = t.high; return ctx.getHRStage(hr); },
+    rmStage: (v, crit) => { ctx.thresholds.rmssd = crit; return ctx.getRMSSDStage(v); },
+  };
 }
 
-// -------- Golden vector + expected output ----
-// This sequence covers: normal RR, RSA-sized variation (±20 ms), ectopic
-// short RR (big negative jump), compensatory pause (big positive jump),
-// out-of-range noise (must be filtered), and return to baseline.
-const goldenRR = [
-  800, 810, 790, 820, 805,             // normal RSA-like
-  400,                                  // ectopic short
-  1200,                                 // compensatory pause
-  810, 795, 805,                        // return to normal
-  2500,                                 // out-of-range high (must drop)
-  200,                                  // out-of-range low (must drop)
-  820, 815, 800, 810, 790, 805,         // more normal
+function javaHarness(engine, gatt) {
+  const conv = /rrs\.add\(((?:\(int\) )?(?:Math\.round)?\(raw[^;]*)\);/.exec(gatt);
+  if (!conv) throw new Error('not found: Java raw RR conversion');
+  const parts = [
+    block(engine, 'private static final class RrEntry', 'RrEntry'),
+    block(engine, 'private static Double computeRmssd\\(', 'computeRmssd'),
+    block(engine, 'private static Double computeSdnn\\(', 'computeSdnn'),
+    block(engine, 'private String hrStage\\(', 'hrStage').replace('private String', 'static String'),
+    block(engine, 'private String rmssdStage\\(', 'rmssdStage').replace('private String', 'static String'),
+  ];
+  return `import java.util.*;
+import java.io.*;
+public class ParityHarness {
+  static int stageLow, stageNormal, stageElevated, stageHigh, stageRmssdCritical;
+  static int rrConv(int raw) { return ${conv[1]}; }
+${parts.join('\n')}
+  public static void main(String[] args) throws Exception {
+    BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+    StringBuilder out = new StringBuilder();
+    String line;
+    while ((line = in.readLine()) != null) {
+      String[] p = line.split(" ");
+      if (p[0].equals("rr")) {
+        ArrayDeque<RrEntry> w = new ArrayDeque<>();
+        if (p.length > 1 && !p[1].isEmpty()) for (String s : p[1].split(",")) w.addLast(new RrEntry(Integer.parseInt(s), 0L));
+        out.append(computeRmssd(w)).append(' ').append(computeSdnn(w)).append('\\n');
+      } else if (p[0].equals("conv")) {
+        out.append(rrConv(Integer.parseInt(p[1]))).append('\\n');
+      } else if (p[0].equals("hr")) {
+        stageLow = Integer.parseInt(p[2]); stageNormal = Integer.parseInt(p[3]); stageElevated = Integer.parseInt(p[4]); stageHigh = Integer.parseInt(p[5]);
+        out.append(hrStage(Integer.parseInt(p[1]))).append('\\n');
+      } else if (p[0].equals("rm")) {
+        stageRmssdCritical = Integer.parseInt(p[2]);
+        out.append(rmssdStage(Double.parseDouble(p[1]))).append('\\n');
+      }
+    }
+    System.out.print(out);
+  }
+}
+`;
+}
+
+// The cases: golden RR (normal, RSA, ectopic pair, out-of-range high and low), 300 seeded random
+// vectors, raw values where rounding and truncation disagree, and the stage boundaries.
+const GOLDEN = [800, 810, 790, 820, 805, 400, 1200, 810, 795, 805, 2500, 200, 820, 815, 800, 810, 790, 805];
+const EXPECTED_RMSSD = 16.2018517460; // sqrt(3150 / 12), worked by hand in the history of this file
+let seed = 20261024;
+const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const vectors = [GOLDEN, [], [800], [800, 2500], [800, 1100]];
+for (let v = 0; v < 300; v++) {
+  const n = Math.floor(rnd() * 60), a = [];
+  let base = 600 + Math.floor(rnd() * 500);
+  for (let i = 0; i < n; i++) {
+    const r = rnd();
+    if (r < 0.08) a.push(100 + Math.floor(rnd() * 2600));          // out of range or ectopic-sized
+    else if (r < 0.14) a.push(base + (rnd() < 0.5 ? -1 : 1) * (190 + Math.floor(rnd() * 30))); // around the 200 ms diff edge
+    else { base += Math.floor(rnd() * 41) - 20; a.push(base); }
+  }
+  vectors.push(a);
+}
+const RAWS = [819, 820, 821, 1000, 1023, 1025, 512, 305, 2047, 410, 833, 847];
+const T = { low: 70, normal: 90, elevated: 110, high: 130 };
+const HRS = [50, 69, 70, 71, 89, 90, 93, 109, 110, 115, 129, 130, 180];
+const RMS = [[10, 15], [14.99, 15], [15, 15], [16, 15], [19.99, 15], [20, 15], [22, 15], [34.9, 15], [35, 15], [36, 15], [55, 15], [59.99, 15], [60, 15], [80, 15], [12, 10]];
+
+function compare(js, javaOut) {
+  const lines = javaOut.trim().split('\n');
+  const bad = [];
+  let k = 0;
+  const num = (s) => (s === 'null' ? null : parseFloat(s));
+  const same = (a, b) => (a == null || b == null ? a == null && b == null : Math.abs(a - b) < 1e-9);
+  for (const v of vectors) {
+    const [jr, js2] = js.rr(v), [xr, xs] = lines[k++].split(' ').map(num);
+    if (!same(jr, xr) || !same(js2, xs)) bad.push(`RR [${v.slice(0, 8).join(',')}${v.length > 8 ? ',...' : ''}] js=${jr},${js2} java=${xr},${xs}`);
+  }
+  for (const r of RAWS) { const a = js.conv(r), b = +lines[k++]; if (a !== b) bad.push(`raw ${r}: js=${a} java=${b}`); }
+  for (const h of HRS) { const a = js.hrStage(h, T), b = lines[k++]; if (a !== b) bad.push(`HR ${h}: js=${a} java=${b}`); }
+  for (const [v, c] of RMS) { const a = js.rmStage(v, c), b = lines[k++]; if (a !== b) bad.push(`RMSSD ${v} (critical ${c}): js=${a} java=${b}`); }
+  return bad;
+}
+
+function run(html, engine, gatt) {
+  const js = jsEngine(html);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rmssd-parity-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'ParityHarness.java'), javaHarness(engine, gatt));
+    const c = spawnSync(bin('javac'), ['-nowarn', '-d', dir, path.join(dir, 'ParityHarness.java')], { encoding: 'utf8' });
+    if (c.status !== 0) throw new Error('javac failed:\n' + c.stderr);
+    const input = [
+      ...vectors.map((v) => 'rr ' + v.join(',')),
+      ...RAWS.map((r) => 'conv ' + r),
+      ...HRS.map((h) => `hr ${h} ${T.low} ${T.normal} ${T.elevated} ${T.high}`),
+      ...RMS.map(([v, c]) => `rm ${v} ${c}`),
+    ].join('\n') + '\n';
+    const r = spawnSync(bin('java'), ['-cp', dir, 'ParityHarness'], { input, encoding: 'utf8' });
+    if (r.status !== 0) throw new Error('java failed:\n' + r.stderr);
+    return { js, bad: compare(js, r.stdout) };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const html = read(path.join(ROOT, 'hr_monitor.html'));
+const engine = read(path.join(JAVA_DIR, 'HrEngine.java'));
+const gatt = read(path.join(JAVA_DIR, 'GattHrDevice.java'));
+let failed = 0;
+
+const real = run(html, engine, gatt);
+const golden = real.js.rr(GOLDEN)[0];
+const goldenOk = Math.abs(golden - EXPECTED_RMSSD) < 1e-6;
+console.log((goldenOk ? 'OK    ' : 'FAIL  ') + `golden RMSSD ${golden} (expected ${EXPECTED_RMSSD})`);
+if (!goldenOk) failed++;
+const bites = RAWS.some((r) => real.js.conv(r) !== Math.trunc(r * 1000 / 1024));
+console.log((bites ? 'OK    ' : 'FAIL  ') + 'raw RR values exercise rounding against truncation');
+if (!bites) failed++;
+console.log((real.bad.length ? 'FAIL  ' : 'OK    ') + `real JS against real Java: ${vectors.length} RR vectors, ${RAWS.length} raw values, ${HRS.length + RMS.length} stages` + (real.bad.length ? '\n        ' + real.bad.slice(0, 6).join('\n        ') : ''));
+if (real.bad.length) failed++;
+
+// Negative controls: each mutated source must make parity FAIL.
+const MUTANTS = [
+  ['Java RR floor 300 -> 250', html, engine.replace('e.rrMs >= 300 && e.rrMs <= 2000) clean.add(e.rrMs);', 'e.rrMs >= 250 && e.rrMs <= 2000) clean.add(e.rrMs);'), gatt],
+  ['JS ectopic gate 200 -> 250', html.replace('if (Math.abs(d) < 200) {', 'if (Math.abs(d) < 250) {'), engine, gatt],
+  ['Java SDNN population (n)', html, engine.replace('return Math.sqrt(sumSq / (clean.size() - 1));', 'return Math.sqrt(sumSq / clean.size());'), gatt],
+  ['Java raw RR truncates', html, engine, gatt.replace('(int) Math.round(raw * 1000.0 / 1024.0)', '(int) (raw * 1000 / 1024)')],
+  ['JS HR low boundary exclusive', html.replace('if (hr <= colorThresholds.low)', 'if (hr < colorThresholds.low)'), engine, gatt],
+  ['Java RMSSD stage 35 -> 36', html, engine.replace('if (rmssd < 35) return "stage-elevated";', 'if (rmssd < 36) return "stage-elevated";'), gatt],
 ];
-
-// Expected RMSSD on this input (JS algorithm):
-//   After filter: [800, 810, 790, 820, 805, 400, 1200, 810, 795, 805, 820, 815, 800, 810, 790, 805]
-//   Successive diffs: [10, -20, 30, -15, -405, 800, -390, -15, 10, 15, -5, -15, 10, -20, 15]
-//   Diffs with |d| < 200: [10, -20, 30, -15, -15, 10, 15, -5, -15, 10, -20, 15]  (12 values, dropped 3)
-//   sumSq = 100+400+900+225+225+100+225+25+225+100+400+225 = 3150
-//   RMSSD = sqrt(3150/12) = sqrt(262.5) = 16.2018...
-const EXPECTED_RMSSD = 16.2018517460;
-const TOLERANCE = 1e-6;
-
-// -------- SDNN implementations ----
-// JS: hr_monitor.html computeSDNN
-// Java: HrEngine.java computeSdnn
-function computeSDNN_js(rrs) {
-  if (rrs.length < 2) return null;
-  const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
-  if (clean.length < 2) return null;
-  let sum = 0;
-  for (const rr of clean) sum += rr;
-  const mean = sum / clean.length;
-  let sumSq = 0;
-  for (const rr of clean) {
-    const d = rr - mean;
-    sumSq += d * d;
-  }
-  return Math.sqrt(sumSq / (clean.length - 1));
-}
-function computeSDNN_javaPort(rrs) {
-  if (rrs.length < 2) return null;
-  const clean = [];
-  for (const rr of rrs) {
-    if (rr >= 300 && rr <= 2000) clean.push(rr);
-  }
-  if (clean.length < 2) return null;
-  let sum = 0;
-  for (const rr of clean) sum += rr;
-  const mean = sum / clean.length;
-  let sumSq = 0;
-  for (const rr of clean) {
-    const d = rr - mean;
-    sumSq += d * d;
-  }
-  return Math.sqrt(sumSq / (clean.length - 1));
+for (const [name, h, e, g] of MUTANTS) {
+  if (h === html && e === engine && g === gatt) { console.log(`FAIL  mutant "${name}" did not apply (source changed; update the mutant)`); failed++; continue; }
+  const { bad } = run(h, e, g);
+  console.log((bad.length ? 'OK    ' : 'FAIL  ') + `mutant "${name}" ${bad.length ? 'caught' : 'NOT caught'}`);
+  if (!bad.length) failed++;
 }
 
-// Expected SDNN on the same golden vector. Computed once via the JS impl
-// and frozen here. After filter (16 values): mean = 804.6875,
-// sample stddev ≈ 146.3499...
-const EXPECTED_SDNN = computeSDNN_js(goldenRR);
-
-// -------- Run ----
-const jsOut = computeRMSSD_js(goldenRR);
-const javaOut = computeRMSSD_javaPort(goldenRR);
-const jsSdnn = computeSDNN_js(goldenRR);
-const javaSdnn = computeSDNN_javaPort(goldenRR);
-
-let ok = true;
-
-function check(label, actual, expected) {
-  const diff = Math.abs(actual - expected);
-  const pass = diff < TOLERANCE;
-  console.log(
-    `${pass ? 'OK   ' : 'FAIL '} ${label.padEnd(32)} ` +
-    `got=${actual.toFixed(10)} expected=${expected.toFixed(10)} diff=${diff.toExponential(3)}`
-  );
-  if (!pass) ok = false;
-}
-
-check('JS implementation', jsOut, EXPECTED_RMSSD);
-check('Java port (hand-ported)', javaOut, EXPECTED_RMSSD);
-check('JS vs Java parity', jsOut, javaOut);
-
-console.log('\nSDNN parity (sample stddev of in-range RR):');
-check('JS SDNN', jsSdnn, EXPECTED_SDNN);
-check('Java SDNN port', javaSdnn, EXPECTED_SDNN);
-check('JS vs Java SDNN parity', jsSdnn, javaSdnn);
-
-// -------- RR raw→ms conversion parity ----
-// JS: hr_monitor.html parseHR — rrs.push(Math.round(raw * 1000 / 1024))
-// Java: GattHrDevice.java parseHrPacket —
-//   rrs.add((int) Math.round(raw * 1000.0 / 1024.0))
-// A raw 1/1024-second RR count must map to the same integer ms on both sides,
-// or the RMSSD/SDNN inputs and the CSV diverge. The old `raw * 1000 / 1024`
-// integer-truncation on the Java side lost up to ~1 ms per interval.
-function rrRawToMs_js(raw) { return Math.round(raw * 1000 / 1024); }
-function rrRawToMs_javaPort(raw) { return Math.round(raw * 1000.0 / 1024.0); }
-
-// Values chosen so round-vs-truncate disagree (fractional part ≥ 0.5).
-const goldenRawRR = [819, 820, 821, 1000, 1023, 1025, 512, 305, 2047, 410, 833, 847];
-
-console.log('\nRR raw→ms conversion parity:');
-let rrParityChecked = 0;
-let rrRoundBites = false;
-for (const raw of goldenRawRR) {
-  const js = rrRawToMs_js(raw);
-  const java = rrRawToMs_javaPort(raw);
-  const truncated = Math.trunc(raw * 1000 / 1024);
-  if (js !== truncated) rrRoundBites = true;
-  const pass = js === java;
-  if (!pass) {
-    ok = false;
-    console.log(`FAIL  raw=${raw} js=${js} java=${java}`);
-  }
-  rrParityChecked++;
-}
-console.log(`OK    ${rrParityChecked} raw values, js==java on all`);
-if (!rrRoundBites) {
-  ok = false;
-  console.log('FAIL  golden RR vector never exercises rounding vs truncation');
-}
-
-// -------- RMSSD stage classification parity ----
-// JS: hr_monitor.html:getRMSSDStage
-// Java: HrEngine.java:rmssdStage
-// If these diverge, same RMSSD shows different colours on monitor vs relay
-// overlay — which happened at RMSSD=36 (JS normal/green, Java elevated/orange).
-function rmssdStage_js(rmssd, thresholdCritical) {
-  if (rmssd == null) return 'stage-normal';
-  if (rmssd < thresholdCritical) return 'stage-critical';
-  if (rmssd < 20) return 'stage-high';
-  if (rmssd < 35) return 'stage-elevated';
-  if (rmssd < 60) return 'stage-normal';
-  return 'stage-low';
-}
-function rmssdStage_javaPort(rmssd, thresholdCritical) {
-  if (rmssd < thresholdCritical) return 'stage-critical';
-  if (rmssd < 20) return 'stage-high';
-  if (rmssd < 35) return 'stage-elevated';
-  if (rmssd < 60) return 'stage-normal';
-  return 'stage-low';
-}
-
-function checkStage(label, rmssd, critical, expected) {
-  const js = rmssdStage_js(rmssd, critical);
-  const java = rmssdStage_javaPort(rmssd, critical);
-  const pass = js === expected && java === expected && js === java;
-  console.log(
-    `${pass ? 'OK   ' : 'FAIL '} ${label.padEnd(32)} ` +
-    `rmssd=${rmssd} critical=${critical} js=${js} java=${java} expected=${expected}`
-  );
-  if (!pass) ok = false;
-}
-
-console.log('\nRMSSD stage classification parity:');
-checkStage('crash at user threshold', 10, 15, 'stage-critical');
-checkStage('just above critical',     16, 15, 'stage-high');
-checkStage('high range',              22, 15, 'stage-elevated');
-checkStage('elevated range',          36, 15, 'stage-normal');   // the reported mismatch
-checkStage('normal range',            55, 15, 'stage-normal');
-checkStage('excellent range',         80, 15, 'stage-low');
-
-// -------- HR stage classification parity ----
-// JS: hr_monitor.html:getHRStage
-// Java: HrEngine.java:hrStage
-// Both use user-configurable thresholds pushed from JS via setStageThresholds.
-// Boundaries must match exactly (the `<=` on low is load-bearing).
-function hrStage_js(hr, t) {
-  if (hr == null) return 'stage-normal';
-  if (hr <= t.low) return 'stage-low';
-  if (hr < t.normal) return 'stage-normal';
-  if (hr < t.elevated) return 'stage-elevated';
-  if (hr < t.high) return 'stage-high';
-  return 'stage-critical';
-}
-function hrStage_javaPort(hr, t) {
-  if (hr <= t.low) return 'stage-low';
-  if (hr < t.normal) return 'stage-normal';
-  if (hr < t.elevated) return 'stage-elevated';
-  if (hr < t.high) return 'stage-high';
-  return 'stage-critical';
-}
-
-function checkHRStage(label, hr, t, expected) {
-  const js = hrStage_js(hr, t);
-  const java = hrStage_javaPort(hr, t);
-  const pass = js === expected && java === expected && js === java;
-  console.log(
-    `${pass ? 'OK   ' : 'FAIL '} ${label.padEnd(32)} ` +
-    `hr=${hr} t=${JSON.stringify(t)} js=${js} java=${java} expected=${expected}`
-  );
-  if (!pass) ok = false;
-}
-
-console.log('\nHR stage classification parity:');
-const T = { low: 70, normal: 90, elevated: 110, high: 130 };  // default user thresholds
-checkHRStage('below low boundary',    50, T, 'stage-low');
-checkHRStage('at low boundary',       70, T, 'stage-low');        // inclusive
-checkHRStage('just above low',        71, T, 'stage-normal');
-checkHRStage('at normal boundary',    89, T, 'stage-normal');
-checkHRStage('elevated range',        93, T, 'stage-elevated');   // user reported 93 green/orange mismatch
-checkHRStage('high range',           115, T, 'stage-high');
-checkHRStage('at high boundary',     129, T, 'stage-high');
-checkHRStage('critical',             130, T, 'stage-critical');   // strict: = high hits critical
-
-if (!ok) {
-  console.error('\nFAIL: RMSSD parity broken.');
-  console.error('  - If JS is right: update HrEngine.java:computeRmssd + the port above.');
-  console.error('  - If Java is right: update hr_monitor.html:computeRMSSD + the port above.');
-  console.error('  - If expected value changed intentionally: recompute EXPECTED_RMSSD and document why.');
+if (failed) {
+  console.error(`\n${failed} check(s) failed. Mirror the change in the other engine (both carry PARITY CRITICAL), or update a mutant whose anchor moved.`);
   process.exit(1);
 }
-
-console.log('\nOK: JS and Java-port RMSSD match on the golden vector.');
+console.log('\nOK: JS and Java RMSSD, SDNN, RR conversion and stages match from source.');
