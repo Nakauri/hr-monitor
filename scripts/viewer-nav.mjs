@@ -119,7 +119,14 @@ async function open(width, query = 'demo=1', hash = '', textScale = 1, drive = n
     if (!signedOut) localStorage.setItem('aorti_auth_v2', JSON.stringify({ version: 2, access_token: 'fake', expires_at: Date.now() + 3600000, email: 'a@example.com', scope: 'drive.file', issued_at: Date.now() }));
     // Every change of the bar's syncing class, with its time.
     window.__cloudLog = [];
+    // Every time the bar draws the cloud slashed (class drive-off), from the first paint: a signed-in open must
+    // never show it, because tapping a slashed cloud starts a fresh sign-in.
+    window.__cloudOff = [];
     document.addEventListener('DOMContentLoaded', () => {
+      const ab = document.getElementById('app-bar');
+      const note = () => { if (ab.classList.contains('drive-off')) window.__cloudOff.push(Date.now()); };
+      note();
+      new MutationObserver(note).observe(ab, { attributes: true, attributeFilter: ['class'] });
       const bar = document.getElementById('app-bar');
       let was = bar.classList.contains('syncing');
       new MutationObserver(() => {
@@ -411,6 +418,29 @@ async function s62Bar() {
   return rows;
 }
 
+// Khal 2026-10-24: on open, signed in, the cloud read "off" while the cache painted; tapping it started a needless
+// fresh sign-in. A signed-in open must never show "Drive: off", from the first paint on.
+async function s62ColdOpen() {
+  const fake = new FakeDrive();
+  fake.folder('HR Monitor Sessions', null, '2025-01-01T00:00:00.000Z', 'root1');
+  const drive = { fake, log: [], delay: () => 1500 };
+  const { ctx, page } = await open(360, 'x=1', '', 1, drive);
+  await page.waitForTimeout(2500);
+  const offs = await page.evaluate(() => window.__cloudOff);
+  const errs = page.errors.slice();
+  await ctx.close();
+  // The other side: genuinely signed out, the cloud is slashed.
+  const out = await open(360, 'x=1', '', 1, { fake, log: [], signedOut: true, delay: () => 0 });
+  await out.page.waitForTimeout(1500);
+  const slashedOut = await out.page.evaluate(() => document.getElementById('app-bar').classList.contains('drive-off'));
+  await out.ctx.close();
+  return [
+    [`S62 cold open signed in: the cloud is never drawn slashed (${offs.length} slashed paint(s))`, offs.length === 0, JSON.stringify(offs)],
+    ['S62 cold open signed out: the cloud is slashed', slashedOut],
+    ['S62 cold open signed in: no page errors', !errs.length, errs.join(' | ')],
+  ];
+}
+
 // S62 item D (Khal 10-18: 18 s of nothing between sign-in and the sync starting): from signed out, sign-in shows
 // syncing at once and holds it through the Drive listing until the sync ends; each phase logs one timed line.
 async function s62SignIn() {
@@ -689,7 +719,7 @@ try {
     report(await s23Cloud());
   }
   if (!MUTANTS_ONLY && (!PART || PART === 's27')) report(await s27Pills());
-  if (!MUTANTS_ONLY && (!PART || PART === 's62')) { report(await s62Bar()); report(await s62SignIn()); }
+  if (!MUTANTS_ONLY && (!PART || PART === 's62')) { report(await s62Bar()); report(await s62SignIn()); report(await s62ColdOpen()); }
   if (MUTANTS_ONLY) {
     console.log('\nS23 negative controls (each must FAIL):');
     for (const [id, name, mut, fn] of S23_MUTANTS.filter((m) => !PART || m[0] === PART)) {

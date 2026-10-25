@@ -14,8 +14,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" integrity="sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js" integrity="sha384-HZZ/fukV+9G8gwTNjN7zQDG0Sp7MsZy5DDN6VfY3Be7V9dvQpEpR2jF2HlyFUUjU" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" integrity="sha384-DhxhYObIMeMNGyAG7iK11OHzBIKyEIeRL0ad1iFPAOwZB8iirUlTT0O/WJJUk8+o" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js" integrity="sha384-HZZ/fukV+9G8gwTNjN7zQDG0Sp7MsZy5DDN6VfY3Be7V9dvQpEpR2jF2HlyFUUjU" crossorigin="anonymous"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
 <script src="./marks-store.js"></script>
@@ -628,9 +628,10 @@
     padding: var(--card-pad) calc(var(--card-pad) + 48px) var(--card-pad) var(--card-pad);
     position: relative;
   }
+  /* The phone Summary header: the shared .row-btn disclosure, shown on phones only. */
   .summary-bar-title {
-    background: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; text-align: left;
     display: none;
+    line-height: normal;
     align-items: center;
     min-height: 44px;
     font-size: var(--t14);
@@ -1826,8 +1827,12 @@
     const syncing = busy && cloud.shown;
     const changed = bar.classList.contains('syncing') !== syncing;
     bar.classList.toggle('syncing', syncing);
-    bar.classList.toggle('drive-off', cloud.conn === 'off');
-    btn.setAttribute('aria-label', 'Drive: ' + (syncing ? 'syncing' : cloud.label));
+    // Slashed only with no saved sign-in at all: any paint before the token is read (startup, a slow cache
+    // paint) shows connecting, so a tap never starts a needless fresh sign-in (Khal, 2026-10-24).
+    const cached = !!(window.aortiAuth && window.aortiAuth.getCachedToken());
+    const off = cloud.conn === 'off' && !cached;
+    bar.classList.toggle('drive-off', off);
+    btn.setAttribute('aria-label', 'Drive: ' + (syncing ? 'syncing' : cloud.conn === 'off' && cached ? 'connecting' : cloud.label));
     const fill = document.getElementById('syncbar-fill');
     if (fill) fill.style.transform = 'scaleX(' + (syncing ? Math.max(0.04, Math.min(1, cloud.frac)) : 0) + ')';
     if (changed) fitBar();
@@ -6487,7 +6492,7 @@
     el.innerHTML = `
       ${opts.head || `<div class="session-top-row ui"><a class="back-link" href="#/index">${UI.icon('prev')}All sessions</a></div>`}
       <div class="summary-bar ui" id="summary-bar">
-        <button type="button" class="summary-bar-title" id="summary-toggle" aria-expanded="true" aria-controls="summary-grid"><span>Summary</span><span class="summary-title-dur" data-stat="duration"><span class="sr-only">duration </span>${durKpi}</span><svg class="summary-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
+        <button type="button" class="row-btn summary-bar-title" id="summary-toggle" aria-expanded="true" aria-controls="summary-grid"><span>Summary</span><span class="summary-title-dur" data-stat="duration"><span class="sr-only">duration </span>${durKpi}</span><svg class="summary-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
         <button class="btn icon summary-bar-kebab" id="summary-bar-kebab" type="button" aria-label="Stats and tags" aria-haspopup="true" aria-expanded="false">${UI.icon('kebab')}</button>
         <div class="menu summary-bar-menu" id="summary-bar-menu" hidden>
           <div class="summary-bar-menu-head">Show stats</div>
@@ -11907,6 +11912,9 @@
     } else {
       await restoreFolder();
       driveLoadMeta();
+      // Read the cached sign-in before the first paint: the cache paint below takes seconds on a phone, and a
+      // cloud drawn "off" meanwhile invited a needless fresh sign-in (Khal, 2026-10-24).
+      if (window.aortiAuth) syncAuthStateLocal();
       driveUpdateUI();
       updateWatchLiveUI();
       marksInit();
