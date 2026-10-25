@@ -1,6 +1,6 @@
 #!/bin/sh
-# Every fast check, in one command. .githooks/pre-push and CI both run it; so can you.
-# Fast tier only (about 70 s): node tests that need no browser and no build. The Playwright
+# Every check that needs no browser, in one command. .githooks/pre-push and CI both run it; so can you.
+# Node tests (about 70 s) always; the JVM tier when Java changed and always in CI. The Playwright
 # .mjs checks need `cd mobile && npm run copy-web` first and run before a release, by hand.
 # A check that cannot run is not a pass: if nothing ran, the script exits 2.
 set -e
@@ -23,6 +23,14 @@ run node scripts/lifecycle-state.test.cjs
 run node scripts/lifecycle-deadline.test.cjs
 run node scripts/demo-synthetic.test.cjs
 run node scripts/marks-store.test.cjs
+# The JVM tier (compiles the real native Java, about 4 min) runs in CI always, and locally only when the
+# push touches the Java or these tests (or origin/main is unknown).
+if [ -n "$CI" ] || ! git rev-parse -q --verify origin/main >/dev/null \
+   || git diff --name-only origin/main...HEAD | grep -qE '^mobile/android-overlay/|^scripts/jvm/'; then
+  for t in scripts/jvm/run-*.cjs; do run node "$t"; done
+else
+  echo "== JVM tier skipped: no Java or scripts/jvm change since origin/main (CI runs it)"
+fi
 # The CLAUDE.md map checker is local-only (gitignored; the repo is public), so CI skips it.
 if [ -f .claude/docmap.py ]; then run python .claude/docmap.py; fi
 if [ "$ran" -eq 0 ]; then echo "check: nothing ran"; exit 2; fi
