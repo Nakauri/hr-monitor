@@ -438,6 +438,10 @@ public final class HrEngine implements HrDevice.Callback {
     // wait for the assignment rather than read a live socket as stale.
     private final Object relayLock = new Object();
     private boolean isCurrentRelay(WebSocket ws) { synchronized (relayLock) { return ws == relaySocket; } }
+    // Down only if still current, in one step: a replaced socket's late close must not mark its successor down.
+    private boolean markDownIfCurrent(WebSocket ws) {
+        synchronized (relayLock) { if (ws != relaySocket) return false; relayLive.set(false); return true; }
+    }
 
     // readTimeout(0) also covers the TLS handshake and the upgrade read, and pings start only after the upgrade, so
     // a handshake on a path that died after the TCP connect waits forever with no callback: the 10-25 dark overlay.
@@ -483,6 +487,8 @@ public final class HrEngine implements HrDevice.Callback {
             .build();
         // Stale callbacks (from a socket we replaced or closed) bail through isCurrentRelay.
         synchronized (relayLock) {
+        // Re-checked under the lock a stop's close takes, so no socket opens after the stop and outlives it.
+        if (!sessionActive.get()) return;
         relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
                 if (!isCurrentRelay(ws)) return;
@@ -504,19 +510,16 @@ public final class HrEngine implements HrDevice.Callback {
             }
             // A close the relay starts arrives here; onClosed follows only once we answer it.
             @Override public void onClosing(WebSocket ws, int code, String reason) {
-                if (!isCurrentRelay(ws)) return;
-                relayLive.set(false);
+                if (!markDownIfCurrent(ws)) return;
                 try { ws.close(1000, null); } catch (Throwable ignored) {}
             }
             @Override public void onClosed(WebSocket ws, int code, String reason) {
-                if (!isCurrentRelay(ws)) return;
-                relayLive.set(false);
+                if (!markDownIfCurrent(ws)) return;
                 emitState();
                 scheduleRelayReconnect();
             }
             @Override public void onFailure(WebSocket ws, Throwable t, Response r) {
-                if (!isCurrentRelay(ws)) return;
-                relayLive.set(false);
+                if (!markDownIfCurrent(ws)) return;
                 Log.w(TAG, "Relay failure: " + NativeRelaySocketPlugin.redact(t != null ? t.getMessage() : "unknown"));
                 emitState();
                 scheduleRelayReconnect();
@@ -2097,7 +2100,8 @@ public final class HrEngine implements HrDevice.Callback {
 
             sessionActive.set(true);
             // After the flag: a fast failure schedules its retry only once the session counts as active.
-            if (canBroadcast) openRelaySocket();
+            // A throw here must not leave the session claimed but half started; the watchdog retries the open.
+            if (canBroadcast) { try { openRelaySocket(); } catch (Throwable t) { Log.w(TAG, "relay open failed: " + NativeRelaySocketPlugin.redact(String.valueOf(t))); } }
             // One .commit(): a SIGKILL right after must not lose the live flag, the key or the senderId a resume needs.
             try {
                 appCtx.getSharedPreferences("hr_monitor_session", 0).edit()
