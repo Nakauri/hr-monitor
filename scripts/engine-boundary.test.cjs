@@ -482,13 +482,22 @@ function step2Checks() {
       const relayClose = E.slice(E.indexOf('private void closeRelaySocket()'), E.indexOf('private void closeRelaySocket()') + 1600);
       check('relay callbacks compare under the lock that guards the assignment',
         /synchronized \(relayLock\) \{\s*relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
-        && (relayOpen.match(/if \(!isCurrentRelay\(ws\)/g) || []).length === 5 && !/ws != relaySocket/.test(E)
+        && (relayOpen.match(/if \(!isCurrentRelay\(ws\)/g) || []).length === 5
+        && !/ws != relaySocket/.test(E.replace(/synchronized \(relayLock\) \{ if \(ws != relaySocket\) return; relayLive\.set\(true\); \}/, ''))
         && /synchronized \(relayLock\) \{ return ws == relaySocket; \}/.test(E));
-      check('a relay handshake still not open after 20 s is cancelled, so onFailure logs and backs off',
-        /RELAY_HANDSHAKE_MS = 20_000L/.test(E)
+      check('a stale socket never marks the relay live: the check and the set share the lock',
+        /synchronized \(relayLock\) \{ if \(ws != relaySocket\) return; relayLive\.set\(true\); \}/.test(relayOpen)
+        && !/relayLive\.set\(true\)/.test(relayOpen.replace(/synchronized \(relayLock\) \{ if \(ws != relaySocket\) return; relayLive\.set\(true\); \}/, ''))
+        && /synchronized \(relayLock\) \{ old = relaySocket; relaySocket = null; wasLive = relayLive\.getAndSet\(false\); \}/.test(relayClose));
+      const startBody = E.slice(E.indexOf('sessionActive.set(true);', E.indexOf('startSessionInternal')), E.indexOf('sessionActive.set(true);', E.indexOf('startSessionInternal')) + 300);
+      check('session start opens the relay only once the session counts as active',
+        /^sessionActive\.set\(true\);[\s\S]{0,160}if \(canBroadcast\) openRelaySocket\(\);/.test(startBody)
+        && /private void openRelaySocket\(\) \{\s*relayRetryPending = false;\s*if \(!sessionActive\.get\(\) \|\| !hasBroadcastKey\(\)\) return;/.test(E));
+      check('a relay handshake still not open after 35 s is cancelled, so onFailure logs and backs off',
+        /RELAY_HANDSHAKE_MS = 35_000L/.test(E)
         && /mainHandler\.postDelayed\(\(\) -> \{\s*if \(!isCurrentRelay\(opening\) \|\| relayLive\.get\(\)\) return;[\s\S]{0,160}opening\.cancel\(\);\s*\}, RELAY_HANDSHAKE_MS\);/.test(relayOpen));
       check('closing a relay socket that never opened cancels it',
-        /if \(relayLive\.get\(\)\) old\.close\(1000, "session stop"\); else old\.cancel\(\);/.test(relayClose));
+        /if \(wasLive\) old\.close\(1000, "session stop"\); else old\.cancel\(\);/.test(relayClose));
       check('a close the relay starts marks the link down and is answered',
         /public void onClosing\(WebSocket ws, int code, String reason\) \{\s*if \(!isCurrentRelay\(ws\)\) return;\s*relayLive\.set\(false\);\s*try \{ ws\.close\(1000, null\); \}/.test(relayOpen));
       const hb = E.slice(E.indexOf('private final Runnable heartbeatRunnable'), E.indexOf('private final Runnable heartbeatRunnable') + 2500);
@@ -498,10 +507,10 @@ function step2Checks() {
         && /RELAY_WATCHDOG_MS = 120_000L/.test(E) && /return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(E)
         && /relayLastOpenAtMs = android\.os\.SystemClock\.elapsedRealtime\(\);/.test(relayOpen)
         && /relayRetryPending = true;/.test(E) && /removeCallbacks\(relayReconnectRunnable\);\s*relayRetryPending = false;/.test(relayClose)
-        && /if \(!hasBroadcastKey\(\)\) return;/.test(relayOpen));
+        && /if \(!sessionActive\.get\(\) \|\| !hasBroadcastKey\(\)\) return;/.test(relayOpen));
       check('the network callback follows the default network, and its return reconnects a down relay',
         /cm\.registerDefaultNetworkCallback\(networkCallback\);/.test(E)
-        && /boolean back = networkWasLost && !relayLive\.get\(\);/.test(E) && /if \(\(changed \|\| back\) && sessionActive\.get\(\) && broadcastEnabled\)/.test(E)
+        && /boolean back = networkWasLost;/.test(E) && /if \(\(changed \|\| back\) && sessionActive\.get\(\) && broadcastEnabled\)/.test(E)
         && /lastActiveNetwork = null; networkWasLost = true;/.test(E));
       check('native reads the verdict by its exact type, not a substring',
         /optString\("type", ""\)/.test(onMsg) && /"publisher_rejected"\.equals\(type\)/.test(onMsg) && !/text\.contains\("\\"publisher_/.test(onMsg));

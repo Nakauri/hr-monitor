@@ -325,7 +325,8 @@ public final class HrEngine implements HrDevice.Callback {
                 @Override public void onAvailable(android.net.Network network) {
                     // A new network, or the old one back after a drop while the relay is down.
                     boolean changed = lastActiveNetwork != null && !network.equals(lastActiveNetwork);
-                    boolean back = networkWasLost && !relayLive.get();
+                    // Back after a loss counts whatever relayLive says: the socket on the lost network may not know yet.
+                    boolean back = networkWasLost;
                     networkWasLost = false;
                     if ((changed || back) && sessionActive.get() && broadcastEnabled) {
                         Log.i(TAG, "Network " + (changed ? "changed" : "back") + " — forcing relay reconnect");
@@ -441,7 +442,8 @@ public final class HrEngine implements HrDevice.Callback {
     // readTimeout(0) also covers the TLS handshake and the upgrade read, and pings start only after the upgrade, so
     // a handshake on a path that died after the TCP connect waits forever with no callback: the 10-25 dark overlay.
     // Cancelling it routes the stall through onFailure, which logs and backs off.
-    static final long RELAY_HANDSHAKE_MS = 20_000L;
+    // Clear of the client's 15 s connect timeout plus a second route and TLS on a weak network.
+    static final long RELAY_HANDSHAKE_MS = 35_000L;
     // Safety net under the backoff: down, no retry queued and no attempt for this long, so reopen once.
     static final long RELAY_WATCHDOG_MS = 120_000L;
     private volatile long relayLastOpenAtMs = 0;
@@ -468,7 +470,8 @@ public final class HrEngine implements HrDevice.Callback {
     }
 
     private void openRelaySocket() {
-        if (!hasBroadcastKey()) return;
+        relayRetryPending = false;
+        if (!sessionActive.get() || !hasBroadcastKey()) return;
         if (!broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
@@ -492,7 +495,9 @@ public final class HrEngine implements HrDevice.Callback {
                     } catch (Throwable t) { Log.w(TAG, "presence-end send failed: " + t); }
                     pendingPresenceEndId = null;
                 }
-                relayLive.set(true);
+                // Checked and set under the lock: a socket replaced since must never mark the link live, which would
+                // hide a stalled successor from the handshake limit and the watchdog.
+                synchronized (relayLock) { if (ws != relaySocket) return; relayLive.set(true); }
                 relayReconnectAttempts = 0;
                 Log.i(TAG, "Relay open");
                 emitState();
@@ -550,12 +555,12 @@ public final class HrEngine implements HrDevice.Callback {
             } catch (Throwable ignored) {}
         }
         WebSocket old;
-        synchronized (relayLock) { old = relaySocket; relaySocket = null; }
+        boolean wasLive;
+        synchronized (relayLock) { old = relaySocket; relaySocket = null; wasLive = relayLive.getAndSet(false); }
         // A socket that never opened has no writer to send a close, so only cancel frees its thread and connection.
         if (old != null) {
-            try { if (relayLive.get()) old.close(1000, "session stop"); else old.cancel(); } catch (Exception ignored) {}
+            try { if (wasLive) old.close(1000, "session stop"); else old.cancel(); } catch (Exception ignored) {}
         }
-        relayLive.set(false);
     }
 
 
@@ -2090,9 +2095,9 @@ public final class HrEngine implements HrDevice.Callback {
                 try { uploader.uploadOrphansAsync(sessionsDir); } catch (Throwable ignored) {}
             } catch (Throwable t) { /* never block session start */ }
 
-            if (canBroadcast) openRelaySocket();
-
             sessionActive.set(true);
+            // After the flag: a fast failure schedules its retry only once the session counts as active.
+            if (canBroadcast) openRelaySocket();
             // One .commit(): a SIGKILL right after must not lose the live flag, the key or the senderId a resume needs.
             try {
                 appCtx.getSharedPreferences("hr_monitor_session", 0).edit()
