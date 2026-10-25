@@ -82,6 +82,12 @@ const FAKE_WEB = (o) => `(() => {
       return new Response(JSON.stringify({ files: [], id: 'fake-file' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (/accounts\\.google\\.com|oauth2/.test(url)) window.__prompts++;
+    if (/\\/api\\/auth\\/refresh/.test(url) && o.refresh) {
+      window.__refreshes = (window.__refreshes || 0) + 1;
+      return o.refresh === 'ok'
+        ? new Response(JSON.stringify({ access_token: 'fresh-token', expires_in: 3600 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        : new Response('{}', { status: 502 });
+    }
     return realFetch(u, init);
   };
   const realOpen = window.open; window.open = function () { window.__prompts++; return null; };
@@ -202,6 +208,38 @@ try {
   check(!/mode=offline/.test(idx) && monLinks.length >= 2 && monLinks.every((h) => h === 'href="./hr_monitor.html"'), 'index.html: every Open monitor link is a plain link to the monitor', monLinks.join(' '));
   check(!/mode=offline/.test(fs.readFileSync(path.join(ROOT, 'app-home.html'), 'utf8')), 'app-home.html: no Offline mode link');
   check(!/mode-offline|__hrMonitorMode/.test(monitorSrc), 'hr_monitor.html: no mode-offline rules and no __hrMonitorMode');
+
+  // 0. Signed in with an expired access token (Khal 2026-10-24: "if I'm already signed in, why would I need to tap
+  // anything?"): the monitor refreshes silently, never says "Tap to reconnect", never opens Google sign-in. Only a
+  // refresh that fails shows the reconnect prompt.
+  for (const refresh of ['ok', 'fail']) {
+    // Opens signed in and settles, then the hour runs out under the open page (the case seen on the phone: the
+    // token expires while the monitor sits open with no Drive call due).
+    const { ctx, page, errs } = await newPage({ size: '1440', web: { signedIn: true, refresh }, url: '/hr_monitor.html' });
+    await page.waitForFunction(() => /Syncing to Drive/.test(document.getElementById('drive-status').textContent), null, { timeout: 6000 }).catch(() => {});
+    await page.evaluate(() => {
+      window.__statuses = [];
+      const el = document.getElementById('drive-status');
+      const note = () => { const t = el.textContent; if (t !== window.__statuses[window.__statuses.length - 1]) window.__statuses.push(t); };
+      new MutationObserver(note).observe(el, { childList: true, characterData: true, subtree: true });
+      const rec = JSON.parse(localStorage.getItem('aorti_auth_v2'));
+      rec.expires_at = Date.now() - 1000;
+      localStorage.setItem('aorti_auth_v2', JSON.stringify(rec));
+      window.dispatchEvent(new StorageEvent('storage', { key: 'aorti_auth_v2' }));
+    });
+    await page.waitForTimeout(2500);
+    const r = await page.evaluate(() => ({ statuses: window.__statuses, prompts: window.__prompts, refreshes: window.__refreshes || 0 }));
+    const asked = r.statuses.some((s) => /reconnect|sign in|Sign-in failed/i.test(s));
+    if (refresh === 'ok') {
+      check(!asked && r.refreshes >= 1 && r.prompts === 0, 'expired token, refresh works: refreshed silently, never asked to reconnect or sign in', JSON.stringify(r));
+    } else {
+      check(asked && r.prompts === 0, 'expired token, refresh fails: the reconnect prompt shows, no sign-in opened by itself', JSON.stringify(r));
+    }
+    // A failed refresh is expected to log the folder init failing; anything else is a real page error.
+    const unexpected = errs.filter((e) => !(refresh === 'fail' && /refresh_failed_502/.test(e)));
+    if (unexpected.length) fail(`expired token ${refresh}: page errors ` + unexpected.join('; '));
+    await ctx.close();
+  }
 
   // 1. Sync on: one upload per tick, single flight held.
   {

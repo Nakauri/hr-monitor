@@ -5731,9 +5731,11 @@
     if (!statusEl) return;
     statusEl.classList.remove('drive-idle', 'drive-signedin', 'drive-syncing', 'drive-error');
     const tokenExpired = driveAccessToken && Date.now() > driveTokenExpiresAt;
+    // Signed in with an expired access token: refresh silently instead of asking for a tap (Khal, 2026-10-24).
+    if (tokenExpired && !driveTokenError) driveSilentRefresh();
     const effectiveError = driveTokenError && !driveRefreshing;
     const email = window.aortiAuth ? window.aortiAuth.getEmail() : null;
-    if (driveAccessToken && !tokenExpired && !effectiveError) {
+    if (driveAccessToken && (!tokenExpired || driveRefreshing) && !effectiveError) {
       if (!driveSyncOn()) {
         statusEl.textContent = 'Sync off';
         statusEl.classList.add('drive-signedin');
@@ -5792,6 +5794,22 @@
       }
     });
     window.addEventListener('offline', driveUpdateUI);
+  }
+
+  // One silent refresh at a time, at most one automatic attempt a minute; a failure leaves driveTokenError set,
+  // which is the only state that shows "Tap to reconnect Drive".
+  let driveSilentRefreshP = null, driveSilentRefreshAt = 0;
+  function driveSilentRefresh(force) {
+    if (!window.aortiAuth || !window.aortiAuth.isSignedIn()) return Promise.resolve(false);
+    if (driveSilentRefreshP) return driveSilentRefreshP;
+    if (!force && Date.now() - driveSilentRefreshAt < 60000) return Promise.resolve(false);
+    driveSilentRefreshAt = Date.now();
+    driveRefreshing = true;
+    driveSilentRefreshP = window.aortiAuth.getValidAccessToken()
+      .then(() => { syncAuthStateLocal(); driveTokenError = null; return true; })
+      .catch((e) => { driveTokenError = (e && e.message) || 'refresh_failed'; return false; })
+      .finally(() => { driveRefreshing = false; driveSilentRefreshP = null; driveUpdateUI(); });
+    return driveSilentRefreshP;
   }
 
   async function driveSignIn() {
@@ -6833,6 +6851,12 @@
     $('drive-signin').addEventListener('click', async () => {
       if (!window.aortiAuth || !window.aortiAuth.isSignedIn()) {
         driveSignIn();
+        return;
+      }
+      // Signed in but the token failed: a silent refresh first, a full sign-in only if that fails too.
+      if (driveTokenError || Date.now() > driveTokenExpiresAt) {
+        driveTokenError = null;
+        if (!(await driveSilentRefresh(true))) driveSignIn();
         return;
       }
       // Signed in already. On Capacitor with an active native session,
