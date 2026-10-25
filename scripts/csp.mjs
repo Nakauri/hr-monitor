@@ -23,8 +23,13 @@ const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwr
 const REAL = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.csv': 'text/csv', '.webmanifest': 'application/manifest+json' };
 
+// Rule sources compile the way Vercel compiles them (@vercel/routing-utils sourceToRegex: path-to-regexp,
+// strict and case-sensitive). A plain RegExp let "/(index...)?" match "/" here while Vercel sent "/" no CSP.
+const { pathToRegexp } = createRequire(path.join(ROOT, 'relay', 'package.json'))('path-to-regexp');
+export const vercelRegex = (source) => pathToRegexp(source, [], { strict: true, sensitive: true, delimiter: '/' });
+
 function serve(config) {
-  const rules = (config.headers || []).map((r) => ({ re: new RegExp('^' + r.source + '$'), headers: r.headers }));
+  const rules = (config.headers || []).map((r) => ({ re: vercelRegex(r.source), headers: r.headers }));
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let p = decodeURIComponent(url.pathname);
@@ -130,6 +135,13 @@ const MUTANTS = [
     h.value = h.value.replace(/ 'sha256-[^']+'/, '');
     return c;
   })()],
+  // The 10-24 bug: Vercel's matcher never sends "/" a policy from this source.
+  ['landing rule as "/(index(?:\\.html)?)?"', (() => {
+    const c = JSON.parse(JSON.stringify(REAL));
+    c.headers.find((r) => r.source === '/').source = '/(index(?:\\.html)?)?';
+    return c;
+  })()],
+  ['Chart.js pinned to the wrong file', strip('/Chart.js/4.4.0/')],
   ['inline scripts allowed again', (() => {
     const c = JSON.parse(JSON.stringify(REAL));
     for (const rule of c.headers) for (const h of rule.headers) if (h.key === 'Content-Security-Policy') h.value = h.value.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'");

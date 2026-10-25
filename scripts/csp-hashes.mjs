@@ -17,11 +17,17 @@ import { uxDir } from './ux-dir.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 
-// Each page's own rule. cleanUrls means /x and /x.html both reach x.html; "/" is index.html.
+// Each page's own rules. cleanUrls means /x and /x.html both reach x.html; "/" is index.html and needs its
+// own rule: Vercel compiles sources with path-to-regexp, where "/(index...)?" matches "" but never "/".
 const NAMES = ['index', 'hr_monitor', 'hrv_viewer', 'app-home', 'legal', 'changelog', 'new-look', 'overlay'];
-export const PAGES = NAMES.map((n) => [n === 'index' ? '/(index(?:\\.html)?)?' : `/${n}(\\.html)?`, n + '.html']);
+export const PAGES = [['/', 'index.html'], ...NAMES.map((n) => [`/${n}(\\.html)?`, n + '.html'])];
 
-const HOSTS_SCRIPT = "https://cdnjs.cloudflare.com https://accounts.google.com https://cdn.vercel-insights.com";
+// Exact scripts, not whole hosts: a host allowlist lets injected markup pull in any library the CDN serves
+// (an AngularJS gadget on cdnjs, for one). Google's sign-in client lives under /gsi/.
+const CHART = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
+const SORTABLE = 'https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js';
+const INSIGHTS = 'https://cdn.vercel-insights.com/v1/script.js';
+const HOSTS_SCRIPT = `${CHART} ${SORTABLE} https://accounts.google.com/gsi/ ${INSIGHTS}`;
 const BASE = (scriptExtra) => [
   "default-src 'self'",
   `script-src 'self' ${HOSTS_SCRIPT}${scriptExtra}`,
@@ -40,7 +46,7 @@ const BASE = (scriptExtra) => [
 // The overlay is a stream widget other sites may embed: no frame-ancestors, fewer hosts.
 const OVERLAY = (scriptExtra) => [
   "default-src 'self'",
-  `script-src 'self' https://cdnjs.cloudflare.com https://cdn.vercel-insights.com${scriptExtra}`,
+  `script-src 'self' ${CHART} ${INSIGHTS}${scriptExtra}`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
@@ -56,7 +62,7 @@ export async function pageHashes() {
   const page = await browser.newPage();
   const out = {};
   try {
-    for (const [, file] of PAGES) {
+    for (const file of new Set(PAGES.map(([, f]) => f))) {
       const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
       const texts = await page.evaluate((h) => [...new DOMParser().parseFromString(h, 'text/html').querySelectorAll('script:not([src])')].map((s) => s.textContent), html);
       out[file] = [...new Set(texts.map((t) => "'sha256-" + crypto.createHash('sha256').update(t, 'utf8').digest('base64') + "'"))];
