@@ -2121,10 +2121,11 @@
     const content = await driveFetch('files/' + id + '?alt=media');
     const cfg = await content.json();
     if (cfg && typeof cfg.broadcastKey === 'string' && /^[0-9a-f]{16}$/.test(cfg.broadcastKey)) {
-      // A newer link made by the monitor here and not yet in Drive stays; the monitor writes it (hr_monitor_link_at).
+      // A newer link the monitor made here and has not written to Drive yet stays; the monitor writes it.
       const cfgAt = Number.isFinite(cfg.linkAt) && cfg.linkAt > 0 ? cfg.linkAt : 0;
+      const localKey = localStorage.getItem('hr_monitor_broadcast_key');
       const localAt = Number(localStorage.getItem('hr_monitor_link_at')) || 0;
-      if (cfg.broadcastKey !== localStorage.getItem('hr_monitor_broadcast_key') && localAt > cfgAt) return;
+      if (cfg.broadcastKey !== localKey && localStorage.getItem('hr_monitor_link_mine') === localKey && localAt > cfgAt) return;
       localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
       localStorage.setItem('hr_monitor_link_at', String(cfgAt));
       updateWatchLiveUI();

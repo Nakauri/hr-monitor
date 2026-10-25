@@ -794,21 +794,11 @@ CHECKS.U1 = async (src) => {
 const MUTANTS = [
   ['K1', 'old config not given a secret', 'monitor', '    if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt });\n', ''],
   ['K1', 'the owner write drops the link time', 'monitor', 'publishSecret: secret, linkAt: cfgAt });', 'publishSecret: secret });'],
-  ['K1', 'secret written before acceptance (the 10-24 lock-out)', 'monitor', 'const owner = relayAccepted && !keyChanged;', 'const owner = !keyChanged;'],
-  ['K1', 'secret written for another key', 'monitor', 'const owner = relayAccepted && !keyChanged;', 'const owner = relayAccepted;'],
+  ['K1', 'secret written before acceptance (the 10-24 lock-out)', 'monitor', 'const owner = relayAccepted && relayKey === key && !keyChanged;', 'const owner = !keyChanged;'],
+  ['K1', 'secret written for another key', 'monitor', 'const owner = relayAccepted && relayKey === key && !keyChanged;', 'const owner = relayAccepted && relayKey === key;'],
   ['K1', 'the owner adopts a stray config secret', 'monitor', 'const secretChanged = secretOk && !owner && ', 'const secretChanged = secretOk && '],
-  ['K1', 'a new config takes an unaccepted secret', 'monitor', 'relayAccepted || at > 0 ? {', 'true ? {'],
-  ['K1', 'a new link has no time (round 2)', 'monitor', '    localStorage.setItem(LINK_AT, String(Date.now()));\n', ''],
-  ['K1', 'a newer local link is read over (round 2)', 'monitor', '    if (cfg.broadcastKey !== key && at > cfgAt) {', '    if (false) {'],
-  ['K1', 'an older local link overwrites a newer one (round 3)', 'monitor', '    if (cfg.broadcastKey !== key && at > cfgAt) {', '    if (cfg.broadcastKey !== key && at > 0) {'],
-  ['K1', 'the sync weighs what it saw before the click (round 3)', 'monitor',
-    "    const id = await driveFindConfig();\n    const cfg = id ? await (await driveFetch('files/' + id + '?alt=media')).json() : null;\n    // Read after the awaits: a new link made meanwhile, here or in another tab, is what this sync weighs.\n    const key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();",
-    "    const key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();\n    const id = await driveFindConfig();\n    const cfg = id ? await (await driveFetch('files/' + id + '?alt=media')).json() : null;"],
-  ['K1', 'an adopted link keeps the old time', 'monitor', " localStorage.setItem(LINK_AT, String(cfgAt)); }", ' }'],
   ['K1', 'the poll does not recheck a written link', 'monitor', '      configBehind = true;\n', ''],
-  ['K1', 'a new link keeps the old secret', 'monitor', "    localStorage.removeItem('hr_monitor_publish_secret');\n    getOrCreateBroadcastKey();", '    getOrCreateBroadcastKey();'],
   ['K1', 'a failed owner write is never retried', 'monitor', 'if (waiting || Date.now() - configSyncedAt > 300000) driveSyncConfig()', 'if (waiting) driveSyncConfig()'],
-  ['K1', 'the viewer reads an older link back', 'viewer', "      if (cfg.broadcastKey !== localStorage.getItem('hr_monitor_broadcast_key') && localAt > cfgAt) return;\n", ''],
   ['K1', 'acceptance does not sync', 'monitor', "      if (driveAccessToken && driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));\n      return;\n    }\n    if (msg.type === 'publisher_rejected') {", "      return;\n    }\n    if (msg.type === 'publisher_rejected') {"],
   ['K1', 'never shown as taken', 'monitor', '    relayTaken = relayRefused && !keyChanged && !secretChanged && (secretOk || Date.now() - relayRefusedAt > 180000);', '    relayTaken = false;'],
   ['K1', 'taken at once with no owner secret', 'monitor', '(secretOk || Date.now() - relayRefusedAt > 180000)', '(true)'],
@@ -820,6 +810,24 @@ const MUTANTS = [
   ['K1', 'new link not written to Drive', 'monitor', "    driveSyncConfig().catch(e => console.warn('config write:', e));\n    reconnectRelay();", '    reconnectRelay();'],
   ['K1', 'refusal not shown', 'monitor', "      relayRefused = true;\n", ''],
   ['K1', 'socket without the proof', 'monitor', "'?role=publisher&proof=' + getOrCreatePublishSecret()", "'?role=publisher'"],
+  ['K1', 'secret written for a key changed since the acceptance', 'monitor', 'const owner = relayAccepted && relayKey === key && !keyChanged;', 'const owner = relayAccepted && !keyChanged;'],
+  ['K1', 'a new config takes an unproven secret', 'monitor', 'relayAccepted && relayKey === key ? {', 'relayAccepted ? {'],
+  ['K1', 'a new link has no time (round 2)', 'monitor', '    localStorage.setItem(LINK_AT, String(at));\n', ''],
+  ['K1', 'a new link not marked as made here (round 4)', 'monitor', '    localStorage.setItem(LINK_MINE, key);\n', ''],
+  ['K1', 'a link made here is read over (round 2)', 'monitor', '    if (mine && (!valid || (cfg.broadcastKey !== key && at > cfgAt))) {', '    if (false) {'],
+  ['K1', 'an older link here overwrites a newer one (round 3)', 'monitor', '(cfg.broadcastKey !== key && at > cfgAt)', '(cfg.broadcastKey !== key)'],
+  ['K1', 'any newer link here is written, made here or not (round 4)', 'monitor', 'const mine = localStorage.getItem(LINK_MINE) === key;', 'const mine = at > 0;'],
+  ['K1', 'a clock running ahead outranks a click (round 4)', 'monitor', 'const at = Math.max(Date.now(), localLinkAt() + 1);', 'const at = Date.now();'],
+  ['K1', 'a matching key does not keep the config time (round 4)', 'monitor', '      if (cfgAt > at) localStorage.setItem(LINK_AT, String(cfgAt));\n', ''],
+  ['K1', 'an adopted link keeps the old time', 'monitor', '      localStorage.setItem(LINK_AT, String(cfgAt));\n      localStorage.removeItem(LINK_MINE);', '      localStorage.removeItem(LINK_MINE);'],
+  ['K1', 'sign-out keeps a link not yet in Drive (round 4)', 'monitor', '    localStorage.removeItem(LINK_MINE);\n    try { await window.aortiAuth.signOut()', '    try { await window.aortiAuth.signOut()'],
+  ['K1', 'an unreadable config never takes a link made here (round 4)', 'monitor', '(!valid || (cfg.broadcastKey !== key && at > cfgAt))', '(valid && cfg.broadcastKey !== key && at > cfgAt)'],
+  ['K1', 'an unparseable config throws (round 4)', 'monitor', 'try { cfg = JSON.parse(await resp.text()); } catch (e) { cfg = null; }', 'cfg = JSON.parse(await resp.text());'],
+  ['K1', 'an unreadable config is read as a link (round 4)', 'monitor', '    if (!valid) { configSyncedAt = Date.now(); return; }\n', ''],
+  ['K1', 'another tab reconnects on the removal (round 4)', 'monitor', '    if (e.newValue === null) return;\n', ''],
+  ['K1', 'a new link keeps the old secret', 'monitor', '    localStorage.removeItem(\'hr_monitor_publish_secret\');\n    const key = getOrCreateBroadcastKey();', '    const key = getOrCreateBroadcastKey();'],
+  ['K1', 'the sync weighs what it saw before the click (round 3)', 'monitor', '    let cfg = null;\n    if (id) {', '    const key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();\n    let cfg = null;\n    if (id) {'],
+  ['K1', 'the viewer reads a link made here back', 'viewer', '      if (cfg.broadcastKey !== localKey && localStorage.getItem(\'hr_monitor_link_mine\') === localKey && localAt > cfgAt) return;\n', ''],
   ['M1', 'writer drops base', 'store', "        base: prev ? prev.updatedAt : 0,\n", ''],
   ['M1', 'base always 0', 'store', "        base: prev ? prev.updatedAt : 0,", "        base: 0,"],
   ['M2', 'merge ignores other devices', 'store', '      for (const f of s.files.values()) for (const r of (f.records || [])) offer(r);\n', ''],
@@ -883,12 +891,13 @@ CHECKS.K1 = async (src) => {
       },
       fetch: (u, i) => fake.fetch(u, i),
       relayRefused: false, relayRefusedAt: 0, relayAccepted: false, relayTaken: false, watchFrameSrc: 'x',
-      LINK_AT: 'hr_monitor_link_at', configSyncedAt: 0, configPollTimer: null, configBehind: false,
+      LINK_AT: 'hr_monitor_link_at', LINK_MINE: 'hr_monitor_link_mine', configSyncedAt: 0, configPollTimer: null, configBehind: false,
+      relayKey: (ls || {}).hr_monitor_broadcast_key || null, aortiAuth: null,
       setInterval: (fn) => { n.intervals++; n.poll = fn; return 7; }, clearInterval() {},
-      window: { HRMNativeHrSession: { setRelayCredentials: async (o) => { n.creds.push(o); } } },
+      window: { HRMNativeHrSession: { setRelayCredentials: async (o) => { n.creds.push(o); } }, aortiAuth: { signOut: async () => {} } },
       updateStreamingUI() {}, updateWatchMode() {}, refreshRelayStatus() { n.refreshes++; }, reconnectRelay() { n.reconnects++; },
     }, state || {});
-    const ctx = loadPage(src.monitor, ['driveSyncConfig', 'driveWriteConfig', 'driveFindConfig', 'getOrCreatePublishSecret', 'getOrCreateBroadcastKey', 'regenerateBroadcastKey', 'handleRelayMessage', 'pushRelayCredentialsToEngine', 'startConfigPoll', 'localLinkAt'], g);
+    const ctx = loadPage(src.monitor, ['driveSyncConfig', 'driveWriteConfig', 'driveFindConfig', 'getOrCreatePublishSecret', 'getOrCreateBroadcastKey', 'regenerateBroadcastKey', 'handleRelayMessage', 'pushRelayCredentialsToEngine', 'startConfigPoll', 'localLinkAt', 'driveSignOut'], g);
     return { ctx, store, n };
   };
   const cfgOf = (fake) => { const f = fake.byName('.hr-monitor-config.json').filter((x) => !x.trashed); return f.length === 1 ? JSON.parse(f[0].content) : null; };
@@ -1014,7 +1023,7 @@ CHECKS.K1 = async (src) => {
   // Round 3: a link made later on another device wins over this device's older one.
   const later = Number(d.store.get('hr_monitor_link_at')) + 60000;
   fake = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2, linkAt: later });
-  d = monitor(fake, { hr_monitor_broadcast_key: outKey, hr_monitor_publish_secret: S1, hr_monitor_link_at: String(later - 60000) });
+  d = monitor(fake, { hr_monitor_broadcast_key: outKey, hr_monitor_publish_secret: S1, hr_monitor_link_at: String(later - 60000), hr_monitor_link_mine: outKey });
   await d.ctx.driveSyncConfig();
   out.push(['K1 an older link here never overwrites a newer one from another device; it adopts the newer',
     cfgOf(fake).broadcastKey === 'cccccccccccccccc' && d.store.get('hr_monitor_broadcast_key') === 'cccccccccccccccc' && d.store.get('hr_monitor_publish_secret') === S2
@@ -1048,12 +1057,75 @@ CHECKS.K1 = async (src) => {
     });
     return { ctx, store };
   };
-  let v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1 }), { hr_monitor_broadcast_key: 'eeeeeeeeeeeeeeee', hr_monitor_link_at: '1000' });
+  const EK = 'eeeeeeeeeeeeeeee';
+  let v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1 }), { hr_monitor_broadcast_key: EK, hr_monitor_link_at: '1000', hr_monitor_link_mine: EK });
   await v.ctx.driveSyncConfig();
-  const kept = v.store.get('hr_monitor_broadcast_key') === 'eeeeeeeeeeeeeeee';
-  v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1, linkAt: 2000 }), { hr_monitor_broadcast_key: 'eeeeeeeeeeeeeeee', hr_monitor_link_at: '1000' });
+  const kept = v.store.get('hr_monitor_broadcast_key') === EK;
+  v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1, linkAt: 2000 }), { hr_monitor_broadcast_key: EK, hr_monitor_link_at: '1000', hr_monitor_link_mine: EK });
   await v.ctx.driveSyncConfig();
-  out.push(['K1 the viewer keeps a newer local link and adopts a newer Drive one', kept && v.store.get('hr_monitor_broadcast_key') === KA && v.store.get('hr_monitor_link_at') === '2000']);
+  const newer = v.store.get('hr_monitor_broadcast_key') === KA && v.store.get('hr_monitor_link_at') === '2000';
+  v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1 }), { hr_monitor_broadcast_key: EK, hr_monitor_link_at: '1000' });
+  await v.ctx.driveSyncConfig();
+  out.push(['K1 the viewer keeps a newer link made here, and adopts a newer Drive one or one not made here',
+    kept && newer && v.store.get('hr_monitor_broadcast_key') === KA, [kept, newer, v.store.get('hr_monitor_broadcast_key')].join(',')]);
+
+  // Round 4: a config stamped by a clock running ahead never outranks a click here.
+  const ahead = Date.now() + 86400000;
+  fake = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2, linkAt: ahead });
+  d = monitor(fake, { hr_monitor_broadcast_key: 'cccccccccccccccc', hr_monitor_publish_secret: S2 }, { relayRefused: true, relayRefusedAt: Date.now() });
+  await d.ctx.driveSyncConfig();
+  const keptAhead = Number(d.store.get('hr_monitor_link_at')) === ahead;
+  d.ctx.regenerateBroadcastKey();
+  await settle();
+  const clicked = d.store.get('hr_monitor_broadcast_key');
+  await d.ctx.driveSyncConfig();
+  out.push(['K1 a click outranks a config stamped by a clock running ahead, and stays',
+    keptAhead && clicked !== 'cccccccccccccccc' && d.store.get('hr_monitor_broadcast_key') === clicked && cfgOf(fake).broadcastKey === clicked && cfgOf(fake).linkAt > ahead, JSON.stringify(cfgOf(fake))]);
+
+  // Round 4: signing out leaves a link not yet in Drive behind; the next account's key is adopted, not overwritten.
+  fake = withConfig({ broadcastKey: KA, publishSecret: S1 });
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 }, { driveAccessToken: null });
+  d.ctx.regenerateBroadcastKey();
+  await settle();
+  await d.ctx.driveSignOut();
+  const other = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2 });
+  d.ctx.driveFetch = (p, i) => other.fetch(p, i);
+  d.ctx.fetch = (u, i) => other.fetch(u, i);
+  d.ctx.driveAccessToken = 'tok';
+  await d.ctx.driveSyncConfig();
+  out.push(['K1 after a sign-out, another account\'s key is adopted and its config left alone',
+    JSON.stringify(cfgOf(other)) === JSON.stringify({ broadcastKey: 'cccccccccccccccc', publishSecret: S2 }) && d.store.get('hr_monitor_broadcast_key') === 'cccccccccccccccc', JSON.stringify(cfgOf(other))]);
+
+  // Round 4: a key the viewer adopted, with no config in Drive, gets no unproven secret written next to it.
+  for (const [label, state] of [['unaccepted', {}], ['accepted for an older key', { relayAccepted: true, relayKey: 'bbbbbbbbbbbbbbbb' }]]) {
+    fake = new FakeDrive();
+    d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S2, hr_monitor_link_at: '1761400000000' }, state);
+    await d.ctx.driveSyncConfig();
+    out.push(['K1 a key not made here gets a config without a secret (' + label + ')', cfgOf(fake) && cfgOf(fake).broadcastKey === KA && cfgOf(fake).publishSecret === undefined, JSON.stringify(cfgOf(fake))]);
+  }
+
+  // Round 4: an unreadable config is replaced by a link made here, and left alone otherwise.
+  const junk = () => { const f = new FakeDrive(); f.add({ name: '.hr-monitor-config.json', parents: ['root'], content: 'not json {' }); return f; };
+  fake = junk();
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 });
+  d.ctx.regenerateBroadcastKey();
+  await settle();
+  let junkMine = false;
+  try { junkMine = cfgOf(fake).broadcastKey === d.store.get('hr_monitor_broadcast_key'); } catch (e) { /* still junk */ }
+  fake = junk();
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 });
+  let junkThrew = false;
+  try { await d.ctx.driveSyncConfig(); } catch (e) { junkThrew = true; }
+  out.push(['K1 an unreadable config takes a new link made here, is left alone otherwise, and counts as synced',
+    junkMine && !junkThrew && fake.byName('.hr-monitor-config.json')[0].content === 'not json {' && d.ctx.configSyncedAt > 0]);
+
+  // Round 4: an acceptance for the key the socket used never vouches for a key changed since.
+  fake = withConfig({ broadcastKey: KA, publishSecret: S2 });
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 }, { relayAccepted: true, relayKey: 'bbbbbbbbbbbbbbbb' });
+  await d.ctx.driveSyncConfig();
+  out.push(['K1 a stale acceptance adopts the config secret instead of overwriting it',
+    cfgOf(fake).publishSecret === S2 && d.store.get('hr_monitor_publish_secret') === S2, JSON.stringify(cfgOf(fake))]);
+  out.push(['K1 another tab ignores the removal half of a new link', /if \(e\.newValue === null\) return;/.test(src.monitor)]);
 
   // A failed config write is an error, not a silent success.
   fake.failUploads = true;
@@ -1069,7 +1141,7 @@ CHECKS.K1 = async (src) => {
 };
 
 // The L1 mutant also needs the lock call itself to pass through when there is no lock manager.
-const EXTRA = { 'sync without the lock': [['drive', '    async function push(signal, lockOpts) {\n      if (!locks) return \'nolocks\';', '    async function push(signal, lockOpts) {'],
+const EXTRA = { 'the sync weighs what it saw before the click (round 3)': [['monitor', '    // Read after the awaits: a new link made meanwhile, here or in another tab, is what this sync weighs.\n    const key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();\n', '']], 'sync without the lock': [['drive', '    async function push(signal, lockOpts) {\n      if (!locks) return \'nolocks\';', '    async function push(signal, lockOpts) {'],
   ['drive', "      return locks.request('aorti-marks:' + m, lockOpts || {}, (lock) => (lock ? fn() : 'busy'));", "      return locks ? locks.request('aorti-marks:' + m, lockOpts || {}, (lock) => (lock ? fn() : 'busy')) : fn();"]] };
 
 function mutate(name, key, find, replace) {

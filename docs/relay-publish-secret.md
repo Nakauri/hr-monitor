@@ -38,19 +38,27 @@ room owner's:
   adopts it. (Review round 1: writing on first sync let two devices upgrading together lock the account out.)
 - A new config holds only the key until the relay accepts this device.
 - Each link carries when it was made (`linkAt`, in the config and in `hr_monitor_link_at`; 0 for links older
-  than the field). When the device's key and the config's differ, the newer link wins: the device writes its
-  own, or adopts the config's. The device's values are read after Drive answers, so a sync already under way
-  when the user makes a new link weighs the new one. (Review rounds 2 and 3: an acceptance sync, or one in
-  flight across the click, read the old key back; a link left waiting overwrote a newer one made elsewhere.)
+  than the field). A link made on this device is marked (`hr_monitor_link_mine`) until Drive shows it back.
+  Only a marked link is ever written over the config, and only over an older or unreadable one; every other
+  difference adopts the config's. The device's values are read after Drive answers, so a sync already under
+  way when the user makes a new link weighs the new one. (Review rounds 2 to 4: an acceptance sync, or one in
+  flight across the click, read the old key back; a waiting link overwrote a newer one made elsewhere; "newer"
+  without "made here" let a viewer-adopted key or another account's config be overwritten.)
+- A click is stamped later than any link time this device has seen, and a matching config raises the
+  device's time to the config's, so a click always outranks the link it replaces, whatever the clocks say.
+- Signing out drops the mark, so a link made under one account never lands in the next one's config.
+- An unparseable config counts as unreadable: a marked link replaces it, anything else leaves it alone.
+- The relay acceptance only vouches for the key the socket connected with (`relayKey`).
 - The config is reread every minute while refused or until Drive shows back a link this device wrote, and
   every 5 minutes otherwise, so a new link made on another device arrives and a failed write is retried.
-- Another tab of the monitor follows a new key or secret through the `storage` event.
+- Another tab of the monitor follows a new key or secret through the `storage` event, ignoring the removal
+  half of a new link.
 - Refused while holding the config's own pair, or refused for 3 minutes with no owner's secret appearing,
   means someone else claimed the room: the monitor shows "Another device holds this link" with a
   **Make a new link** button.
 - A new link (`regenerateBroadcastKey`) mints a fresh key, a fresh secret and its time, and hands the pair
   to the native engine. Its secret goes into the config at once: no other device knows a room this new.
-- The viewer shares the monitor's storage and follows the same rule: it keeps a newer local link.
+- The viewer shares the monitor's storage and follows the same rule: it keeps a newer link made here.
 - A failed config write throws instead of passing silently.
 
 ## Native
@@ -77,8 +85,10 @@ room owner's:
   is the way to retire a secret.
 - Until the new relay is deployed, the old one forwards anything, verdicts included; deploy the relay with
   the site.
-- Link times come from each device's clock, so a device whose clock runs far behind can lose a tie it
-  should win. New links are rare, deliberate clicks; the fix is another click.
+- Link times come from device clocks. A click always outranks the link it replaced, but two devices making
+  new links within the same stretch rank by their clocks.
+- Drive has no conditional write for media updates, so two devices writing at once is last-writer-wins; the
+  maker's one-minute recheck puts its link back.
 
 ## Checks
 
@@ -88,7 +98,8 @@ room owner's:
   claim surviving hibernation.
 - `scripts/marks-store.test.cjs` K1: no write before acceptance, the two-device race, taken detection, new
   link to Drive and engine with a fresh secret and its time, a new link through a failed write, a sync held
-  in flight across the click, an older write landing late, a sign-in, a newer link from another device, the
+  in flight across the click, an older write landing late, a sign-in, a newer link from another device, a
+  clock running ahead, an account switch, a key the viewer adopted, unreadable configs, a stale acceptance, the
   owner repairing a stray secret, retried writes, failed writes, and the viewer run for real.
 - `scripts/engine-boundary.test.cjs` (reads the Java as text): native saves the secret with the key, refuses
   an empty one, reads the verdict by exact type, reports it, and no native log line, rejection or status
