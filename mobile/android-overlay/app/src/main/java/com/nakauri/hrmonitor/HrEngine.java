@@ -341,10 +341,16 @@ public final class HrEngine implements HrDevice.Callback {
                     if (network.equals(lastActiveNetwork)) { lastActiveNetwork = null; networkWasLost = true; }
                 }
             };
-            android.net.NetworkRequest req = new android.net.NetworkRequest.Builder()
-                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build();
-            cm.registerNetworkCallback(req, networkCallback);
+            // The default network only: with mobile data always on, Wi-Fi and cellular both carry INTERNET, and a
+            // callback for the network not in use forced reopens onto whichever path was dying.
+            if (Build.VERSION.SDK_INT >= 24) {
+                cm.registerDefaultNetworkCallback(networkCallback);
+            } else {
+                android.net.NetworkRequest req = new android.net.NetworkRequest.Builder()
+                    .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build();
+                cm.registerNetworkCallback(req, networkCallback);
+            }
         } catch (Throwable t) {
             Log.w(TAG, "registerNetworkCallback failed: " + t.getMessage());
             networkCallback = null;
@@ -391,6 +397,7 @@ public final class HrEngine implements HrDevice.Callback {
         // Cancel any pending reconnect immediately so a stale onClosed→
         // scheduleRelayReconnect callback can't open a socket we just turned off.
         mainHandler.removeCallbacks(relayReconnectRunnable);
+        relayRetryPending = false;
         if (sessionActive.get() && enabled != prev) {
             mainHandler.post(() -> {
                 if (enabled && broadcastKey != null && !broadcastKey.isEmpty()) {
@@ -426,21 +433,28 @@ public final class HrEngine implements HrDevice.Callback {
 
     private final Runnable relayReconnectRunnable = this::openRelaySocket;
 
-    // Callbacks run on OkHttp's thread and can fire before newWebSocket returns; the lock makes a fast failure wait
-    // for the assignment instead of reading it as stale and dropping its retry (overlay dark until a toggle, 10-25).
+    // Callbacks run on OkHttp's thread and may in principle fire before newWebSocket returns; the lock makes them
+    // wait for the assignment rather than read a live socket as stale.
     private final Object relayLock = new Object();
     private boolean isCurrentRelay(WebSocket ws) { synchronized (relayLock) { return ws == relaySocket; } }
 
-    // Safety net under the backoff: down with no attempt for this long means a retry was lost, so reopen once.
+    // readTimeout(0) also covers the TLS handshake and the upgrade read, and pings start only after the upgrade, so
+    // a handshake on a path that died after the TCP connect waits forever with no callback: the 10-25 dark overlay.
+    // Cancelling it routes the stall through onFailure, which logs and backs off.
+    static final long RELAY_HANDSHAKE_MS = 20_000L;
+    // Safety net under the backoff: down, no retry queued and no attempt for this long, so reopen once.
     static final long RELAY_WATCHDOG_MS = 120_000L;
     private volatile long relayLastOpenAtMs = 0;
-    static boolean relayWatchdogDue(boolean broadcast, boolean hasKey, boolean live, long now, long lastOpenAtMs) {
-        return broadcast && hasKey && !live && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;
+    private volatile boolean relayRetryPending = false;
+    static boolean relayWatchdogDue(boolean broadcast, boolean hasKey, boolean live, boolean retryPending, long now, long lastOpenAtMs) {
+        return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;
     }
+    private boolean hasBroadcastKey() { return broadcastKey != null && !broadcastKey.isEmpty(); }
 
     private void scheduleRelayReconnect() {
         if (!sessionActive.get() || !broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
+        relayRetryPending = true;
         relayReconnectAttempts++;
         long delay = nextRelayBackoffMs();
         Log.i(TAG, "Relay reconnect scheduled in " + delay + "ms (attempt " + relayReconnectAttempts + ")");
@@ -454,12 +468,12 @@ public final class HrEngine implements HrDevice.Callback {
     }
 
     private void openRelaySocket() {
-        if (broadcastKey == null) return;
+        if (!hasBroadcastKey()) return;
         if (!broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
         relayRefused = false;
-        relayLastOpenAtMs = System.currentTimeMillis();
+        relayLastOpenAtMs = android.os.SystemClock.elapsedRealtime();
         Request req = new Request.Builder()
             .url("wss://hr-relay.nakauri.workers.dev/parties/main/" + broadcastKey + "?role=publisher"
                 + (publishSecret != null && publishSecret.matches("[0-9a-f]{32}") ? "&proof=" + publishSecret : ""))
@@ -482,6 +496,12 @@ public final class HrEngine implements HrDevice.Callback {
                 relayReconnectAttempts = 0;
                 Log.i(TAG, "Relay open");
                 emitState();
+            }
+            // A close the relay starts arrives here; onClosed follows only once we answer it.
+            @Override public void onClosing(WebSocket ws, int code, String reason) {
+                if (!isCurrentRelay(ws)) return;
+                relayLive.set(false);
+                try { ws.close(1000, null); } catch (Throwable ignored) {}
             }
             @Override public void onClosed(WebSocket ws, int code, String reason) {
                 if (!isCurrentRelay(ws)) return;
@@ -508,10 +528,17 @@ public final class HrEngine implements HrDevice.Callback {
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
         }
+        final WebSocket opening = relaySocket;
+        mainHandler.postDelayed(() -> {
+            if (!isCurrentRelay(opening) || relayLive.get()) return;
+            Log.w(TAG, "Relay handshake stalled " + RELAY_HANDSHAKE_MS + "ms, cancelling");
+            opening.cancel();
+        }, RELAY_HANDSHAKE_MS);
     }
 
     private void closeRelaySocket() {
         mainHandler.removeCallbacks(relayReconnectRunnable);
+        relayRetryPending = false;
         // Fire presence-end for this senderId before tearing down the socket.
         // Without this the relay's activeBroadcasters map keeps the id around
         // until its 15 s idle eviction fires; users see ghost "live recording"
@@ -524,8 +551,9 @@ public final class HrEngine implements HrDevice.Callback {
         }
         WebSocket old;
         synchronized (relayLock) { old = relaySocket; relaySocket = null; }
+        // A socket that never opened has no writer to send a close, so only cancel frees its thread and connection.
         if (old != null) {
-            try { old.close(1000, "session stop"); } catch (Exception ignored) {}
+            try { if (relayLive.get()) old.close(1000, "session stop"); else old.cancel(); } catch (Exception ignored) {}
         }
         relayLive.set(false);
     }
@@ -834,10 +862,10 @@ public final class HrEngine implements HrDevice.Callback {
                 }
             }
             postSegmentTick();
-            if (relayWatchdogDue(broadcastEnabled, broadcastKey != null, relayLive.get(), now, relayLastOpenAtMs)) {
-                Log.w(TAG, "Relay watchdog: down with no attempt for " + (now - relayLastOpenAtMs) + "ms, reopening");
+            long up = android.os.SystemClock.elapsedRealtime();
+            if (relayWatchdogDue(broadcastEnabled, hasBroadcastKey(), relayLive.get(), relayRetryPending, up, relayLastOpenAtMs)) {
+                Log.w(TAG, "Relay watchdog: down with no attempt for " + (up - relayLastOpenAtMs) + "ms, reopening");
                 NativeHrService.logLifecycle(appCtx, "relay_watchdog_reopen");
-                relayReconnectAttempts = 0;
                 openRelaySocket();
             }
             // Re-check before re-posting: sessionActive may have flipped during this run.

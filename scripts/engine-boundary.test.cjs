@@ -476,20 +476,32 @@ function step2Checks() {
         }
       }
       check('no native log line, rejection or status field carries the relay URL unredacted', leaks.length === 0, leaks.join(' | '));
-      // A relay failure that fired before newWebSocket returned was read as stale and its retry dropped: the
-      // overlay stayed dark for good while the session kept recording (10-25, fixed only by a broadcast toggle).
+      // 10-25: after a network blip the relay stayed dark for good while the session kept recording, with no
+      // failure or retry logged, until a broadcast toggle. readTimeout(0) lets a handshake on a dead path wait forever.
       const relayOpen = E.slice(E.indexOf('private void openRelaySocket()'), E.indexOf('private void closeRelaySocket()'));
-      check('relay callbacks wait for the socket assignment, so a fast failure keeps its retry',
+      const relayClose = E.slice(E.indexOf('private void closeRelaySocket()'), E.indexOf('private void closeRelaySocket()') + 1600);
+      check('relay callbacks compare under the lock that guards the assignment',
         /synchronized \(relayLock\) \{\s*relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
-        && (relayOpen.match(/if \(!isCurrentRelay\(ws\)/g) || []).length === 4 && !/ws != relaySocket/.test(E)
+        && (relayOpen.match(/if \(!isCurrentRelay\(ws\)/g) || []).length === 5 && !/ws != relaySocket/.test(E)
         && /synchronized \(relayLock\) \{ return ws == relaySocket; \}/.test(E));
+      check('a relay handshake still not open after 20 s is cancelled, so onFailure logs and backs off',
+        /RELAY_HANDSHAKE_MS = 20_000L/.test(E)
+        && /mainHandler\.postDelayed\(\(\) -> \{\s*if \(!isCurrentRelay\(opening\) \|\| relayLive\.get\(\)\) return;[\s\S]{0,160}opening\.cancel\(\);\s*\}, RELAY_HANDSHAKE_MS\);/.test(relayOpen));
+      check('closing a relay socket that never opened cancels it',
+        /if \(relayLive\.get\(\)\) old\.close\(1000, "session stop"\); else old\.cancel\(\);/.test(relayClose));
+      check('a close the relay starts marks the link down and is answered',
+        /public void onClosing\(WebSocket ws, int code, String reason\) \{\s*if \(!isCurrentRelay\(ws\)\) return;\s*relayLive\.set\(false\);\s*try \{ ws\.close\(1000, null\); \}/.test(relayOpen));
       const hb = E.slice(E.indexOf('private final Runnable heartbeatRunnable'), E.indexOf('private final Runnable heartbeatRunnable') + 2500);
-      check('the heartbeat reopens a relay left down with no attempt for 2 min',
-        /if \(relayWatchdogDue\(broadcastEnabled, broadcastKey != null, relayLive\.get\(\), now, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocket\(\)/.test(hb)
-        && /RELAY_WATCHDOG_MS = 120_000L/.test(E) && /return broadcast && hasKey && !live && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(E)
-        && /relayLastOpenAtMs = System\.currentTimeMillis\(\);/.test(relayOpen));
-      check('the same network coming back reconnects a down relay',
-        /boolean back = networkWasLost && !relayLive\.get\(\);/.test(E) && /if \(\(changed \|\| back\) && sessionActive\.get\(\) && broadcastEnabled\)/.test(E)
+      check('the heartbeat reopens a relay left down, no retry queued, no attempt for 2 min',
+        /if \(relayWatchdogDue\(broadcastEnabled, hasBroadcastKey\(\), relayLive\.get\(\), relayRetryPending, up, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocket\(\)/.test(hb)
+        && !/if \(relayWatchdogDue\([^{]*\{[^}]*relayReconnectAttempts = 0/.test(hb)
+        && /RELAY_WATCHDOG_MS = 120_000L/.test(E) && /return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(E)
+        && /relayLastOpenAtMs = android\.os\.SystemClock\.elapsedRealtime\(\);/.test(relayOpen)
+        && /relayRetryPending = true;/.test(E) && /removeCallbacks\(relayReconnectRunnable\);\s*relayRetryPending = false;/.test(relayClose)
+        && /if \(!hasBroadcastKey\(\)\) return;/.test(relayOpen));
+      check('the network callback follows the default network, and its return reconnects a down relay',
+        /cm\.registerDefaultNetworkCallback\(networkCallback\);/.test(E)
+        && /boolean back = networkWasLost && !relayLive\.get\(\);/.test(E) && /if \(\(changed \|\| back\) && sessionActive\.get\(\) && broadcastEnabled\)/.test(E)
         && /lastActiveNetwork = null; networkWasLost = true;/.test(E));
       check('native reads the verdict by its exact type, not a substring',
         /optString\("type", ""\)/.test(onMsg) && /"publisher_rejected"\.equals\(type\)/.test(onMsg) && !/text\.contains\("\\"publisher_/.test(onMsg));
