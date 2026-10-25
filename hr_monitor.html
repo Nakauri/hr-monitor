@@ -2984,8 +2984,8 @@
     localStorage.setItem(LINK_AT, String(at));
     localStorage.setItem(LINK_MINE, key);
     if (acct) localStorage.setItem(LINK_ACCOUNT, acct);
-    // Signed in, id not known yet: bound to this login's email, so only this login's sync claims it.
-    else if (acct === null && driveAuthEmail) localStorage.setItem(LINK_ACCOUNT, 'email:' + driveAuthEmail);
+    // Signed in, id not known yet: bound to this login's tag, so only this login's sync claims it.
+    else if (acct === null && driveLoginTag) localStorage.setItem(LINK_ACCOUNT, driveLoginTag);
     else if (acct === null) localStorage.removeItem(LINK_ACCOUNT);
     // Waiting on Drive from the click on, so a sync dropped before it writes still leaves the one-minute recheck.
     configBehind = true;
@@ -5850,6 +5850,14 @@
   let driveTokenError = null;
   let driveFolderId = null;
   let driveAuthEmail = null;
+  // This login's tag: its email, or a random tag when the record has none; cleared on sign-out, so a click made
+  // before the account id is known binds to the login that made it and no other.
+  let driveLoginTag = null;
+  function setDriveLogin(record) {
+    if (!record) { driveAuthEmail = null; driveLoginTag = null; return; }
+    if (record.email) { driveAuthEmail = record.email; driveLoginTag = 'email:' + record.email; }
+    else if (!driveLoginTag) driveLoginTag = 'login:' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
   let driveUploadInFlight = null;
   let driveFileIdForSession = null;
   let driveRefreshing = false;
@@ -5912,7 +5920,7 @@
   function initDriveUI() {
     if (!window.aortiAuth) { setTimeout(initDriveUI, 120); return; }
     // The account signed in at load, so the first sign-in over it is seen as a change of account too.
-    try { driveAuthEmail = window.aortiAuth.getEmail ? window.aortiAuth.getEmail() : null; } catch (e) { driveAuthEmail = null; }
+    try { setDriveLogin(window.aortiAuth.getCachedToken ? window.aortiAuth.getCachedToken() : null); } catch (e) { setDriveLogin(null); }
     window.aortiAuth.onAuthChange((record) => {
       syncAuthStateLocal();
       driveTokenError = null;
@@ -5923,7 +5931,7 @@
         driveFileIdForSession = null;
         driveAccountCache = null;
       }
-      if (record && record.email) driveAuthEmail = record.email;
+      setDriveLogin(record);
       if (record) {
         if (!driveFolderId) driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
       } else {
@@ -6035,13 +6043,13 @@
   async function driveEnsureFolder() {
     // Pinned to the login it started under: a lookup that lands after another account signed in is dropped,
     // never kept as that account's folder.
-    const email = driveAuthEmail;
+    const login = driveLoginTag;
     // Look for existing folder named DRIVE_FOLDER_NAME owned by this app (drive.file scope)
     const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
     // Oldest root wins, id breaking ties: the same pick as the viewer and the phone's uploaders.
     const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
     const data = await resp.json();
-    if (driveAuthEmail !== email || !driveAccessToken) return;
+    if (driveLoginTag !== login || !driveAccessToken) return;
     if (data.files && data.files.length) {
       const older = (a, b) => {
         const ta = Date.parse(a.createdTime) || Infinity, tb = Date.parse(b.createdTime) || Infinity;
@@ -6055,7 +6063,7 @@
         body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
       });
       const cd = await create.json();
-      if (driveAuthEmail !== email || !driveAccessToken) return;
+      if (driveLoginTag !== login || !driveAccessToken) return;
       driveFolderId = cd.id;
     }
     driveUpdateUI();
@@ -6096,7 +6104,7 @@
     // A key from before the account field belongs to the first account that syncs it, as it always did; one made
     // before its login's id was known belongs to that login only, and reads as foreign under any other.
     const bound = localStorage.getItem(LINK_ACCOUNT);
-    if (!bound || (driveAuthEmail && bound === 'email:' + driveAuthEmail)) localStorage.setItem(LINK_ACCOUNT, acct);
+    if (!bound || (driveLoginTag && bound === driveLoginTag)) localStorage.setItem(LINK_ACCOUNT, acct);
     const foreign = localStorage.getItem(LINK_ACCOUNT) !== acct;
     const valid = !!cfg && typeof cfg.broadcastKey === 'string' && /^[0-9a-f]{16}$/.test(cfg.broadcastKey);
     const cfgAt = valid && Number.isFinite(cfg.linkAt) && cfg.linkAt > 0 ? cfg.linkAt : 0;

@@ -62,8 +62,9 @@ room owner's:
 - For the same key, a different secret in the config is adopted only once the relay refused this device's;
   before the verdict this device may be the owner, and once accepted it repairs the config instead. (Review
   round 8: an owner whose sync beat the verdict threw its own secret away and lost the room.)
-- A click while signed in but before the account's id is known binds the link to that login's email, so only
-  that login's sync claims it and any other login reads it as foreign. A click signed out keeps the last
+- A click while signed in but before the account's id is known binds the link to that login's tag (its email,
+  or a random tag when the record has none; cleared on sign-out), so only that login's sync claims it and any
+  other login reads it as foreign. The folder lookup is pinned to the same tag. A click signed out keeps the last
   account. (Review round 9: an unbound click was claimed by the next login and overwrote its link.)
 - A tab following another tab's change drops its old refusal (its new socket gets its own verdict), and a
   socket is opened only after the pending retry is cleared and any open socket closed. The link counts as waiting on
@@ -116,6 +117,11 @@ room owner's:
 - Signing out keeps the secret, because a signed-out monitor still broadcasts to its own room; a new link
   is the way to retire a secret.
 - Two accounts an older build already pointed at one room keep sharing it until either makes a new link.
+- An account whose email changes between a click and its first sync reads that click as foreign and adopts
+  its config's link; make the link again. Another login with no email that signs in over one with no email,
+  with no sign-out between, cannot be told apart.
+- Diagnostics' Purge clears every stored value, the relay credentials included; the account adopts its
+  config again, but a new link Drive had not taken yet is gone.
 - This device holds one link at a time: switching to another account before a new link reached Drive adopts
   that account's link, and the new one is gone from this device. Make it again under the first account.
 - Until the new relay is deployed, the old one forwards anything, verdicts included; deploy the relay with

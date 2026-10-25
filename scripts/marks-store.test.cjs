@@ -609,7 +609,7 @@ CHECKS.R3 = async (src) => {
     function () { globalThis.__get = () => driveFolderId; });
   await v.driveEnsureFolder();
   const mf = fx();
-  const m = loadPage(src.monitor, ['driveEnsureFolder'], { driveFetch: (p, i) => mf.fetch(p, i), driveSyncConfig: async () => {}, startConfigPoll() {}, driveUpdateUI() {}, driveAuthEmail: null, driveAccessToken: 'tok', DRIVE_FOLDER_NAME: 'HR Monitor Sessions' },
+  const m = loadPage(src.monitor, ['driveEnsureFolder'], { driveFetch: (p, i) => mf.fetch(p, i), driveSyncConfig: async () => {}, startConfigPoll() {}, driveUpdateUI() {}, driveAuthEmail: null, driveLoginTag: null, driveAccessToken: 'tok', DRIVE_FOLDER_NAME: 'HR Monitor Sessions' },
     function () { globalThis.__get = () => driveFolderId; });
   await m.driveEnsureFolder();
   out.push(['R3 viewer and monitor root pickers agree on the oldest root, id breaking the tie', v.__get() === 'r-a' && m.__get() === 'r-a', v.__get() + ' / ' + m.__get()]);
@@ -830,14 +830,16 @@ const MUTANTS = [
   ['K1', 'the viewer keeps a stale watch key (round 7)', 'viewer', '{ localStorage.removeItem(VIEWER_WATCH_KEY); return; }', '{ return; }'],
   ['K1', 'a sync spanning an account change writes (round 7)', 'monitor', '    if (driveFolderId !== folder || driveAccessToken !== token) return;\n', ''],
   ['K1', 'a config with no link time is overwritten (round 7)', 'monitor', ' && (cfgAt > 0 || mine);', ';'],
-  ['K1', 'the account at load is unknown (round 7)', 'monitor', 'try { driveAuthEmail = window.aortiAuth.getEmail ? window.aortiAuth.getEmail() : null; } catch (e) { driveAuthEmail = null; }', ''],
+  ['K1', 'the account at load is unknown (round 7)', 'monitor', 'try { setDriveLogin(window.aortiAuth.getCachedToken ? window.aortiAuth.getCachedToken() : null); } catch (e) { setDriveLogin(null); }', ''],
   ['K1', 'a key from another account is treated as this one\'s (round 5)', 'monitor', 'const foreign = localStorage.getItem(LINK_ACCOUNT) !== acct;', 'const foreign = false;'],
   ['K1', 'a new account inherits the last key (round 5)', 'monitor', '    if (foreign && !valid) {', '    if (false) {'],
   ['K1', 'a device owns another account\'s room (round 5)', 'monitor', '!keyChanged && !foreign;', '!keyChanged;'],
   ['K1', 'an adopted key keeps the old account (round 5)', 'monitor', '    localStorage.setItem(LINK_ACCOUNT, acct);\n    // The config takes', '    // The config takes'],
-  ['K1', 'a key from before the account field is never bound (round 5)', 'monitor', "if (!bound || (driveAuthEmail && bound === 'email:' + driveAuthEmail)) localStorage.setItem(LINK_ACCOUNT, acct);", ''],
-  ['K1', 'a login-bound click is claimed by another login (round 9)', 'monitor', "(driveAuthEmail && bound === 'email:' + driveAuthEmail)", "bound.startsWith('email:')"],
-  ['K1', 'a click with an unknown id is left unbound (round 9)', 'monitor', "    else if (acct === null && driveAuthEmail) localStorage.setItem(LINK_ACCOUNT, 'email:' + driveAuthEmail);\n", ''],
+  ['K1', 'a key from before the account field is never bound (round 5)', 'monitor', 'if (!bound || (driveLoginTag && bound === driveLoginTag)) localStorage.setItem(LINK_ACCOUNT, acct);', ''],
+  ['K1', 'a login-bound click is claimed by another login (round 9)', 'monitor', '(driveLoginTag && bound === driveLoginTag)', "(/^(email|login):/.test(bound))"],
+  ['K1', 'a click with an unknown id is left unbound (round 9)', 'monitor', '    else if (acct === null && driveLoginTag) localStorage.setItem(LINK_ACCOUNT, driveLoginTag);\n', ''],
+  ['K1', 'a sign-out keeps the old login tag (round 10)', 'monitor', '    if (!record) { driveAuthEmail = null; driveLoginTag = null; return; }', '    if (!record) return;'],
+  ['K1', 'a login with no email gets no tag (round 10)', 'monitor', "    else if (!driveLoginTag) driveLoginTag = 'login:' + Math.random().toString(36).slice(2) + Date.now().toString(36);", ''],
   ['K1', 'another tab keeps a stale refusal (round 9)', 'monitor', '    relayRefused = false; relayRefusedAt = 0; relayTaken = false;\n    reconnectRelay();', '    reconnectRelay();'],
   ['K1', 'a second open leaves the first socket in the old room (round 9)', 'monitor', '      try { old.close(); } catch (e) {}\n', ''],
   ['K1', 'an unreadable config never takes a link made here (round 4)', 'monitor', '(mine && !valid)', 'false'],
@@ -916,7 +918,7 @@ CHECKS.K1 = async (src) => {
       relayRefused: false, relayRefusedAt: 0, relayAccepted: false, relayTaken: false, watchFrameSrc: 'x',
       LINK_AT: 'hr_monitor_link_at', LINK_MINE: 'hr_monitor_link_mine', LINK_ACCOUNT: 'hr_monitor_link_account', driveAccountCache: null,
       configSyncedAt: 0, configPollTimer: null, configBehind: false,
-      relayKey: (ls || {}).hr_monitor_broadcast_key || null, aortiAuth: null, driveAuthEmail: 'a@example.com',
+      relayKey: (ls || {}).hr_monitor_broadcast_key || null, aortiAuth: null, driveAuthEmail: 'a@example.com', driveLoginTag: 'email:a@example.com',
       setInterval: (fn) => { n.intervals++; n.poll = fn; return 7; }, clearInterval() {},
       window: { HRMNativeHrSession: { setRelayCredentials: async (o) => { n.creds.push(o); } }, aortiAuth: { signOut: async () => {} } },
       updateStreamingUI() {}, updateWatchMode() {}, refreshRelayStatus() { n.refreshes++; }, reconnectRelay() { n.reconnects++; },
@@ -1075,6 +1077,7 @@ CHECKS.K1 = async (src) => {
   const switchTo = (dd, drive, token) => {
     dd.ctx.driveFetch = (p, i) => drive.fetch(p, i); dd.ctx.fetch = (u, i) => drive.fetch(u, i); dd.ctx.driveAccessToken = token;
     dd.ctx.driveAuthEmail = (drive.permissionId || 'perm-1') + '@example.com';
+    dd.ctx.driveLoginTag = 'email:' + dd.ctx.driveAuthEmail;
   };
   // Round 7: the viewer reads the account's key into its own slot and never writes the monitor's credentials
   // (two pages writing them under different rules put one account's link into another's config).
@@ -1126,8 +1129,8 @@ CHECKS.K1 = async (src) => {
   await d.ctx.driveSyncConfig();
   out.push(['K1 a config with no link time is adopted by a device whose link was not made here',
     JSON.stringify(cfgOf(fake)) === JSON.stringify({ broadcastKey: 'cccccccccccccccc', publishSecret: S2 }) && d.store.get('hr_monitor_broadcast_key') === 'cccccccccccccccc', JSON.stringify(cfgOf(fake))]);
-  out.push(['K1 the monitor knows the account signed in at load',
-    /driveAuthEmail = window\.aortiAuth\.getEmail \? window\.aortiAuth\.getEmail\(\) : null;/.test(src.monitor)]);
+  out.push(['K1 the monitor knows the login signed in at load',
+    /try \{ setDriveLogin\(window\.aortiAuth\.getCachedToken \? window\.aortiAuth\.getCachedToken\(\) : null\); \}/.test(src.monitor)]);
 
   // Round 4: a config stamped by a clock running ahead never outranks a click here.
   const ahead = Date.now() + 86400000;
@@ -1324,7 +1327,7 @@ CHECKS.K1 = async (src) => {
   // it and no other login's sync can claim it.
   fake = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2, linkAt: 3 });
   fake.permissionId = 'perm-2';
-  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_account: 'perm-1' }, { driveAuthEmail: 'perm-2@example.com' });
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_account: 'perm-1' }, { driveAuthEmail: 'perm-2@example.com', driveLoginTag: 'email:perm-2@example.com' });
   d.ctx.regenerateBroadcastKey();
   const unboundKey = d.store.get('hr_monitor_broadcast_key');
   const loginBound = d.store.get('hr_monitor_link_account') === 'email:perm-2@example.com';
@@ -1333,7 +1336,7 @@ CHECKS.K1 = async (src) => {
     loginBound && d.store.get('hr_monitor_broadcast_key') === unboundKey && cfgOf(fake).broadcastKey === unboundKey && d.store.get('hr_monitor_link_account') === 'perm-2', JSON.stringify(cfgOf(fake))]);
   fake = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2, linkAt: 3 });
   fake.permissionId = 'perm-2';
-  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_account: 'perm-1' }, { driveAuthEmail: 'perm-2@example.com', driveAccessToken: null });
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_account: 'perm-1' }, { driveAuthEmail: 'perm-2@example.com', driveLoginTag: 'email:perm-2@example.com', driveAccessToken: null });
   d.ctx.driveAccessToken = 'tok';
   d.ctx.regenerateBroadcastKey();
   const yDrive = withConfig({ broadcastKey: 'dddddddddddddddd', publishSecret: S1, linkAt: 4 });
@@ -1342,11 +1345,33 @@ CHECKS.K1 = async (src) => {
   await settle(); await d.ctx.driveSyncConfig();
   out.push(['K1 another login\'s sync never claims a click bound to the first login',
     JSON.stringify(cfgOf(yDrive)) === JSON.stringify({ broadcastKey: 'dddddddddddddddd', publishSecret: S1, linkAt: 4 }) && d.store.get('hr_monitor_broadcast_key') === 'dddddddddddddddd', JSON.stringify(cfgOf(yDrive))]);
+  // Round 10: a login whose record has no email gets a random tag, so another login still reads its click as foreign.
+  fake = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2, linkAt: 3 });
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_account: 'perm-1' }, { driveAuthEmail: null, driveLoginTag: 'login:first', driveAccessToken: null });
+  d.ctx.driveAccessToken = 'tok';
+  d.ctx.regenerateBroadcastKey();
+  const tagged = d.store.get('hr_monitor_link_account') === 'login:first';
+  const zDrive = withConfig({ broadcastKey: 'eeeeeeeeeeeeeeee', publishSecret: S2, linkAt: 5 });
+  zDrive.permissionId = 'perm-4';
+  switchTo(d, zDrive, 'tok-z');
+  d.ctx.driveAuthEmail = null; d.ctx.driveLoginTag = 'login:second';
+  await settle(); await d.ctx.driveSyncConfig();
+  out.push(['K1 a click under a login with no email is foreign to the next login',
+    tagged && JSON.stringify(cfgOf(zDrive)) === JSON.stringify({ broadcastKey: 'eeeeeeeeeeeeeeee', publishSecret: S2, linkAt: 5 }), JSON.stringify(cfgOf(zDrive))]);
+  const login = loadPage(src.monitor, ['setDriveLogin'], { driveAuthEmail: 'a@example.com', driveLoginTag: 'email:a@example.com' });
+  login.setDriveLogin(null);
+  const cleared = login.driveAuthEmail === null && login.driveLoginTag === null;
+  login.setDriveLogin({ email: null });
+  const randomTag = /^login:/.test(login.driveLoginTag || '');
+  const firstTag = login.driveLoginTag;
+  login.setDriveLogin({ email: null });
+  out.push(['K1 a sign-out clears the login tag; a login with no email gets one random tag and keeps it',
+    cleared && randomTag && login.driveLoginTag === firstTag, String(login.driveLoginTag)]);
   out.push(['K1 a tab following another tab\'s change drops its old refusal, and one socket replaces the last',
     /relayRefused = false; relayRefusedAt = 0; relayTaken = false;\s*reconnectRelay\(\);/.test(src.monitor)
     && /if \(relaySocket && relaySocket\.readyState !== WebSocket\.CLOSED\) \{\s*const old = relaySocket;\s*relaySocket = null;\s*try \{ old\.close\(\); \} catch \(e\) \{\}/.test(src.monitor)]);
   out.push(['K1 a folder lookup that lands after another account signed in is dropped',
-    (src.monitor.match(/if \(driveAuthEmail !== email \|\| !driveAccessToken\) return;/g) || []).length === 2]);
+    (src.monitor.match(/if \(driveLoginTag !== login \|\| !driveAccessToken\) return;/g) || []).length === 2]);
   out.push(['K1 settings sync never maps the broadcast key', !/lsKey: 'hr_monitor_broadcast_key'/.test(src.settings || require('fs').readFileSync(require('path').join(__dirname, '..', 'settings.js'), 'utf8'))]);
   out.push(['K1 another tab ignores the removal half of a new link', /if \(e\.newValue === null\) return;/.test(src.monitor)]);
 
