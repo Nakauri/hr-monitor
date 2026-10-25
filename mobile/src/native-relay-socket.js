@@ -36,7 +36,7 @@
   }
   markerSet(true);
 
-  const RELAY_URL_TEST = //parties/main//;
+  const RELAY_URL_TEST = /\/parties\/main\//;
   const OriginalWebSocket = window.WebSocket;
 
   function newSocketId() {

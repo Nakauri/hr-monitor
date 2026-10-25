@@ -12,7 +12,13 @@ const path = require('path');
 
 const TARGETS = ['hr_monitor.html', 'hrv_viewer.html', 'overlay.html', 'index.html', 'legal.html', 'app-home.html', 'changelog.html', 'new-look.html'];
 // Shared scripts loaded by those pages; checked with node --check.
-const JS_TARGETS = ['ui.js', 'diagnostics.js', 'widget.js', 'assets/landing/site.js'];
+// Every shipped script, found by listing, so a new file is never skipped. mobile/src was missing until
+// 2026-10-24, when native-relay-socket.js had shipped unparseable for a day (a regex lost its backslashes).
+const JS_TARGETS = [
+  ...fs.readdirSync(path.resolve(__dirname, '..')).filter((f) => f.endsWith('.js')),
+  'assets/landing/site.js',
+  ...fs.readdirSync(path.resolve(__dirname, '..', 'mobile', 'src')).filter((f) => f.endsWith('.js')).map((f) => 'mobile/src/' + f),
+];
 // hr_monitor.html has a known false-positive: a CSS comment around line ~176
 // contains the literal text "<script>" which the regex treats as a script
 // open. The block it captures is CSS, not JS, so it fails to parse. That
