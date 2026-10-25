@@ -56,10 +56,15 @@ room owner's:
   that account a fresh link of its own when it has none; it never writes, owns or seeds the other account's
   key or secret. Signing back into the same account keeps a link Drive had not taken yet. (Review round 5.)
 - Key and secret are stored secret first, so another tab that reconnects on each change never reaches a new
-  room holding a different secret. A key adopted with no secret beside it takes a fresh secret (the viewer
-  drops the old one), never the secret of the room left behind.
-- Another account signing in over this one (a reconnect lets the user pick any account) drops the old
-  account's folder and account id. The account id is asked once per token, shared by overlapping syncs.
+  room holding a different secret. A key adopted with no secret beside it takes a fresh secret, never the
+  secret of the room left behind.
+- Another account signing in over this one (a reconnect lets the user pick any account, and the account
+  signed in at load counts) drops the old account's folder and account id. The account id is asked once per
+  token, shared by overlapping syncs.
+- A sync is pinned to the folder and login it started under; if either changes during a Drive call it stops
+  without writing, and the next sync starts over. (Review round 7: a sync spanning an account switch wrote
+  the first account's key into the second's config.)
+- A config from before link times is adopted, never overwritten, unless this device just made a link.
 - An unparseable config counts as unreadable: a marked link replaces it, anything else leaves it alone.
 - The relay acceptance only vouches for the key the socket connected with (`relayKey`).
 - The config is reread every minute while refused or until Drive shows back a link this device wrote, and
@@ -71,8 +76,10 @@ room owner's:
   **Make a new link** button.
 - A new link (`regenerateBroadcastKey`) mints a fresh key, a fresh secret and its time, and hands the pair
   to the native engine. Its secret goes into the config at once: no other device knows a room this new.
-- The viewer shares the monitor's storage and follows the same rule: it keeps a newer link made here, and
-  adopts a key together with its secret.
+- The monitor alone writes the relay credentials (key, secret, link time, account). The viewer shares its
+  storage but only reads: it keeps the account's key from the config in its own slot (`hr_viewer_watch_key`,
+  cleared when the account has no config) for Watch live. (Review round 7: two pages writing the same
+  credentials under different rules put one account's link into another's config.)
 - A failed config write throws instead of passing silently.
 
 ## Native
@@ -104,8 +111,8 @@ room owner's:
   new links within the same stretch rank by their clocks.
 - Drive has no conditional write for media updates, so two devices writing at once is last-writer-wins; the
   device holding the newer link writes it back on its next sync (one minute while it waits on Drive).
-- The viewer keeps its folder when another account signs in over this one without a sign-out; it only reads
-  the config, so it finds nothing there and writes nothing.
+- The viewer keeps its folder when another account signs in over this one without a sign-out; it only reads,
+  so it finds nothing there and Watch live falls back to the monitor's key.
 
 ## Checks
 
@@ -117,8 +124,9 @@ room owner's:
   link to Drive and engine with a fresh secret and its time, a new link through a failed write, a sync held
   in flight across the click, an older write landing late, a sign-in, a newer link from another device, a
   clock running ahead, account switches (sign-out, new login, a new account with no config, a shared room,
-  back to the same account), a key the viewer adopted, unreadable configs, a stale acceptance, the
-  owner repairing a stray secret, retried writes, failed writes, and the viewer run for real.
+  back to the same account, a sync spanning the switch), unreadable configs, configs from before link times,
+  a stale acceptance, the owner repairing a stray secret, retried writes, failed writes, and the viewer run
+  for real (read-only, its own slot).
 - `scripts/engine-boundary.test.cjs` (reads the Java as text): native saves the secret with the key, refuses
   an empty one, reads the verdict by exact type, reports it, and no native log line, rejection or status
   field carries the relay URL unredacted.

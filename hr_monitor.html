@@ -5892,6 +5892,8 @@
 
   function initDriveUI() {
     if (!window.aortiAuth) { setTimeout(initDriveUI, 120); return; }
+    // The account signed in at load, so the first sign-in over it is seen as a change of account too.
+    try { driveAuthEmail = window.aortiAuth.getEmail ? window.aortiAuth.getEmail() : null; } catch (e) { driveAuthEmail = null; }
     window.aortiAuth.onAuthChange((record) => {
       syncAuthStateLocal();
       driveTokenError = null;
@@ -6042,8 +6044,8 @@
   // Read (or create) .hr-monitor-config.json in the Drive folder. Today it
   // only holds the broadcast key, so phone + desktop signed into the same
   // Google account end up on the same relay room without any URL copying.
-  async function driveFindConfig() {
-    const q = encodeURIComponent(`'${driveFolderId}' in parents and name='.hr-monitor-config.json' and trashed=false`);
+  async function driveFindConfig(folder = driveFolderId) {
+    const q = encodeURIComponent(`'${folder}' in parents and name='.hr-monitor-config.json' and trashed=false`);
     const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
     // A failed listing is not "no config": read that way, the write after it replaced a newer link.
     if (!resp.ok) throw new Error('config list ' + resp.status);
@@ -6052,8 +6054,11 @@
   }
   async function driveSyncConfig() {
     if (!driveAccessToken || !driveFolderId) return;
+    // Pinned to the account and folder it started under: if either changed during a Drive call, what it read
+    // belongs to the other account, so it stops and the next sync starts over (review round 7).
+    const folder = driveFolderId, token = driveAccessToken;
     const acct = await driveAccountId();
-    const id = await driveFindConfig();
+    const id = await driveFindConfig(folder);
     let cfg = null;
     if (id) {
       const resp = await driveFetch('files/' + id + '?alt=media');
@@ -6061,6 +6066,7 @@
       // Unparseable content is an unreadable config, not a failed sync.
       try { cfg = JSON.parse(await resp.text()); } catch (e) { cfg = null; }
     }
+    if (driveFolderId !== folder || driveAccessToken !== token) return;
     // Read after the awaits: a new link made meanwhile, here or in another tab, is what this sync weighs.
     let key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();
     // A key from before the account field belongs to the first account that syncs it, as it always did.
@@ -6081,17 +6087,18 @@
     // This account's newer link goes back in whichever device made it, so a late write of an older link is put
     // right; an unreadable config is replaced only by a link made here. The secret goes with it only for a link
     // made here (no other device knows a room this new) or one the relay accepted from this device.
-    const newer = valid && !foreign && cfg.broadcastKey !== key && at > cfgAt;
+    // A config from before link times is only ever adopted, unless this device just made a link to replace it.
+    const newer = valid && !foreign && cfg.broadcastKey !== key && at > cfgAt && (cfgAt > 0 || mine);
     if (newer || (mine && !valid)) {
       configBehind = true;
       const proven = mine || (relayAccepted && relayKey === key && !foreign);
-      await driveWriteConfig(id, proven ? { broadcastKey: key, publishSecret: secret, linkAt: at } : { broadcastKey: key, linkAt: at });
+      await driveWriteConfig(id, proven ? { broadcastKey: key, publishSecret: secret, linkAt: at } : { broadcastKey: key, linkAt: at }, folder);
       configSyncedAt = Date.now();
       return;
     }
     if (!id) {
       // A first config holds the key; the secret joins once the relay accepted it.
-      await driveWriteConfig(null, relayAccepted && relayKey === key ? { broadcastKey: key, publishSecret: secret } : { broadcastKey: key });
+      await driveWriteConfig(null, relayAccepted && relayKey === key ? { broadcastKey: key, publishSecret: secret } : { broadcastKey: key }, folder);
       configSyncedAt = Date.now();
       return;
     }
@@ -6119,7 +6126,7 @@
     }
     localStorage.setItem(LINK_ACCOUNT, acct);
     // The config takes this device's secret only once the relay accepted it for this very key.
-    if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt });
+    if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt }, folder);
     // Refused while holding the account's own pair, or refused for 3 min with no owner's secret ever
     // appearing in the config: someone else claimed the room first.
     relayTaken = relayRefused && !keyChanged && !secretChanged && (secretOk || Date.now() - relayRefusedAt > 180000);
@@ -6135,10 +6142,10 @@
     }
     configSyncedAt = Date.now();
   }
-  // Overwrites the config in place with these fields, or creates it.
-  async function driveWriteConfig(existingId, fields) {
-    if (!driveAccessToken || !driveFolderId) return;
-    const id = existingId || await driveFindConfig();
+  // Overwrites the config in place with these fields, or creates it, in the folder the sync started in.
+  async function driveWriteConfig(existingId, fields, folder = driveFolderId) {
+    if (!driveAccessToken || !folder) return;
+    const id = existingId || await driveFindConfig(folder);
     const body = JSON.stringify(fields);
     let resp;
     if (id) {
@@ -6151,7 +6158,7 @@
       const boundary = '-------hrm-config-' + Math.random().toString(36).slice(2);
       const mpBody =
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
-        JSON.stringify({ name: '.hr-monitor-config.json', parents: [driveFolderId], mimeType: 'application/json' }) +
+        JSON.stringify({ name: '.hr-monitor-config.json', parents: [folder], mimeType: 'application/json' }) +
         `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
       resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',

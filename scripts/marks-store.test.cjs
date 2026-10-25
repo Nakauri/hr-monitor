@@ -792,8 +792,8 @@ CHECKS.U1 = async (src) => {
 // ---------------------------------------------------------------- mutants
 // [check, name, file key, find, replace]. Each must make its check fail.
 const MUTANTS = [
-  ['K1', 'old config not given a secret', 'monitor', '    if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt });\n', ''],
-  ['K1', 'the owner write drops the link time', 'monitor', 'publishSecret: secret, linkAt: cfgAt });', 'publishSecret: secret });'],
+  ['K1', 'old config not given a secret', 'monitor', '    if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt }, folder);\n', ''],
+  ['K1', 'the owner write drops the link time', 'monitor', 'publishSecret: secret, linkAt: cfgAt }, folder);', 'publishSecret: secret }, folder);'],
   ['K1', 'secret written before acceptance (the 10-24 lock-out)', 'monitor', 'const owner = relayAccepted && relayKey === key && !keyChanged && !foreign;', 'const owner = !keyChanged && !foreign;'],
   ['K1', 'secret written for another key', 'monitor', 'const owner = relayAccepted && relayKey === key && !keyChanged && !foreign;', 'const owner = relayAccepted && relayKey === key && !foreign;'],
   ['K1', 'the owner adopts a stray config secret', 'monitor', 'const secretChanged = secretOk && !owner && ', 'const secretChanged = secretOk && '],
@@ -815,7 +815,7 @@ const MUTANTS = [
   ['K1', 'a new link has no time (round 2)', 'monitor', '    localStorage.setItem(LINK_AT, String(at));\n', ''],
   ['K1', 'a new link not marked as made here (round 4)', 'monitor', '    localStorage.setItem(LINK_MINE, key);\n', ''],
   ['K1', 'a link made here is read over (round 2)', 'monitor', '    if (newer || (mine && !valid)) {', '    if (false) {'],
-  ['K1', 'an older link here overwrites a newer one (round 3)', 'monitor', 'cfg.broadcastKey !== key && at > cfgAt;', 'cfg.broadcastKey !== key;'],
+  ['K1', 'an older link here overwrites a newer one (round 3)', 'monitor', 'cfg.broadcastKey !== key && at > cfgAt && (cfgAt > 0 || mine);', 'cfg.broadcastKey !== key && (cfgAt > 0 || mine);'],
   ['K1', 'any newer link here is written, made here or not (round 4)', 'monitor', 'const mine = localStorage.getItem(LINK_MINE) === key;', 'const mine = at > 0;'],
   ['K1', 'a clock running ahead outranks a click (round 4)', 'monitor', 'const at = Math.max(Date.now(), localLinkAt() + 1);', 'const at = Date.now();'],
   ['K1', 'a matching key does not keep the config time (round 4)', 'monitor', '      if (cfgAt > at) localStorage.setItem(LINK_AT, String(cfgAt));\n', ''],
@@ -824,23 +824,25 @@ const MUTANTS = [
   ['K1', 'a key adopted without a secret keeps the old one (round 6)', 'monitor', '    else if (keyChanged && !secretOk) { localStorage.removeItem(\'hr_monitor_publish_secret\'); getOrCreatePublishSecret(); }\n', ''],
   ['K1', 'restoring a link writes an unproven secret (round 6)', 'monitor', 'proven ? {', 'true ? {'],
   ['K1', 'another account\'s newer link is written (round 6)', 'monitor', 'valid && !foreign && cfg.broadcastKey !== key', 'valid && cfg.broadcastKey !== key'],
-  ['K1', 'a link read back is never restored (round 6)', 'monitor', 'const newer = valid && !foreign && cfg.broadcastKey !== key && at > cfgAt;', 'const newer = mine && valid && !foreign && cfg.broadcastKey !== key && at > cfgAt;'],
+  ['K1', 'a link read back is never restored (round 6)', 'monitor', 'const newer = valid && !foreign && cfg.broadcastKey !== key && at > cfgAt && (cfgAt > 0 || mine);', 'const newer = mine && valid && !foreign && cfg.broadcastKey !== key && at > cfgAt;'],
   ['K1', 'overlapping syncs ask twice (round 6)', 'monitor', 'if (driveAccountCache && driveAccountCache.token === token) return driveAccountCache.p;', 'if (driveAccountCache && driveAccountCache.token === token && driveAccountCache.id) return driveAccountCache.p;'],
   ['K1', 'a new login keeps the old folder (round 6)', 'monitor', '        driveFolderId = null;\n        driveFileIdForSession = null;\n        driveAccountCache = null;\n', ''],
-  ['K1', 'the viewer keeps the old room\'s secret beside a new key (round 6)', 'viewer', '        localStorage.removeItem(\'hr_monitor_publish_secret\');\n      }\n      localStorage.setItem(\'hr_monitor_broadcast_key\'', '      }\n      localStorage.setItem(\'hr_monitor_broadcast_key\''],
+  ['K1', 'the viewer writes the monitor\'s key (round 7)', 'viewer', '      localStorage.setItem(VIEWER_WATCH_KEY, cfg.broadcastKey);', '      localStorage.setItem(\'hr_monitor_broadcast_key\', cfg.broadcastKey);'],
+  ['K1', 'the viewer keeps a stale watch key (round 7)', 'viewer', '{ localStorage.removeItem(VIEWER_WATCH_KEY); return; }', '{ return; }'],
+  ['K1', 'a sync spanning an account change writes (round 7)', 'monitor', '    if (driveFolderId !== folder || driveAccessToken !== token) return;\n', ''],
+  ['K1', 'a config with no link time is overwritten (round 7)', 'monitor', ' && (cfgAt > 0 || mine);', ';'],
+  ['K1', 'the account at load is unknown (round 7)', 'monitor', 'try { driveAuthEmail = window.aortiAuth.getEmail ? window.aortiAuth.getEmail() : null; } catch (e) { driveAuthEmail = null; }', ''],
   ['K1', 'a key from another account is treated as this one\'s (round 5)', 'monitor', 'const foreign = localStorage.getItem(LINK_ACCOUNT) !== acct;', 'const foreign = false;'],
   ['K1', 'a new account inherits the last key (round 5)', 'monitor', '    if (foreign && !valid) {', '    if (false) {'],
   ['K1', 'a device owns another account\'s room (round 5)', 'monitor', '!keyChanged && !foreign;', '!keyChanged;'],
   ['K1', 'an adopted key keeps the old account (round 5)', 'monitor', '    localStorage.setItem(LINK_ACCOUNT, acct);\n    // The config takes', '    // The config takes'],
   ['K1', 'a key from before the account field is never bound (round 5)', 'monitor', 'if (!localStorage.getItem(LINK_ACCOUNT)) localStorage.setItem(LINK_ACCOUNT, acct);', ''],
-  ['K1', 'the viewer adopts a key without its secret (round 5)', 'viewer', '        localStorage.setItem(\'hr_monitor_publish_secret\', cfg.publishSecret);\n', ''],
   ['K1', 'an unreadable config never takes a link made here (round 4)', 'monitor', '(mine && !valid)', 'false'],
   ['K1', 'an unparseable config throws (round 4)', 'monitor', 'try { cfg = JSON.parse(await resp.text()); } catch (e) { cfg = null; }', 'cfg = JSON.parse(await resp.text());'],
   ['K1', 'an unreadable config is read as a link (round 4)', 'monitor', '    if (!valid) { configSyncedAt = Date.now(); return; }\n', ''],
   ['K1', 'another tab reconnects on the removal (round 4)', 'monitor', '    if (e.newValue === null) return;\n', ''],
   ['K1', 'a new link keeps the old secret', 'monitor', '    localStorage.removeItem(\'hr_monitor_publish_secret\');\n    const key = getOrCreateBroadcastKey();', '    const key = getOrCreateBroadcastKey();'],
   ['K1', 'the sync weighs what it saw before the click (round 3)', 'monitor', '    let cfg = null;\n    if (id) {', '    let key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();\n    let cfg = null;\n    if (id) {'],
-  ['K1', 'the viewer reads a link made here back', 'viewer', '      if (cfg.broadcastKey !== localKey && localStorage.getItem(\'hr_monitor_link_mine\') === localKey && localAt > cfgAt) return;\n', ''],
   ['M1', 'writer drops base', 'store', "        base: prev ? prev.updatedAt : 0,\n", ''],
   ['M1', 'base always 0', 'store', "        base: prev ? prev.updatedAt : 0,", "        base: 0,"],
   ['M2', 'merge ignores other devices', 'store', '      for (const f of s.files.values()) for (const r of (f.records || [])) offer(r);\n', ''],
@@ -1062,30 +1064,59 @@ CHECKS.K1 = async (src) => {
   await settle();
   out.push(['K1 a failed owner write is retried by the poll', firstFailed && cfgOf(fake).publishSecret === S1, JSON.stringify(cfgOf(fake))]);
 
-  // The viewer shares this origin's storage: it keeps a newer link the monitor has not written yet.
+  const switchTo = (dd, drive, token) => { dd.ctx.driveFetch = (p, i) => drive.fetch(p, i); dd.ctx.fetch = (u, i) => drive.fetch(u, i); dd.ctx.driveAccessToken = token; };
+  // Round 7: the viewer reads the account's key into its own slot and never writes the monitor's credentials
+  // (two pages writing them under different rules put one account's link into another's config).
   const viewer = (vfake, ls) => {
     const store = new Map(Object.entries(ls));
     const ctx = loadPage(src.viewer, ['driveSyncConfig'], {
       localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
       driveAccessToken: 'tok', driveFolderId: 'root', driveFetch: (p, i) => vfake.fetch(p, i), updateWatchLiveUI() {},
+      VIEWER_WATCH_KEY: 'hr_viewer_watch_key',
     });
     return { ctx, store };
   };
-  const EK = 'eeeeeeeeeeeeeeee';
-  let v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1 }), { hr_monitor_broadcast_key: EK, hr_monitor_link_at: '1000', hr_monitor_link_mine: EK });
+  const monitorSlots = { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_at: '1000', hr_monitor_link_mine: KA, hr_monitor_link_account: 'perm-1' };
+  let v = viewer(withConfig({ broadcastKey: 'bbbbbbbbbbbbbbbb', publishSecret: S2, linkAt: 5000 }), monitorSlots);
   await v.ctx.driveSyncConfig();
-  const kept = v.store.get('hr_monitor_broadcast_key') === EK;
-  v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1, linkAt: 2000 }), { hr_monitor_broadcast_key: EK, hr_monitor_link_at: '1000', hr_monitor_link_mine: EK });
+  const untouched = Object.entries(monitorSlots).every(([k, val]) => v.store.get(k) === val);
+  out.push(['K1 the viewer keeps the account\'s key in its own slot and leaves the monitor\'s credentials alone',
+    untouched && v.store.get('hr_viewer_watch_key') === 'bbbbbbbbbbbbbbbb', JSON.stringify(Array.from(v.store.entries()))]);
+  v = viewer(new FakeDrive(), { hr_viewer_watch_key: 'bbbbbbbbbbbbbbbb' });
   await v.ctx.driveSyncConfig();
-  const newer = v.store.get('hr_monitor_broadcast_key') === KA && v.store.get('hr_monitor_link_at') === '2000' && v.store.get('hr_monitor_publish_secret') === S1;
-  v = viewer(withConfig({ broadcastKey: KA, publishSecret: S1 }), { hr_monitor_broadcast_key: EK, hr_monitor_link_at: '1000' });
-  await v.ctx.driveSyncConfig();
-  out.push(['K1 the viewer keeps a newer link made here, and adopts a newer Drive one or one not made here',
-    kept && newer && v.store.get('hr_monitor_broadcast_key') === KA, [kept, newer, v.store.get('hr_monitor_broadcast_key')].join(',')]);
-  v = viewer(withConfig({ broadcastKey: 'bbbbbbbbbbbbbbbb' }), { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 });
-  await v.ctx.driveSyncConfig();
-  out.push(['K1 the viewer drops the old room\'s secret when the new key comes without one',
-    v.store.get('hr_monitor_broadcast_key') === 'bbbbbbbbbbbbbbbb' && !v.store.has('hr_monitor_publish_secret')]);
+  out.push(['K1 the viewer forgets the watch key when the account has no config', !v.store.has('hr_viewer_watch_key')]);
+  out.push(['K1 the viewer watches its own slot first, then the monitor\'s key',
+    /return localStorage\.getItem\(VIEWER_WATCH_KEY\) \|\| localStorage\.getItem\('hr_monitor_broadcast_key'\);/.test(src.viewer)
+    && !/localStorage\.(setItem|removeItem)\('hr_monitor_(broadcast_key|publish_secret|link_at|link_mine|link_account)'/.test(src.viewer)]);
+
+  // Round 7: a sync that spans a change of account stops before it writes anything.
+  fake = new FakeDrive();
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 }, { relayAccepted: true });
+  const bOther = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2, linkAt: 9 });
+  bOther.permissionId = 'perm-2';
+  let releaseList; const listHold = new Promise((r) => { releaseList = r; });
+  const aFetch = d.ctx.driveFetch;
+  let held = false;
+  d.ctx.driveFetch = (p, i) => (!held && p.startsWith('files?q=') ? (held = true, listHold.then(() => aFetch(p, i))) : aFetch(p, i));
+  const spanning = d.ctx.driveSyncConfig();
+  await settle();
+  switchTo(d, bOther, 'tok-6');
+  d.ctx.driveFolderId = 'root-b';
+  releaseList();
+  try { await spanning; } catch (e) { /* the B write would fail anyway */ }
+  await settle();
+  out.push(['K1 a sync spanning a change of account writes nothing to either account',
+    JSON.stringify(cfgOf(bOther)) === JSON.stringify({ broadcastKey: 'cccccccccccccccc', publishSecret: S2, linkAt: 9 }) && cfgOf(fake) === null,
+    JSON.stringify(cfgOf(bOther)) + ' / ' + JSON.stringify(cfgOf(fake))]);
+
+  // Round 7: a config from before link times is adopted, never overwritten by a device holding a stamped link.
+  fake = withConfig({ broadcastKey: 'cccccccccccccccc', publishSecret: S2 });
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_at: '1000', hr_monitor_link_account: 'perm-1' });
+  await d.ctx.driveSyncConfig();
+  out.push(['K1 a config with no link time is adopted by a device whose link was not made here',
+    JSON.stringify(cfgOf(fake)) === JSON.stringify({ broadcastKey: 'cccccccccccccccc', publishSecret: S2 }) && d.store.get('hr_monitor_broadcast_key') === 'cccccccccccccccc', JSON.stringify(cfgOf(fake))]);
+  out.push(['K1 the monitor knows the account signed in at load',
+    /driveAuthEmail = window\.aortiAuth\.getEmail \? window\.aortiAuth\.getEmail\(\) : null;/.test(src.monitor)]);
 
   // Round 4: a config stamped by a clock running ahead never outranks a click here.
   const ahead = Date.now() + 86400000;
@@ -1102,7 +1133,6 @@ CHECKS.K1 = async (src) => {
 
   // Rounds 4 and 5: a link made under one account never lands in another account's config, however the account
   // changes (sign-out, an expired login, a re-sign-in as someone else), and that account's own link is adopted.
-  const switchTo = (dd, drive, token) => { dd.ctx.driveFetch = (p, i) => drive.fetch(p, i); dd.ctx.fetch = (u, i) => drive.fetch(u, i); dd.ctx.driveAccessToken = token; };
   for (const [label, how] of [['a sign-out', 'signout'], ['a new login with no sign-out', 'token']]) {
     fake = withConfig({ broadcastKey: KA, publishSecret: S1 });
     d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 });

@@ -1714,8 +1714,8 @@
   }
 
   // Watch live link shows up only when we know a broadcast key. Key can come
-  // from two places: the shared Drive config (driveSyncConfig writes it) or
-  // localStorage carried over from a prior monitor session on this browser.
+  // from two places: the shared Drive config (driveSyncConfig keeps it in the
+  // viewer's own slot) or the monitor's key on this browser.
   // Opens overlay.html with &bg=dark so the page renders visibly instead of
   // the transparent-for-OBS default. Visible only when (1) a broadcast key
   // is in localStorage AND (2) we've seen a tick from the relay in the
@@ -1730,11 +1730,16 @@
   })();
   let watchLiveSocket = null;
   let watchLiveLastTick = 0;
+  // The account's key from the Drive config, else the monitor's on this browser; read only, never written back.
+  const VIEWER_WATCH_KEY = 'hr_viewer_watch_key';
+  function viewerWatchKey() {
+    return localStorage.getItem(VIEWER_WATCH_KEY) || localStorage.getItem('hr_monitor_broadcast_key');
+  }
   // While a broadcast is live the bar's Monitor link reads "Watch live" and opens the stream on the web; in the app it stays Monitor with the live light.
   function updateWatchLiveUI() {
     const link = document.getElementById('monitor-link');
     if (!link) return;
-    const key = __viewerDemoFlag ? null : localStorage.getItem('hr_monitor_broadcast_key');
+    const key = __viewerDemoFlag ? null : viewerWatchKey();
     const live = !!(key && watchLiveLastTick && Date.now() - watchLiveLastTick < 15000);
     if (link.classList.contains('is-live') === live && link.dataset.wired) return;
     link.dataset.wired = '1';
@@ -1753,7 +1758,7 @@
   // tick if the sender disconnected.
   (function connectWatchLiveRelay() {
     if (__viewerDemoFlag) return;
-    const key = localStorage.getItem('hr_monitor_broadcast_key');
+    const key = viewerWatchKey();
     if (!key) return;
     try {
       watchLiveSocket = new WebSocket('wss://hr-relay.nakauri.workers.dev/parties/main/' + encodeURIComponent(key));
@@ -2108,34 +2113,22 @@
     if (driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));
   }
 
-  // Read .hr-monitor-config.json from the Drive folder and copy the shared
-  // broadcastKey into localStorage. Viewer never writes here — the live app
-  // owns the seed. Updating Watch-live UI once the key is resolved.
+  // Read .hr-monitor-config.json for the account's broadcast key, kept in the viewer's own slot. The monitor
+  // alone writes the relay credentials (key, secret, link time, account): two pages writing them under
+  // different rules put one account's link into another's config (review round 7).
   async function driveSyncConfig() {
     if (!driveAccessToken || !driveFolderId) return;
     const q =encodeURIComponent(`'${driveFolderId}' in parents and name='.hr-monitor-config.json' and trashed=false`);
     const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
     const data = await resp.json();
-    if (!data.files || !data.files.length) return;
+    if (!resp.ok) return;
+    // An account with no config has no room to watch; an earlier account's key must not stand in for it.
+    if (!data.files || !data.files.length) { localStorage.removeItem(VIEWER_WATCH_KEY); return; }
     const id = data.files[0].id;
     const content = await driveFetch('files/' + id + '?alt=media');
     const cfg = await content.json();
     if (cfg && typeof cfg.broadcastKey === 'string' && /^[0-9a-f]{16}$/.test(cfg.broadcastKey)) {
-      // A newer link the monitor made here and has not written to Drive yet stays; the monitor writes it.
-      const cfgAt = Number.isFinite(cfg.linkAt) && cfg.linkAt > 0 ? cfg.linkAt : 0;
-      const localKey = localStorage.getItem('hr_monitor_broadcast_key');
-      const localAt = Number(localStorage.getItem('hr_monitor_link_at')) || 0;
-      if (cfg.broadcastKey !== localKey && localStorage.getItem('hr_monitor_link_mine') === localKey && localAt > cfgAt) return;
-      // Key and secret travel together, secret first: a monitor tab reconnects on each change, and must never reach
-      // the new room holding another secret, which would claim it.
-      if (typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret)) {
-        localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
-      } else if (cfg.broadcastKey !== localKey) {
-        // No secret beside the new key: the monitor makes a fresh one rather than reuse the old room's.
-        localStorage.removeItem('hr_monitor_publish_secret');
-      }
-      localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
-      localStorage.setItem('hr_monitor_link_at', String(cfgAt));
+      localStorage.setItem(VIEWER_WATCH_KEY, cfg.broadcastKey);
       updateWatchLiveUI();
     }
   }
