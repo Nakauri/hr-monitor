@@ -14,6 +14,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { uxDir } from './ux-dir.mjs';
+import { pageHashes, buildConfig } from './csp-hashes.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -76,7 +77,11 @@ async function run(config) {
       const v = await page.evaluate(() => window.__csp || []);
       const ok = await page.evaluate(ready).catch(() => false);
       const h = resp.headers();
-      out.push({ route, violations: [...new Set([...v, ...consoleCsp])], ready: ok, csp: !!h['content-security-policy'], nosniff: h['x-content-type-options'] === 'nosniff', referrer: !!h['referrer-policy'] });
+      const policy = h['content-security-policy'] || '';
+      out.push({ route, violations: [...new Set([...v, ...consoleCsp])], ready: ok, csp: !!policy, nosniff: h['x-content-type-options'] === 'nosniff', referrer: !!h['referrer-policy'],
+        // Two matching rules would stack two policies, and the browser enforces both.
+        policies: policy.split('default-src').length - 1,
+        inlineAllowed: /script-src[^;]*'unsafe-inline'/.test(policy) });
       await ctx.close();
     }
   } finally {
@@ -91,9 +96,16 @@ const verdict = (rows) => rows.flatMap((r) => [
   ...(r.ready ? [] : [`${r.route}: the page's feature did not come up under the policy`]),
   ...(r.csp ? [] : [`${r.route}: no Content-Security-Policy header`]),
   ...(r.nosniff && r.referrer ? [] : [`${r.route}: missing nosniff or Referrer-Policy`]),
+  ...(r.policies === 1 ? [] : [`${r.route}: ${r.policies} Content-Security-Policy headers (want exactly 1)`]),
+  ...(r.inlineAllowed ? [`${r.route}: script-src allows 'unsafe-inline'`] : []),
 ]);
 
 let fails = 0;
+// vercel.json must hold the hashes of the pages as they are now (scripts/csp-hashes.mjs --write regenerates it).
+const fresh = buildConfig(await pageHashes(), REAL);
+const current = JSON.stringify(fresh) === JSON.stringify(REAL);
+console.log((current ? 'OK    ' : 'FAIL  ') + 'vercel.json holds every page\'s current inline script hashes' + (current ? '' : ' (run node scripts/csp-hashes.mjs --write)'));
+if (!current) fails++;
 const real = await run(REAL);
 for (const r of real) {
   const bad = verdict([r]);
@@ -110,6 +122,19 @@ const MUTANTS = [
   ['policy without the Chart.js CDN', strip(' https://cdnjs.cloudflare.com')],
   ['policy without blob workers', strip(" worker-src 'self' blob:;")],
   ['policy without the relay socket', strip(' wss://hr-relay.nakauri.workers.dev')],
+  // A page script edited without regenerating: its old hash no longer matches, so the script is blocked.
+  ['monitor policy missing one script hash', (() => {
+    const c = JSON.parse(JSON.stringify(REAL));
+    const rule = c.headers.find((r) => r.source.startsWith('/hr_monitor'));
+    const h = rule.headers.find((x) => x.key === 'Content-Security-Policy');
+    h.value = h.value.replace(/ 'sha256-[^']+'/, '');
+    return c;
+  })()],
+  ['inline scripts allowed again', (() => {
+    const c = JSON.parse(JSON.stringify(REAL));
+    for (const rule of c.headers) for (const h of rule.headers) if (h.key === 'Content-Security-Policy') h.value = h.value.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'");
+    return c;
+  })()],
 ];
 console.log('\nNegative controls (each must FAIL):');
 for (const [name, cfg] of MUTANTS) {

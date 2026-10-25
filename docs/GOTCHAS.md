@@ -49,7 +49,9 @@ The checks that guard a rule are named in brackets.
 - **Every pinned CDN script carries an integrity hash and `crossorigin="anonymous"`.** Test harnesses that serve
   a local copy must serve the identical file. [`scripts/parse-check.cjs`]
 - **The Content-Security-Policy lives in `vercel.json` and is tested against every page.** Adding a new outside
-  host means adding it there. [`scripts/csp.mjs`]
+  host means adding it in `scripts/csp-hashes.mjs`. [`scripts/csp.mjs`]
+- **Inline scripts run only by hash.** An edit to a page's inline script blocks it on the live site until
+  `node scripts/csp-hashes.mjs --write` regenerates `vercel.json`. [`scripts/csp.mjs` fails while it is stale]
 - **`vercel.json` uses clean URLs: `/hrv_viewer.html` redirects to `/hrv_viewer`.** Check deploys on the clean
   path.
 

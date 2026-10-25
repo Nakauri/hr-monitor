@@ -55,7 +55,7 @@ const TIER = {
   'overlay-behaviour': [/^overlay\.html$|^widget\.(css|js)$/, [], false],
   'landing': [/^(index|new-look|legal|changelog)\.html$|^assets\/landing\/|^ui\.css$|^tokens\.css$/, [], false],
   'no-widows': [/\.html$|\.css$/, [], false],
-  'csp': [/^vercel\.json$|\.html$|^(ui|widget|auth|diagnostics|settings|marks-store|marks-drive)\.js$/, [], false],
+  'csp': [/^vercel\.json$|^scripts\/csp(-hashes)?\.mjs$|\.html$|^(ui|widget|auth|diagnostics|settings|marks-store|marks-drive)\.js$/, [], false],
 };
 
 const only = (val('--only') || '').split(',').filter(Boolean);
