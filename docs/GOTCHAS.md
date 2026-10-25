@@ -12,10 +12,10 @@ The checks that guard a rule are named in brackets.
   became `//parties/main//`, which parses as a comment, and the native relay shim shipped dead. Use the editor.
 - **Every shim is an IIFE with local helpers.** Top-level functions named `init` or `mark` in two shims
   overwrite each other and the first shim fails silently.
-- **Capacitor plugins are `Capacitor.Plugins.<Name>`**, not `registerPlugin`, because the shims are plain
-  scripts, not ES modules.
+- **Capacitor plugins are reached as `Capacitor.Plugins.<Name>`.** `registerPlugin` exists only in ES modules,
+  and the shims are plain scripts.
 - **A UI drawn from stored or async state must not show a wrong default while it loads.** The viewer drew Drive
-  as signed out until its cache paint finished, and a tap on that started a needless fresh sign-in. The cloud is
+  as signed out until its cache paint finished, and tapping it started a needless fresh sign-in. The cloud is
   slashed only with no saved sign-in at all. [`viewer-nav` S62 cold open]
 - **A signed-in page refreshes an expired access token by itself.** Only a refresh that fails may ask for a tap.
   [`monitor-sync` expired token]
@@ -41,7 +41,7 @@ The checks that guard a rule are named in brackets.
 
 ## Relay
 
-- **Size caps are measured in bytes, not characters, and sized against a real tick (about 11 KB).** A 4 KB cap
+- **Size caps count bytes (`TextEncoder`) and are sized against a real tick (about 11 KB).** A 4 KB cap
   dropped every tick for weeks with both ends looking healthy. [`scripts/relay-server.test.mjs`]
 
 ## Web
