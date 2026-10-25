@@ -61,6 +61,11 @@ if printf '%s' "$PREFS" | grep -q 'name="sessionActive" value="true"'; then
   ACTIVE=true
 elif printf '%s' "$PREFS" | grep -qE '<map|No such file|not installed|[Uu]nknown package'; then
   ACTIVE=false
+elif printf '%s' "$PREFS" | grep -q 'not debuggable'; then
+  # A release build is installed, so run-as cannot read prefs. Judge on the service alone: a foreground
+  # service counts as a live recording.
+  ACTIVE=unknown
+  echo "install-gated: the installed build is a release build; prefs unreadable, judging on the service alone"
 else
   echo "install-gated: REFUSED, could not read the session prefs:"
   printf '%s\n' "$PREFS" | head -3
@@ -77,7 +82,7 @@ else
 fi
 echo "install-gated: prefs sessionActive=$ACTIVE, NativeHrService foreground=$FG"
 
-if [ "$ACTIVE" = "true" ] && [ "$FG" = "true" ]; then
+if [ "$ACTIVE" != "false" ] && [ "$FG" = "true" ]; then
   if [ "$ALLOW" -ne 1 ]; then
     echo "install-gated: REFUSED, a session is recording: prefs sessionActive=true AND NativeHrService is in the foreground."
     echo "install-gated: an install kills that recording. To install anyway, rerun with: --allow-live-session"
