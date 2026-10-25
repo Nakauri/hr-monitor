@@ -43,6 +43,11 @@ The checks that guard a rule are named in brackets.
 
 - **Size caps count bytes (`TextEncoder`) and are sized against a real tick (about 11 KB).** A 4 KB cap
   dropped every tick for weeks with both ends looking healthy. [`scripts/relay-server.test.mjs`]
+- **Only the room's owner publishes.** The relay keeps the hash of the first publish proof per room; the
+  secret syncs with the key through the Drive config. Never put the secret in a link, a log or diagnostics.
+  [`relay-server`, `marks-store` K1, `engine-boundary`; design in `docs/relay-publish-secret.md`]
+- **Stopping `wrangler dev` can leave `workerd.exe` serving port 8787**, respawned by its `node` parent. End
+  the parent, then check the port is free.
 
 ## Web
 
