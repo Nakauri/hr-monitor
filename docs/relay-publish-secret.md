@@ -1,6 +1,6 @@
 # Relay publish secret
 
-Status: BUILT 2026-10-24 on branch grade-a (relay, web monitor, native engine), revised after review rounds 1 and 2.
+Status: BUILT 2026-10-24 on branch grade-a (relay, web monitor, native engine), revised after review rounds 1 to 3.
 Live once the relay is deployed; the site and APK work against the old relay too (it ignores the proof).
 
 ## The problem it closes
@@ -37,15 +37,20 @@ room owner's:
   device holds the owner's secret, so it fills in a config with none and repairs a different one, and never
   adopts it. (Review round 1: writing on first sync let two devices upgrading together lock the account out.)
 - A new config holds only the key until the relay accepts this device.
-- The config is reread every minute while refused or while a new link waits for Drive, and every 5 minutes
-  otherwise, so a new link made on another device arrives and a failed write is retried.
+- Each link carries when it was made (`linkAt`, in the config and in `hr_monitor_link_at`; 0 for links older
+  than the field). When the device's key and the config's differ, the newer link wins: the device writes its
+  own, or adopts the config's. The device's values are read after Drive answers, so a sync already under way
+  when the user makes a new link weighs the new one. (Review rounds 2 and 3: an acceptance sync, or one in
+  flight across the click, read the old key back; a link left waiting overwrote a newer one made elsewhere.)
+- The config is reread every minute while refused or until Drive shows back a link this device wrote, and
+  every 5 minutes otherwise, so a new link made on another device arrives and a failed write is retried.
+- Another tab of the monitor follows a new key or secret through the `storage` event.
 - Refused while holding the config's own pair, or refused for 3 minutes with no owner's secret appearing,
   means someone else claimed the room: the monitor shows "Another device holds this link" with a
   **Make a new link** button.
-- A new link (`regenerateBroadcastKey`) mints a fresh key and a fresh secret, hands both to the native engine,
-  and marks them pending (`hr_monitor_config_pending`). While pending, a sync writes the pair instead of
-  reading the config, and the viewer leaves the key alone; the flag clears only once Drive has it. (Review
-  round 2: an acceptance sync could read the old key back before the write landed, or after it failed.)
+- A new link (`regenerateBroadcastKey`) mints a fresh key, a fresh secret and its time, and hands the pair
+  to the native engine. Its secret goes into the config at once: no other device knows a room this new.
+- The viewer shares the monitor's storage and follows the same rule: it keeps a newer local link.
 - A failed config write throws instead of passing silently.
 
 ## Native
@@ -53,6 +58,7 @@ room owner's:
 - The engine takes new credentials mid-session through `setRelayCredentials` (shim, plugin, engine), which
   saves key and secret in one `.commit()` and reopens the socket. It refuses an empty or malformed secret.
 - The socket plugin redacts `proof=` from every log line, error and status field.
+- The engine reads a verdict by its exact `type`, as the page does.
 - The page pushes them after a resume and at bootstrap with a live session: prefs written by an APK from
   before the secret have none.
 - The engine reads the relay's verdict and reports `relayRefused` in its snapshot, so the monitor shows
@@ -71,6 +77,8 @@ room owner's:
   is the way to retire a secret.
 - Until the new relay is deployed, the old one forwards anything, verdicts included; deploy the relay with
   the site.
+- Link times come from each device's clock, so a device whose clock runs far behind can lose a tie it
+  should win. New links are rare, deliberate clicks; the fix is another click.
 
 ## Checks
 
@@ -79,7 +87,9 @@ room owner's:
 - `relay/scripts/probe.mjs`: the same contract against `wrangler dev` or the deployed host, including the
   claim surviving hibernation.
 - `scripts/marks-store.test.cjs` K1: no write before acceptance, the two-device race, taken detection, new
-  link to Drive and engine with a fresh secret, the pending link through a failed or lagging write and a
-  sign-in, the owner repairing a stray secret, retried writes, failed writes.
-- `scripts/engine-boundary.test.cjs`: native saves the secret with the key, refuses an empty one, reads the
-  verdict, reports it, and no native log line or status field carries the relay URL unredacted.
+  link to Drive and engine with a fresh secret and its time, a new link through a failed write, a sync held
+  in flight across the click, an older write landing late, a sign-in, a newer link from another device, the
+  owner repairing a stray secret, retried writes, failed writes, and the viewer run for real.
+- `scripts/engine-boundary.test.cjs` (reads the Java as text): native saves the secret with the key, refuses
+  an empty one, reads the verdict by exact type, reports it, and no native log line, rejection or status
+  field carries the relay URL unredacted.

@@ -2941,16 +2941,22 @@
   // older config, so the config's secret is always the room owner's. relayTaken: refused while holding the
   // account's own pair, so no reread can help; only a new link does.
   let relayRefused = false, relayRefusedAt = 0, relayAccepted = false, relayTaken = false;
-  // configSyncedAt: the last sync that finished, so a failed write retries on the next tick.
-  let configPollTimer = null, configSyncedAt = 0;
-  // A new link made here and not yet in Drive; while set, a sync writes this pair instead of reading the old one back.
-  const CONFIG_PENDING = 'hr_monitor_config_pending';
+  // configSyncedAt: the last sync that finished, so a failed write retries on the next tick. configBehind: this
+  // device wrote a newer link and Drive has not shown it back yet.
+  let configPollTimer = null, configSyncedAt = 0, configBehind = false;
+  // When this device's link was made (0 for links older than the field). The config carries the same field, and
+  // the newer link wins, so a sync never reads an old key back over a new one, nor writes an old one over a newer.
+  const LINK_AT = 'hr_monitor_link_at';
+  function localLinkAt() {
+    const n = Number(localStorage.getItem(LINK_AT));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
   // Rereads the config every minute while something waits on it, every 5 min otherwise, so a link made elsewhere arrives.
   function startConfigPoll() {
     if (configPollTimer) return;
     configPollTimer = setInterval(() => {
       if (!driveAccessToken || !driveFolderId) return;
-      const waiting = (relayRefused && !relayTaken) || localStorage.getItem(CONFIG_PENDING) === '1';
+      const waiting = (relayRefused && !relayTaken) || configBehind;
       if (waiting || Date.now() - configSyncedAt > 300000) driveSyncConfig().catch(e => console.warn('config sync:', e));
     }, 60000);
   }
@@ -2966,7 +2972,7 @@
     localStorage.removeItem('hr_monitor_publish_secret');
     getOrCreateBroadcastKey();
     getOrCreatePublishSecret();
-    localStorage.setItem(CONFIG_PENDING, '1');
+    localStorage.setItem(LINK_AT, String(Date.now()));
     relayRefused = false; relayTaken = false;
     pushRelayCredentialsToEngine();
     startConfigPoll();
@@ -2978,6 +2984,14 @@
     watchFrameSrc = null;
     if (typeof updateWatchMode === 'function') updateWatchMode();
   }
+  // Another tab took a new link or the account's secret: this tab's socket follows it.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== 'hr_monitor_broadcast_key' && e.key !== 'hr_monitor_publish_secret') return;
+    reconnectRelay();
+    updateStreamingUI();
+    watchFrameSrc = null;
+    if (typeof updateWatchMode === 'function') updateWatchMode();
+  });
   let relaySocket = null;
   let relayReconnectTimer = null;
   function reconnectRelay() {
@@ -5993,26 +6007,34 @@
   async function driveSyncConfig() {
     if (!driveAccessToken || !driveFolderId) return;
     const id = await driveFindConfig();
-    // A fresh room no other device knows yet, so its secret goes in before any acceptance.
-    if (localStorage.getItem(CONFIG_PENDING) === '1') {
-      if (await driveWriteConfig(id)) localStorage.removeItem(CONFIG_PENDING);
+    const cfg = id ? await (await driveFetch('files/' + id + '?alt=media')).json() : null;
+    // Read after the awaits: a new link made meanwhile, here or in another tab, is what this sync weighs.
+    const key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();
+    if (!id) {
+      // A first config holds the key; the secret joins once the relay accepted it, or at once for a new link,
+      // whose room no other device knows.
+      await driveWriteConfig(null, relayAccepted || at > 0 ? { broadcastKey: key, publishSecret: secret, linkAt: at } : { broadcastKey: key });
       configSyncedAt = Date.now();
       return;
     }
-    // No config yet: the key goes in now, the secret once the relay accepted it.
-    if (!id) { await driveWriteConfig(null, relayAccepted); configSyncedAt = Date.now(); return; }
-    const content = await driveFetch('files/' + id + '?alt=media');
-    const cfg = await content.json();
-    if (!cfg || typeof cfg.broadcastKey !== 'string' || !/^[0-9a-f]{16}$/.test(cfg.broadcastKey)) return;
-    const keyChanged = localStorage.getItem('hr_monitor_broadcast_key') !== cfg.broadcastKey;
+    if (!cfg || typeof cfg.broadcastKey !== 'string' || !/^[0-9a-f]{16}$/.test(cfg.broadcastKey)) { configSyncedAt = Date.now(); return; }
+    const cfgAt = Number.isFinite(cfg.linkAt) && cfg.linkAt > 0 ? cfg.linkAt : 0;
+    if (cfg.broadcastKey !== key && at > cfgAt) {
+      configBehind = true;
+      await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: at });
+      configSyncedAt = Date.now();
+      return;
+    }
+    configBehind = false;
+    const keyChanged = key !== cfg.broadcastKey;
     const secretOk = typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret);
     // Accepted for this key, this device holds the owner's secret: a different one in the config is the stray.
     const owner = relayAccepted && !keyChanged;
-    const secretChanged = secretOk && !owner && localStorage.getItem('hr_monitor_publish_secret') !== cfg.publishSecret;
-    if (keyChanged) localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
+    const secretChanged = secretOk && !owner && secret !== cfg.publishSecret;
+    if (keyChanged) { localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey); localStorage.setItem(LINK_AT, String(cfgAt)); }
     if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
     // The config takes this device's secret only once the relay accepted it for this very key.
-    if (owner && cfg.publishSecret !== localStorage.getItem('hr_monitor_publish_secret')) await driveWriteConfig(id);
+    if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt });
     // Refused while holding the account's own pair, or refused for 3 min with no owner's secret ever
     // appearing in the config: someone else claimed the room first.
     relayTaken = relayRefused && !keyChanged && !secretChanged && (secretOk || Date.now() - relayRefusedAt > 180000);
@@ -6028,14 +6050,11 @@
     }
     configSyncedAt = Date.now();
   }
-  // Writes this device's key and publish secret: overwrites the config in place, or creates it.
-  // False when signed out, so a pending new link stays pending.
-  async function driveWriteConfig(existingId, withSecret = true) {
-    if (!driveAccessToken || !driveFolderId) return false;
+  // Overwrites the config in place with these fields, or creates it.
+  async function driveWriteConfig(existingId, fields) {
+    if (!driveAccessToken || !driveFolderId) return;
     const id = existingId || await driveFindConfig();
-    const body = JSON.stringify(withSecret
-      ? { broadcastKey: getOrCreateBroadcastKey(), publishSecret: getOrCreatePublishSecret() }
-      : { broadcastKey: getOrCreateBroadcastKey() });
+    const body = JSON.stringify(fields);
     let resp;
     if (id) {
       resp = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media', {
@@ -6059,7 +6078,6 @@
       });
     }
     if (!resp.ok) throw new Error('config write ' + resp.status);
-    return true;
   }
 
   // Upload or update the current session's CSV on Drive. Called alongside local
