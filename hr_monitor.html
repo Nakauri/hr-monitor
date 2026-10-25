@@ -2984,6 +2984,8 @@
     localStorage.setItem(LINK_AT, String(at));
     localStorage.setItem(LINK_MINE, key);
     if (acct) localStorage.setItem(LINK_ACCOUNT, acct);
+    // Signed in, id not known yet: bound to this login's email, so only this login's sync claims it.
+    else if (acct === null && driveAuthEmail) localStorage.setItem(LINK_ACCOUNT, 'email:' + driveAuthEmail);
     else if (acct === null) localStorage.removeItem(LINK_ACCOUNT);
     // Waiting on Drive from the click on, so a sync dropped before it writes still leaves the one-minute recheck.
     configBehind = true;
@@ -3029,6 +3031,8 @@
     if (e.key !== 'hr_monitor_broadcast_key' && e.key !== 'hr_monitor_publish_secret') return;
     // A new link removes before it sets; reconnecting on the removal would mint this tab its own key.
     if (e.newValue === null) return;
+    // A refusal for the pair this tab held says nothing about the new one; its own verdict follows.
+    relayRefused = false; relayRefusedAt = 0; relayTaken = false;
     reconnectRelay();
     updateStreamingUI();
     watchFrameSrc = null;
@@ -3051,6 +3055,13 @@
     // connection state.
     const key = getOrCreateBroadcastKey();
     if (!key) return;
+    // One socket at a time: a pending retry or a socket still open is replaced, never left untracked in the old room.
+    if (relayReconnectTimer) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
+    if (relaySocket && relaySocket.readyState !== WebSocket.CLOSED) {
+      const old = relaySocket;
+      relaySocket = null;
+      try { old.close(); } catch (e) {}
+    }
     setStreamingStatus('connecting');
     relayAccepted = false;
     relayKey = key;
@@ -6082,8 +6093,10 @@
     if (driveFolderId !== folder || driveAccessToken !== token) return;
     // Read after the awaits: a new link made meanwhile, here or in another tab, is what this sync weighs.
     let key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();
-    // A key from before the account field belongs to the first account that syncs it, as it always did.
-    if (!localStorage.getItem(LINK_ACCOUNT)) localStorage.setItem(LINK_ACCOUNT, acct);
+    // A key from before the account field belongs to the first account that syncs it, as it always did; one made
+    // before its login's id was known belongs to that login only, and reads as foreign under any other.
+    const bound = localStorage.getItem(LINK_ACCOUNT);
+    if (!bound || (driveAuthEmail && bound === 'email:' + driveAuthEmail)) localStorage.setItem(LINK_ACCOUNT, acct);
     const foreign = localStorage.getItem(LINK_ACCOUNT) !== acct;
     const valid = !!cfg && typeof cfg.broadcastKey === 'string' && /^[0-9a-f]{16}$/.test(cfg.broadcastKey);
     const cfgAt = valid && Number.isFinite(cfg.linkAt) && cfg.linkAt > 0 ? cfg.linkAt : 0;
