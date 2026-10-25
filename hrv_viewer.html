@@ -10534,7 +10534,7 @@
           border: 'rgba(232,152,88,0.45)',
           borderWidth: 1,
           t: w.start,
-          html: `<b>${label}</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${dur})`,
+          html: `<b>${escape(label)}</b><br/>${formatDuration(w.start)} → ${formatDuration(w.end)} (${dur})`,
         });
       }
     }
@@ -10635,7 +10635,7 @@
           border: c.border,
           borderWidth: 0,
           t: sp.start,
-          html: `<b>Posture: ${sp.posture}</b><br/>${formatDuration(sp.start)} → ${formatDuration(sp.end)} (${formatDuration(sp.end - sp.start)})`,
+          html: `<b>Posture: ${escape(sp.posture)}</b><br/>${formatDuration(sp.start)} → ${formatDuration(sp.end)} (${formatDuration(sp.end - sp.start)})`,
         });
       }
     }
