@@ -23,11 +23,12 @@ const NAMES = ['index', 'hr_monitor', 'hrv_viewer', 'app-home', 'legal', 'change
 export const PAGES = [['/', 'index.html'], ...NAMES.map((n) => [`/${n}(\\.html)?`, n + '.html'])];
 
 // Exact scripts, not whole hosts: a host allowlist lets injected markup pull in any library the CDN serves
-// (an AngularJS gadget on cdnjs, for one). Google's sign-in client lives under /gsi/.
+// (an AngularJS gadget on cdnjs, for one). Google's sign-in needs only its client script (Google's CSP guide).
 const CHART = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js';
 const SORTABLE = 'https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js';
 const INSIGHTS = 'https://cdn.vercel-insights.com/v1/script.js';
-const HOSTS_SCRIPT = `${CHART} ${SORTABLE} https://accounts.google.com/gsi/ ${INSIGHTS}`;
+const GSI = 'https://accounts.google.com/gsi/client';
+const HOSTS_SCRIPT = `${CHART} ${SORTABLE} ${GSI} ${INSIGHTS}`;
 const BASE = (scriptExtra) => [
   "default-src 'self'",
   `script-src 'self' ${HOSTS_SCRIPT}${scriptExtra}`,
