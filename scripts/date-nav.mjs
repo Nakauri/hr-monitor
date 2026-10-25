@@ -278,7 +278,13 @@ async function partKpi() {
     const r = await page.evaluate(() => {
       const grid = document.querySelector('#summary-bar .summary-grid');
       if (!grid) return null;
-      const token = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--s5'));
+      // The gap token this grid asks for (--kpi-gap: --s5 by default, --s3 in the phone summary since 10-18),
+      // resolved by a probe so it is in px; the 'KPI gap removed' mutant drops the gap but keeps the token.
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;visibility:hidden;width:var(--kpi-gap)';
+      grid.appendChild(probe);
+      const token = probe.getBoundingClientRect().width;
+      probe.remove();
       const stats = [...grid.children].filter((e) => e.offsetParent !== null).map((e) => {
         const b = e.getBoundingClientRect();
         const kids = [...e.children].filter((k) => k.offsetParent !== null).map((k) => { const rg = document.createRange(); rg.selectNodeContents(k); const t = rg.getBoundingClientRect(); return { right: t.right, w: t.width }; });
