@@ -5853,10 +5853,13 @@
   // This login's tag: its email, or a random tag when the record has none; cleared on sign-out, so a click made
   // before the account id is known binds to the login that made it and no other.
   let driveLoginTag = null;
+  // Stored until sign-out, so a click made before a reload is still this login's after it.
+  const LOGIN_TAG = 'hr_monitor_login_tag';
   function setDriveLogin(record) {
-    if (!record) { driveAuthEmail = null; driveLoginTag = null; return; }
+    if (!record) { driveAuthEmail = null; driveLoginTag = null; localStorage.removeItem(LOGIN_TAG); return; }
     if (record.email) { driveAuthEmail = record.email; driveLoginTag = 'email:' + record.email; }
-    else if (!driveLoginTag) driveLoginTag = 'login:' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    else if (!driveLoginTag) driveLoginTag = localStorage.getItem(LOGIN_TAG) || 'login:' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem(LOGIN_TAG, driveLoginTag);
   }
   let driveUploadInFlight = null;
   let driveFileIdForSession = null;

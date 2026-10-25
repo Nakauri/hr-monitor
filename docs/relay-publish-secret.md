@@ -63,7 +63,7 @@ room owner's:
   before the verdict this device may be the owner, and once accepted it repairs the config instead. (Review
   round 8: an owner whose sync beat the verdict threw its own secret away and lost the room.)
 - A click while signed in but before the account's id is known binds the link to that login's tag (its email,
-  or a random tag when the record has none; cleared on sign-out), so only that login's sync claims it and any
+  or a random tag when the record has none, stored until sign-out), so only that login's sync claims it and any
   other login reads it as foreign. The folder lookup is pinned to the same tag. A click signed out keeps the last
   account. (Review round 9: an unbound click was claimed by the next login and overwrote its link.)
 - A tab following another tab's change drops its old refusal (its new socket gets its own verdict), and a
@@ -117,9 +117,11 @@ room owner's:
 - Signing out keeps the secret, because a signed-out monitor still broadcasts to its own room; a new link
   is the way to retire a secret.
 - Two accounts an older build already pointed at one room keep sharing it until either makes a new link.
-- An account whose email changes between a click and its first sync reads that click as foreign and adopts
-  its config's link; make the link again. Another login with no email that signs in over one with no email,
-  with no sign-out between, cannot be told apart.
+- An account whose email changes between a click and its first sync, or whose record gains an email in a
+  refresh, reads that click as foreign and adopts its config's link; make the link again. A login whose record
+  has no email, signing in over another login with no sign-out between, keeps the earlier login's tag and can
+  claim its pending click. Both sign-in paths fill the email in, so these need a record the app does not make.
+  (Review rounds 10 and 11; the audit stopped here because these change neither the verdict nor the fixes.)
 - Diagnostics' Purge clears every stored value, the relay credentials included; the account adopts its
   config again, but a new link Drive had not taken yet is gone.
 - This device holds one link at a time: switching to another account before a new link reached Drive adopts

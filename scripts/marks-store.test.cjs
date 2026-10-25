@@ -838,8 +838,9 @@ const MUTANTS = [
   ['K1', 'a key from before the account field is never bound (round 5)', 'monitor', 'if (!bound || (driveLoginTag && bound === driveLoginTag)) localStorage.setItem(LINK_ACCOUNT, acct);', ''],
   ['K1', 'a login-bound click is claimed by another login (round 9)', 'monitor', '(driveLoginTag && bound === driveLoginTag)', "(/^(email|login):/.test(bound))"],
   ['K1', 'a click with an unknown id is left unbound (round 9)', 'monitor', '    else if (acct === null && driveLoginTag) localStorage.setItem(LINK_ACCOUNT, driveLoginTag);\n', ''],
-  ['K1', 'a sign-out keeps the old login tag (round 10)', 'monitor', '    if (!record) { driveAuthEmail = null; driveLoginTag = null; return; }', '    if (!record) return;'],
-  ['K1', 'a login with no email gets no tag (round 10)', 'monitor', "    else if (!driveLoginTag) driveLoginTag = 'login:' + Math.random().toString(36).slice(2) + Date.now().toString(36);", ''],
+  ['K1', 'a sign-out keeps the old login tag (round 10)', 'monitor', '    if (!record) { driveAuthEmail = null; driveLoginTag = null; localStorage.removeItem(LOGIN_TAG); return; }', '    if (!record) return;'],
+  ['K1', 'a login with no email gets no tag (round 10)', 'monitor', "    else if (!driveLoginTag) driveLoginTag = localStorage.getItem(LOGIN_TAG) || 'login:' + Math.random().toString(36).slice(2) + Date.now().toString(36);", ''],
+  ['K1', 'a reload forgets the login tag (round 11)', 'monitor', 'driveLoginTag = localStorage.getItem(LOGIN_TAG) || ', 'driveLoginTag = '],
   ['K1', 'another tab keeps a stale refusal (round 9)', 'monitor', '    relayRefused = false; relayRefusedAt = 0; relayTaken = false;\n    reconnectRelay();', '    reconnectRelay();'],
   ['K1', 'a second open leaves the first socket in the old room (round 9)', 'monitor', '      try { old.close(); } catch (e) {}\n', ''],
   ['K1', 'an unreadable config never takes a link made here (round 4)', 'monitor', '(mine && !valid)', 'false'],
@@ -1358,15 +1359,20 @@ CHECKS.K1 = async (src) => {
   await settle(); await d.ctx.driveSyncConfig();
   out.push(['K1 a click under a login with no email is foreign to the next login',
     tagged && JSON.stringify(cfgOf(zDrive)) === JSON.stringify({ broadcastKey: 'eeeeeeeeeeeeeeee', publishSecret: S2, linkAt: 5 }), JSON.stringify(cfgOf(zDrive))]);
-  const login = loadPage(src.monitor, ['setDriveLogin'], { driveAuthEmail: 'a@example.com', driveLoginTag: 'email:a@example.com' });
+  const tagStore = new Map();
+  const tagLs = { getItem: (k) => (tagStore.has(k) ? tagStore.get(k) : null), setItem: (k, v) => tagStore.set(k, String(v)), removeItem: (k) => tagStore.delete(k) };
+  const login = loadPage(src.monitor, ['setDriveLogin'], { driveAuthEmail: 'a@example.com', driveLoginTag: 'email:a@example.com', localStorage: tagLs, LOGIN_TAG: 'hr_monitor_login_tag' });
   login.setDriveLogin(null);
-  const cleared = login.driveAuthEmail === null && login.driveLoginTag === null;
+  const cleared = login.driveAuthEmail === null && login.driveLoginTag === null && !tagStore.has('hr_monitor_login_tag');
   login.setDriveLogin({ email: null });
   const randomTag = /^login:/.test(login.driveLoginTag || '');
   const firstTag = login.driveLoginTag;
   login.setDriveLogin({ email: null });
-  out.push(['K1 a sign-out clears the login tag; a login with no email gets one random tag and keeps it',
-    cleared && randomTag && login.driveLoginTag === firstTag, String(login.driveLoginTag)]);
+  // A reload: memory starts empty, the stored tag carries the login over.
+  const reloaded = loadPage(src.monitor, ['setDriveLogin'], { driveAuthEmail: null, driveLoginTag: null, localStorage: tagLs, LOGIN_TAG: 'hr_monitor_login_tag' });
+  reloaded.setDriveLogin({ email: null });
+  out.push(['K1 a sign-out clears the login tag; a login with no email gets one random tag, kept across a reload',
+    cleared && randomTag && login.driveLoginTag === firstTag && reloaded.driveLoginTag === firstTag, String(reloaded.driveLoginTag)]);
   out.push(['K1 a tab following another tab\'s change drops its old refusal, and one socket replaces the last',
     /relayRefused = false; relayRefusedAt = 0; relayTaken = false;\s*reconnectRelay\(\);/.test(src.monitor)
     && /if \(relaySocket && relaySocket\.readyState !== WebSocket\.CLOSED\) \{\s*const old = relaySocket;\s*relaySocket = null;\s*try \{ old\.close\(\); \} catch \(e\) \{\}/.test(src.monitor)]);
