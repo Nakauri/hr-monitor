@@ -356,11 +356,12 @@ public final class HrEngine implements HrDevice.Callback {
     }
 
     // A new link or the account's synced secret, mid-session: saved for resume, then the socket reopens with it.
+    // Both must be well formed, so a held secret is never downgraded to none.
     public void setRelayCredentials(String key, String secret) {
         if (key == null || !key.matches("[0-9a-f]{16}")) return;
-        if (secret != null && !secret.isEmpty() && !secret.matches("[0-9a-f]{32}")) return;
+        if (secret == null || !secret.matches("[0-9a-f]{32}")) return;
         mainHandler.post(() -> {
-            boolean changed = !key.equals(broadcastKey) || !(secret == null ? "" : secret).equals(publishSecret == null ? "" : publishSecret);
+            boolean changed = !key.equals(broadcastKey) || !secret.equals(publishSecret);
             if (!changed) return;
             broadcastKey = key;
             publishSecret = secret;
@@ -368,7 +369,7 @@ public final class HrEngine implements HrDevice.Callback {
             try {
                 appCtx.getSharedPreferences("hr_monitor_session", 0).edit()
                     .putString("broadcastKey", key)
-                    .putString("publishSecret", secret == null ? "" : secret)
+                    .putString("publishSecret", secret)
                     .commit();
             } catch (Throwable ignored) {}
             if (sessionActive.get() && broadcastEnabled) {

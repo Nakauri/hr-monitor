@@ -462,6 +462,18 @@ function step2Checks() {
       // The relay proof must never reach diagnostics or the log (report card 2026-10-24).
       check('the publish secret never appears in diagnostics or a log line',
         !/putSafe\([^;]*publishSecret|Log\.[a-z]\([^;]*publishSecret|logLifecycle\([^;]*publishSecret/.test(E));
+      // The relay URL carries the proof: the socket plugin logged it whole on every open (review round 2, 2026-10-25).
+      const leaks = [];
+      for (const f of fs.readdirSync(path.join(ROOT, REL)).filter((n) => n.endsWith('.java'))) {
+        let src = '';
+        try { src = readRepo(REL + f); } catch (e) { continue; }
+        for (const m of src.matchAll(/(?:Log\.[a-z]|logLifecycle|putSafe|ret\.put)\([^;]*;/g)) {
+          if (/publishSecret|proof=/.test(m[0]) || (/\b(?:currentUrl|url|wsUrl|relayUrl)\b/.test(m[0]) && !/redact\(/.test(m[0]))) leaks.push(f + ': ' + m[0].slice(0, 80));
+        }
+      }
+      check('no native log line or status field carries the relay URL unredacted', leaks.length === 0, leaks.join(' | '));
+      const plugin = readRepo(REL + 'NativeRelaySocketPlugin.java');
+      check('the socket plugin redacts the proof', /replaceAll\("proof=\[\^&\\\\s\]\*", "proof=redacted"\)/.test(plugin));
       check('startSessionInternal starts the FGS after the prefs .commit()', fgs >= 0 && commit >= 0 && fgs > commit,
         'fgs ' + (fgs >= 0 ? ':' + lineOf(E, start[0] + fgs) : 'missing') + ', commit ' + (commit >= 0 ? ':' + lineOf(E, start[0] + commit) : 'missing'));
     }

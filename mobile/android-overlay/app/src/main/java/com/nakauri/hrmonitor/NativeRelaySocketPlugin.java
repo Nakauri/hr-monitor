@@ -90,7 +90,7 @@ public class NativeRelaySocketPlugin extends Plugin {
         } catch (Throwable t) {
             // 2-arg Log only; the Throwable overload ClassNotFoundExceptions
             // on API 28.
-            Log.e(TAG, "newWebSocket failed: " + t);
+            Log.e(TAG, "newWebSocket failed: " + redact(String.valueOf(t)));
             socket = null;
             socketId = null;
             currentUrl = null;
@@ -149,7 +149,7 @@ public class NativeRelaySocketPlugin extends Plugin {
         try {
             JSObject ret = new JSObject();
             ret.put("connected", socket != null);
-            ret.put("url", currentUrl);
+            ret.put("url", redact(currentUrl));
             String id = socketId;
             if (id != null) ret.put("socketId", id);
             call.resolve(ret);
@@ -200,7 +200,7 @@ public class NativeRelaySocketPlugin extends Plugin {
         @Override
         public void onOpen(WebSocket webSocket, Response response) {
             if (!isCurrent(webSocket)) return;
-            Log.i(TAG, "WebSocket open: " + currentUrl);
+            Log.i(TAG, "WebSocket open: " + redact(currentUrl));
             emitState(id, "open", null);
         }
 
@@ -234,9 +234,14 @@ public class NativeRelaySocketPlugin extends Plugin {
         @Override
         public void onFailure(WebSocket webSocket, Throwable t, Response response) {
             if (!releaseIfCurrent(webSocket)) return;
-            String msg = t != null && t.getMessage() != null ? t.getMessage() : "unknown";
+            String msg = redact(t != null && t.getMessage() != null ? t.getMessage() : "unknown");
             Log.w(TAG, "WebSocket failure: " + msg);
             emitState(id, "error", msg);
         }
+    }
+
+    // The publish proof rides in the relay URL; it never reaches logcat or the page's status.
+    static String redact(String s) {
+        return s == null ? null : s.replaceAll("proof=[^&\\s]*", "proof=redacted");
     }
 }
