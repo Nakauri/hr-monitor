@@ -97,6 +97,10 @@ async function suite(mod) {
   const legacy = conn('old', 'role=publisher'); s2.conns.push(legacy.c); await s2.onConnect(legacy.c, legacy.ctx);
   s2.sent = []; await s2.onMessage(legacy.c, '{"type":"tick"}');
   check('an unclaimed room takes a proofless publisher (older installs)', s2.sent.length === 1);
+  // In an unclaimed room only the subscriber rule stops a viewer publishing (the claimed-room rule cannot).
+  const watcher = conn('watcher'); s2.conns.push(watcher.c); await s2.onConnect(watcher.c, watcher.ctx);
+  s2.sent = []; await s2.onMessage(watcher.c, '{"type":"tick"}');
+  check('a subscriber cannot publish in an unclaimed room', s2.sent.length === 0);
   check('a proofless publisher is never told it was accepted', !legacy.c.got.some((m) => /publisher_accepted/.test(m)));
   check('a proofless publisher does not claim the room', (await s2.ctx.storage.get('publisherHash')) === undefined);
   const owner = conn('new', 'role=publisher&proof=' + P2); s2.conns.push(owner.c); await s2.onConnect(owner.c, owner.ctx);
@@ -124,7 +128,7 @@ const MUTANTS = [
   ['subscribers publish again', '    if (!sender.state?.publisher) return;', ''],
   ['any proof accepted', "if (!owner || hash === owner)", "if (true)"],
   ['the raw proof stored', 'await this.ctx.storage.put(OWNER_KEY, hash);', 'await this.ctx.storage.put(OWNER_KEY, proof);'],
-  ['proofless publishers kept after the claim', "    if (!sender.state.proven && await this.ctx.storage.get(OWNER_KEY)) return;", ''],
+  ['proofless publishers kept after the claim', "    if (!sender.state?.proven && await this.ctx.storage.get(OWNER_KEY)) return;", ''],
   ['a proofless publisher claims the room', 'if (!owner && hash) {', 'if (!owner) {'],
   ['no refusal notice', "      conn.send(JSON.stringify({ type: 'publisher_rejected' }));", ''],
   ['no acceptance notice', "      if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));", ''],

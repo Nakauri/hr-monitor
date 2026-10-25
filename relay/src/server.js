@@ -94,7 +94,7 @@ export class Main extends Server {
     // Subscribers never publish.
     if (!sender.state?.publisher) return;
     // A proofless publisher let in before the room was claimed loses its voice once it is.
-    if (!sender.state.proven && await this.ctx.storage.get(OWNER_KEY)) return;
+    if (!sender.state?.proven && await this.ctx.storage.get(OWNER_KEY)) return;
 
     // Fan out to every OTHER connection in this room (not back to the sender).
     // Room id === broadcast key, so isolation between users is automatic:
