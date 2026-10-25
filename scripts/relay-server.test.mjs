@@ -20,10 +20,12 @@ const IMPORT = "import { routePartykitRequest, Server } from 'partyserver';";
 const STUB = `class Server {
   constructor() {
     this.sent = [];
+    this.conns = [];
     const m = new Map();
     this.ctx = { storage: { get: async (k) => m.get(k), put: async (k, v) => { m.set(k, v); } } };
   }
   broadcast(msg, without) { this.sent.push({ msg, without }); }
+  getConnections() { return this.conns; }
 }
 async function routePartykitRequest() { return null; }`;
 
@@ -46,7 +48,7 @@ async function suite(mod) {
   const out = [];
   const check = (name, ok, detail) => out.push([name, !!ok, detail || '']);
   const s = new mod.Main();
-  const join = async (id, query) => { const x = conn(id, query); await s.onConnect(x.c, x.ctx); return x.c; };
+  const join = async (id, query) => { const x = conn(id, query); s.conns.push(x.c); await s.onConnect(x.c, x.ctx); return x.c; };
   const send = async (sender, msg) => { s.sent = []; await s.onMessage(sender, msg); return s.sent; };
 
   const pub = await join('pub', 'role=publisher&proof=' + P1);
@@ -87,17 +89,21 @@ async function suite(mod) {
   const bare = await join('bare', 'role=publisher');
   check('role=publisher without a proof cannot publish in a claimed room', (await send(bare, '{"type":"tick"}')).length === 0);
   check('a proof is never fanned out to subscribers', !JSON.stringify(s.sent).includes(P1));
+  check('a publisher cannot forge a verdict for its peers',
+    (await send(pub, '{"type":"publisher_rejected"}')).length === 0 && (await send(pub, '{"type":"publisher_accepted"}')).length === 0);
 
   // An unclaimed room keeps working for installs that send no proof, until a proof claims it.
   const s2 = new mod.Main();
-  const legacy = conn('old', 'role=publisher'); await s2.onConnect(legacy.c, legacy.ctx);
+  const legacy = conn('old', 'role=publisher'); s2.conns.push(legacy.c); await s2.onConnect(legacy.c, legacy.ctx);
   s2.sent = []; await s2.onMessage(legacy.c, '{"type":"tick"}');
   check('an unclaimed room takes a proofless publisher (older installs)', s2.sent.length === 1);
   check('a proofless publisher is never told it was accepted', !legacy.c.got.some((m) => /publisher_accepted/.test(m)));
   check('a proofless publisher does not claim the room', (await s2.ctx.storage.get('publisherHash')) === undefined);
-  const owner = conn('new', 'role=publisher&proof=' + P2); await s2.onConnect(owner.c, owner.ctx);
+  const owner = conn('new', 'role=publisher&proof=' + P2); s2.conns.push(owner.c); await s2.onConnect(owner.c, owner.ctx);
   s2.sent = []; await s2.onMessage(legacy.c, '{"type":"tick"}');
   check('once claimed, the proofless publisher is silenced without reconnecting', s2.sent.length === 0);
+  check('the silenced proofless publisher is told it was refused', legacy.c.got.some((m) => /publisher_rejected/.test(m)));
+  check('the claiming publisher is not told it was refused', !owner.c.got.some((m) => /publisher_rejected/.test(m)));
   s2.sent = []; await s2.onMessage(owner.c, '{"type":"tick"}');
   check('the claiming publisher publishes', s2.sent.length === 1);
   const junk = conn('junk', 'role=publisher&proof=short'); await s2.onConnect(junk.c, junk.ctx);
@@ -110,13 +116,16 @@ async function suite(mod) {
 const MUTANTS = [
   ['cap back to 4096 (the July bug)', 'const MAX_MESSAGE_BYTES = 32768;', 'const MAX_MESSAGE_BYTES = 4096;'],
   ['cap measured in characters', 'size = encoder.encode(message).length;', 'size = message.length;'],
-  ['non-JSON fanned out', "    } catch (e) { return; } // drop non-JSON", '    } catch (e) { } // drop non-JSON'],
+  ['non-JSON fanned out', "catch (e) { return; } // drop non-JSON", 'catch (e) { parsed = {}; } // drop non-JSON'],
+  ['verdicts forwarded', "    if (typeof parsed.type === 'string' && parsed.type.startsWith('publisher_')) return;\n", ''],
+  ['silenced publishers not told', "        if (c.state?.publisher && !c.state.proven) c.send(JSON.stringify({ type: 'publisher_rejected' }));\n", ''],
+  ['the claimer told it was refused', "if (c.state?.publisher && !c.state.proven) c.send(", "c.send("],
   ['sender gets its own message', 'this.broadcast(message, [sender.id]);', 'this.broadcast(message, []);'],
   ['subscribers publish again', '    if (!sender.state?.publisher) return;', ''],
   ['any proof accepted', "if (!owner || hash === owner)", "if (true)"],
   ['the raw proof stored', 'await this.ctx.storage.put(OWNER_KEY, hash);', 'await this.ctx.storage.put(OWNER_KEY, proof);'],
   ['proofless publishers kept after the claim', "    if (!sender.state.proven && await this.ctx.storage.get(OWNER_KEY)) return;", ''],
-  ['a proofless publisher claims the room', 'if (!owner && hash) await', 'if (!owner) await'],
+  ['a proofless publisher claims the room', 'if (!owner && hash) {', 'if (!owner) {'],
   ['no refusal notice', "      conn.send(JSON.stringify({ type: 'publisher_rejected' }));", ''],
   ['no acceptance notice', "      if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));", ''],
   ['proofless publishers told accepted', "      if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));", "      conn.send(JSON.stringify({ type: 'publisher_accepted' }));"],

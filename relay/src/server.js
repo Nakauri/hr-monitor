@@ -50,7 +50,13 @@ export class Main extends Server {
     // between the owner read and the claim.
     const hash = proof && PROOF.test(proof) ? await sha256Hex(proof) : null;
     const owner = await this.ctx.storage.get(OWNER_KEY);
-    if (!owner && hash) await this.ctx.storage.put(OWNER_KEY, hash);
+    if (!owner && hash) {
+      await this.ctx.storage.put(OWNER_KEY, hash);
+      // Proofless publishers already here lose their voice now; tell them, so none reports itself live.
+      for (const c of this.getConnections()) {
+        if (c.state?.publisher && !c.state.proven) c.send(JSON.stringify({ type: 'publisher_rejected' }));
+      }
+    }
     // An unclaimed room still takes a proofless publisher (installs older than
     // the proof); the first proof locks them out.
     // The verdict goes back to the publisher: a client writes its secret into the account's config only
@@ -79,10 +85,11 @@ export class Main extends Server {
     let text;
     try { text = typeof message === 'string' ? message : new TextDecoder().decode(message); }
     catch (e) { return; }
-    try {
-      const parsed = JSON.parse(text);
-      if (!parsed || typeof parsed !== 'object') return;
-    } catch (e) { return; } // drop non-JSON
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { return; } // drop non-JSON
+    if (!parsed || typeof parsed !== 'object') return;
+    // Verdicts come only from the relay; a publisher cannot forge one for its peers.
+    if (typeof parsed.type === 'string' && parsed.type.startsWith('publisher_')) return;
 
     // Subscribers never publish.
     if (!sender.state?.publisher) return;

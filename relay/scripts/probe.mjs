@@ -49,6 +49,17 @@ await wait(800);
 check('a wrong proof cannot publish', !sub.got.some((m) => m.includes('from-evil')));
 check('a proofless publisher cannot publish in a claimed room', !sub.got.some((m) => m.includes('from-bare')));
 evil.close(); bare.close();
+pub.send(JSON.stringify({ type: 'publisher_rejected' }));
+await wait(800);
+check('a publisher cannot forge a verdict for its peers', !sub.got.some((m) => m.includes('publisher_rejected')));
+
+// A proofless publisher in an unclaimed room is told when a proof claims it.
+const room2 = room + '-legacy';
+const legacy = await open(`${host}/parties/main/${room2}?role=publisher`);
+const claimer = await open(url(room2, PROOF));
+await wait(800);
+check('a proofless publisher is told when a claim silences it', legacy.got.some((m) => m.includes('publisher_rejected')) && !claimer.got.some((m) => m.includes('publisher_rejected')));
+legacy.close(); claimer.close();
 
 // After a quiet gap the room must still route (hibernation wake path).
 await wait(Number(process.env.IDLE_MS || 12000));
