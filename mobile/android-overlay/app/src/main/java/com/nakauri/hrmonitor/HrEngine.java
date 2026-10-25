@@ -262,21 +262,8 @@ public final class HrEngine implements HrDevice.Callback {
         RrEntry(int rrMs, long ts) { this.rrMs = rrMs; this.timestampMs = ts; }
     }
 
-    // PARITY CRITICAL — MUST MATCH hr_monitor.html:computeRMSSD (line ~1857).
-    //
-    // Both implementations ship RMSSD to end users (JS to the monitor
-    // widget, Java to the relay broadcast and the CSV writer). If they
-    // drift, the same recording shows different HRV numbers on different
-    // surfaces. Already happened once (see scripts/rmssd-parity.test.js
-    // for the golden vector and regression history).
-    //
-    // Both filters are standard HRV preprocessing:
-    //   - RR range 300..2000 ms (HR 30..200) drops obvious artefacts
-    //   - |successive-diff| >= 200 ms drops ectopic-beat jumps
-    //
-    // When you change either implementation, update the other and run
-    // `node scripts/rmssd-parity.test.js` to verify both still produce
-    // the golden-vector expected output.
+    // PARITY CRITICAL — MUST MATCH hr_monitor.html computeRMSSD; scripts/rmssd-parity.test.js compiles this method and compares.
+    // Filters: RR 300..2000 ms drops artefacts; |successive diff| >= 200 ms drops ectopic jumps.
     private static Double computeRmssd(Deque<RrEntry> window) {
         if (window.size() < 2) return null;
         java.util.ArrayList<Integer> clean = new java.util.ArrayList<>();
