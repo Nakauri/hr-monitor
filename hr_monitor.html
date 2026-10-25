@@ -946,7 +946,7 @@
   .streaming-status.live { color: var(--hrv); background: rgba(93,202,165,0.12); }
   .streaming-status.ready { color: var(--text-dim); background: rgba(255,255,255,0.04); }
   .streaming-status.listening { color: var(--text-dim); background: rgba(255,255,255,0.04); }
-  .streaming-status.error { color: var(--warn-high); background: rgba(226,75,74,0.14); }
+  .streaming-status.error, .streaming-status.blocked { color: var(--warn-high); background: rgba(226,75,74,0.14); }
 
   .tab-panel {
     display: none;
@@ -2921,9 +2921,24 @@
     }
     return k;
   }
+  // The relay lets a room's first proven publisher keep it; the overlay link carries only the key.
+  // Travels with the key in the Drive config so every device on the account can publish.
+  function getOrCreatePublishSecret() {
+    let p = localStorage.getItem('hr_monitor_publish_secret');
+    if (!p || !/^[0-9a-f]{32}$/.test(p)) {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      p = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('hr_monitor_publish_secret', p);
+    }
+    return p;
+  }
+  let relayRefused = false;
   function regenerateBroadcastKey() {
     localStorage.removeItem('hr_monitor_broadcast_key');
     getOrCreateBroadcastKey();
+    relayRefused = false;
+    driveWriteConfig().catch(e => console.warn('config write:', e));
     reconnectRelay();
     updateStreamingUI();
     // Force the watch iframe to rebuild with the new key the next time
@@ -2950,7 +2965,7 @@
     if (!key) return;
     setStreamingStatus('connecting');
     try {
-      const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key + '?role=publisher');
+      const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key + '?role=publisher&proof=' + getOrCreatePublishSecret());
       relaySocket = ws;
       ws.addEventListener('open', () => {
         refreshRelayStatus();
@@ -3033,6 +3048,7 @@
   // actually going to the relay, not the JS-side observer.
   function refreshRelayStatus() {
     if (!widgetPrefs.broadcast) { setStreamingStatus('off'); return; }
+    if (relayRefused) { setStreamingStatus('blocked'); return; }
     const nativePub = !!(window.HRMNativeHrSession
         && window.HRMNativeHrSession.isPublishing
         && window.HRMNativeHrSession.isPublishing());
@@ -3071,6 +3087,13 @@
   const SENDER_ID_RE = /^[a-z0-9_-]{1,64}$/i;
   function handleRelayMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'publisher_rejected') {
+      // Another device holds this room with a different secret; the Drive config has the account's current pair.
+      relayRefused = true;
+      refreshRelayStatus();
+      if (driveAccessToken && driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));
+      return;
+    }
     if (msg.senderId != null && !SENDER_ID_RE.test(String(msg.senderId))) return;
     if ((msg.type === 'tick' || msg.type === 'presence') && msg.senderId) {
       // Native: the engine's own ticks arrive before its id is known; the list waits for the first snapshot.
@@ -3281,7 +3304,7 @@
     const el = $('relay-status');
     if (!el) return;
     el.textContent = s;
-    const known = ['live', 'connecting', 'error', 'ready', 'listening'];
+    const known = ['live', 'connecting', 'error', 'ready', 'listening', 'blocked'];
     el.className = 'streaming-status ' + (known.includes(s) ? s : '');
   }
   function buildObsSourceUrl() {
@@ -4258,6 +4281,7 @@
       // The engine mints the senderId and returns it; the page sends only its label.
       startCall = window.HRMNativeHrSession.startSession({
         broadcastKey: getOrCreateBroadcastKey(),
+        publishSecret: getOrCreatePublishSecret(),
         senderLabel: getDeviceIdentity().label,
         broadcast: !!widgetPrefs.broadcast,
       });
@@ -5907,29 +5931,47 @@
   // Read (or create) .hr-monitor-config.json in the Drive folder. Today it
   // only holds the broadcast key, so phone + desktop signed into the same
   // Google account end up on the same relay room without any URL copying.
-  async function driveSyncConfig() {
-    if (!driveAccessToken || !driveFolderId) return;
+  async function driveFindConfig() {
     const q = encodeURIComponent(`'${driveFolderId}' in parents and name='.hr-monitor-config.json' and trashed=false`);
     const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
     const data = await resp.json();
-    if (data.files && data.files.length) {
-      const id = data.files[0].id;
-      const content = await driveFetch('files/' + id + '?alt=media');
-      const cfg = await content.json();
-      if (cfg && typeof cfg.broadcastKey === 'string') {
-        const local = localStorage.getItem('hr_monitor_broadcast_key');
-        if (local !== cfg.broadcastKey) {
-          localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
-          if (typeof reconnectRelay === 'function') reconnectRelay();
-          if (typeof updateStreamingUI === 'function') updateStreamingUI();
-          // Invalidate the watch iframe cache so it rebuilds with the new key.
-          watchFrameSrc = null;
-          if (typeof updateWatchMode === 'function') updateWatchMode();
-        }
-      }
+    return data.files && data.files.length ? data.files[0].id : null;
+  }
+  async function driveSyncConfig() {
+    if (!driveAccessToken || !driveFolderId) return;
+    const id = await driveFindConfig();
+    if (!id) { await driveWriteConfig(null); return; }
+    const content = await driveFetch('files/' + id + '?alt=media');
+    const cfg = await content.json();
+    if (!cfg || typeof cfg.broadcastKey !== 'string') return;
+    const keyChanged = localStorage.getItem('hr_monitor_broadcast_key') !== cfg.broadcastKey;
+    const secretOk = typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret);
+    const secretChanged = secretOk && localStorage.getItem('hr_monitor_publish_secret') !== cfg.publishSecret;
+    if (keyChanged) localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
+    if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
+    // A config from before the publish secret: this device's secret becomes the account's.
+    if (!secretOk) await driveWriteConfig(id);
+    if (keyChanged || secretChanged) {
+      relayRefused = false;
+      if (typeof reconnectRelay === 'function') reconnectRelay();
+      if (typeof updateStreamingUI === 'function') updateStreamingUI();
+      // Invalidate the watch iframe cache so it rebuilds with the new key.
+      watchFrameSrc = null;
+      if (typeof updateWatchMode === 'function') updateWatchMode();
+    }
+  }
+  // Writes this device's key and publish secret: overwrites the config in place, or creates it.
+  async function driveWriteConfig(existingId) {
+    if (!driveAccessToken || !driveFolderId) return;
+    const id = existingId || await driveFindConfig();
+    const body = JSON.stringify({ broadcastKey: getOrCreateBroadcastKey(), publishSecret: getOrCreatePublishSecret() });
+    if (id) {
+      await fetch('https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media', {
+        method: 'PATCH',
+        headers: { 'Authorization': await driveAuthHeader(), 'Content-Type': 'application/json' },
+        body,
+      });
     } else {
-      const key = getOrCreateBroadcastKey();
-      const body = JSON.stringify({ broadcastKey: key });
       const boundary = '-------hrm-config-' + Math.random().toString(36).slice(2);
       const mpBody =
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +

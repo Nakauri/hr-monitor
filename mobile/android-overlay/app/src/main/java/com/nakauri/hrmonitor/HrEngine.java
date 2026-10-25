@@ -109,6 +109,8 @@ public final class HrEngine implements HrDevice.Callback {
 
     // Session state
     private String broadcastKey;
+    // Relay publish proof; never logged or put in diagnostics.
+    private String publishSecret;
     private String senderId;
     private String senderLabel;
     private long sessionStartMs;
@@ -413,7 +415,8 @@ public final class HrEngine implements HrDevice.Callback {
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
         Request req = new Request.Builder()
-            .url("wss://hr-relay.nakauri.workers.dev/parties/main/" + broadcastKey + "?role=publisher")
+            .url("wss://hr-relay.nakauri.workers.dev/parties/main/" + broadcastKey + "?role=publisher"
+                + (publishSecret != null && publishSecret.matches("[0-9a-f]{32}") ? "&proof=" + publishSecret : ""))
             .build();
         // Stale callbacks (from a socket we replaced or closed) compare ws to
         // the volatile relaySocket field and bail. Required because OkHttp
@@ -1099,6 +1102,7 @@ public final class HrEngine implements HrDevice.Callback {
         String csv = prefs.getString("activeCsvFilename", "");
         long startMs = prefs.getLong("sessionStartMs", 0L);
         String key = prefs.getString("broadcastKey", "");
+        String secret = prefs.getString("publishSecret", "");
         boolean enabled = prefs.getBoolean("broadcastEnabled", true);
         String label = prefs.getString("senderLabel", "");
         String oldId = prefs.getString("senderId", "");
@@ -1135,7 +1139,7 @@ public final class HrEngine implements HrDevice.Callback {
         targetMac = mac;
         boolean fresh = csv == null || csv.isEmpty() || startMs <= 0L;
         if (fresh) NativeHrService.logLifecycle(appCtx, "resume_fresh origin=" + origin + " csv=" + csv + " start=" + startMs);
-        JSONObject started = startSessionInternal(key, label, enabled,
+        JSONObject started = startSessionInternal(key, secret, label, enabled,
             fresh ? null : csv, fresh ? null : Long.valueOf(startMs), origin);
         String newId = started.optString("senderId", "");
         if (newId.equals(pendingPresenceEndId)) pendingPresenceEndId = null;
@@ -1876,7 +1880,7 @@ public final class HrEngine implements HrDevice.Callback {
 
     // origin: ORIGIN_START for a plugin start, else the resume door (sticky, alarm, worker, replaced, js).
     // The engine mints the relay senderId on every start and resume; JS adopts it from the result, events and status.
-    public JSONObject startSessionInternal(String broadcastKeyArg, String senderLabelArg,
+    public JSONObject startSessionInternal(String broadcastKeyArg, String publishSecretArg, String senderLabelArg,
             Boolean broadcastOpt, String resumeFilename, Long resumeStartMs, String origin) throws AlreadyActiveException {
         // The plugin thread and the main thread (Service resume) both start; the check and the claim are one.
         synchronized (START_LOCK) {
@@ -1897,6 +1901,7 @@ public final class HrEngine implements HrDevice.Callback {
             // Bump generation before resource creation so a stale stop's recheck fails first.
             sessionGeneration.incrementAndGet();
             broadcastKey = broadcastKeyArg;
+            publishSecret = publishSecretArg;
             senderId = mintSenderId();
             senderLabel = senderLabelArg;
             broadcastEnabled = (broadcastOpt == null) ? true : broadcastOpt;
@@ -2007,6 +2012,7 @@ public final class HrEngine implements HrDevice.Callback {
                     .putBoolean("cleanlyStopped", false)
                     .putLong("sessionStartMs", sessionStartMs)
                     .putString("broadcastKey", broadcastKey == null ? "" : broadcastKey)
+                    .putString("publishSecret", publishSecret == null ? "" : publishSecret)
                     .putString("senderId", senderId == null ? "" : senderId)
                     .putString("senderLabel", senderLabel == null ? "" : senderLabel)
                     .putBoolean("broadcastEnabled", broadcastEnabled)

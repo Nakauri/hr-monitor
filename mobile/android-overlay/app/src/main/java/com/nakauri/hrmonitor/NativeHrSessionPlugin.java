@@ -26,7 +26,7 @@ import org.json.JSONObject;
  * Public Capacitor methods:
  *   scan({timeoutMs?})            — scan for HR-service straps. Returns a device list.
  *   connect({mac})                — connect the strap and subscribe to 0x2A37.
- *   startSession({broadcastKey, senderId, senderLabel})
+ *   startSession({broadcastKey, publishSecret, senderId, senderLabel})
  *                                — open relay socket + start CSV file +
  *                                  begin Drive upload cadence.
  *   stopSession()                 — flush CSV + final Drive push + close socket.
@@ -248,6 +248,7 @@ public class NativeHrSessionPlugin extends Plugin {
             if (e == null) return;
             JSONObject ret = e.startSessionInternal(
                 call.getString("broadcastKey"),
+                call.getString("publishSecret"),
                 call.getString("senderLabel", "HR Monitor Android"),
                 call.getBoolean("broadcast"),
                 call.getString("resumeFilename"),

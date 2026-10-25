@@ -448,8 +448,11 @@ function step2Checks() {
       const commit = live >= 0 ? rawBody.indexOf('.commit()', live) : -1;
       const between = live >= 0 && commit > live ? rawBody.slice(live, commit) : '';
       const fgs = body.search(/\bstartNativeForegroundService\s*\(/);
-      check('startSessionInternal commits sessionActive, senderId and broadcastKey in ONE .commit()',
-        commit > live && between.includes('"senderId"') && between.includes('"broadcastKey"') && !between.includes('.apply()'));
+      check('startSessionInternal commits sessionActive, senderId, broadcastKey and publishSecret in ONE .commit()',
+        commit > live && between.includes('"senderId"') && between.includes('"broadcastKey"') && between.includes('"publishSecret"') && !between.includes('.apply()'));
+      // The relay proof must never reach diagnostics or the log (report card 2026-10-24).
+      check('the publish secret never appears in diagnostics or a log line',
+        !/putSafe\([^;]*publishSecret|Log\.[a-z]\([^;]*publishSecret|logLifecycle\([^;]*publishSecret/.test(E));
       check('startSessionInternal starts the FGS after the prefs .commit()', fgs >= 0 && commit >= 0 && fgs > commit,
         'fgs ' + (fgs >= 0 ? ':' + lineOf(E, start[0] + fgs) : 'missing') + ', commit ' + (commit >= 0 ? ':' + lineOf(E, start[0] + commit) : 'missing'));
     }
