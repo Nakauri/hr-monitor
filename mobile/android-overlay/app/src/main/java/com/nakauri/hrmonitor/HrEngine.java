@@ -333,7 +333,7 @@ public final class HrEngine implements HrDevice.Callback {
                         relayReconnectAttempts = 0;
                         mainHandler.post(() -> {
                             try { closeRelaySocket(); } catch (Throwable ignored) {}
-                            try { openRelaySocket(); } catch (Throwable ignored) {}
+                            openRelaySocketSafely();
                         });
                     }
                     lastActiveNetwork = network;
@@ -385,7 +385,7 @@ public final class HrEngine implements HrDevice.Callback {
             } catch (Throwable ignored) {}
             if (sessionActive.get() && broadcastEnabled) {
                 relayReconnectAttempts = 0;
-                try { openRelaySocket(); } catch (Throwable ignored) {}
+                openRelaySocketSafely();
             } else {
                 emitState();
             }
@@ -403,7 +403,7 @@ public final class HrEngine implements HrDevice.Callback {
             mainHandler.post(() -> {
                 if (enabled && broadcastKey != null && !broadcastKey.isEmpty()) {
                     relayReconnectAttempts = 0;
-                    try { openRelaySocket(); } catch (Throwable ignored) {}
+                    openRelaySocketSafely();
                 } else {
                     try { closeRelaySocket(); } catch (Throwable ignored) {}
                     relayLive.set(false);
@@ -497,7 +497,6 @@ public final class HrEngine implements HrDevice.Callback {
         // An open on another thread may have assigned since our close; it is cancelled, never orphaned, and its
         // live flag never stands for the socket replacing it.
         prev = relaySocket;
-        if (prev != null) relayLive.set(false);
         opening = relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
                 if (!isCurrentRelay(ws)) return;
@@ -544,6 +543,8 @@ public final class HrEngine implements HrDevice.Callback {
             }
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
+        // Cleared only once the new socket exists: a throw above leaves prev current and its flag true.
+        if (prev != null) relayLive.set(false);
         }
         if (prev != null) { try { prev.cancel(); } catch (Throwable ignored) {} }
         // The socket made under the lock, never the field re-read after it: a stop in between leaves it null.

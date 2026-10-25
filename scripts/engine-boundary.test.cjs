@@ -458,7 +458,7 @@ function step2Checks() {
       const creds = E.slice(E.indexOf('public void setRelayCredentials('), E.indexOf('public void setBroadcast('));
       check('setRelayCredentials checks both formats and saves key and secret in one .commit()',
         /key\.matches\("\[0-9a-f\]\{16\}"\)/.test(creds) && /secret\.matches\("\[0-9a-f\]\{32\}"\)/.test(creds)
-        && /\.putString\("broadcastKey", key\)\s*\.putString\("publishSecret"[^;]*\.commit\(\)/.test(creds) && /openRelaySocket\(\)/.test(creds));
+        && /\.putString\("broadcastKey", key\)\s*\.putString\("publishSecret"[^;]*\.commit\(\)/.test(creds) && /openRelaySocket(Safely)?\(\)/.test(creds));
       // The relay proof must never reach diagnostics or the log (report card 2026-10-24).
       check('the publish secret never appears in diagnostics or a log line',
         !/putSafe\([^;]*publishSecret|Log\.[a-z]\([^;]*publishSecret|logLifecycle\([^;]*publishSecret/.test(E));
@@ -500,7 +500,9 @@ function step2Checks() {
         && /synchronized \(relayLock\) \{[^}]{0,160}if \(!sessionActive\.get\(\)\) return;[^}]{0,400}opening = relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
         && /private void openRelaySocket\(\) \{\s*relayRetryPending = false;\s*if \(!sessionActive\.get\(\) \|\| !hasBroadcastKey\(\)\) return;/.test(E));
       check('two opens racing never orphan a socket, and the handshake timer holds the socket made under the lock',
-        /prev = relaySocket;\s*if \(prev != null\) relayLive\.set\(false\);\s*opening = relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
+        /prev = relaySocket;\s*opening = relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
+        && /\}\);\s*\/\/[^\n]*\n\s*if \(prev != null\) relayLive\.set\(false\);\s*\}/.test(relayOpen)
+        && !/try \{ openRelaySocket\(\); \} catch \(Throwable ignored\) \{\}/.test(E)
         && /if \(prev != null\) \{ try \{ prev\.cancel\(\); \} catch \(Throwable ignored\) \{\} \}/.test(relayOpen)
         && !/final WebSocket opening = relaySocket;/.test(relayOpen));
       check('a relay handshake still not open after 35 s is cancelled, so onFailure logs and backs off',
