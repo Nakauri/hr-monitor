@@ -38,7 +38,7 @@
     },
     colorThresholds:  { lsKey: 'hr_monitor_color_thresholds',   kind: 'json' },
     audioConfig:      { lsKey: 'hr_monitor_audio_config',       kind: 'json' },
-    broadcastKey:     { lsKey: 'hr_monitor_broadcast_key',      kind: 'string' },
+    // No broadcast key here: only the monitor's config sync writes the relay credentials (docs/relay-publish-secret.md).
     // Cross-surface toggle (viewer + monitor both honour it)
     autonomicOn:      { lsKey: 'hr_monitor_autonomic_on',       kind: 'bool' },
     // Per-card colour-zone thresholds used by the viewer interp cells

@@ -2972,15 +2972,21 @@
   }
   // A fresh room and secret, stamped later than any link this device has seen (so it outranks the link it
   // replaces whatever the clocks say) and marked as made here, under acct or the account the last key had.
+  // Both values are made first and stored secret first with no removal in between: another tab reconnects on
+  // each change, and must never find the new key beside no secret (it would mint its own and claim the room).
+  // acct undefined keeps the last account (signed out); null unbinds the key for the next sync to bind.
   function mintLink(acct) {
     const at = Math.max(Date.now(), localLinkAt() + 1);
-    localStorage.removeItem('hr_monitor_broadcast_key');
-    localStorage.removeItem('hr_monitor_publish_secret');
-    const key = getOrCreateBroadcastKey();
-    getOrCreatePublishSecret();
+    const hex = (n) => { const b = new Uint8Array(n); crypto.getRandomValues(b); return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join(''); };
+    const key = hex(8), secret = hex(16);
+    localStorage.setItem('hr_monitor_publish_secret', secret);
+    localStorage.setItem('hr_monitor_broadcast_key', key);
     localStorage.setItem(LINK_AT, String(at));
     localStorage.setItem(LINK_MINE, key);
     if (acct) localStorage.setItem(LINK_ACCOUNT, acct);
+    else if (acct === null) localStorage.removeItem(LINK_ACCOUNT);
+    // Waiting on Drive from the click on, so a sync dropped before it writes still leaves the one-minute recheck.
+    configBehind = true;
     return key;
   }
   function localLinkAt() {
@@ -3004,7 +3010,9 @@
   }
   // A new link is a fresh room and a fresh secret, so whoever held the old secret cannot claim the new room.
   function regenerateBroadcastKey() {
-    mintLink(driveAccessToken && driveAccountCache && driveAccountCache.token === driveAccessToken ? driveAccountCache.id || null : null);
+    // Signed in: the account if known, else unbound so this account's first sync claims it. Signed out: the last one.
+    const known = driveAccountCache && driveAccountCache.token === driveAccessToken ? driveAccountCache.id : null;
+    mintLink(driveAccessToken ? known : undefined);
     relayRefused = false; relayTaken = false;
     pushRelayCredentialsToEngine();
     startConfigPoll();
@@ -6014,11 +6022,15 @@
   }
 
   async function driveEnsureFolder() {
+    // Pinned to the login it started under: a lookup that lands after another account signed in is dropped,
+    // never kept as that account's folder.
+    const email = driveAuthEmail;
     // Look for existing folder named DRIVE_FOLDER_NAME owned by this app (drive.file scope)
     const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
     // Oldest root wins, id breaking ties: the same pick as the viewer and the phone's uploaders.
     const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
     const data = await resp.json();
+    if (driveAuthEmail !== email || !driveAccessToken) return;
     if (data.files && data.files.length) {
       const older = (a, b) => {
         const ta = Date.parse(a.createdTime) || Infinity, tb = Date.parse(b.createdTime) || Infinity;
@@ -6032,6 +6044,7 @@
         body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
       });
       const cd = await create.json();
+      if (driveAuthEmail !== email || !driveAccessToken) return;
       driveFolderId = cd.id;
     }
     driveUpdateUI();
@@ -6114,7 +6127,9 @@
     const secretOk = typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret);
     // Accepted for this key, this device holds the owner's secret: a different one in the config is the stray.
     const owner = relayAccepted && relayKey === key && !keyChanged && !foreign;
-    const secretChanged = secretOk && !owner && secret !== cfg.publishSecret;
+    // For the same key, a different config secret is adopted only once the relay refused this device's: before
+    // its verdict this device may be the owner and the config's the stray (round 8: the owner threw its own away).
+    const secretChanged = secretOk && secret !== cfg.publishSecret && (keyChanged || (relayRefused && relayKey === key));
     // Secret first: another tab reconnects on each change and must never reach the new room with another secret.
     // A key adopted with no secret beside it takes a fresh one, never the secret of the room left behind.
     if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);

@@ -56,13 +56,20 @@ room owner's:
   that account a fresh link of its own when it has none; it never writes, owns or seeds the other account's
   key or secret. Signing back into the same account keeps a link Drive had not taken yet. (Review round 5.)
 - Key and secret are stored secret first, so another tab that reconnects on each change never reaches a new
-  room holding a different secret. A key adopted with no secret beside it takes a fresh secret, never the
-  secret of the room left behind.
+  room holding a different secret. A new link makes both values before storing either and removes neither,
+  so no tab ever sees the new key beside no secret. A key adopted with no secret beside it takes a fresh
+  secret, never the secret of the room left behind.
+- For the same key, a different secret in the config is adopted only once the relay refused this device's;
+  before the verdict this device may be the owner, and once accepted it repairs the config instead. (Review
+  round 8: an owner whose sync beat the verdict threw its own secret away and lost the room.)
+- A click while signed in but before the account's id is known leaves the link unbound, so the signed-in
+  account's first sync claims it. A click signed out keeps the last account. The link counts as waiting on
+  Drive from the click, so a sync dropped before it writes still leaves the one-minute recheck.
 - Another account signing in over this one (a reconnect lets the user pick any account, and the account
   signed in at load counts) drops the old account's folder and account id. The account id is asked once per
   token, shared by overlapping syncs.
 - A sync is pinned to the folder and login it started under; if either changes during a Drive call it stops
-  without writing, and the next sync starts over. (Review round 7: a sync spanning an account switch wrote
+  without writing, and the next sync starts over. The folder lookup is pinned the same way. (Review round 7: a sync spanning an account switch wrote
   the first account's key into the second's config.)
 - A config from before link times is adopted, never overwritten, unless this device just made a link.
 - An unparseable config counts as unreadable: a marked link replaces it, anything else leaves it alone.
@@ -77,8 +84,9 @@ room owner's:
 - A new link (`regenerateBroadcastKey`) mints a fresh key, a fresh secret and its time, and hands the pair
   to the native engine. Its secret goes into the config at once: no other device knows a room this new.
 - The monitor alone writes the relay credentials (key, secret, link time, account). The viewer shares its
-  storage but only reads: it keeps the account's key from the config in its own slot (`hr_viewer_watch_key`,
-  cleared when the account has no config) for Watch live. (Review round 7: two pages writing the same
+  storage but only reads: Watch live uses the monitor's key on this browser, else the account's key from the
+  config kept in the viewer's own slot (`hr_viewer_watch_key`, cleared when the account has no config). The
+  settings sync never maps the broadcast key. (Review round 7: two pages writing the same
   credentials under different rules put one account's link into another's config.)
 - A failed config write throws instead of passing silently.
 

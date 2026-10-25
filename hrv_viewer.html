@@ -1714,8 +1714,8 @@
   }
 
   // Watch live link shows up only when we know a broadcast key. Key can come
-  // from two places: the shared Drive config (driveSyncConfig keeps it in the
-  // viewer's own slot) or the monitor's key on this browser.
+  // from two places: the monitor's key on this browser, or the shared Drive
+  // config (driveSyncConfig keeps it in the viewer's own slot).
   // Opens overlay.html with &bg=dark so the page renders visibly instead of
   // the transparent-for-OBS default. Visible only when (1) a broadcast key
   // is in localStorage AND (2) we've seen a tick from the relay in the
@@ -1730,10 +1730,11 @@
   })();
   let watchLiveSocket = null;
   let watchLiveLastTick = 0;
-  // The account's key from the Drive config, else the monitor's on this browser; read only, never written back.
+  // The monitor's key on this browser (it is the newest: the monitor adopts the account's link, or just made
+  // one), else the account's key from the Drive config; read only, never written back.
   const VIEWER_WATCH_KEY = 'hr_viewer_watch_key';
   function viewerWatchKey() {
-    return localStorage.getItem(VIEWER_WATCH_KEY) || localStorage.getItem('hr_monitor_broadcast_key');
+    return localStorage.getItem('hr_monitor_broadcast_key') || localStorage.getItem(VIEWER_WATCH_KEY);
   }
   // While a broadcast is live the bar's Monitor link reads "Watch live" and opens the stream on the web; in the app it stays Monitor with the live light.
   function updateWatchLiveUI() {
@@ -2122,7 +2123,7 @@
     const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
     const data = await resp.json();
     if (!resp.ok) return;
-    // An account with no config has no room to watch; an earlier account's key must not stand in for it.
+    // An account with no config has no room in Drive; the viewer's slot forgets the earlier account's key.
     if (!data.files || !data.files.length) { localStorage.removeItem(VIEWER_WATCH_KEY); return; }
     const id = data.files[0].id;
     const content = await driveFetch('files/' + id + '?alt=media');
