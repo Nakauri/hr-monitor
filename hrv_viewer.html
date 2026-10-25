@@ -2130,6 +2130,9 @@
       // the new room holding another secret, which would claim it.
       if (typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret)) {
         localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
+      } else if (cfg.broadcastKey !== localKey) {
+        // No secret beside the new key: the monitor makes a fresh one rather than reuse the old room's.
+        localStorage.removeItem('hr_monitor_publish_secret');
       }
       localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
       localStorage.setItem('hr_monitor_link_at', String(cfgAt));

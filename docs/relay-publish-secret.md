@@ -38,9 +38,13 @@ room owner's:
   adopts it. (Review round 1: writing on first sync let two devices upgrading together lock the account out.)
 - A new config holds only the key until the relay accepts this device.
 - Each link carries when it was made (`linkAt`, in the config and in `hr_monitor_link_at`; 0 for links older
-  than the field). A link made on this device is marked (`hr_monitor_link_mine`) until Drive shows it back.
-  Only a marked link is ever written over the config, and only over an older or unreadable one; every other
-  difference adopts the config's. The device's values are read after Drive answers, so a sync already under
+  than the field). When the device and the config hold different keys of the same account, the newer link
+  wins: the device writes its own back, or adopts the config's. A link made on this device is marked
+  (`hr_monitor_link_mine`) until Drive shows it back; only a marked link replaces an unreadable config, and
+  a restored link carries its secret only when marked or accepted by the relay from this device, otherwise
+  the key and time alone. A failed listing fails the sync, never reads as "no config". (Review round 6: a
+  late write of an older link after the read-back, and a failed listing, each wiped the newer link.)
+  The device's values are read after Drive answers, so a sync already under
   way when the user makes a new link weighs the new one. (Review rounds 2 to 4: an acceptance sync, or one in
   flight across the click, read the old key back; a waiting link overwrote a newer one made elsewhere; "newer"
   without "made here" let a viewer-adopted key or another account's config be overwritten.)
@@ -52,7 +56,10 @@ room owner's:
   that account a fresh link of its own when it has none; it never writes, owns or seeds the other account's
   key or secret. Signing back into the same account keeps a link Drive had not taken yet. (Review round 5.)
 - Key and secret are stored secret first, so another tab that reconnects on each change never reaches a new
-  room holding a different secret.
+  room holding a different secret. A key adopted with no secret beside it takes a fresh secret (the viewer
+  drops the old one), never the secret of the room left behind.
+- Another account signing in over this one (a reconnect lets the user pick any account) drops the old
+  account's folder and account id. The account id is asked once per token, shared by overlapping syncs.
 - An unparseable config counts as unreadable: a marked link replaces it, anything else leaves it alone.
 - The relay acceptance only vouches for the key the socket connected with (`relayKey`).
 - The config is reread every minute while refused or until Drive shows back a link this device wrote, and
@@ -96,7 +103,9 @@ room owner's:
 - Link times come from device clocks. A click always outranks the link it replaced, but two devices making
   new links within the same stretch rank by their clocks.
 - Drive has no conditional write for media updates, so two devices writing at once is last-writer-wins; the
-  maker's one-minute recheck puts its link back.
+  device holding the newer link writes it back on its next sync (one minute while it waits on Drive).
+- The viewer keeps its folder when another account signs in over this one without a sign-out; it only reads
+  the config, so it finds nothing there and writes nothing.
 
 ## Checks
 
