@@ -313,6 +313,7 @@ public final class HrEngine implements HrDevice.Callback {
     // Force relay reconnect on Wi-Fi/cellular handoff (OkHttp readTimeout=0 stalls). Registered once, never unregistered.
     private android.net.ConnectivityManager.NetworkCallback networkCallback;
     private android.net.Network lastActiveNetwork;
+    private volatile boolean networkWasLost = false;
 
     private void registerNetworkCallback() {
         if (networkCallback != null) return;
@@ -322,9 +323,12 @@ public final class HrEngine implements HrDevice.Callback {
             if (cm == null) return;
             networkCallback = new android.net.ConnectivityManager.NetworkCallback() {
                 @Override public void onAvailable(android.net.Network network) {
-                    if (lastActiveNetwork != null && !network.equals(lastActiveNetwork)
-                            && sessionActive.get() && broadcastEnabled) {
-                        Log.i(TAG, "Network changed — forcing relay reconnect");
+                    // A new network, or the old one back after a drop while the relay is down.
+                    boolean changed = lastActiveNetwork != null && !network.equals(lastActiveNetwork);
+                    boolean back = networkWasLost && !relayLive.get();
+                    networkWasLost = false;
+                    if ((changed || back) && sessionActive.get() && broadcastEnabled) {
+                        Log.i(TAG, "Network " + (changed ? "changed" : "back") + " — forcing relay reconnect");
                         relayReconnectAttempts = 0;
                         mainHandler.post(() -> {
                             try { closeRelaySocket(); } catch (Throwable ignored) {}
@@ -334,7 +338,7 @@ public final class HrEngine implements HrDevice.Callback {
                     lastActiveNetwork = network;
                 }
                 @Override public void onLost(android.net.Network network) {
-                    if (network.equals(lastActiveNetwork)) lastActiveNetwork = null;
+                    if (network.equals(lastActiveNetwork)) { lastActiveNetwork = null; networkWasLost = true; }
                 }
             };
             android.net.NetworkRequest req = new android.net.NetworkRequest.Builder()
@@ -422,6 +426,18 @@ public final class HrEngine implements HrDevice.Callback {
 
     private final Runnable relayReconnectRunnable = this::openRelaySocket;
 
+    // Callbacks run on OkHttp's thread and can fire before newWebSocket returns; the lock makes a fast failure wait
+    // for the assignment instead of reading it as stale and dropping its retry (overlay dark until a toggle, 10-25).
+    private final Object relayLock = new Object();
+    private boolean isCurrentRelay(WebSocket ws) { synchronized (relayLock) { return ws == relaySocket; } }
+
+    // Safety net under the backoff: down with no attempt for this long means a retry was lost, so reopen once.
+    static final long RELAY_WATCHDOG_MS = 120_000L;
+    private volatile long relayLastOpenAtMs = 0;
+    static boolean relayWatchdogDue(boolean broadcast, boolean hasKey, boolean live, long now, long lastOpenAtMs) {
+        return broadcast && hasKey && !live && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;
+    }
+
     private void scheduleRelayReconnect() {
         if (!sessionActive.get() || !broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
@@ -443,17 +459,16 @@ public final class HrEngine implements HrDevice.Callback {
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
         relayRefused = false;
+        relayLastOpenAtMs = System.currentTimeMillis();
         Request req = new Request.Builder()
             .url("wss://hr-relay.nakauri.workers.dev/parties/main/" + broadcastKey + "?role=publisher"
                 + (publishSecret != null && publishSecret.matches("[0-9a-f]{32}") ? "&proof=" + publishSecret : ""))
             .build();
-        // Stale callbacks (from a socket we replaced or closed) compare ws to
-        // the volatile relaySocket field and bail. Required because OkHttp
-        // queues callbacks on a worker thread and they can fire after we've
-        // moved on.
+        // Stale callbacks (from a socket we replaced or closed) bail through isCurrentRelay.
+        synchronized (relayLock) {
         relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
-                if (ws != relaySocket) return;
+                if (!isCurrentRelay(ws)) return;
                 // Before relayLive, so no tick under the new id precedes the old id's presence-end.
                 String endId = pendingPresenceEndId;
                 if (endId != null) {
@@ -469,13 +484,13 @@ public final class HrEngine implements HrDevice.Callback {
                 emitState();
             }
             @Override public void onClosed(WebSocket ws, int code, String reason) {
-                if (ws != relaySocket) return;
+                if (!isCurrentRelay(ws)) return;
                 relayLive.set(false);
                 emitState();
                 scheduleRelayReconnect();
             }
             @Override public void onFailure(WebSocket ws, Throwable t, Response r) {
-                if (ws != relaySocket) return;
+                if (!isCurrentRelay(ws)) return;
                 relayLive.set(false);
                 Log.w(TAG, "Relay failure: " + NativeRelaySocketPlugin.redact(t != null ? t.getMessage() : "unknown"));
                 emitState();
@@ -483,7 +498,7 @@ public final class HrEngine implements HrDevice.Callback {
             }
             // The relay's verdict on the proof; every other message is for the page.
             @Override public void onMessage(WebSocket ws, String text) {
-                if (ws != relaySocket || text == null || text.length() > 64) return;
+                if (!isCurrentRelay(ws) || text == null || text.length() > 64) return;
                 // The exact type, as the page reads it: a peer's message that only mentions a verdict is not one.
                 String type;
                 try { type = new JSONObject(text).optString("type", ""); } catch (JSONException e) { return; }
@@ -492,6 +507,7 @@ public final class HrEngine implements HrDevice.Callback {
             }
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
+        }
     }
 
     private void closeRelaySocket() {
@@ -506,9 +522,10 @@ public final class HrEngine implements HrDevice.Callback {
                 relaySocket.send(msg);
             } catch (Throwable ignored) {}
         }
-        if (relaySocket != null) {
-            try { relaySocket.close(1000, "session stop"); } catch (Exception ignored) {}
-            relaySocket = null;
+        WebSocket old;
+        synchronized (relayLock) { old = relaySocket; relaySocket = null; }
+        if (old != null) {
+            try { old.close(1000, "session stop"); } catch (Exception ignored) {}
         }
         relayLive.set(false);
     }
@@ -817,6 +834,12 @@ public final class HrEngine implements HrDevice.Callback {
                 }
             }
             postSegmentTick();
+            if (relayWatchdogDue(broadcastEnabled, broadcastKey != null, relayLive.get(), now, relayLastOpenAtMs)) {
+                Log.w(TAG, "Relay watchdog: down with no attempt for " + (now - relayLastOpenAtMs) + "ms, reopening");
+                NativeHrService.logLifecycle(appCtx, "relay_watchdog_reopen");
+                relayReconnectAttempts = 0;
+                openRelaySocket();
+            }
             // Re-check before re-posting: sessionActive may have flipped during this run.
             if (sessionActive.get()) mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
         }

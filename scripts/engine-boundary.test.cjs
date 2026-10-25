@@ -476,6 +476,21 @@ function step2Checks() {
         }
       }
       check('no native log line, rejection or status field carries the relay URL unredacted', leaks.length === 0, leaks.join(' | '));
+      // A relay failure that fired before newWebSocket returned was read as stale and its retry dropped: the
+      // overlay stayed dark for good while the session kept recording (10-25, fixed only by a broadcast toggle).
+      const relayOpen = E.slice(E.indexOf('private void openRelaySocket()'), E.indexOf('private void closeRelaySocket()'));
+      check('relay callbacks wait for the socket assignment, so a fast failure keeps its retry',
+        /synchronized \(relayLock\) \{\s*relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
+        && (relayOpen.match(/if \(!isCurrentRelay\(ws\)/g) || []).length === 4 && !/ws != relaySocket/.test(E)
+        && /synchronized \(relayLock\) \{ return ws == relaySocket; \}/.test(E));
+      const hb = E.slice(E.indexOf('private final Runnable heartbeatRunnable'), E.indexOf('private final Runnable heartbeatRunnable') + 2500);
+      check('the heartbeat reopens a relay left down with no attempt for 2 min',
+        /if \(relayWatchdogDue\(broadcastEnabled, broadcastKey != null, relayLive\.get\(\), now, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocket\(\)/.test(hb)
+        && /RELAY_WATCHDOG_MS = 120_000L/.test(E) && /return broadcast && hasKey && !live && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(E)
+        && /relayLastOpenAtMs = System\.currentTimeMillis\(\);/.test(relayOpen));
+      check('the same network coming back reconnects a down relay',
+        /boolean back = networkWasLost && !relayLive\.get\(\);/.test(E) && /if \(\(changed \|\| back\) && sessionActive\.get\(\) && broadcastEnabled\)/.test(E)
+        && /lastActiveNetwork = null; networkWasLost = true;/.test(E));
       check('native reads the verdict by its exact type, not a substring',
         /optString\("type", ""\)/.test(onMsg) && /"publisher_rejected"\.equals\(type\)/.test(onMsg) && !/text\.contains\("\\"publisher_/.test(onMsg));
       const plugin = readRepo(REL + 'NativeRelaySocketPlugin.java');
