@@ -432,7 +432,11 @@ public final class HrEngine implements HrDevice.Callback {
         return (long) (base * jitter);
     }
 
-    private final Runnable relayReconnectRunnable = this::openRelaySocket;
+    private final Runnable relayReconnectRunnable = this::openRelaySocketSafely;
+    // Main-looper opens (retry, watchdog, start) never throw into the looper; the watchdog tries again later.
+    private void openRelaySocketSafely() {
+        try { openRelaySocket(); } catch (Throwable t) { Log.w(TAG, "relay open failed: " + NativeRelaySocketPlugin.redact(String.valueOf(t))); }
+    }
 
     // Callbacks run on OkHttp's thread and may in principle fire before newWebSocket returns; the lock makes them
     // wait for the assignment rather than read a live socket as stale.
@@ -486,10 +490,15 @@ public final class HrEngine implements HrDevice.Callback {
                 + (publishSecret != null && publishSecret.matches("[0-9a-f]{32}") ? "&proof=" + publishSecret : ""))
             .build();
         // Stale callbacks (from a socket we replaced or closed) bail through isCurrentRelay.
+        final WebSocket prev, opening;
         synchronized (relayLock) {
         // Re-checked under the lock a stop's close takes, so no socket opens after the stop and outlives it.
         if (!sessionActive.get()) return;
-        relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
+        // An open on another thread may have assigned since our close; it is cancelled, never orphaned, and its
+        // live flag never stands for the socket replacing it.
+        prev = relaySocket;
+        if (prev != null) relayLive.set(false);
+        opening = relaySocket = httpClient.newWebSocket(req, new WebSocketListener() {
             @Override public void onOpen(WebSocket ws, Response r) {
                 if (!isCurrentRelay(ws)) return;
                 // Before relayLive, so no tick under the new id precedes the old id's presence-end.
@@ -536,7 +545,8 @@ public final class HrEngine implements HrDevice.Callback {
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
         }
-        final WebSocket opening = relaySocket;
+        if (prev != null) { try { prev.cancel(); } catch (Throwable ignored) {} }
+        // The socket made under the lock, never the field re-read after it: a stop in between leaves it null.
         mainHandler.postDelayed(() -> {
             if (!isCurrentRelay(opening) || relayLive.get()) return;
             Log.w(TAG, "Relay handshake stalled " + RELAY_HANDSHAKE_MS + "ms, cancelling");
@@ -874,7 +884,7 @@ public final class HrEngine implements HrDevice.Callback {
             if (relayWatchdogDue(broadcastEnabled, hasBroadcastKey(), relayLive.get(), relayRetryPending, up, relayLastOpenAtMs)) {
                 Log.w(TAG, "Relay watchdog: down with no attempt for " + (up - relayLastOpenAtMs) + "ms, reopening");
                 NativeHrService.logLifecycle(appCtx, "relay_watchdog_reopen");
-                openRelaySocket();
+                openRelaySocketSafely();
             }
             // Re-check before re-posting: sessionActive may have flipped during this run.
             if (sessionActive.get()) mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
@@ -2101,7 +2111,7 @@ public final class HrEngine implements HrDevice.Callback {
             sessionActive.set(true);
             // After the flag: a fast failure schedules its retry only once the session counts as active.
             // A throw here must not leave the session claimed but half started; the watchdog retries the open.
-            if (canBroadcast) { try { openRelaySocket(); } catch (Throwable t) { Log.w(TAG, "relay open failed: " + NativeRelaySocketPlugin.redact(String.valueOf(t))); } }
+            if (canBroadcast) openRelaySocketSafely();
             // One .commit(): a SIGKILL right after must not lose the live flag, the key or the senderId a resume needs.
             try {
                 appCtx.getSharedPreferences("hr_monitor_session", 0).edit()

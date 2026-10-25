@@ -481,7 +481,7 @@ function step2Checks() {
       const relayOpen = E.slice(E.indexOf('private void openRelaySocket()'), E.indexOf('private void closeRelaySocket()'));
       const relayClose = E.slice(E.indexOf('private void closeRelaySocket()'), E.indexOf('private void closeRelaySocket()') + 1600);
       check('relay callbacks compare under the lock that guards the assignment',
-        /synchronized \(relayLock\) \{[^}]{0,200}relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
+        /synchronized \(relayLock\) \{[^}]{0,600}opening = relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
         && (relayOpen.match(/if \(!isCurrentRelay\(ws\)/g) || []).length === 2
         && (relayOpen.match(/if \(!markDownIfCurrent\(ws\)\) return;/g) || []).length === 3
         && /synchronized \(relayLock\) \{ if \(ws != relaySocket\) return false; relayLive\.set\(false\); return true; \}/.test(E)
@@ -494,9 +494,15 @@ function step2Checks() {
         && /synchronized \(relayLock\) \{ old = relaySocket; relaySocket = null; wasLive = relayLive\.getAndSet\(false\); \}/.test(relayClose));
       const startBody = E.slice(E.indexOf('sessionActive.set(true);', E.indexOf('startSessionInternal')), E.indexOf('sessionActive.set(true);', E.indexOf('startSessionInternal')) + 700);
       check('session start opens the relay only once the session counts as active, and a throw cannot half-start it',
-        /^sessionActive\.set\(true\);[\s\S]{0,400}if \(canBroadcast\) \{ try \{ openRelaySocket\(\); \} catch \(Throwable t\) \{/.test(startBody)
-        && /synchronized \(relayLock\) \{[\s\S]{0,140}if \(!sessionActive\.get\(\)\) return;\s*relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
+        /^sessionActive\.set\(true\);[\s\S]{0,400}if \(canBroadcast\) openRelaySocketSafely\(\);/.test(startBody)
+        && /private final Runnable relayReconnectRunnable = this::openRelaySocketSafely;/.test(E)
+        && /private void openRelaySocketSafely\(\) \{\s*try \{ openRelaySocket\(\); \} catch \(Throwable t\) \{/.test(E)
+        && /synchronized \(relayLock\) \{[^}]{0,160}if \(!sessionActive\.get\(\)\) return;[^}]{0,400}opening = relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
         && /private void openRelaySocket\(\) \{\s*relayRetryPending = false;\s*if \(!sessionActive\.get\(\) \|\| !hasBroadcastKey\(\)\) return;/.test(E));
+      check('two opens racing never orphan a socket, and the handshake timer holds the socket made under the lock',
+        /prev = relaySocket;\s*if \(prev != null\) relayLive\.set\(false\);\s*opening = relaySocket = httpClient\.newWebSocket\(/.test(relayOpen)
+        && /if \(prev != null\) \{ try \{ prev\.cancel\(\); \} catch \(Throwable ignored\) \{\} \}/.test(relayOpen)
+        && !/final WebSocket opening = relaySocket;/.test(relayOpen));
       check('a relay handshake still not open after 35 s is cancelled, so onFailure logs and backs off',
         /RELAY_HANDSHAKE_MS = 35_000L/.test(E)
         && /mainHandler\.postDelayed\(\(\) -> \{\s*if \(!isCurrentRelay\(opening\) \|\| relayLive\.get\(\)\) return;[\s\S]{0,160}opening\.cancel\(\);\s*\}, RELAY_HANDSHAKE_MS\);/.test(relayOpen));
@@ -506,7 +512,7 @@ function step2Checks() {
         /public void onClosing\(WebSocket ws, int code, String reason\) \{\s*if \(!markDownIfCurrent\(ws\)\) return;\s*try \{ ws\.close\(1000, null\); \}/.test(relayOpen));
       const hb = E.slice(E.indexOf('private final Runnable heartbeatRunnable'), E.indexOf('private final Runnable heartbeatRunnable') + 2500);
       check('the heartbeat reopens a relay left down, no retry queued, no attempt for 2 min',
-        /if \(relayWatchdogDue\(broadcastEnabled, hasBroadcastKey\(\), relayLive\.get\(\), relayRetryPending, up, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocket\(\)/.test(hb)
+        /if \(relayWatchdogDue\(broadcastEnabled, hasBroadcastKey\(\), relayLive\.get\(\), relayRetryPending, up, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocketSafely\(\)/.test(hb)
         && !/if \(relayWatchdogDue\([^{]*\{[^}]*relayReconnectAttempts = 0/.test(hb)
         && /RELAY_WATCHDOG_MS = 120_000L/.test(E) && /return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(E)
         && /relayLastOpenAtMs = android\.os\.SystemClock\.elapsedRealtime\(\);/.test(relayOpen)
