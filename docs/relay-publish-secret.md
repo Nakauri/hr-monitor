@@ -46,7 +46,13 @@ room owner's:
   without "made here" let a viewer-adopted key or another account's config be overwritten.)
 - A click is stamped later than any link time this device has seen, and a matching config raises the
   device's time to the config's, so a click always outranks the link it replaces, whatever the clocks say.
-- Signing out drops the mark, so a link made under one account never lands in the next one's config.
+- Each key belongs to one Google account (`hr_monitor_link_account`, Drive's permissionId; a key from before
+  the field binds to the first account that syncs it). Under any other account, however the account changed
+  (sign-out, an expired login, a re-sign-in as someone else), the device adopts that account's link, or makes
+  that account a fresh link of its own when it has none; it never writes, owns or seeds the other account's
+  key or secret. Signing back into the same account keeps a link Drive had not taken yet. (Review round 5.)
+- Key and secret are stored secret first, so another tab that reconnects on each change never reaches a new
+  room holding a different secret.
 - An unparseable config counts as unreadable: a marked link replaces it, anything else leaves it alone.
 - The relay acceptance only vouches for the key the socket connected with (`relayKey`).
 - The config is reread every minute while refused or until Drive shows back a link this device wrote, and
@@ -58,7 +64,8 @@ room owner's:
   **Make a new link** button.
 - A new link (`regenerateBroadcastKey`) mints a fresh key, a fresh secret and its time, and hands the pair
   to the native engine. Its secret goes into the config at once: no other device knows a room this new.
-- The viewer shares the monitor's storage and follows the same rule: it keeps a newer link made here.
+- The viewer shares the monitor's storage and follows the same rule: it keeps a newer link made here, and
+  adopts a key together with its secret.
 - A failed config write throws instead of passing silently.
 
 ## Native
@@ -83,6 +90,7 @@ room owner's:
 - Every claimed room keeps one stored hash, with no expiry.
 - Signing out keeps the secret, because a signed-out monitor still broadcasts to its own room; a new link
   is the way to retire a secret.
+- Two accounts an older build already pointed at one room keep sharing it until either makes a new link.
 - Until the new relay is deployed, the old one forwards anything, verdicts included; deploy the relay with
   the site.
 - Link times come from device clocks. A click always outranks the link it replaced, but two devices making
@@ -99,7 +107,8 @@ room owner's:
 - `scripts/marks-store.test.cjs` K1: no write before acceptance, the two-device race, taken detection, new
   link to Drive and engine with a fresh secret and its time, a new link through a failed write, a sync held
   in flight across the click, an older write landing late, a sign-in, a newer link from another device, a
-  clock running ahead, an account switch, a key the viewer adopted, unreadable configs, a stale acceptance, the
+  clock running ahead, account switches (sign-out, new login, a new account with no config, a shared room,
+  back to the same account), a key the viewer adopted, unreadable configs, a stale acceptance, the
   owner repairing a stray secret, retried writes, failed writes, and the viewer run for real.
 - `scripts/engine-boundary.test.cjs` (reads the Java as text): native saves the secret with the key, refuses
   an empty one, reads the verdict by exact type, reports it, and no native log line, rejection or status

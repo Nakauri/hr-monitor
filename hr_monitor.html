@@ -2948,7 +2948,34 @@
   // When this device's link was made (0 for links older than the field); the config carries the same field.
   // LINK_MINE: a link made on this device that Drive has not shown back yet. Only such a link is ever written
   // over Drive's, and only over an older or unreadable one; every other difference adopts Drive's.
-  const LINK_AT = 'hr_monitor_link_at', LINK_MINE = 'hr_monitor_link_mine';
+  // LINK_ACCOUNT: the Google account (Drive permissionId) the current key belongs to. A key from another account
+  // is never written, owned or seeded under this one; that account's own link is adopted, or a fresh one made.
+  const LINK_AT = 'hr_monitor_link_at', LINK_MINE = 'hr_monitor_link_mine', LINK_ACCOUNT = 'hr_monitor_link_account';
+  let driveAccountCache = null;
+  async function driveAccountId() {
+    const token = driveAccessToken;
+    if (driveAccountCache && driveAccountCache.token === token) return driveAccountCache.id;
+    const resp = await driveFetch('about?fields=' + encodeURIComponent('user(permissionId)'));
+    if (!resp.ok) throw new Error('about ' + resp.status);
+    const d = await resp.json();
+    const id = (d.user && d.user.permissionId) || '';
+    if (!id) throw new Error('about: no account id');
+    driveAccountCache = { token, id };
+    return id;
+  }
+  // A fresh room and secret, stamped later than any link this device has seen (so it outranks the link it
+  // replaces whatever the clocks say) and marked as made here, under acct or the account the last key had.
+  function mintLink(acct) {
+    const at = Math.max(Date.now(), localLinkAt() + 1);
+    localStorage.removeItem('hr_monitor_broadcast_key');
+    localStorage.removeItem('hr_monitor_publish_secret');
+    const key = getOrCreateBroadcastKey();
+    getOrCreatePublishSecret();
+    localStorage.setItem(LINK_AT, String(at));
+    localStorage.setItem(LINK_MINE, key);
+    if (acct) localStorage.setItem(LINK_ACCOUNT, acct);
+    return key;
+  }
   function localLinkAt() {
     const n = Number(localStorage.getItem(LINK_AT));
     return Number.isFinite(n) && n > 0 ? n : 0;
@@ -2970,14 +2997,7 @@
   }
   // A new link is a fresh room and a fresh secret, so whoever held the old secret cannot claim the new room.
   function regenerateBroadcastKey() {
-    // Later than any link this device has seen, so the click outranks the link it replaces whatever the clocks say.
-    const at = Math.max(Date.now(), localLinkAt() + 1);
-    localStorage.removeItem('hr_monitor_broadcast_key');
-    localStorage.removeItem('hr_monitor_publish_secret');
-    const key = getOrCreateBroadcastKey();
-    getOrCreatePublishSecret();
-    localStorage.setItem(LINK_AT, String(at));
-    localStorage.setItem(LINK_MINE, key);
+    mintLink(driveAccessToken && driveAccountCache && driveAccountCache.token === driveAccessToken ? driveAccountCache.id : null);
     relayRefused = false; relayTaken = false;
     pushRelayCredentialsToEngine();
     startConfigPoll();
@@ -5927,8 +5947,6 @@
   }
 
   async function driveSignOut() {
-    // A link made here and not yet in Drive belongs to the account being left, never to the next one signed in.
-    localStorage.removeItem(LINK_MINE);
     try { await window.aortiAuth.signOut(); } catch (e) { console.warn('[drive] signOut:', e); }
   }
 
@@ -6016,6 +6034,7 @@
   }
   async function driveSyncConfig() {
     if (!driveAccessToken || !driveFolderId) return;
+    const acct = await driveAccountId();
     const id = await driveFindConfig();
     let cfg = null;
     if (id) {
@@ -6025,10 +6044,22 @@
       try { cfg = JSON.parse(await resp.text()); } catch (e) { cfg = null; }
     }
     // Read after the awaits: a new link made meanwhile, here or in another tab, is what this sync weighs.
-    const key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();
-    const mine = localStorage.getItem(LINK_MINE) === key;
+    let key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();
+    // A key from before the account field belongs to the first account that syncs it, as it always did.
+    if (!localStorage.getItem(LINK_ACCOUNT)) localStorage.setItem(LINK_ACCOUNT, acct);
+    const foreign = localStorage.getItem(LINK_ACCOUNT) !== acct;
     const valid = !!cfg && typeof cfg.broadcastKey === 'string' && /^[0-9a-f]{16}$/.test(cfg.broadcastKey);
     const cfgAt = valid && Number.isFinite(cfg.linkAt) && cfg.linkAt > 0 ? cfg.linkAt : 0;
+    // Another account's key, and this account has no readable link: it gets a fresh one of its own, so no key or
+    // secret ever crosses accounts.
+    if (foreign && !valid) {
+      key = mintLink(acct); secret = getOrCreatePublishSecret(); at = localLinkAt();
+      pushRelayCredentialsToEngine();
+      if (typeof reconnectRelay === 'function') reconnectRelay();
+      if (typeof updateStreamingUI === 'function') updateStreamingUI();
+      watchFrameSrc = null;
+    }
+    const mine = localStorage.getItem(LINK_MINE) === key && localStorage.getItem(LINK_ACCOUNT) === acct;
     // A link made here goes in, secret and all (no other device knows a room this new), unless Drive holds a newer one.
     if (mine && (!valid || (cfg.broadcastKey !== key && at > cfgAt))) {
       configBehind = true;
@@ -6053,14 +6084,16 @@
     }
     const secretOk = typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret);
     // Accepted for this key, this device holds the owner's secret: a different one in the config is the stray.
-    const owner = relayAccepted && relayKey === key && !keyChanged;
+    const owner = relayAccepted && relayKey === key && !keyChanged && !foreign;
     const secretChanged = secretOk && !owner && secret !== cfg.publishSecret;
+    // Secret first: another tab reconnects on each change and must never reach the new room with another secret.
+    if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
     if (keyChanged) {
       localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
       localStorage.setItem(LINK_AT, String(cfgAt));
       localStorage.removeItem(LINK_MINE);
     }
-    if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
+    localStorage.setItem(LINK_ACCOUNT, acct);
     // The config takes this device's secret only once the relay accepted it for this very key.
     if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt });
     // Refused while holding the account's own pair, or refused for 3 min with no owner's secret ever

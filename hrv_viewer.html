@@ -2126,6 +2126,11 @@
       const localKey = localStorage.getItem('hr_monitor_broadcast_key');
       const localAt = Number(localStorage.getItem('hr_monitor_link_at')) || 0;
       if (cfg.broadcastKey !== localKey && localStorage.getItem('hr_monitor_link_mine') === localKey && localAt > cfgAt) return;
+      // Key and secret travel together, secret first: a monitor tab reconnects on each change, and must never reach
+      // the new room holding another secret, which would claim it.
+      if (typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret)) {
+        localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
+      }
       localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
       localStorage.setItem('hr_monitor_link_at', String(cfgAt));
       updateWatchLiveUI();
