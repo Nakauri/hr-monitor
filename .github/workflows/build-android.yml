@@ -54,6 +54,16 @@ jobs:
       - name: Run ./check
         run: sh ./check
 
+      # The browser tier needs the local ux-audit kit, but a stale CSP hash blocks a page's scripts on the live
+      # site, so CI checks vercel.json against the pages with the same Chromium parser the pre-push hook uses.
+      - name: Check the CSP hashes are current
+        run: |
+          mkdir -p "$RUNNER_TEMP/ux/kit" && cd "$RUNNER_TEMP/ux/kit"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund playwright@1.64.0 > /dev/null
+          npx playwright install --with-deps chromium > /dev/null
+          cd "$GITHUB_WORKSPACE" && node scripts/csp-hashes.mjs --check --ux "$RUNNER_TEMP/ux"
+
   build:
     needs: check
     runs-on: ubuntu-latest
@@ -110,9 +120,13 @@ jobs:
         run: |
           if [ -n "$KS" ]; then
             echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # A push publishes to the public release; a debug-signed APK there would not update the installed app.
+            echo "::error::ANDROID_KEYSTORE_BASE64 not set; refusing to publish a debug-signed APK."
+            exit 1
           else
             echo "has_keystore=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::ANDROID_KEYSTORE_BASE64 not set — building with debug keystore."
+            echo "::warning::ANDROID_KEYSTORE_BASE64 not set; pull request build uses the debug keystore and publishes nothing."
           fi
 
       - name: Configure release signing
