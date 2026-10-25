@@ -349,7 +349,7 @@ public class NativeHrSessionPlugin extends Plugin {
             e.setRelayCredentials(call.getString("broadcastKey", ""), call.getString("publishSecret", ""));
             call.resolve();
         } catch (Throwable t) {
-            call.reject("set_relay_credentials_failed: " + t.getMessage());
+            call.reject("set_relay_credentials_failed: " + NativeRelaySocketPlugin.redact(t.getMessage()));
         }
     }
 

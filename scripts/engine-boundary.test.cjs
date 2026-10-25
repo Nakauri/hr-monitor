@@ -467,11 +467,17 @@ function step2Checks() {
       for (const f of fs.readdirSync(path.join(ROOT, REL)).filter((n) => n.endsWith('.java'))) {
         let src = '';
         try { src = readRepo(REL + f); } catch (e) { continue; }
-        for (const m of src.matchAll(/(?:Log\.[a-z]|logLifecycle|putSafe|ret\.put)\([^;]*;/g)) {
-          if (/publishSecret|proof=/.test(m[0]) || (/\b(?:currentUrl|url|wsUrl|relayUrl)\b/.test(m[0]) && !/redact\(/.test(m[0]))) leaks.push(f + ': ' + m[0].slice(0, 80));
+        for (const m of src.matchAll(/(?:Log\.[a-z]|logLifecycle|putSafe|ret\.put|call\.reject)\([^;]*;/g)) {
+          const s = m[0];
+          const url = /\b(?:currentUrl|url|wsUrl|relayUrl)\b/.test(s.replace(/"[^"]*"/g, '""'));
+          // A socket error message can quote the URL it failed on.
+          const relayError = /getMessage\(\)|\+ t\b/.test(s) && (f === 'NativeRelaySocketPlugin.java' || /[Rr]elay/.test(s));
+          if (/publishSecret|proof=/.test(s) || ((url || relayError) && !/redact\(/.test(s))) leaks.push(f + ': ' + s.slice(0, 80));
         }
       }
-      check('no native log line or status field carries the relay URL unredacted', leaks.length === 0, leaks.join(' | '));
+      check('no native log line, rejection or status field carries the relay URL unredacted', leaks.length === 0, leaks.join(' | '));
+      check('native reads the verdict by its exact type, not a substring',
+        /optString\("type", ""\)/.test(onMsg) && /"publisher_rejected"\.equals\(type\)/.test(onMsg) && !/text\.contains\("\\"publisher_/.test(onMsg));
       const plugin = readRepo(REL + 'NativeRelaySocketPlugin.java');
       check('the socket plugin redacts the proof', /replaceAll\("proof=\[\^&\\\\s\]\*", "proof=redacted"\)/.test(plugin));
       check('startSessionInternal starts the FGS after the prefs .commit()', fgs >= 0 && commit >= 0 && fgs > commit,

@@ -94,7 +94,7 @@ public class NativeRelaySocketPlugin extends Plugin {
             socket = null;
             socketId = null;
             currentUrl = null;
-            call.reject("open failed: " + t.getMessage());
+            call.reject("open failed: " + redact(t.getMessage()));
         }
     }
 
@@ -119,7 +119,7 @@ public class NativeRelaySocketPlugin extends Plugin {
             ret.put("queued", queued);
             call.resolve(ret);
         } catch (Throwable t) {
-            call.reject("send failed: " + t.getMessage());
+            call.reject("send failed: " + redact(t.getMessage()));
         }
     }
 
@@ -140,7 +140,7 @@ public class NativeRelaySocketPlugin extends Plugin {
             ret.put("closed", true);
             call.resolve(ret);
         } catch (Throwable t) {
-            call.reject("close failed: " + t.getMessage());
+            call.reject("close failed: " + redact(t.getMessage()));
         }
     }
 
@@ -154,7 +154,7 @@ public class NativeRelaySocketPlugin extends Plugin {
             if (id != null) ret.put("socketId", id);
             call.resolve(ret);
         } catch (Throwable t) {
-            call.reject("status failed: " + t.getMessage());
+            call.reject("status failed: " + redact(t.getMessage()));
         }
     }
 

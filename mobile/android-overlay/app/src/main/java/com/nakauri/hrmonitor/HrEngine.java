@@ -477,15 +477,18 @@ public final class HrEngine implements HrDevice.Callback {
             @Override public void onFailure(WebSocket ws, Throwable t, Response r) {
                 if (ws != relaySocket) return;
                 relayLive.set(false);
-                Log.w(TAG, "Relay failure: " + (t != null ? t.getMessage() : "unknown"));
+                Log.w(TAG, "Relay failure: " + NativeRelaySocketPlugin.redact(t != null ? t.getMessage() : "unknown"));
                 emitState();
                 scheduleRelayReconnect();
             }
             // The relay's verdict on the proof; every other message is for the page.
             @Override public void onMessage(WebSocket ws, String text) {
                 if (ws != relaySocket || text == null || text.length() > 64) return;
-                if (text.contains("\"publisher_rejected\"")) { relayRefused = true; emitState(); }
-                else if (text.contains("\"publisher_accepted\"")) { relayRefused = false; emitState(); }
+                // The exact type, as the page reads it: a peer's message that only mentions a verdict is not one.
+                String type;
+                try { type = new JSONObject(text).optString("type", ""); } catch (JSONException e) { return; }
+                if ("publisher_rejected".equals(type)) { relayRefused = true; emitState(); }
+                else if ("publisher_accepted".equals(type)) { relayRefused = false; emitState(); }
             }
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
