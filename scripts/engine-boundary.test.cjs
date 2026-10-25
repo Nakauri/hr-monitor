@@ -524,6 +524,10 @@ function step2Checks() {
         /cm\.registerDefaultNetworkCallback\(networkCallback\);/.test(E)
         && /boolean back = networkWasLost;/.test(E) && /if \(\(changed \|\| back\) && sessionActive\.get\(\) && broadcastEnabled\)/.test(E)
         && /lastActiveNetwork = null; networkWasLost = true;/.test(E));
+      // publishTick runs on the BLE binder thread; re-reading the field after its null check let a stop in between
+      // throw (blind re-grade 2026-10-25).
+      check('nothing sends or closes through the shared relay field: each use takes one local copy',
+        !/relaySocket\.(send|close|cancel)\(/.test(E) && /final WebSocket ws = relaySocket;\s*if \(ws == null \|\| !relayLive\.get\(\)\) return;/.test(E));
       check('native reads the verdict by its exact type, not a substring',
         /optString\("type", ""\)/.test(onMsg) && /"publisher_rejected"\.equals\(type\)/.test(onMsg) && !/text\.contains\("\\"publisher_/.test(onMsg));
       const plugin = readRepo(REL + 'NativeRelaySocketPlugin.java');

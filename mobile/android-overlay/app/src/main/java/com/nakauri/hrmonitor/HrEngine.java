@@ -562,10 +562,11 @@ public final class HrEngine implements HrDevice.Callback {
         // Without this the relay's activeBroadcasters map keeps the id around
         // until its 15 s idle eviction fires; users see ghost "live recording"
         // entries between a session stop and the next presence cleanup tick.
-        if (relaySocket != null && senderId != null && !senderId.isEmpty()) {
+        final WebSocket ending = relaySocket;
+        if (ending != null && senderId != null && !senderId.isEmpty()) {
             try {
                 String msg = "{\"type\":\"presence-end\",\"senderId\":\"" + escapeJson(senderId) + "\"}";
-                relaySocket.send(msg);
+                ending.send(msg);
             } catch (Throwable ignored) {}
         }
         WebSocket old;
@@ -585,9 +586,11 @@ public final class HrEngine implements HrDevice.Callback {
      * When adding or renaming a field, update all three: this method,
      * hr_monitor.html broadcastTick, and overlay.html handleTick.
      */
+    // Runs on the BLE binder thread (onHr); one read of the socket, since a stop or reconnect can null the field.
     private void publishTick(int hr, Double rmssd, boolean contactOff, long nowMs) {
         if (!broadcastEnabled) return;
-        if (relaySocket == null || !relayLive.get()) return;
+        final WebSocket ws = relaySocket;
+        if (ws == null || !relayLive.get()) return;
         double tMin = Math.max(0, nowMs - sessionStartMs) / 60_000.0;
         // Construct minimal JSON manually — avoids extra dep on org.json
         // and matches the wire shape overlay.html consumes.
@@ -633,12 +636,12 @@ public final class HrEngine implements HrDevice.Callback {
         }
 
         sb.append('}');
-        relaySocket.send(sb.toString());
+        ws.send(sb.toString());
     }
 
     // Snapshot the deque before iterating. ArrayDeque is not thread-safe;
     // BLE callbacks (binder thread) addLast on liveBuffer / trendHrBuffer /
-    // trendRmssdBuffer at the same moment publishTick (main thread) walks
+    // trendRmssdBuffer while publishTick (also the binder thread, via onHr) walks
     // them. Today the call chain happens to serialise, but a future caller
     // off either thread would hit ConcurrentModificationException. Cheap
     // toArray copy avoids the race for the lifetime of the iteration.
@@ -2475,7 +2478,7 @@ public final class HrEngine implements HrDevice.Callback {
                     .edit().putLong("last_alive_ms", now).apply();
             } catch (Throwable ignored) {}
         }
-        // synchronized: BLE binder writes, main thread reads in publishTick.
+        // synchronized: the BLE binder thread writes here; any other reader takes the same lock.
         Double rmssd;
         Double sdnnMatch;
         synchronized (rrWindow) {
