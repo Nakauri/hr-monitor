@@ -437,7 +437,8 @@ CHECKS.M6 = async (src) => {
   const el = () => { const c = new Set(); return { classList: { contains: (k) => c.has(k), toggle: (k, on) => { if (on) c.add(k); else c.delete(k); } }, setAttribute() {}, style: {}, has: (k) => c.has(k) }; };
   const els = { 'app-bar': el(), 'drive-cloud': el(), 'syncbar-fill': el() };
   const paint = (cloud) => {
-    loadPage(src.viewer, ['paintCloud'], { document: { getElementById: (id) => els[id] || null }, fitBar() {}, cloud }, function () { paintCloud(); });
+    // paintCloud reads window.aortiAuth (a slashed cloud only when signed out); signed in here, as in the cases below.
+    loadPage(src.viewer, ['paintCloud'], { document: { getElementById: (id) => els[id] || null }, fitBar() {}, cloud, window: { aortiAuth: { getCachedToken: () => ({ access_token: 'tok' }) } } }, function () { paintCloud(); });
     return els['app-bar'].has('syncing');
   };
   out.push(['M6 cloud reads syncing while marks are not on Drive (signed in), off when signed out',
