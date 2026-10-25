@@ -40,6 +40,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
 <script src="./marks-store.js"></script>
+<script src="./relay-link.js"></script>
 <script src="./marks-drive.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <script src="./widget.js"></script>
@@ -2910,133 +2911,50 @@
   }
 
   // ===== WebSocket relay =====
-  // PartyServer on Cloudflare Workers. Each user gets a unique broadcast key; publisher
-  // and subscriber (the OBS Browser Source) connect to the same room by key. Zero
-  // server-side persistence — messages just fan out and vanish.
-  const RELAY_HOST = 'wss://hr-relay.nakauri.workers.dev';
-  function getOrCreateBroadcastKey() {
-    let k = localStorage.getItem('hr_monitor_broadcast_key');
-    if (!k) {
-      // 16 hex chars ≈ 64 bits of entropy; collision risk negligible, URL stays short.
-      const bytes = new Uint8Array(8);
-      (crypto || window.msCrypto).getRandomValues(bytes);
-      k = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('hr_monitor_broadcast_key', k);
-    }
-    return k;
-  }
-  // The relay lets a room's first proven publisher keep it; the overlay link carries only the key.
-  // Travels with the key in the Drive config so every device on the account can publish.
-  function getOrCreatePublishSecret() {
-    let p = localStorage.getItem('hr_monitor_publish_secret');
-    if (!p || !/^[0-9a-f]{32}$/.test(p)) {
-      const bytes = new Uint8Array(16);
-      crypto.getRandomValues(bytes);
-      p = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('hr_monitor_publish_secret', p);
-    }
-    return p;
-  }
-  // relayAccepted: the relay took this device's proof for the current key. Only then may the secret go into an
-  // older config, so the config's secret is always the room owner's. relayTaken: refused while holding the
-  // account's own pair, so no reread can help; only a new link does.
-  // relayKey: the key the open socket connected with, so an acceptance never vouches for a key changed since.
-  let relayRefused = false, relayRefusedAt = 0, relayAccepted = false, relayTaken = false, relayKey = null;
-  // configSyncedAt: the last sync that finished, so a failed write retries on the next tick. configBehind: this
-  // device wrote a newer link and Drive has not shown it back yet.
-  let configPollTimer = null, configSyncedAt = 0, configBehind = false;
-  // When this device's link was made (0 for links older than the field); the config carries the same field.
-  // LINK_MINE: a link made on this device that Drive has not shown back yet. Only such a link is ever written
-  // over Drive's, and only over an older or unreadable one; every other difference adopts Drive's.
-  // LINK_ACCOUNT: the Google account (Drive permissionId) the current key belongs to. A key from another account
-  // is never written, owned or seeded under this one; that account's own link is adopted, or a fresh one made.
-  const LINK_AT = 'hr_monitor_link_at', LINK_MINE = 'hr_monitor_link_mine', LINK_ACCOUNT = 'hr_monitor_link_account';
-  // One request per token, shared by overlapping syncs.
-  let driveAccountCache = null;
-  function driveAccountId() {
-    const token = driveAccessToken;
-    if (driveAccountCache && driveAccountCache.token === token) return driveAccountCache.p;
-    const entry = { token, p: null, id: null };
-    entry.p = (async () => {
-      const resp = await driveFetch('about?fields=' + encodeURIComponent('user(permissionId)'));
-      if (!resp.ok) throw new Error('about ' + resp.status);
-      const d = await resp.json();
-      const id = (d.user && d.user.permissionId) || '';
-      if (!id) throw new Error('about: no account id');
-      entry.id = id;
-      return id;
-    })();
-    driveAccountCache = entry;
-    entry.p.catch(() => { if (driveAccountCache === entry) driveAccountCache = null; });
-    return entry.p;
-  }
-  // A fresh room and secret, stamped later than any link this device has seen (so it outranks the link it
-  // replaces whatever the clocks say) and marked as made here, under acct or the account the last key had.
-  // Both values are made first and stored secret first with no removal in between: another tab reconnects on
-  // each change, and must never find the new key beside no secret (it would mint its own and claim the room).
-  // acct undefined keeps the last account (signed out); null unbinds the key for the next sync to bind.
-  function mintLink(acct) {
-    const at = Math.max(Date.now(), localLinkAt() + 1);
-    const hex = (n) => { const b = new Uint8Array(n); crypto.getRandomValues(b); return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join(''); };
-    const key = hex(8), secret = hex(16);
-    localStorage.setItem('hr_monitor_publish_secret', secret);
-    localStorage.setItem('hr_monitor_broadcast_key', key);
-    localStorage.setItem(LINK_AT, String(at));
-    localStorage.setItem(LINK_MINE, key);
-    if (acct) localStorage.setItem(LINK_ACCOUNT, acct);
-    // Signed in, id not known yet: bound to this login's tag, so only this login's sync claims it.
-    else if (acct === null && driveLoginTag) localStorage.setItem(LINK_ACCOUNT, driveLoginTag);
-    else if (acct === null) localStorage.removeItem(LINK_ACCOUNT);
-    // Waiting on Drive from the click on, so a sync dropped before it writes still leaves the one-minute recheck.
-    configBehind = true;
-    return key;
-  }
-  function localLinkAt() {
-    const n = Number(localStorage.getItem(LINK_AT));
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-  // Rereads the config every minute while something waits on it, every 5 min otherwise, so a link made elsewhere arrives.
-  function startConfigPoll() {
-    if (configPollTimer) return;
-    configPollTimer = setInterval(() => {
-      if (!driveAccessToken || !driveFolderId) return;
-      const waiting = (relayRefused && !relayTaken) || configBehind;
-      if (waiting || Date.now() - configSyncedAt > 300000) driveSyncConfig().catch(e => console.warn('config sync:', e));
-    }, 60000);
-  }
+  // PartyServer on Cloudflare Workers. Each account gets a broadcast key; publishers and subscribers (the OBS
+  // Browser Source) meet in the room named by it. The relay stores one value per room: the hash of the proof that
+  // claimed it. The key, the publish secret and their copy in the Drive config live in relay-link.js.
+  const RELAY_HOST = AortiRelayLink.RELAY_HOST;
+  const relayLink = AortiRelayLink.create({
+    storage: localStorage,
+    random: (n) => crypto.getRandomValues(new Uint8Array(n)),
+    token: () => driveAccessToken,
+    folder: () => driveFolderId,
+    driveFetch: (path, init) => driveFetch(path, init),
+    upload: async (url, init) => fetch(url, Object.assign({}, init, { headers: Object.assign({ 'Authorization': await driveAuthHeader() }, init.headers) })),
+    onCredentials: () => followRelayCredentials(true),
+    onStatus: () => refreshRelayStatus(),
+    setInterval: (fn, ms) => setInterval(fn, ms),
+    warn: (...a) => console.warn(...a),
+  });
+  function getOrCreateBroadcastKey() { return relayLink.key(); }
+  function getOrCreatePublishSecret() { return relayLink.secret(); }
+  function driveSyncConfig() { return relayLink.sync(); }
+  function startConfigPoll() { relayLink.startPoll(); }
   // A running native session keeps its own socket; it takes a new key or secret without a restart.
   function pushRelayCredentialsToEngine() {
     const ns = window.HRMNativeHrSession;
     if (!ns || typeof ns.setRelayCredentials !== 'function') return;
     ns.setRelayCredentials({ broadcastKey: getOrCreateBroadcastKey(), publishSecret: getOrCreatePublishSecret() }).catch(() => {});
   }
-  // A new link is a fresh room and a fresh secret, so whoever held the old secret cannot claim the new room.
-  function regenerateBroadcastKey() {
-    // Signed in: the account if known, else unbound so this account's first sync claims it. Signed out: the last one.
-    const known = driveAccountCache && driveAccountCache.token === driveAccessToken ? driveAccountCache.id : null;
-    mintLink(driveAccessToken ? known : undefined);
-    relayRefused = false; relayTaken = false;
-    pushRelayCredentialsToEngine();
-    startConfigPoll();
-    driveSyncConfig().catch(e => console.warn('config write:', e));
+  // The pair changed: this tab's socket and screen follow, and the engine too when the change was made here (a
+  // change from another tab reached the engine from that tab).
+  function followRelayCredentials(toEngine) {
+    if (toEngine) pushRelayCredentialsToEngine();
     reconnectRelay();
     updateStreamingUI();
-    // Force the watch iframe to rebuild with the new key the next time
-    // watch-mode activates.
+    // Force the watch iframe to rebuild with the new key the next time watch-mode activates.
     watchFrameSrc = null;
     if (typeof updateWatchMode === 'function') updateWatchMode();
   }
+  // A new link is a fresh room and a fresh secret, so whoever held the old secret cannot claim the new room.
+  function regenerateBroadcastKey() {
+    relayLink.newLink();
+    followRelayCredentials(true);
+  }
   // Another tab took a new link or the account's secret: this tab's socket follows it.
   window.addEventListener('storage', (e) => {
-    if (e.key !== 'hr_monitor_broadcast_key' && e.key !== 'hr_monitor_publish_secret') return;
-    // A new link removes before it sets; reconnecting on the removal would mint this tab its own key.
-    if (e.newValue === null) return;
-    // A refusal for the pair this tab held says nothing about the new one; its own verdict follows.
-    relayRefused = false; relayRefusedAt = 0; relayTaken = false;
-    reconnectRelay();
-    updateStreamingUI();
-    watchFrameSrc = null;
-    if (typeof updateWatchMode === 'function') updateWatchMode();
+    if (relayLink.otherTabChanged(e.key, e.newValue)) followRelayCredentials(false);
   });
   let relaySocket = null;
   let relayReconnectTimer = null;
@@ -3063,8 +2981,7 @@
       try { old.close(); } catch (e) {}
     }
     setStreamingStatus('connecting');
-    relayAccepted = false;
-    relayKey = key;
+    relayLink.connecting(key);
     try {
       const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key + '?role=publisher&proof=' + getOrCreatePublishSecret());
       relaySocket = ws;
@@ -3153,9 +3070,9 @@
   }
   function refreshRelayStatus() {
     const taken = $('relay-taken');
-    if (taken) taken.hidden = !(relayTaken && widgetPrefs.broadcast);
+    if (taken) taken.hidden = !(relayLink.state.taken && widgetPrefs.broadcast);
     if (!widgetPrefs.broadcast) { setStreamingStatus('off'); return; }
-    if (relayRefused || nativeRelayRefused()) { setStreamingStatus('blocked'); return; }
+    if (relayLink.state.refused || nativeRelayRefused()) { setStreamingStatus('blocked'); return; }
     const nativePub = !!(window.HRMNativeHrSession
         && window.HRMNativeHrSession.isPublishing
         && window.HRMNativeHrSession.isPublishing());
@@ -3194,23 +3111,8 @@
   const SENDER_ID_RE = /^[a-z0-9_-]{1,64}$/i;
   function handleRelayMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'publisher_accepted') {
-      relayAccepted = true;
-      relayRefused = false; relayTaken = false;
-      refreshRelayStatus();
-      if (driveAccessToken && driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));
-      return;
-    }
-    if (msg.type === 'publisher_rejected') {
-      // Another device holds this room. Its secret reaches the Drive config once the relay accepts it there.
-      if (!relayRefused) relayRefusedAt = Date.now();
-      relayRefused = true;
-      relayAccepted = false;
-      refreshRelayStatus();
-      if (driveAccessToken && driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));
-      startConfigPoll();
-      return;
-    }
+    // The relay's verdict on this device's proof.
+    if (relayLink.verdict(msg.type)) return;
     if (msg.senderId != null && !SENDER_ID_RE.test(String(msg.senderId))) return;
     if ((msg.type === 'tick' || msg.type === 'presence') && msg.senderId) {
       // Native: the engine's own ticks arrive before its id is known; the list waits for the first snapshot.
@@ -5849,18 +5751,8 @@
   let driveTokenExpiresAt = 0;
   let driveTokenError = null;
   let driveFolderId = null;
-  let driveAuthEmail = null;
-  // This login's tag: its email, or a random tag when the record has none; cleared on sign-out, so a click made
-  // before the account id is known binds to the login that made it and no other.
-  let driveLoginTag = null;
-  // Stored until sign-out, so a click made before a reload is still this login's after it.
-  const LOGIN_TAG = 'hr_monitor_login_tag';
-  function setDriveLogin(record) {
-    if (!record) { driveAuthEmail = null; driveLoginTag = null; localStorage.removeItem(LOGIN_TAG); return; }
-    if (record.email) { driveAuthEmail = record.email; driveLoginTag = 'email:' + record.email; }
-    else if (!driveLoginTag) driveLoginTag = localStorage.getItem(LOGIN_TAG) || 'login:' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    localStorage.setItem(LOGIN_TAG, driveLoginTag);
-  }
+  // The login behind the token, kept by the relay link: its email (for the account-switch check) and its tag.
+  function setDriveLogin(record) { relayLink.setLogin(record); }
   let driveUploadInFlight = null;
   let driveFileIdForSession = null;
   let driveRefreshing = false;
@@ -5929,10 +5821,10 @@
       driveTokenError = null;
       // Another account signed in over this one (a reconnect lets the user pick any): the old account's folder
       // is invisible to it, and syncing there would mint links it never needed.
-      if (record && record.email && driveAuthEmail && record.email !== driveAuthEmail) {
+      if (record && record.email && relayLink.loginEmail && record.email !== relayLink.loginEmail) {
         driveFolderId = null;
         driveFileIdForSession = null;
-        driveAccountCache = null;
+        relayLink.forgetAccount();
       }
       setDriveLogin(record);
       if (record) {
@@ -6046,13 +5938,13 @@
   async function driveEnsureFolder() {
     // Pinned to the login it started under: a lookup that lands after another account signed in is dropped,
     // never kept as that account's folder.
-    const login = driveLoginTag;
+    const login = relayLink.loginTag;
     // Look for existing folder named DRIVE_FOLDER_NAME owned by this app (drive.file scope)
     const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
     // Oldest root wins, id breaking ties: the same pick as the viewer and the phone's uploaders.
     const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
     const data = await resp.json();
-    if (driveLoginTag !== login || !driveAccessToken) return;
+    if (relayLink.loginTag !== login || !driveAccessToken) return;
     if (data.files && data.files.length) {
       const older = (a, b) => {
         const ta = Date.parse(a.createdTime) || Infinity, tb = Date.parse(b.createdTime) || Infinity;
@@ -6066,7 +5958,7 @@
         body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
       });
       const cd = await create.json();
-      if (driveLoginTag !== login || !driveAccessToken) return;
+      if (relayLink.loginTag !== login || !driveAccessToken) return;
       driveFolderId = cd.id;
     }
     driveUpdateUI();
@@ -6076,140 +5968,6 @@
     startConfigPoll();
   }
 
-  // Read (or create) .hr-monitor-config.json in the Drive folder. Today it
-  // only holds the broadcast key, so phone + desktop signed into the same
-  // Google account end up on the same relay room without any URL copying.
-  async function driveFindConfig(folder = driveFolderId) {
-    const q = encodeURIComponent(`'${folder}' in parents and name='.hr-monitor-config.json' and trashed=false`);
-    const resp = await driveFetch('files?q=' + q + '&fields=files(id,name)');
-    // A failed listing is not "no config": read that way, the write after it replaced a newer link.
-    if (!resp.ok) throw new Error('config list ' + resp.status);
-    const data = await resp.json();
-    return data.files && data.files.length ? data.files[0].id : null;
-  }
-  async function driveSyncConfig() {
-    if (!driveAccessToken || !driveFolderId) return;
-    // Pinned to the account and folder it started under: if either changed during a Drive call, what it read
-    // belongs to the other account, so it stops and the next sync starts over (review round 7).
-    const folder = driveFolderId, token = driveAccessToken;
-    const acct = await driveAccountId();
-    const id = await driveFindConfig(folder);
-    let cfg = null;
-    if (id) {
-      const resp = await driveFetch('files/' + id + '?alt=media');
-      if (!resp.ok) throw new Error('config read ' + resp.status);
-      // Unparseable content is an unreadable config, not a failed sync.
-      try { cfg = JSON.parse(await resp.text()); } catch (e) { cfg = null; }
-    }
-    if (driveFolderId !== folder || driveAccessToken !== token) return;
-    // Read after the awaits: a new link made meanwhile, here or in another tab, is what this sync weighs.
-    let key = getOrCreateBroadcastKey(), secret = getOrCreatePublishSecret(), at = localLinkAt();
-    // A key from before the account field belongs to the first account that syncs it, as it always did; one made
-    // before its login's id was known belongs to that login only, and reads as foreign under any other.
-    const bound = localStorage.getItem(LINK_ACCOUNT);
-    if (!bound || (driveLoginTag && bound === driveLoginTag)) localStorage.setItem(LINK_ACCOUNT, acct);
-    const foreign = localStorage.getItem(LINK_ACCOUNT) !== acct;
-    const valid = !!cfg && typeof cfg.broadcastKey === 'string' && /^[0-9a-f]{16}$/.test(cfg.broadcastKey);
-    const cfgAt = valid && Number.isFinite(cfg.linkAt) && cfg.linkAt > 0 ? cfg.linkAt : 0;
-    // Another account's key, and this account has no readable link: it gets a fresh one of its own, so no key or
-    // secret ever crosses accounts.
-    if (foreign && !valid) {
-      key = mintLink(acct); secret = getOrCreatePublishSecret(); at = localLinkAt();
-      pushRelayCredentialsToEngine();
-      if (typeof reconnectRelay === 'function') reconnectRelay();
-      if (typeof updateStreamingUI === 'function') updateStreamingUI();
-      watchFrameSrc = null;
-    }
-    const mine = localStorage.getItem(LINK_MINE) === key;
-    // This account's newer link goes back in whichever device made it, so a late write of an older link is put
-    // right; an unreadable config is replaced only by a link made here. The secret goes with it only for a link
-    // made here (no other device knows a room this new) or one the relay accepted from this device.
-    // A config from before link times is only ever adopted, unless this device just made a link to replace it.
-    const newer = valid && !foreign && cfg.broadcastKey !== key && at > cfgAt && (cfgAt > 0 || mine);
-    if (newer || (mine && !valid)) {
-      configBehind = true;
-      const proven = mine || (relayAccepted && relayKey === key && !foreign);
-      await driveWriteConfig(id, proven ? { broadcastKey: key, publishSecret: secret, linkAt: at } : { broadcastKey: key, linkAt: at }, folder);
-      configSyncedAt = Date.now();
-      return;
-    }
-    if (!id) {
-      // A first config holds the key; the secret joins once the relay accepted it.
-      await driveWriteConfig(null, relayAccepted && relayKey === key ? { broadcastKey: key, publishSecret: secret } : { broadcastKey: key }, folder);
-      configSyncedAt = Date.now();
-      return;
-    }
-    // Unreadable and not ours to replace: leave it for the device that wrote it.
-    if (!valid) { configSyncedAt = Date.now(); return; }
-    configBehind = false;
-    const keyChanged = key !== cfg.broadcastKey;
-    // Drive shows this link: it is the account's now, and later clicks here must outrank its time.
-    if (!keyChanged) {
-      localStorage.removeItem(LINK_MINE);
-      if (cfgAt > at) localStorage.setItem(LINK_AT, String(cfgAt));
-    }
-    const secretOk = typeof cfg.publishSecret === 'string' && /^[0-9a-f]{32}$/.test(cfg.publishSecret);
-    // Accepted for this key, this device holds the owner's secret: a different one in the config is the stray.
-    const owner = relayAccepted && relayKey === key && !keyChanged && !foreign;
-    // For the same key, a different config secret is adopted only once the relay refused this device's: before
-    // its verdict this device may be the owner and the config's the stray (round 8: the owner threw its own away).
-    const secretChanged = secretOk && secret !== cfg.publishSecret && (keyChanged || (relayRefused && relayKey === key));
-    // Secret first: another tab reconnects on each change and must never reach the new room with another secret.
-    // A key adopted with no secret beside it takes a fresh one, never the secret of the room left behind.
-    if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
-    else if (keyChanged && !secretOk) { localStorage.removeItem('hr_monitor_publish_secret'); getOrCreatePublishSecret(); }
-    if (keyChanged) {
-      localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
-      localStorage.setItem(LINK_AT, String(cfgAt));
-      localStorage.removeItem(LINK_MINE);
-    }
-    localStorage.setItem(LINK_ACCOUNT, acct);
-    // The config takes this device's secret only once the relay accepted it for this very key.
-    if (owner && cfg.publishSecret !== secret) await driveWriteConfig(id, { broadcastKey: key, publishSecret: secret, linkAt: cfgAt }, folder);
-    // Refused while holding the account's own pair, or refused for 3 min with no owner's secret ever
-    // appearing in the config: someone else claimed the room first.
-    relayTaken = relayRefused && !keyChanged && !secretChanged && (secretOk || Date.now() - relayRefusedAt > 180000);
-    if (keyChanged || secretChanged) pushRelayCredentialsToEngine();
-    if (relayTaken) refreshRelayStatus();
-    if (keyChanged || secretChanged) {
-      relayRefused = false;
-      if (typeof reconnectRelay === 'function') reconnectRelay();
-      if (typeof updateStreamingUI === 'function') updateStreamingUI();
-      // Invalidate the watch iframe cache so it rebuilds with the new key.
-      watchFrameSrc = null;
-      if (typeof updateWatchMode === 'function') updateWatchMode();
-    }
-    configSyncedAt = Date.now();
-  }
-  // Overwrites the config in place with these fields, or creates it, in the folder the sync started in.
-  async function driveWriteConfig(existingId, fields, folder = driveFolderId) {
-    if (!driveAccessToken || !folder) return;
-    const id = existingId || await driveFindConfig(folder);
-    const body = JSON.stringify(fields);
-    let resp;
-    if (id) {
-      resp = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media', {
-        method: 'PATCH',
-        headers: { 'Authorization': await driveAuthHeader(), 'Content-Type': 'application/json' },
-        body,
-      });
-    } else {
-      const boundary = '-------hrm-config-' + Math.random().toString(36).slice(2);
-      const mpBody =
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
-        JSON.stringify({ name: '.hr-monitor-config.json', parents: [folder], mimeType: 'application/json' }) +
-        `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
-      resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-        method: 'POST',
-        headers: {
-          'Authorization': await driveAuthHeader(),
-          'Content-Type': 'multipart/related; boundary=' + boundary,
-        },
-        body: mpBody,
-      });
-    }
-    if (!resp.ok) throw new Error('config write ' + resp.status);
-  }
 
   // Upload or update the current session's CSV on Drive. Called alongside local
   // auto-save. Reuses the same Drive file for the whole session (updates in place)

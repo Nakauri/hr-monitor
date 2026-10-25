@@ -21,6 +21,7 @@ on:
       - 'tokens.css'
       - 'diagnostics.js'
       - 'marks-store.js'
+      - 'relay-link.js'
       - 'marks-drive.js'
       - 'mobile/**'
       - '.github/workflows/build-android.yml'

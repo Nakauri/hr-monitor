@@ -1,153 +1,127 @@
 # Relay publish secret
 
-Status: BUILT 2026-10-24 on branch grade-a (relay, web monitor, native engine), revised after review rounds 1 to 3.
-Live once the relay is deployed; the site and APK work against the old relay too (it ignores the proof).
+Status: BUILT on branch grade-a (relay, `relay-link.js`, web monitor, native engine). Live once the relay is
+deployed; the site and APK work against the old relay too (it ignores the proof). Deploy the relay with the site.
 
 ## The problem it closes
 
 The overlay link carries the room key, and the relay used to let any connection that said `role=publisher`
-publish. Anyone who saw a streamer's OBS URL could push fake heart rate onto that overlay and into the
-monitor's broadcasters panel.
+publish. Anyone who saw a streamer's OBS URL could push fake heart rate onto that overlay and into the monitor's
+broadcasters panel.
 
-## How it works: the first proof claims the room
+## The relay: the first proof claims the room
 
-- Each account keeps a random 128-bit **publish secret** (`hr_monitor_publish_secret` in localStorage; native
-  keeps it in the session prefs, saved in the same `.commit()` as the key).
-- Publishers connect with `?role=publisher&proof=<secret>`. The overlay link never carries the secret.
-- The relay stores the SHA-256 of the first proof it sees for a room (Durable Object storage, one value per
-  room) and from then on accepts only publishers showing the same proof.
-- The relay answers every proven publisher: `{"type":"publisher_accepted"}` when the proof claims or matches
-  the room, `{"type":"publisher_rejected"}` when it does not. A refused connection stays as a subscriber.
-- Subscribers never publish: their messages are dropped.
-- Only the relay sends verdicts: a publisher's message whose `type` starts with `publisher_` is dropped, so no
-  peer can fake "refused" or "accepted".
-- An unclaimed room still takes a proofless publisher, so installs from before the secret keep working until
-  an updated one claims the room; from then on the proofless one is silenced and told `publisher_rejected`.
-- Opening the updated monitor once claims the room: `connectRelay()` runs with the proof on every load,
-  sharing on or off.
+- Publishers connect with `?role=publisher&proof=<secret>`, a random 128-bit secret per account. The overlay
+  link never carries it.
+- The relay stores the SHA-256 of the first proof it sees for a room (one Durable Object value per room) and
+  from then on accepts only publishers showing the same proof.
+- It answers every proven publisher with `{"type":"publisher_accepted"}` or `{"type":"publisher_rejected"}`; a
+  refused connection stays a subscriber.
+- Subscribers never publish. Only the relay sends verdicts: a publisher's message whose `type` starts with
+  `publisher_` is dropped.
+- An unclaimed room still takes a proofless publisher (installs from before the secret) until a proof claims
+  it; then the proofless one is silenced and told `publisher_rejected`.
+- The monitor connects with the proof on every load, sharing on or off, so opening it once claims the room.
 
-## Every device on the account shares the secret
+## The account's link: `relay-link.js`
 
-The broadcast key already syncs through `.hr-monitor-config.json` in the user's Drive folder; the secret
-rides in the same file (`{ broadcastKey, publishSecret }`). The rules keep the config's secret equal to the
-room owner's:
+One module keeps the key, the secret and their copy in the account's Drive config (`.hr-monitor-config.json`,
+`{ broadcastKey, publishSecret, linkAt }`). It is the only writer of these values; the page owns the socket and
+the screen and tells the module what the socket does. The relay's address lives here once.
 
-- A device adopts the config's key and secret, reconnects, and hands both to a running native session.
-- A config's secret is written only by a device the relay sent `publisher_accepted` for that same key. That
-  device holds the owner's secret, so it fills in a config with none and repairs a different one, and never
-  adopts it. (Review round 1: writing on first sync let two devices upgrading together lock the account out.)
-- A new config holds only the key until the relay accepts this device.
-- Each link carries when it was made (`linkAt`, in the config and in `hr_monitor_link_at`; 0 for links older
-  than the field). When the device and the config hold different keys of the same account, the newer link
-  wins: the device writes its own back, or adopts the config's. A link made on this device is marked
-  (`hr_monitor_link_mine`) until Drive shows it back; only a marked link replaces an unreadable config, and
-  a restored link carries its secret only when marked or accepted by the relay from this device, otherwise
-  the key and time alone. A failed listing fails the sync, never reads as "no config". (Review round 6: a
-  late write of an older link after the read-back, and a failed listing, each wiped the newer link.)
-  The device's values are read after Drive answers, so a sync already under
-  way when the user makes a new link weighs the new one. (Review rounds 2 to 4: an acceptance sync, or one in
-  flight across the click, read the old key back; a waiting link overwrote a newer one made elsewhere; "newer"
-  without "made here" let a viewer-adopted key or another account's config be overwritten.)
-- A click is stamped later than any link time this device has seen, and a matching config raises the
-  device's time to the config's, so a click always outranks the link it replaces, whatever the clocks say.
-- Each key belongs to one Google account (`hr_monitor_link_account`, Drive's permissionId; a key from before
-  the field binds to the first account that syncs it). Under any other account, however the account changed
-  (sign-out, an expired login, a re-sign-in as someone else), the device adopts that account's link, or makes
-  that account a fresh link of its own when it has none; it never writes, owns or seeds the other account's
-  key or secret. Signing back into the same account keeps a link Drive had not taken yet. (Review round 5.)
-- Key and secret are stored secret first, so another tab that reconnects on each change never reaches a new
-  room holding a different secret. A new link makes both values before storing either and removes neither,
-  so no tab ever sees the new key beside no secret. A key adopted with no secret beside it takes a fresh
-  secret, never the secret of the room left behind.
-- For the same key, a different secret in the config is adopted only once the relay refused this device's;
-  before the verdict this device may be the owner, and once accepted it repairs the config instead. (Review
-  round 8: an owner whose sync beat the verdict threw its own secret away and lost the room.)
-- A click while signed in but before the account's id is known binds the link to that login's tag (its email,
-  or a random tag when the record has none, stored until sign-out), so only that login's sync claims it and any
-  other login reads it as foreign. The folder lookup is pinned to the same tag. A click signed out keeps the last
-  account. (Review round 9: an unbound click was claimed by the next login and overwrote its link.)
-- A tab following another tab's change drops its old refusal (its new socket gets its own verdict), and a
-  socket is opened only after the pending retry is cleared and any open socket closed. The link counts as waiting on
-  Drive from the click, so a sync dropped before it writes still leaves the one-minute recheck.
-- Another account signing in over this one (a reconnect lets the user pick any account, and the account
-  signed in at load counts) drops the old account's folder and account id. The account id is asked once per
-  token, shared by overlapping syncs.
-- A sync is pinned to the folder and login it started under; if either changes during a Drive call it stops
-  without writing, and the next sync starts over. The folder lookup is pinned the same way. (Review round 7: a sync spanning an account switch wrote
-  the first account's key into the second's config.)
-- A config from before link times is adopted, never overwritten, unless this device just made a link.
-- An unparseable config counts as unreadable: a marked link replaces it, anything else leaves it alone.
-- The relay acceptance only vouches for the key the socket connected with (`relayKey`).
-- The config is reread every minute while refused or until Drive shows back a link this device wrote, and
-  every 5 minutes otherwise, so a new link made on another device arrives and a failed write is retried.
-- Another tab of the monitor follows a new key or secret through the `storage` event, ignoring the removal
-  half of a new link.
-- Refused while holding the config's own pair, or refused for 3 minutes with no owner's secret appearing,
-  means someone else claimed the room: the monitor shows "Another device holds this link" with a
-  **Make a new link** button.
-- A new link (`regenerateBroadcastKey`) mints a fresh key, a fresh secret and its time, and hands the pair
-  to the native engine. Its secret goes into the config at once: no other device knows a room this new.
-- The monitor alone writes the relay credentials (key, secret, link time, account). The viewer shares its
-  storage but only reads: Watch live uses the monitor's key on this browser, else the account's key from the
-  config kept in the viewer's own slot (`hr_viewer_watch_key`, cleared when the account has no config). The
-  settings sync never maps the broadcast key. (Review round 7: two pages writing the same
-  credentials under different rules put one account's link into another's config.)
-- A failed config write throws instead of passing silently.
+State in localStorage: `hr_monitor_broadcast_key`, `hr_monitor_publish_secret`, `hr_monitor_link_at` (when this
+device's link was made), `hr_monitor_link_mine` (a link made here that Drive has not shown back),
+`hr_monitor_link_account` (the Drive permissionId the key belongs to, or a login tag while that is unknown) and
+`hr_monitor_login_tag` (this login's tag, kept until sign-out).
+
+**One sync at a time.** A request while a sync runs is folded into one more run after it. A sync still running
+after 60 s is given up (a stalled connection never settles): it acts on nothing it reads after that, and the
+folded run starts. Each sync is pinned to
+the folder and token it started under and stops without writing if either changes during a Drive call. The
+device's own values are read after Drive answers, so a click partway through a sync is what it weighs.
+
+**When the device and the config hold different keys of the same account:**
+- The newer link wins: the device writes its own back, or adopts the config's key, time and secret.
+- A config with no link time (an older build) is only adopted, unless this device just made a link.
+- A restored link carries its secret only when it was made here or the relay accepted this device for it;
+  otherwise the key and time alone.
+
+**When the keys match:**
+- The accepted owner repairs a different secret in the config; a device the relay refused for that key adopts
+  the config's. Before the verdict, neither happens.
+- A config with no secret takes the secret only from the device the relay accepted for that key.
+
+**Writes and reads that fail:**
+- A failed listing or read fails the sync; it never reads as "no config". A failed write throws.
+- An unparseable config is unreadable: a link made here replaces it, anything else leaves it alone.
+- The config is reread every minute while refused or while Drive has not shown back a link this device wrote,
+  and every 5 minutes otherwise.
+
+**Accounts and logins:**
+- A key from another account is never written, owned or seeded under this one. That account's link is adopted,
+  or, when it has no readable config, a fresh link of its own is made.
+- A key from before the account field binds to the first account that syncs it.
+- A click before the account's id is known binds to this login's tag (its email, or a random tag kept until
+  sign-out), so only this login's sync claims it. A click signed out keeps the last account.
+- Another account signing in over this one drops the old account's folder and account id; the id is asked once
+  per token. The folder lookup is pinned to the login.
+
+**A new link** (Make a new link) is a fresh key and secret, both made before either is stored and stored secret
+first, stamped later than any link time this device has seen (so it outranks the link it replaces whatever the
+clocks say). It goes into the config at once with its secret: no other device knows a room this new. The engine
+and this tab's socket follow.
+
+**Other tabs** follow a changed key or secret through the `storage` event, ignoring removals, and drop their old
+refusal; the socket they open gets its own verdict.
+
+**Taken:** refused while holding the config's own pair, or refused for 3 minutes with no owner's secret in the
+config, means someone else claimed the room. The monitor shows "Another device holds this link" with **Make a
+new link**.
+
+**The viewer** only reads. Watch live uses the monitor's key on this browser, else the account's key from the
+config kept in the viewer's own slot (`hr_viewer_watch_key`, cleared when the account has no config). The
+settings sync never maps the key.
 
 ## Native
 
-- The engine takes new credentials mid-session through `setRelayCredentials` (shim, plugin, engine), which
-  saves key and secret in one `.commit()` and reopens the socket. It refuses an empty or malformed secret.
-- The socket plugin redacts `proof=` from every log line, error and status field.
-- The engine reads a verdict by its exact `type`, as the page does.
-- The page pushes them after a resume and at bootstrap with a live session: prefs written by an APK from
-  before the secret have none.
-- The engine reads the relay's verdict and reports `relayRefused` in its snapshot, so the monitor shows
+- The engine takes new credentials mid-session through `setRelayCredentials` (shim, plugin, engine): key and
+  secret saved in one `.commit()`, socket reopened. It refuses an empty or malformed secret.
+- The page pushes them after a resume and at bootstrap with a live session; prefs from an APK before the secret
+  have none.
+- The engine reads a verdict by its exact `type` and reports `relayRefused` in its snapshot, so the monitor shows
   `blocked` instead of `live` while nothing reaches the overlay.
+- The socket plugin redacts `proof=` from every log line, rejection and status field.
 
 ## Accepted limits
 
-- Someone who already holds a key and connects with their own proof before the owner's updated install does
-  claims that room. The way out is a new link, which makes a fresh, unclaimed room, then pasting the new OBS
-  link.
+- Someone who holds a key and connects with their own proof before the owner's updated install claims that
+  room. The way out is a new link, then pasting the new OBS link.
 - Anyone the user shares their Drive folder with can read the config and publish.
-- The proof travels in the WebSocket query string; only the Cloudflare account owner can see request URLs,
-  and the relay logs none.
-- Every claimed room keeps one stored hash, with no expiry.
-- Signing out keeps the secret, because a signed-out monitor still broadcasts to its own room; a new link
-  is the way to retire a secret.
+- The proof travels in the WebSocket query string; only the Cloudflare account owner sees request URLs, and the
+  relay logs none. Every claimed room keeps one stored hash, with no expiry.
+- Signing out keeps the secret (a signed-out monitor still broadcasts to its own room); a new link retires it.
 - Two accounts an older build already pointed at one room keep sharing it until either makes a new link.
-- An account whose email changes between a click and its first sync, or whose record gains an email in a
-  refresh, reads that click as foreign and adopts its config's link; make the link again. A login whose record
-  has no email, signing in over another login with no sign-out between, keeps the earlier login's tag and can
-  claim its pending click. Both sign-in paths fill the email in, so these need a record the app does not make.
-  (Review rounds 10 and 11; the audit stopped here because these change neither the verdict nor the fixes.)
-- Diagnostics' Purge clears every stored value, the relay credentials included; the account adopts its
-  config again, but a new link Drive had not taken yet is gone.
-- This device holds one link at a time: switching to another account before a new link reached Drive adopts
-  that account's link, and the new one is gone from this device. Make it again under the first account.
-- Until the new relay is deployed, the old one forwards anything, verdicts included; deploy the relay with
-  the site.
-- Link times come from device clocks. A click always outranks the link it replaced, but two devices making
-  new links within the same stretch rank by their clocks.
-- Drive has no conditional write for media updates, so two devices writing at once is last-writer-wins; the
-  device holding the newer link writes it back on its next sync (one minute while it waits on Drive).
+- This device holds one link at a time: switching account before a new link reached Drive loses that link here.
+- Link times come from device clocks: two devices making new links in the same stretch rank by their clocks.
+- Drive has no conditional write for media updates; two devices writing at once is last-writer-wins, and the
+  device holding the newer link writes it back on its next sync.
+- A record with no email can blur logins: an account whose email changes, or whose record gains one, between a
+  click and its first sync loses that click; an email-less login over another with no sign-out between keeps
+  the earlier tag. Both sign-in paths fill the email in.
+- Diagnostics' Purge clears the credentials; the account adopts its config again, but a new link Drive had not
+  taken yet is gone.
 - The viewer keeps its folder when another account signs in over this one without a sign-out; it only reads,
-  so it finds nothing there and Watch live falls back to the monitor's key.
+  so Watch live falls back to the monitor's key.
 
 ## Checks
 
-- `scripts/relay-server.test.mjs`: claim, accept and reject notices, same proof, wrong proof, proofless,
-  hash never the proof, forged verdicts, the silenced proofless publisher told, with a mutant for each.
-- `relay/scripts/probe.mjs`: the same contract against `wrangler dev` or the deployed host, including the
-  claim surviving hibernation.
-- `scripts/marks-store.test.cjs` K1: no write before acceptance, the two-device race, taken detection, new
-  link to Drive and engine with a fresh secret and its time, a new link through a failed write, a sync held
-  in flight across the click, an older write landing late, a sign-in, a newer link from another device, a
-  clock running ahead, account switches (sign-out, new login, a new account with no config, a shared room,
-  back to the same account, a sync spanning the switch), unreadable configs, configs from before link times,
-  a stale acceptance, the owner repairing a stray secret, retried writes, failed writes, and the viewer run
-  for real (read-only, its own slot).
-- `scripts/engine-boundary.test.cjs` (reads the Java as text): native saves the secret with the key, refuses
-  an empty one, reads the verdict by exact type, reports it, and no native log line, rejection or status
-  field carries the relay URL unredacted.
+- `scripts/relay-server.test.mjs`: claim, verdicts, same, wrong and missing proofs, subscribers in claimed and
+  unclaimed rooms, forged verdicts, the silenced proofless publisher told, hash never the proof; a mutant each.
+- `relay/scripts/probe.mjs`: the same contract against `wrangler dev` or the deployed host, including the claim
+  surviving hibernation.
+- `scripts/relay-link.test.cjs`: the module run against a fake Drive, every rule above as a case (two devices,
+  failed and slow writes, a sync held across the click, late older writes, clocks, account switches, logins,
+  unreadable and older configs, verdict timing, one sync at a time), the page wiring, the viewer, and one relay
+  address; a mutant each.
+- `scripts/engine-boundary.test.cjs` (reads the Java as text): the native credential, verdict, redaction and
+  reconnect rules.

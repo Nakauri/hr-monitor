@@ -53,9 +53,14 @@ pub.send(JSON.stringify({ type: 'publisher_rejected' }));
 await wait(800);
 check('a publisher cannot forge a verdict for its peers', !sub.got.some((m) => m.includes('publisher_rejected')));
 
-// A proofless publisher in an unclaimed room is told when a proof claims it.
+// A proofless publisher in an unclaimed room is told when a proof claims it; a subscriber there never publishes.
 const room2 = room + '-legacy';
 const legacy = await open(`${host}/parties/main/${room2}?role=publisher`);
+const viewer2 = await open(url(room2));
+viewer2.send(JSON.stringify({ type: 'from-viewer' }));
+await wait(800);
+check('a subscriber cannot publish in an unclaimed room', !legacy.got.some((m) => m.includes('from-viewer')));
+viewer2.close();
 const claimer = await open(url(room2, PROOF));
 await wait(800);
 check('a proofless publisher is told when a claim silences it', legacy.got.some((m) => m.includes('publisher_rejected')) && !claimer.got.some((m) => m.includes('publisher_rejected')));

@@ -45,7 +45,10 @@ The checks that guard a rule are named in brackets.
   dropped every tick for weeks with both ends looking healthy. [`scripts/relay-server.test.mjs`]
 - **Only the room's owner publishes.** The relay keeps the hash of the first publish proof per room; the
   secret syncs with the key through the Drive config. Never put the secret in a link, a log or diagnostics.
-  [`relay-server`, `marks-store` K1, `engine-boundary`; design in `docs/relay-publish-secret.md`]
+  [`relay-server`, `relay-link`, `engine-boundary`; design in `docs/relay-publish-secret.md`]
+- **Only `relay-link.js` writes the relay credentials** (key, secret, link time, account, login tag) and the
+  Drive config; the pages read them through it and the relay address lives there once. A second writer with its
+  own rules put one account's link into another's config (2026-10-25). [`relay-link`]
 - **Stopping `wrangler dev` can leave `workerd.exe` serving port 8787**, respawned by its `node` parent. End
   the parent, then check the port is free.
 

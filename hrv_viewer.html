@@ -19,6 +19,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="./auth.js"></script>
 <script src="./marks-store.js"></script>
+<script src="./relay-link.js"></script>
 <script src="./marks-drive.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <link rel="stylesheet" href="./ui.css">
@@ -1762,7 +1763,7 @@
     const key = viewerWatchKey();
     if (!key) return;
     try {
-      watchLiveSocket = new WebSocket('wss://hr-relay.nakauri.workers.dev/parties/main/' + encodeURIComponent(key));
+      watchLiveSocket = new WebSocket(AortiRelayLink.RELAY_HOST + '/parties/main/' + encodeURIComponent(key));
       watchLiveSocket.addEventListener('message', (ev) => {
         try {
           const m = JSON.parse(ev.data);

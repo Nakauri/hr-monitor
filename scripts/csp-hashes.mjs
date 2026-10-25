@@ -29,13 +29,20 @@ const SORTABLE = 'https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortabl
 const INSIGHTS = 'https://cdn.vercel-insights.com/v1/script.js';
 const GSI = 'https://accounts.google.com/gsi/client';
 const HOSTS_SCRIPT = `${CHART} ${SORTABLE} ${GSI} ${INSIGHTS}`;
+// The relay's address has one home, relay-link.js (a page script, so read as text, not imported).
+const RELAY = (() => {
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'relay-link.js'), 'utf8');
+  const m = src.match(/const RELAY_HOST = '(wss:\/\/[a-z0-9.-]+)';/);
+  if (!m) throw new Error('csp-hashes: RELAY_HOST not found in relay-link.js');
+  return m[1];
+})();
 const BASE = (scriptExtra) => [
   "default-src 'self'",
   `script-src 'self' ${HOSTS_SCRIPT}${scriptExtra}`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https://api.qrserver.com https://*.googleusercontent.com",
-  "connect-src 'self' https://www.googleapis.com https://accounts.google.com https://api.github.com wss://hr-relay.nakauri.workers.dev https://*.vercel-insights.com",
+  `connect-src 'self' https://www.googleapis.com https://accounts.google.com https://api.github.com ${RELAY} https://*.vercel-insights.com`,
   "worker-src 'self' blob:",
   "frame-src 'self' https://accounts.google.com",
   "media-src 'self' data: blob:",
@@ -51,7 +58,7 @@ const OVERLAY = (scriptExtra) => [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
-  "connect-src 'self' wss://hr-relay.nakauri.workers.dev https://*.vercel-insights.com",
+  `connect-src 'self' ${RELAY} https://*.vercel-insights.com`,
   "base-uri 'self'",
   "object-src 'none'",
   "form-action 'none'",

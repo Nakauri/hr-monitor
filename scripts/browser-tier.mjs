@@ -19,8 +19,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const val = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 
-const VIEWER = /^(hrv_viewer\.html|ui\.(css|js)|tokens\.css|report\.css|marks-(store|drive)\.js|settings\.js)$/;
-const MONITOR = /^(hr_monitor\.html|ui\.(css|js)|tokens\.css|widget\.(css|js)|marks-(store|drive)\.js|settings\.js|diagnostics\.js)$/;
+const VIEWER = /^(hrv_viewer\.html|ui\.(css|js)|tokens\.css|report\.css|marks-(store|drive)\.js|relay-link\.js|settings\.js)$/;
+const MONITOR = /^(hr_monitor\.html|ui\.(css|js)|tokens\.css|widget\.(css|js)|marks-(store|drive)\.js|relay-link\.js|settings\.js|diagnostics\.js)$/;
 const NATIVE = /^mobile\/(src|android-overlay|scripts)\//;
 // name: [guarded paths, args, needs mobile/www]
 const TIER = {
@@ -52,10 +52,10 @@ const TIER = {
   'ui-dialogs': [/\.html$|^ui\.(css|js)$/, [], true],
   'zone-preview': [/^(hr_monitor|overlay)\.html$|^widget\.(css|js)$/, [], false],
   'widget-parity': [/^(hr_monitor|overlay)\.html$|^widget\.(css|js)$/, [], false],
-  'overlay-behaviour': [/^overlay\.html$|^widget\.(css|js)$/, [], false],
+  'overlay-behaviour': [/^overlay\.html$|^widget\.(css|js)$|^relay-link\.js$/, [], false],
   'landing': [/^(index|new-look|legal|changelog)\.html$|^assets\/landing\/|^ui\.css$|^tokens\.css$/, [], false],
   'no-widows': [/\.html$|\.css$/, [], false],
-  'csp': [/^vercel\.json$|^scripts\/csp(-hashes)?\.mjs$|\.html$|^(ui|widget|auth|diagnostics|settings|marks-store|marks-drive)\.js$/, [], false],
+  'csp': [/^vercel\.json$|^scripts\/csp(-hashes)?\.mjs$|\.html$|^(ui|widget|auth|diagnostics|settings|marks-store|marks-drive|relay-link)\.js$/, [], false],
 };
 
 const only = (val('--only') || '').split(',').filter(Boolean);
