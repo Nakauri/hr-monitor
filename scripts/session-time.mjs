@@ -3,7 +3,8 @@
 // rowElapsedMinFn, summarizeCSV, loadFullSession, the cached-index re-read. Runtime: about 5 s; run when
 // hrv_viewer.html parsing or summary code changes.
 // Checks: the synthetic stale fixture summarizes to about 3 min with a 9:46 AM axis origin; demo files and a
-// synthetic native segment summarize deep-equal to the --ref build (default e8d9311); the evidence file, when
+// synthetic native segment summarize deep-equal to the --ref build (default 02aef18, which added the posture
+// start stamp on purpose; the older e8d9311 default failed on that field alone); the evidence file, when
 // present locally, prints its duration. --mutants bypasses the helper and must FAIL.
 // Usage: node scripts/session-time.mjs [--ref <commit>] [--mutants]
 import fs from 'node:fs';
@@ -17,7 +18,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const MUTANTS = args.includes('--mutants');
 const refI = args.indexOf('--ref');
-const REF = refI >= 0 ? args[refI + 1] : 'e8d9311';
+const REF = refI >= 0 ? args[refI + 1] : '02aef18';
 const EVIDENCE = path.join(ROOT, '..', 'HR Monitor', 'ux-audit', 'redesign', 'build-shots', 'evidence-stale-timemin-2026-10-05.csv');
 const EVIDENCE_ALT = 'C:/Users/Khal/Desktop/Mine/HR Monitor/ux-audit/redesign/build-shots/evidence-stale-timemin-2026-10-05.csv';
 

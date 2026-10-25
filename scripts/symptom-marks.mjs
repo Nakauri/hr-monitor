@@ -106,9 +106,13 @@ for (const c of CASES) {
   if (c === CASES[0]) {
     const count = () => page.evaluate(() => Object.keys((c => c.$marks || {})(Chart.getChart(document.getElementById('session-chart')))).filter((k) => k.startsWith('ev_')).length);
     const n0 = await count();
-    await page.click('#layer-chips .chip[data-layer="event"]'); await page.waitForTimeout(200);
+    // The layer chips live in the Layers pop-over since S31 (opened by #markers-open).
+    const CHIP = '.layers-pop #layer-chips .chip[data-layer="event"]';
+    await page.click('#markers-open'); await page.waitForSelector(CHIP);
+    await page.click(CHIP); await page.waitForTimeout(200);
     const n1 = await count();
-    await page.click('#layer-chips .chip[data-layer="event"]'); await page.waitForTimeout(200);
+    await page.click(CHIP); await page.waitForTimeout(200);
+    await page.keyboard.press('Escape');
     ok(n0 === 1 && n1 === 0 && (await count()) === 1, `the Marks chip hides and restores the mark (${n0} > ${n1})`);
   }
   ok(!errs.length, `${c.name}: no page errors ${errs.join(' | ')}`);

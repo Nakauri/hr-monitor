@@ -72,7 +72,7 @@ function slice(src, a, b) {
 }
 function cut(src) {
   const body = slice(src, '  // ---- S61 moments ----', '  // ---- S61 moments end ----') + slice(src, '  // ---- S63 sleep ----', '  // ---- S63 sleep end ----') +
-    ['rptMedian', 'rptDur', 's63Prints', 'rptSleepFigures'].map((n) => fnSrc(src, n)).join('\n');
+    ['rptMedian', 'rptDur', 's63Prints', 'rptSleepFigures', 'isoAddDays', 'localDateLabel', 'localDateKeyFromEpoch'].map((n) => fnSrc(src, n)).join('\n');
   const g61 = globalThis.__s61, g63 = globalThis.__s63;
   globalThis.__s61 = undefined; globalThis.__s63 = undefined;
   const o = new Function(body + ';return { s63Digest, s63Baseline, s63Completed, s63Gate, s63Detect, s63States, s63Figures, rptSleepFigures, rptDur, S63_O, counter: globalThis.__s63 };')();

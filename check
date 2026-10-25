@@ -1,7 +1,7 @@
 #!/bin/sh
 # Every check that needs no browser, in one command. .githooks/pre-push and CI both run it; so can you.
-# Node tests (about 70 s) always; the JVM tier when Java changed and always in CI. The Playwright
-# .mjs checks need `cd mobile && npm run copy-web` first and run before a release, by hand.
+# Node tests (about 70 s) always; the JVM tier when Java changed and always in CI; the browser tier for the
+# pages this push changed (0 s to about 15 min), on the pushing machine.
 # A check that cannot run is not a pass: if nothing ran, the script exits 2.
 set -e
 cd "$(dirname "$0")"
@@ -30,6 +30,13 @@ if [ -n "$CI" ] || ! git rev-parse -q --verify origin/main >/dev/null \
   for t in scripts/jvm/run-*.cjs; do run node "$t"; done
 else
   echo "== JVM tier skipped: no Java or scripts/jvm change since origin/main (CI runs it)"
+fi
+# The browser tier: headless Playwright checks for the files this push changed (scripts/browser-tier.mjs).
+# It needs the gitignored ux-audit kit, so it runs on the pushing machine; CI says so instead of passing quietly.
+if [ -n "$CI" ]; then
+  echo "== browser tier not run in CI: it needs the local ux-audit kit; the pre-push hook runs it"
+else
+  run node scripts/browser-tier.mjs
 fi
 # The CLAUDE.md map checker is local-only (gitignored; the repo is public), so CI skips it.
 if [ -f .claude/docmap.py ]; then run python .claude/docmap.py; fi
