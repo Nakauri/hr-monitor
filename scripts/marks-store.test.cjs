@@ -792,7 +792,16 @@ CHECKS.U1 = async (src) => {
 // ---------------------------------------------------------------- mutants
 // [check, name, file key, find, replace]. Each must make its check fail.
 const MUTANTS = [
-  ['K1', 'old config not given a secret', 'monitor', '    if (!secretOk) await driveWriteConfig(id);\n', ''],
+  ['K1', 'old config not given a secret', 'monitor', '    if (!secretOk && !keyChanged && relayAccepted) await driveWriteConfig(id);\n', ''],
+  ['K1', 'secret written before acceptance (the 10-24 lock-out)', 'monitor', 'if (!secretOk && !keyChanged && relayAccepted) await', 'if (!secretOk && !keyChanged) await'],
+  ['K1', 'secret written for another key', 'monitor', 'if (!secretOk && !keyChanged && relayAccepted) await', 'if (!secretOk && relayAccepted) await'],
+  ['K1', 'acceptance does not sync', 'monitor', "      if (driveAccessToken && driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));\n      return;\n    }\n    if (msg.type === 'publisher_rejected') {", "      return;\n    }\n    if (msg.type === 'publisher_rejected') {"],
+  ['K1', 'never shown as taken', 'monitor', '    relayTaken = relayRefused && !keyChanged && !secretChanged && (secretOk || Date.now() - relayRefusedAt > 180000);', '    relayTaken = false;'],
+  ['K1', 'taken at once with no owner secret', 'monitor', '(secretOk || Date.now() - relayRefusedAt > 180000)', '(true)'],
+  ['K1', 'engine not told of a new secret', 'monitor', '    if (keyChanged || secretChanged) pushRelayCredentialsToEngine();\n', ''],
+  ['K1', 'engine not told of a new link', 'monitor', "    if (relayRetryTimer) { clearInterval(relayRetryTimer); relayRetryTimer = null; }\n    pushRelayCredentialsToEngine();\n    driveWriteConfig()", "    if (relayRetryTimer) { clearInterval(relayRetryTimer); relayRetryTimer = null; }\n    driveWriteConfig()"],
+  ['K1', 'failed config write passes silently', 'monitor', "    if (!resp.ok) throw new Error('config write ' + resp.status);\n", ''],
+  ['K1', 'no retry while refused', 'monitor', '      if (!relayRetryTimer) relayRetryTimer = setInterval(resync, 60000);\n', ''],
   ['K1', 'account secret not adopted', 'monitor', "    if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);\n", ''],
   ['K1', 'new link not written to Drive', 'monitor', "    driveWriteConfig().catch(e => console.warn('config write:', e));\n", ''],
   ['K1', 'refusal not shown', 'monitor', "      relayRefused = true;\n", ''],
@@ -839,65 +848,95 @@ const MUTANTS = [
 ];
 
 // K1: the relay publish secret travels with the broadcast key in the Drive config, so every device on the
-// account can publish into its room (docs/relay-publish-secret.md).
+// account can publish into its room; a secret enters the config only after the relay accepted it for that key,
+// so the config never holds a secret the room refuses (docs/relay-publish-secret.md).
 CHECKS.K1 = async (src) => {
   const out = [];
   const S1 = '11111111111111111111111111111111', S2 = '22222222222222222222222222222222';
-  const monitor = (fake, ls) => {
-    const n = { reconnects: 0, refreshes: 0 };
+  const KA = 'aaaaaaaaaaaaaaaa';
+  const monitor = (fake, ls, state) => {
+    const n = { reconnects: 0, refreshes: 0, creds: [], intervals: 0 };
     const store = new Map(Object.entries(ls || {}));
-    const g = {
+    const g = Object.assign({
       localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
       crypto: require('crypto').webcrypto, driveAccessToken: 'tok', driveFolderId: 'root', driveAuthHeader: async () => 'Bearer tok',
       driveFetch: (p, i) => fake.fetch(p, i), fetch: (u, i) => fake.fetch(u, i),
-      relayRefused: true, watchFrameSrc: 'x',
+      relayRefused: false, relayRefusedAt: 0, relayAccepted: false, relayTaken: false, relayRetryTimer: null, watchFrameSrc: 'x',
+      setInterval: () => { n.intervals++; return 7; }, clearInterval() {},
+      window: { HRMNativeHrSession: { setRelayCredentials: async (o) => { n.creds.push(o); } } },
       updateStreamingUI() {}, updateWatchMode() {}, refreshRelayStatus() { n.refreshes++; }, reconnectRelay() { n.reconnects++; },
-    };
-    const ctx = loadPage(src.monitor, ['driveSyncConfig', 'driveWriteConfig', 'driveFindConfig', 'getOrCreatePublishSecret', 'getOrCreateBroadcastKey', 'regenerateBroadcastKey', 'handleRelayMessage'], g);
+    }, state || {});
+    const ctx = loadPage(src.monitor, ['driveSyncConfig', 'driveWriteConfig', 'driveFindConfig', 'getOrCreatePublishSecret', 'getOrCreateBroadcastKey', 'regenerateBroadcastKey', 'handleRelayMessage', 'pushRelayCredentialsToEngine'], g);
     return { ctx, store, n };
   };
   const cfgOf = (fake) => { const f = fake.byName('.hr-monitor-config.json').filter((x) => !x.trashed); return f.length === 1 ? JSON.parse(f[0].content) : null; };
+  const oldConfig = () => { const f = new FakeDrive(); f.add({ name: '.hr-monitor-config.json', parents: ['root'], content: JSON.stringify({ broadcastKey: KA }) }); return f; };
+  const settle = () => new Promise((r) => setTimeout(r, 20));
 
-  // A config written before the secret existed: this device's secret becomes the account's.
-  let fake = new FakeDrive();
-  fake.add({ name: '.hr-monitor-config.json', parents: ['root'], content: JSON.stringify({ broadcastKey: 'aaaaaaaaaaaaaaaa' }) });
-  let d = monitor(fake, { hr_monitor_broadcast_key: 'bbbbbbbbbbbbbbbb', hr_monitor_publish_secret: S1 });
+  // A config from before the secret, and this device not yet accepted: nothing is written.
+  let fake = oldConfig();
+  let d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 });
   await d.ctx.driveSyncConfig();
-  let c = cfgOf(fake);
-  out.push(['K1 an old config gains this device\'s secret and keeps its key', c && c.broadcastKey === 'aaaaaaaaaaaaaaaa' && c.publishSecret === S1, JSON.stringify(c)]);
-  out.push(['K1 the device adopts the account key and reconnects', d.store.get('hr_monitor_broadcast_key') === 'aaaaaaaaaaaaaaaa' && d.n.reconnects === 1]);
+  out.push(['K1 an old config gets no secret before the relay accepted this device', cfgOf(fake).publishSecret === undefined, JSON.stringify(cfgOf(fake))]);
+  // The relay accepts: the accepted handler syncs, and the secret goes in.
+  d.ctx.handleRelayMessage({ type: 'publisher_accepted' });
+  await settle();
+  out.push(['K1 once accepted, the old config gains this device\'s secret and keeps its key', cfgOf(fake).publishSecret === S1 && cfgOf(fake).broadcastKey === KA, JSON.stringify(cfgOf(fake))]);
 
-  // A second device with its own secret adopts the account's pair.
-  d = monitor(fake, { hr_monitor_broadcast_key: 'cccccccccccccccc', hr_monitor_publish_secret: S2 });
+  // Accepted on a different key than the config's: adopt the key, write nothing (the acceptance was for the old room).
+  fake = oldConfig();
+  d = monitor(fake, { hr_monitor_broadcast_key: 'bbbbbbbbbbbbbbbb', hr_monitor_publish_secret: S1 }, { relayAccepted: true });
   await d.ctx.driveSyncConfig();
-  c = cfgOf(fake);
-  out.push(['K1 a second device adopts the account secret, never overwrites it', d.store.get('hr_monitor_publish_secret') === S1 && c.publishSecret === S1, d.store.get('hr_monitor_publish_secret')]);
-  out.push(['K1 adopting the pair clears a refused relay state', d.ctx.relayRefused === false]);
+  out.push(['K1 acceptance for another key writes no secret; the device adopts the account key and reconnects',
+    cfgOf(fake).publishSecret === undefined && d.store.get('hr_monitor_broadcast_key') === KA && d.n.reconnects === 1, JSON.stringify(cfgOf(fake))]);
+
+  // The 10-24 lock-out: B refused before A's secret lands writes nothing, then adopts A's once it does.
+  fake = oldConfig();
+  const B = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S2 });
+  B.ctx.handleRelayMessage({ type: 'publisher_rejected' });
+  await settle();
+  out.push(['K1 a refused device never writes its secret into the config', cfgOf(fake).publishSecret === undefined && B.ctx.relayRefused === true && B.n.intervals === 1, JSON.stringify(cfgOf(fake))]);
+  const A = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 }, { relayAccepted: true });
+  await A.ctx.driveSyncConfig();
+  await B.ctx.driveSyncConfig();
+  out.push(['K1 the refused device adopts the owner\'s secret, reconnects and hands it to the engine',
+    B.store.get('hr_monitor_publish_secret') === S1 && B.n.reconnects === 1 && B.n.creds.some((c) => c.publishSecret === S1 && c.broadcastKey === KA) && B.ctx.relayRefused === false && cfgOf(fake).publishSecret === S1]);
+
+  // Taken: refused while holding the config's own pair, or refused 3 min with no owner secret appearing.
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 }, { relayRefused: true, relayRefusedAt: Date.now() });
+  await d.ctx.driveSyncConfig();
+  out.push(['K1 refused with the account\'s own pair shows the link as taken', d.ctx.relayTaken === true && d.n.refreshes >= 1]);
+  const lone = oldConfig();
+  d = monitor(lone, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1 }, { relayRefused: true, relayRefusedAt: Date.now() - 60000 });
+  await d.ctx.driveSyncConfig();
+  const early = d.ctx.relayTaken;
+  d.ctx.relayRefusedAt = Date.now() - 200000;
+  await d.ctx.driveSyncConfig();
+  out.push(['K1 refused with no owner secret: taken only after 3 min', early === false && d.ctx.relayTaken === true]);
 
   // No config yet: one is created holding both.
   fake = new FakeDrive();
   d = monitor(fake, { hr_monitor_broadcast_key: 'dddddddddddddddd', hr_monitor_publish_secret: S2 });
   await d.ctx.driveSyncConfig();
-  c = cfgOf(fake);
-  out.push(['K1 a first sync creates a config with the key and the secret', c && c.broadcastKey === 'dddddddddddddddd' && c.publishSecret === S2, JSON.stringify(c)]);
+  out.push(['K1 a first sync creates a config with the key and the secret', cfgOf(fake) && cfgOf(fake).broadcastKey === 'dddddddddddddddd' && cfgOf(fake).publishSecret === S2, JSON.stringify(cfgOf(fake))]);
 
-  // A new link reaches Drive, so the next sync does not bring the old key back.
+  // A new link reaches Drive and the engine, so neither keeps the old key.
   d.ctx.regenerateBroadcastKey();
-  await new Promise((r) => setTimeout(r, 20));
+  await settle();
   const fresh = d.store.get('hr_monitor_broadcast_key');
-  c = cfgOf(fake);
-  out.push(['K1 a new link is written to the Drive config', fresh !== 'dddddddddddddddd' && c && c.broadcastKey === fresh, JSON.stringify(c)]);
+  out.push(['K1 a new link is written to the Drive config and handed to the engine',
+    fresh !== 'dddddddddddddddd' && cfgOf(fake) && cfgOf(fake).broadcastKey === fresh && d.n.creds.some((c) => c.broadcastKey === fresh), JSON.stringify(cfgOf(fake))]);
 
-  // The relay refusing this device: shown as blocked, and the config is read again.
-  let synced = 0;
-  d.ctx.driveSyncConfig = async () => { synced++; };
-  d.ctx.relayRefused = false;
-  d.ctx.handleRelayMessage({ type: 'publisher_rejected' });
-  out.push(['K1 a relay refusal marks the relay blocked and rereads the config', d.ctx.relayRefused === true && d.n.refreshes >= 1 && synced === 1]);
+  // A failed config write is an error, not a silent success.
+  fake.failUploads = true;
+  let threw = false;
+  try { await d.ctx.driveWriteConfig(); } catch (e) { threw = /config write 503/.test(e.message); }
+  out.push(['K1 a failed config write throws', threw]);
 
   const M = src.monitor;
   out.push(['K1 the monitor socket and the native start both carry the secret',
     /\?role=publisher&proof=' \+ getOrCreatePublishSecret\(\)/.test(M) && /publishSecret: getOrCreatePublishSecret\(\),\s*senderLabel/.test(M)]);
+  out.push(['K1 a resumed native session gets the page\'s credentials', /if \(snap\.sessionActive\) pushRelayCredentialsToEngine\(\);/.test(M) && /setItem\('hr_monitor_device_label', r\.senderLabel\);\s*pushRelayCredentialsToEngine\(\);/.test(M)]);
   return out;
 };
 

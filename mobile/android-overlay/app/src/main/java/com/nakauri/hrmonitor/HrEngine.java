@@ -111,6 +111,8 @@ public final class HrEngine implements HrDevice.Callback {
     private String broadcastKey;
     // Relay publish proof; never logged or put in diagnostics.
     private String publishSecret;
+    // The relay refused this proof: the socket is open but nothing it sends reaches the overlay.
+    private volatile boolean relayRefused;
     private String senderId;
     private String senderLabel;
     private long sessionStartMs;
@@ -353,6 +355,31 @@ public final class HrEngine implements HrDevice.Callback {
         } catch (Throwable ignored) {}
     }
 
+    // A new link or the account's synced secret, mid-session: saved for resume, then the socket reopens with it.
+    public void setRelayCredentials(String key, String secret) {
+        if (key == null || !key.matches("[0-9a-f]{16}")) return;
+        if (secret != null && !secret.isEmpty() && !secret.matches("[0-9a-f]{32}")) return;
+        mainHandler.post(() -> {
+            boolean changed = !key.equals(broadcastKey) || !(secret == null ? "" : secret).equals(publishSecret == null ? "" : publishSecret);
+            if (!changed) return;
+            broadcastKey = key;
+            publishSecret = secret;
+            relayRefused = false;
+            try {
+                appCtx.getSharedPreferences("hr_monitor_session", 0).edit()
+                    .putString("broadcastKey", key)
+                    .putString("publishSecret", secret == null ? "" : secret)
+                    .commit();
+            } catch (Throwable ignored) {}
+            if (sessionActive.get() && broadcastEnabled) {
+                relayReconnectAttempts = 0;
+                try { openRelaySocket(); } catch (Throwable ignored) {}
+            } else {
+                emitState();
+            }
+        });
+    }
+
     public void setBroadcast(boolean enabled) {
         boolean prev = broadcastEnabled;
         broadcastEnabled = enabled;
@@ -414,6 +441,7 @@ public final class HrEngine implements HrDevice.Callback {
         if (!broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
+        relayRefused = false;
         Request req = new Request.Builder()
             .url("wss://hr-relay.nakauri.workers.dev/parties/main/" + broadcastKey + "?role=publisher"
                 + (publishSecret != null && publishSecret.matches("[0-9a-f]{32}") ? "&proof=" + publishSecret : ""))
@@ -452,7 +480,12 @@ public final class HrEngine implements HrDevice.Callback {
                 emitState();
                 scheduleRelayReconnect();
             }
-            @Override public void onMessage(WebSocket ws, String text) { /* ignored */ }
+            // The relay's verdict on the proof; every other message is for the page.
+            @Override public void onMessage(WebSocket ws, String text) {
+                if (ws != relaySocket || text == null || text.length() > 64) return;
+                if (text.contains("\"publisher_rejected\"")) { relayRefused = true; emitState(); }
+                else if (text.contains("\"publisher_accepted\"")) { relayRefused = false; emitState(); }
+            }
             @Override public void onMessage(WebSocket ws, ByteString bytes) { /* ignored */ }
         });
     }
@@ -2239,6 +2272,7 @@ public final class HrEngine implements HrDevice.Callback {
         putSafe(ret, "bleConnected", device.hasHandle());
         putSafe(ret, "linkUp", device.isLinkUp());
         putSafe(ret, "relayLive", relayLive.get());
+        putSafe(ret, "relayRefused", relayRefused);
         putSafe(ret, "linkState", LinkStatePolicy.wireName(active, link.state()));
         putSafe(ret, "generation", sessionGeneration.get());
         if (active) {

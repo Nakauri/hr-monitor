@@ -342,6 +342,18 @@ public class NativeHrSessionPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setRelayCredentials(PluginCall call) {
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) return;
+            e.setRelayCredentials(call.getString("broadcastKey", ""), call.getString("publishSecret", ""));
+            call.resolve();
+        } catch (Throwable t) {
+            call.reject("set_relay_credentials_failed: " + t.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void getCacheStats(PluginCall call) {
         try {
             HrEngine e = engineOrReject(call);

@@ -52,6 +52,7 @@ async function suite(mod) {
   const pub = await join('pub', 'role=publisher&proof=' + P1);
   const sub = await join('sub');
   check('a publisher with a proof is a publisher', pub.state && pub.state.publisher === true);
+  check('a publisher whose proof claims the room is told it was accepted', pub.got.some((m) => /publisher_accepted/.test(m)));
   check('a plain connection is not a publisher', !(sub.state && sub.state.publisher));
   const bad = conn('bad'); bad.ctx.request.url = 'not a url';
   let threw = false;
@@ -81,7 +82,8 @@ async function suite(mod) {
   check('a second device with the same proof publishes', same.state && same.state.publisher && (await send(same, '{"type":"tick"}')).length === 1);
   const wrong = await join('evil', 'role=publisher&proof=' + P2);
   check('a wrong proof cannot publish', !(wrong.state && wrong.state.publisher) && (await send(wrong, '{"type":"tick"}')).length === 0);
-  check('a wrong proof is told it was refused', wrong.got.some((m) => /publisher_rejected/.test(m)));
+  check('a wrong proof is told it was refused, never accepted', wrong.got.some((m) => /publisher_rejected/.test(m)) && !wrong.got.some((m) => /publisher_accepted/.test(m)));
+  check('a second device with the same proof is told it was accepted', same.got.some((m) => /publisher_accepted/.test(m)));
   const bare = await join('bare', 'role=publisher');
   check('role=publisher without a proof cannot publish in a claimed room', (await send(bare, '{"type":"tick"}')).length === 0);
   check('a proof is never fanned out to subscribers', !JSON.stringify(s.sent).includes(P1));
@@ -91,6 +93,7 @@ async function suite(mod) {
   const legacy = conn('old', 'role=publisher'); await s2.onConnect(legacy.c, legacy.ctx);
   s2.sent = []; await s2.onMessage(legacy.c, '{"type":"tick"}');
   check('an unclaimed room takes a proofless publisher (older installs)', s2.sent.length === 1);
+  check('a proofless publisher is never told it was accepted', !legacy.c.got.some((m) => /publisher_accepted/.test(m)));
   check('a proofless publisher does not claim the room', (await s2.ctx.storage.get('publisherHash')) === undefined);
   const owner = conn('new', 'role=publisher&proof=' + P2); await s2.onConnect(owner.c, owner.ctx);
   s2.sent = []; await s2.onMessage(legacy.c, '{"type":"tick"}');
@@ -114,7 +117,9 @@ const MUTANTS = [
   ['the raw proof stored', 'await this.ctx.storage.put(OWNER_KEY, hash);', 'await this.ctx.storage.put(OWNER_KEY, proof);'],
   ['proofless publishers kept after the claim', "    if (!sender.state.proven && await this.ctx.storage.get(OWNER_KEY)) return;", ''],
   ['a proofless publisher claims the room', 'if (!owner && hash) await', 'if (!owner) await'],
-  ['no refusal notice', "else conn.send(JSON.stringify({ type: 'publisher_rejected' }));", ''],
+  ['no refusal notice', "      conn.send(JSON.stringify({ type: 'publisher_rejected' }));", ''],
+  ['no acceptance notice', "      if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));", ''],
+  ['proofless publishers told accepted', "      if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));", "      conn.send(JSON.stringify({ type: 'publisher_accepted' }));"],
 ];
 
 let fails = 0;

@@ -31,7 +31,9 @@ check('subscriber gets 11 KB tick', sub.got.some((m) => m.length === tick.length
 check('non-JSON dropped', !sub.got.includes('not json'));
 check('40 KB message dropped', !sub.got.some((m) => m.includes('"big"')));
 check('34000-byte multibyte message dropped', !sub.got.some((m) => m.includes('"multibyte"')));
-check('no echo to sender', pub.got.length === 0, `sender got ${pub.got.length}`);
+check('the claiming publisher is told it was accepted', pub.got.some((m) => m.includes('publisher_accepted')));
+const echoed = pub.got.filter((m) => !m.includes('publisher_accepted'));
+check('no echo to sender', echoed.length === 0, `sender got ${echoed.length}`);
 check('other room isolated', other.got.length === 0, `other got ${other.got.length}`);
 
 sub.send(JSON.stringify({ type: 'from-sub' }));

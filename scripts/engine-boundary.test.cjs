@@ -450,6 +450,15 @@ function step2Checks() {
       const fgs = body.search(/\bstartNativeForegroundService\s*\(/);
       check('startSessionInternal commits sessionActive, senderId, broadcastKey and publishSecret in ONE .commit()',
         commit > live && between.includes('"senderId"') && between.includes('"broadcastKey"') && between.includes('"publishSecret"') && !between.includes('.apply()'));
+      // A refused native socket kept showing live while the overlay got nothing (review 2026-10-24).
+      const onMsg = E.slice(E.indexOf('public void onMessage(WebSocket ws, String text)'), E.indexOf('public void onMessage(WebSocket ws, ByteString bytes)'));
+      check('native marks a relay refusal and clears it on acceptance',
+        /publisher_rejected[^}]*relayRefused = true[^}]*emitState\(\)/.test(onMsg) && /publisher_accepted[^}]*relayRefused = false/.test(onMsg));
+      check('the engine snapshot reports relayRefused', /putSafe\(ret, "relayRefused", relayRefused\)/.test(E));
+      const creds = E.slice(E.indexOf('public void setRelayCredentials('), E.indexOf('public void setBroadcast('));
+      check('setRelayCredentials checks both formats and saves key and secret in one .commit()',
+        /key\.matches\("\[0-9a-f\]\{16\}"\)/.test(creds) && /secret\.matches\("\[0-9a-f\]\{32\}"\)/.test(creds)
+        && /\.putString\("broadcastKey", key\)\s*\.putString\("publishSecret"[^;]*\.commit\(\)/.test(creds) && /openRelaySocket\(\)/.test(creds));
       // The relay proof must never reach diagnostics or the log (report card 2026-10-24).
       check('the publish secret never appears in diagnostics or a log line',
         !/putSafe\([^;]*publishSecret|Log\.[a-z]\([^;]*publishSecret|logLifecycle\([^;]*publishSecret/.test(E));

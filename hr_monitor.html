@@ -1317,6 +1317,10 @@
             <span class="track" aria-hidden="true"></span>
           </button>
         </div>
+        <div class="ui" id="relay-taken" hidden>
+          <p class="row-label">Another device holds this link, so this one can't share. A new link frees it. Paste the new OBS link afterwards.</p>
+          <button type="button" class="btn" id="relay-new-link">Make a new link</button>
+        </div>
       </div>
     </div>
 
@@ -2933,11 +2937,22 @@
     }
     return p;
   }
-  let relayRefused = false;
+  // relayAccepted: the relay took this device's proof for the current key. Only then may the secret go into an
+  // older config, so the config's secret is always the room owner's. relayTaken: refused while holding the
+  // account's own pair, so no reread can help; only a new link does.
+  let relayRefused = false, relayRefusedAt = 0, relayAccepted = false, relayTaken = false, relayRetryTimer = null;
+  // A running native session keeps its own socket; it takes a new key or secret without a restart.
+  function pushRelayCredentialsToEngine() {
+    const ns = window.HRMNativeHrSession;
+    if (!ns || typeof ns.setRelayCredentials !== 'function') return;
+    ns.setRelayCredentials({ broadcastKey: getOrCreateBroadcastKey(), publishSecret: getOrCreatePublishSecret() }).catch(() => {});
+  }
   function regenerateBroadcastKey() {
     localStorage.removeItem('hr_monitor_broadcast_key');
     getOrCreateBroadcastKey();
-    relayRefused = false;
+    relayRefused = false; relayTaken = false;
+    if (relayRetryTimer) { clearInterval(relayRetryTimer); relayRetryTimer = null; }
+    pushRelayCredentialsToEngine();
     driveWriteConfig().catch(e => console.warn('config write:', e));
     reconnectRelay();
     updateStreamingUI();
@@ -2964,6 +2979,7 @@
     const key = getOrCreateBroadcastKey();
     if (!key) return;
     setStreamingStatus('connecting');
+    relayAccepted = false;
     try {
       const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key + '?role=publisher&proof=' + getOrCreatePublishSecret());
       relaySocket = ws;
@@ -3046,9 +3062,15 @@
   // It can fall to "error" after a long sleep while the native socket
   // reconnects fine and keeps publishing — pill should reflect what's
   // actually going to the relay, not the JS-side observer.
+  function nativeRelayRefused() {
+    const snap = window.HRMNativeHrSession ? engineSnapshot() : null;
+    return !!(snap && snap.relayRefused);
+  }
   function refreshRelayStatus() {
+    const taken = $('relay-taken');
+    if (taken) taken.hidden = !(relayTaken && widgetPrefs.broadcast);
     if (!widgetPrefs.broadcast) { setStreamingStatus('off'); return; }
-    if (relayRefused) { setStreamingStatus('blocked'); return; }
+    if (relayRefused || nativeRelayRefused()) { setStreamingStatus('blocked'); return; }
     const nativePub = !!(window.HRMNativeHrSession
         && window.HRMNativeHrSession.isPublishing
         && window.HRMNativeHrSession.isPublishing());
@@ -3087,11 +3109,23 @@
   const SENDER_ID_RE = /^[a-z0-9_-]{1,64}$/i;
   function handleRelayMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'publisher_rejected') {
-      // Another device holds this room with a different secret; the Drive config has the account's current pair.
-      relayRefused = true;
+    if (msg.type === 'publisher_accepted') {
+      relayAccepted = true;
+      relayRefused = false; relayTaken = false;
+      if (relayRetryTimer) { clearInterval(relayRetryTimer); relayRetryTimer = null; }
       refreshRelayStatus();
       if (driveAccessToken && driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e));
+      return;
+    }
+    if (msg.type === 'publisher_rejected') {
+      // Another device holds this room. Its secret reaches the Drive config once the relay accepts it there.
+      if (!relayRefused) relayRefusedAt = Date.now();
+      relayRefused = true;
+      relayAccepted = false;
+      refreshRelayStatus();
+      const resync = () => { if (driveAccessToken && driveFolderId) driveSyncConfig().catch(e => console.warn('config sync:', e)); };
+      resync();
+      if (!relayRetryTimer) relayRetryTimer = setInterval(resync, 60000);
       return;
     }
     if (msg.senderId != null && !SENDER_ID_RE.test(String(msg.senderId))) return;
@@ -4668,6 +4702,7 @@
     if (!r || !(r.resumed || r.alreadyRunning)) throw new Error((r && r.reason) || 'not_live');
     if (r.senderId) sessionStorage.setItem('hr_monitor_device_id', r.senderId);
     if (r.senderLabel) sessionStorage.setItem('hr_monitor_device_label', r.senderLabel);
+    pushRelayCredentialsToEngine();
     try { evictSelfFromBroadcasters(); } catch (e) {}
     if (r.sessionStartMs) ctx.sessionStartMs = r.sessionStartMs;
     if (cancelled()) { refreshFromEngine('recovery_late'); return false; }
@@ -4898,6 +4933,8 @@
       clearTimeout(slow);
       const snap = engineSnapshot() || {};
       syncFromEngine(snap, 'bootstrap');
+      // A session the service resumed on its own may hold prefs from before the publish secret.
+      if (snap.sessionActive) pushRelayCredentialsToEngine();
       __hrLifecycle.bootstrap({ publishing: !!snap.sessionActive, recoveryContext: snap.sessionActive ? null : (snap.recoveryContext || null) });
     });
     // The engine is re-read every 30 s even with no event: a lost event costs at most this long.
@@ -5949,8 +5986,14 @@
     const secretChanged = secretOk && localStorage.getItem('hr_monitor_publish_secret') !== cfg.publishSecret;
     if (keyChanged) localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);
     if (secretChanged) localStorage.setItem('hr_monitor_publish_secret', cfg.publishSecret);
-    // A config from before the publish secret: this device's secret becomes the account's.
-    if (!secretOk) await driveWriteConfig(id);
+    // A config from before the publish secret takes this device's secret only once the relay accepted it for
+    // this very key; a config secret is never overwritten here.
+    if (!secretOk && !keyChanged && relayAccepted) await driveWriteConfig(id);
+    // Refused while holding the account's own pair, or refused for 3 min with no owner's secret ever
+    // appearing in the config: someone else claimed the room first.
+    relayTaken = relayRefused && !keyChanged && !secretChanged && (secretOk || Date.now() - relayRefusedAt > 180000);
+    if (keyChanged || secretChanged) pushRelayCredentialsToEngine();
+    if (relayTaken) refreshRelayStatus();
     if (keyChanged || secretChanged) {
       relayRefused = false;
       if (typeof reconnectRelay === 'function') reconnectRelay();
@@ -5965,8 +6008,9 @@
     if (!driveAccessToken || !driveFolderId) return;
     const id = existingId || await driveFindConfig();
     const body = JSON.stringify({ broadcastKey: getOrCreateBroadcastKey(), publishSecret: getOrCreatePublishSecret() });
+    let resp;
     if (id) {
-      await fetch('https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media', {
+      resp = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media', {
         method: 'PATCH',
         headers: { 'Authorization': await driveAuthHeader(), 'Content-Type': 'application/json' },
         body,
@@ -5977,7 +6021,7 @@
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
         JSON.stringify({ name: '.hr-monitor-config.json', parents: [driveFolderId], mimeType: 'application/json' }) +
         `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
-      await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',
         headers: {
           'Authorization': await driveAuthHeader(),
@@ -5986,6 +6030,7 @@
         body: mpBody,
       });
     }
+    if (!resp.ok) throw new Error('config write ' + resp.status);
   }
 
   // Upload or update the current session's CSV on Drive. Called alongside local
@@ -6956,6 +7001,7 @@
       el.addEventListener('click', () => { el.checked = !el.checked; el.dispatchEvent(new Event('change')); });
     }
     ['toggle-broadcast', 'audio-on'].forEach((id) => wireSwitch($(id)));
+    $('relay-new-link').addEventListener('click', () => regenerateBroadcastKey());
     document.querySelectorAll('.save-check').forEach((s) => { s.innerHTML = UI.icon('check'); });
     loadWidgetStyle();
     loadWidgetPrefs();

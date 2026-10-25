@@ -422,6 +422,10 @@
         if (typeof plugin.setBroadcast !== 'function') return Promise.resolve();
         return plugin.setBroadcast({ enabled: !!enabled });
       },
+      setRelayCredentials: function (o) {
+        if (typeof plugin.setRelayCredentials !== 'function') return Promise.resolve();
+        return plugin.setRelayCredentials({ broadcastKey: (o && o.broadcastKey) || '', publishSecret: (o && o.publishSecret) || '' });
+      },
       exportCsv: function (filename, csv) {
         if (typeof plugin.exportCsv !== 'function') return Promise.reject(new Error('unsupported'));
         return plugin.exportCsv({ filename: filename, csv: csv });

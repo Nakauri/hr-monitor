@@ -53,8 +53,14 @@ export class Main extends Server {
     if (!owner && hash) await this.ctx.storage.put(OWNER_KEY, hash);
     // An unclaimed room still takes a proofless publisher (installs older than
     // the proof); the first proof locks them out.
-    if (!owner || hash === owner) conn.setState({ publisher: true, proven: !!hash });
-    else conn.send(JSON.stringify({ type: 'publisher_rejected' }));
+    // The verdict goes back to the publisher: a client writes its secret into the account's config only
+    // once accepted, so the config never holds a secret the room refuses.
+    if (!owner || hash === owner) {
+      conn.setState({ publisher: true, proven: !!hash });
+      if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));
+    } else {
+      conn.send(JSON.stringify({ type: 'publisher_rejected' }));
+    }
   }
 
   // PartyServer order is (connection, message).
