@@ -180,11 +180,21 @@ const was = jsFunction(monitor, 'writeAutoSave') || '';
 const stopNow = jsFunction(monitor, 'stopSessionNow') || '';
 const stopSave = jsFunction(monitor, 'stopSessionAutoSave') || '';
 check('a big file is rebuilt at most once a minute, the final save always',
-  /if \(!final && autoSaveBytes > SAVE_BIG && Date\.now\(\) - autoSaveBuiltAt < 60000\) return;/.test(was) && /if \(final\) return await driveUploadSession\(filename, csv, true\);/.test(was));
+  /if \(!final && !force && autoSaveBytes > SAVE_BIG && Date\.now\(\) - autoSaveBuiltAt < 60000\) return;/.test(was) && /if \(final\) return await driveUploadSession\(filename, csv, true\);/.test(was));
 check('the stop reads its facts, then awaits the final save before the after-stop panel, once per session',
   stopNow.indexOf('const ended = afterStopFacts();') >= 0 && stopNow.indexOf('const ended = afterStopFacts();') < stopNow.indexOf('await Promise.race([stopSessionAutoSave()')
   && stopNow.indexOf('await Promise.race([stopSessionAutoSave()') < stopNow.indexOf('showAfterStop(ended)')
   && /if \(autoSaveFinal\) return autoSaveFinal;/.test(stopSave) && /return job;/.test(jsFunction(monitor, 'driveUploadSession') || ''));
+// Confirm 2026-10-25: the panel polled a status the save itself then overwrote (every folder+Drive stop read "not
+// confirmed"), and a final save settling after the next Start cleared that session's folder file and Drive id.
+const upload = jsFunction(monitor, 'driveUploadSession') || '';
+const after = jsFunction(monitor, 'showAfterStop') || '';
+check('the after-stop panel shows the final save\'s own result',
+  /ended\.driveOk = r\.ok;/.test(stopNow) && /else if \(f\.driveOk === true\) set\('Saved to Drive'\);/.test(after) && /else if \(f\.driveOk === false\) set\('Drive upload failed', 'error'\);/.test(after));
+check('an old session\'s save never touches the new session',
+  /autoSaveGen\+\+;/.test(jsFunction(monitor, 'startSessionAutoSave') || '') && /if \(gen === autoSaveGen\) \{\s*autoSaveFileHandle = null;/.test(stopSave)
+  && /if \(gen === autoSaveGen\) driveFileIdForSession = data\.id;/.test(upload) && (upload.match(/gen === autoSaveGen && typeof setAutoSaveStatus/g) || []).length === 2);
+check('a page close writes a flushed mark past the rebuild pace', /writeAutoSave\(false, true\)/.test(monitor) && /if \(!final && !force && autoSaveBytes > SAVE_BIG/.test(was));
 // The Marks list and the session's full record (the saved file) move together: one insert, one undo, no other writer.
 check('addMarker is the only writer of the marks; undoNativeMark removes one from each list',
   /for \(const \[list, cap\] of \[\[state\.events, 500\], \[state\.full\.events, FULL_CAP\]\]\)/.test(add) && /list\.splice\(i, 0, ev\)/.test(add)

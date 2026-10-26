@@ -609,7 +609,7 @@ CHECKS.R3 = async (src) => {
     function () { globalThis.__get = () => driveFolderId; });
   await v.driveEnsureFolder();
   const mf = fx();
-  const m = loadPage(src.monitor, ['driveEnsureFolder'], { driveFetch: (p, i) => mf.fetch(p, i), driveSyncConfig: async () => {}, startConfigPoll() {}, driveUpdateUI() {}, relayLink: { loginTag: null }, driveAccessToken: 'tok', DRIVE_FOLDER_NAME: 'HR Monitor Sessions' },
+  const m = loadPage(src.monitor, ['driveEnsureFolder', 'driveLookUpFolder'], { driveFolderLookup: null, driveFetch: (p, i) => mf.fetch(p, i), driveSyncConfig: async () => {}, startConfigPoll() {}, driveUpdateUI() {}, relayLink: { loginTag: null }, driveAccessToken: 'tok', DRIVE_FOLDER_NAME: 'HR Monitor Sessions' },
     function () { globalThis.__get = () => driveFolderId; });
   await m.driveEnsureFolder();
   out.push(['R3 viewer and monitor root pickers agree on the oldest root, id breaking the tie', v.__get() === 'r-a' && m.__get() === 'r-a', v.__get() + ' / ' + m.__get()]);
