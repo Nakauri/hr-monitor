@@ -3947,10 +3947,10 @@
   let stopInFlight = false;
   async function stopSessionNow() {
     if (stopInFlight) return;
+    // Held marks and an open note go in before stopInFlight, which refuses new marks, and before the final file.
+    try { hideStopConfirm(); flushHeldMarks(); } catch (e) {}
     stopInFlight = true;
     try {
-      hideStopConfirm();
-      flushHeldMarks();
       // Where the session was going, read before the final save closes the folder handle.
       const ended = afterStopFacts();
       // Web: the final save, awaited until it has reached the folder and Drive (up to 30 s), so the after-stop
@@ -4024,6 +4024,15 @@
     saved.removeAttribute('data-kind');
     drive.removeAttribute('data-kind');
     if (!f.native && f.folder && f.folderFailed) saved.dataset.kind = 'error';
+    // A folder write still running at the 30 s cap: say so, then follow it to its result.
+    if (!f.native && f.folder && f.driveLate && finalLocalOk === undefined && f.finalSave) {
+      saved.textContent = 'Saving to ' + f.folder + dur;
+      f.finalSave.then(() => {
+        if (seq !== afterStopSeq) return;
+        if (finalLocalOk === false) { saved.textContent = 'Last save to ' + f.folder + ' failed' + dur; saved.dataset.kind = 'error'; }
+        else saved.textContent = 'Saved to ' + f.folder + dur;
+      }, () => {});
+    }
     if (f.drive) {
       const set = (t, kind) => {
         driveEl.textContent = t + (driveEl === saved ? dur : '');

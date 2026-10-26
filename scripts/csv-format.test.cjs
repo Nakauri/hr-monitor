@@ -259,6 +259,13 @@ check('a failed final folder write says so and keeps its error',
   && /if \(final\) finalLocalOk = true;/.test(was) && /if \(final\) finalLocalOk = false;/.test(was));
 check('a mark or note during "Saving" is refused, not lost',
   /if \(!state\.startTime \|\| stopInFlight \|\|/.test(jsFunction(monitor, 'logMark') || '') && /if \(!state\.startTime \|\| stopInFlight \|\| noteComposer\) return;/.test(jsFunction(monitor, 'openNoteComposer') || ''));
+// Round 5: an open note is committed through logMark, which refuses once stopInFlight is set, so the flush comes first.
+check('a note open at Stop is flushed before marks are refused',
+  stopNow2.indexOf('flushHeldMarks();') >= 0 && stopNow2.indexOf('flushHeldMarks();') < stopNow2.indexOf('stopInFlight = true;')
+  && stopNow2.indexOf('if (stopInFlight) return;') < stopNow2.indexOf('flushHeldMarks();'));
+check('a folder write still running at the cap is followed to its result',
+  /if \(!f\.native && f\.folder && f\.driveLate && finalLocalOk === undefined && f\.finalSave\) \{\s*saved\.textContent = 'Saving to ' \+ f\.folder \+ dur;/.test(after2)
+  && /if \(finalLocalOk === false\) \{ saved\.textContent = 'Last save to ' \+ f\.folder \+ ' failed' \+ dur;/.test(after2));
 const bounded = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('stalled')), 5000))]);
 const OLD = ['an old final that waited past a new Start uploads nothing', 'an old final held up in its local write past a new Start uploads nothing'];
 bounded(Promise.all([oldFinalAfterStart(true), oldFinalAfterStart(false)])).then((rs) => rs.forEach((r, i) => {
