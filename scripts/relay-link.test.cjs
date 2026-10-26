@@ -670,7 +670,10 @@ CHECKS.K1 = async (src) => {
     && /if \(relayLink\.otherTabChanged\(e\.key, e\.newValue\)\) followRelayCredentials\(false\);/.test(M)
     && /<script src="\.\/relay-link\.js"><\/script>/.test(M)
     // A relay that stays down is retried at 5 s doubling to a minute, not every 5 s for ever (re-grade 2026-10-25).
-    && /relayRetryMs = Math\.min\(60000, relayRetryMs \* 2\);/.test(M) && /ws\.addEventListener\('open', \(\) => \{\s*relayRetryMs = 5000;/.test(M)
+    // and the backoff starts over only once a socket has stayed open 30 s, or on a deliberate reconnect.
+    && /relayRetryMs = Math\.min\(60000, relayRetryMs \* 2\);/.test(M)
+    && /relayHealthyTimer = setTimeout\(\(\) => \{ relayHealthyTimer = null; if \(relaySocket === ws\) relayRetryMs = 5000; \}, 30000\);/.test(M)
+    && /\/\/ A deliberate reconnect \(a new key or secret\) starts the backoff over\.\s*relayRetryMs = 5000;/.test(M)
     && !/setTimeout\(connectRelay, 5000\)/.test(M)
     && !/let relayRefused|let configBehind|function driveSyncConfig\(\) \{\s*if|const LINK_AT/.test(M)]);
   // One home for the relay's address: the pages read it from the module, the CSP generator reads the module, and
