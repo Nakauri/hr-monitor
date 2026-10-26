@@ -44,6 +44,10 @@ mobile/ios/
 mobile/*.keystore
 mobile/*.keystore.b64
 mobile/*.jks
+# Signing keys anywhere: CI copies android-overlay into the build, so a key there would ship in the repo.
+*.keystore
+*.jks
+*.p12
 mobile/sha1.txt
 mobile/keystore-password.txt
 mobile/release/

@@ -40,7 +40,7 @@ async function load(src, tag) {
 const P1 = '0123456789abcdef0123456789abcdef';
 const P2 = 'fedcba9876543210fedcba9876543210';
 function conn(id, query) {
-  const c = { id, state: null, got: [], setState(s) { this.state = s; }, send(m) { this.got.push(m); } };
+  const c = { id, state: null, got: [], closed: null, setState(s) { this.state = s; }, send(m) { this.got.push(m); }, close(code) { this.closed = code; } };
   return { c, ctx: { request: { url: `https://relay.example/parties/main/room${query ? '?' + query : ''}` } } };
 }
 
@@ -88,6 +88,11 @@ async function suite(mod) {
   check('a second device with the same proof is told it was accepted', same.got.some((m) => /publisher_accepted/.test(m)));
   const bare = await join('bare', 'role=publisher');
   check('role=publisher without a proof cannot publish in a claimed room', (await send(bare, '{"type":"tick"}')).length === 0);
+  // Security audit 2026-10-25: a build older than the proof ignores the verdict and showed live; it is closed instead.
+  check('a publisher with no proof field in a claimed room is closed (an old build)', bare.closed === 4001);
+  const empty = await join('empty', 'role=publisher&proof=');
+  check('an empty proof (a current build with no secret yet) is refused, not closed', empty.closed === null && empty.got.some((m) => /publisher_rejected/.test(m)));
+  check('a wrong proof is not closed (a current build shows blocked)', wrong.closed === null);
   check('a proof is never fanned out to subscribers', !JSON.stringify(s.sent).includes(P1));
   check('a publisher cannot forge a verdict for its peers',
     (await send(pub, '{"type":"publisher_rejected"}')).length === 0 && (await send(pub, '{"type":"publisher_accepted"}')).length === 0);
@@ -103,10 +108,15 @@ async function suite(mod) {
   check('a subscriber cannot publish in an unclaimed room', s2.sent.length === 0);
   check('a proofless publisher is never told it was accepted', !legacy.c.got.some((m) => /publisher_accepted/.test(m)));
   check('a proofless publisher does not claim the room', (await s2.ctx.storage.get('publisherHash')) === undefined);
+  const blank = conn('blank', 'role=publisher&proof='); s2.conns.push(blank.c); await s2.onConnect(blank.c, blank.ctx);
   const owner = conn('new', 'role=publisher&proof=' + P2); s2.conns.push(owner.c); await s2.onConnect(owner.c, owner.ctx);
+  check('a current build with no secret yet, there before the claim, is refused but kept open',
+    blank.c.closed === null && blank.c.got.some((m) => /publisher_rejected/.test(m)) && blank.c.state.publisher === false);
   s2.sent = []; await s2.onMessage(legacy.c, '{"type":"tick"}');
   check('once claimed, the proofless publisher is silenced without reconnecting', s2.sent.length === 0);
   check('the silenced proofless publisher is told it was refused', legacy.c.got.some((m) => /publisher_rejected/.test(m)));
+  check('the silenced proofless publisher is closed and no longer a publisher', legacy.c.closed === 4001 && legacy.c.state.publisher === false);
+  check('the claiming publisher is not closed', owner.c.closed === null);
   check('the claiming publisher is not told it was refused', !owner.c.got.some((m) => /publisher_rejected/.test(m)));
   s2.sent = []; await s2.onMessage(owner.c, '{"type":"tick"}');
   check('the claiming publisher publishes', s2.sent.length === 1);
@@ -122,13 +132,17 @@ const MUTANTS = [
   ['cap measured in characters', 'size = encoder.encode(message).length;', 'size = message.length;'],
   ['non-JSON fanned out', "catch (e) { return; } // drop non-JSON", 'catch (e) { parsed = {}; } // drop non-JSON'],
   ['verdicts forwarded', "    if (typeof parsed.type === 'string' && parsed.type.startsWith('publisher_')) return;\n", ''],
-  ['silenced publishers not told', "        if (c.state?.publisher && !c.state.proven) c.send(JSON.stringify({ type: 'publisher_rejected' }));\n", ''],
-  ['the claimer told it was refused', "if (c.state?.publisher && !c.state.proven) c.send(", "c.send("],
+  ['silenced publishers not told', "          c.send(JSON.stringify({ type: 'publisher_rejected' }));\n", ''],
+  ['the claimer told it was refused', "if (c.state?.publisher && !c.state.proven) {", "{"],
   ['sender gets its own message', 'this.broadcast(message, [sender.id]);', 'this.broadcast(message, []);'],
   ['subscribers publish again', '    if (!sender.state?.publisher) return;', ''],
   ['any proof accepted', "if (!owner || hash === owner)", "if (true)"],
   ['the raw proof stored', 'await this.ctx.storage.put(OWNER_KEY, hash);', 'await this.ctx.storage.put(OWNER_KEY, proof);'],
-  ['proofless publishers kept after the claim', "    if (!sender.state?.proven && await this.ctx.storage.get(OWNER_KEY)) return;", ''],
+  ['proofless publishers kept after the claim', "          c.setState({ ...c.state, publisher: false });\n", ''],
+  ['an old build kept open in a claimed room', "      if (proof == null) conn.close(OLD_BUILD_CODE, 'proof required');", ''],
+  ['every refused publisher closed', "      if (proof == null) conn.close(OLD_BUILD_CODE, 'proof required');", "      conn.close(OLD_BUILD_CODE, 'proof required');"],
+  ['an old build left open by the claim', "          if (c.state.oldBuild) c.close(OLD_BUILD_CODE, 'proof required');\n", ''],
+  ['an empty proof read as an old build', 'oldBuild: proof == null', 'oldBuild: !hash'],
   ['a proofless publisher claims the room', 'if (!owner && hash) {', 'if (!owner) {'],
   ['no refusal notice', "      conn.send(JSON.stringify({ type: 'publisher_rejected' }));", ''],
   ['no acceptance notice', "      if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));", ''],

@@ -63,7 +63,7 @@
     // dropped by the bridge, an event fired before any listener), so every event re-pulls and a pull
     // retries until it settles. The page reads only this; it keeps no session copy of its own.
     const snapshot = {
-      sessionActive: false, linkState: 'none', linkUp: false, bleConnected: false, relayLive: false,
+      sessionActive: false, linkState: 'none', linkUp: false, bleConnected: false, relayLive: false, relayRefused: false,
       senderId: null, senderLabel: null, sessionStartMs: 0, csvFile: null, posture: null, generation: 0,
       targetMac: null, strapName: null, lastHrAtMs: 0, interruptedRecovery: false, recoveryContext: null,
     };
@@ -117,6 +117,7 @@
       snapshot.csvFile = null;
       snapshot.posture = null;
       snapshot.linkUp = false;
+      snapshot.relayRefused = false;
     }
 
     // Local truth from an event or a call result; a status() in flight from before it is now stale.
@@ -139,6 +140,8 @@
       snapshot.bleConnected = !!s.bleConnected;
       snapshot.linkUp = typeof s.linkUp === 'boolean' ? s.linkUp : !!s.bleConnected;
       snapshot.relayLive = !!s.relayLive;
+      // The relay refused this phone's proof: the monitor shows blocked, not live.
+      snapshot.relayRefused = !!s.relayRefused;
       // An older APK sends no linkState: a handle means recording, else reconnecting.
       snapshot.linkState = typeof s.linkState === 'string' ? s.linkState
         : (active ? (s.bleConnected ? 'recording' : 'reconnecting') : 'none');

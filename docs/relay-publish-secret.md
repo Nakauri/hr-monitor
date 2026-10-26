@@ -88,8 +88,11 @@ settings sync never maps the key.
   secret saved in one `.commit()`, socket reopened. It refuses an empty or malformed secret.
 - The page pushes them after a resume and at bootstrap with a live session; prefs from an APK before the secret
   have none.
-- The engine reads a verdict by its exact `type` and reports `relayRefused` in its snapshot, so the monitor shows
-  `blocked` instead of `live` while nothing reaches the overlay.
+- The engine reads a verdict by its exact `type` and reports `relayRefused` in its status; the shim copies it into
+  its snapshot, so the monitor shows `blocked` instead of `live` while nothing reaches the overlay.
+- The engine always sends a `proof` field, empty with no secret yet. In a claimed room the relay closes (code 4001)
+  only a publisher with no `proof` field at all: a build older than the proof, which ignores verdicts and would
+  otherwise show live. Its reconnect loop then shows connecting. Every refused current build stays open.
 - The socket plugin redacts `proof=` from every log line, rejection and status field.
 
 ## Accepted limits

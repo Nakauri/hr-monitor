@@ -34,6 +34,9 @@ jobs:
   # The fast checks gate the public APK; .githooks/pre-push runs the same ./check before any push.
   check:
     runs-on: ubuntu-latest
+    # Only the release job writes; the checks read.
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

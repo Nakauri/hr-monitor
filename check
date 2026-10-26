@@ -1,6 +1,6 @@
 #!/bin/sh
 # Every check that needs no browser, in one command. .githooks/pre-push and CI both run it; so can you.
-# Node tests (about 70 s) always; the JVM tier when Java changed and always in CI; the browser tier for the
+# Node tests (about 190 s, measured 2026-10-25: relay-link 117 s and marks-store 59 s are their mutant loops) always; the JVM tier when Java changed and always in CI; the browser tier for the
 # pages this push changed (0 s to about 15 min), on the pushing machine.
 # A check that cannot run is not a pass: if nothing ran, the script exits 2.
 set -e

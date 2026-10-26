@@ -55,6 +55,13 @@ const VISITS = [
   ['/hr_monitor', async () => {}, () => typeof window.Chart === 'function'],
   ['/hrv_viewer?demo=1', async (p) => { await p.waitForTimeout(3500); }, () => typeof window.Chart === 'function' && typeof window.Sortable === 'function'],
   ['/', async (p) => { await p.waitForTimeout(2500); }, () => !!document.querySelector('#variant-frame')],
+  // The contact form posts with fetch; the first policy allowed it only in form-action, so every send failed
+  // (security audit 2026-10-25). The send goes to a stub, never to web3forms.
+  ['/#contact', async (p) => {
+    await p.route('https://api.web3forms.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' }));
+    await p.evaluate(() => document.getElementById('contact-form').requestSubmit());
+    await p.waitForTimeout(1500);
+  }, () => /^Sent\./.test(document.getElementById('contact-status').textContent)],
   ['/overlay?key=csp-test-room', async (p) => { await p.waitForTimeout(2500); }, () => typeof window.Chart === 'function'],
   ['/app-home', async (p) => { await p.waitForTimeout(1500); }, () => true],
   ['/legal', async () => {}, () => true],
@@ -127,6 +134,7 @@ const MUTANTS = [
   ['policy without the Chart.js CDN', strip(' https://cdnjs.cloudflare.com')],
   ['policy without blob workers', strip(" worker-src 'self' blob:;")],
   ['policy without the relay socket', strip(' wss://hr-relay.nakauri.workers.dev')],
+  ['policy without the contact form host', strip(' https://api.web3forms.com')],
   // A page script edited without regenerating: its old hash no longer matches, so the script is blocked.
   ['monitor policy missing one script hash', (() => {
     const c = JSON.parse(JSON.stringify(REAL));

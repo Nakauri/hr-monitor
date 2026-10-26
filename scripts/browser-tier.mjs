@@ -7,7 +7,8 @@
 // this runner refreshes; so it runs on the machine that pushes, not in CI (CI prints why it skips).
 // Left out on purpose: pdf-proof (needs a phone session), shot-diff (a picture tool, not a check),
 // viewer-perf (headless timings swing 15% run to run, so a budget there fails without a bug).
-// Runtime: 0 s with nothing changed; about 10 to 15 min when hrv_viewer.html changes; about 25 min for --all.
+// Runtime: 0 s with nothing changed; about 10 to 15 min when hrv_viewer.html changes; about 35 to 37 min for --all
+// (2063 s and 2204 s, 2026-10-25). Run it from a worktree of HEAD so edits elsewhere cannot change a run.
 // Usage: node scripts/browser-tier.mjs [--all | --base <ref>] [--list] [--only a,b]
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';

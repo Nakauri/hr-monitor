@@ -288,6 +288,20 @@ function shimSandbox(pluginOverrides) {
   return { ns: win.HRMNativeHrSession, listeners };
 }
 
+// Security audit 2026-10-25: the engine reported relayRefused but the shim copied fields one by one and dropped
+// it, so a phone the relay refused showed live while the overlay was dark.
+async function shimCarriesRelayRefused() {
+  console.log('\n[S9] the shim snapshot carries the engine\'s relayRefused, and a stopped session clears it');
+  let st = { sessionActive: true, bleConnected: true, relayLive: true, relayRefused: true, linkState: 'recording', senderId: 'a1' };
+  const { ns } = shimSandbox({ status: () => Promise.resolve(st) });
+  await ns.whenStatusReady();
+  check('relayRefused true reaches getSnapshot()', ns.getSnapshot().relayRefused === true);
+  st = { sessionActive: false, bleConnected: false, relayLive: false, relayRefused: true };
+  const s2 = shimSandbox({ status: () => Promise.resolve(st) });
+  await s2.ns.whenStatusReady();
+  check('a session that is not active never reads as refused', s2.ns.getSnapshot().relayRefused === false);
+}
+
 async function shimResumeFlipsPublishing() {
   console.log('\n[S4] a shim resumeSession resolution flips publishing so the wait resolves with no event');
   const { ns } = shimSandbox();
@@ -339,6 +353,7 @@ async function shimResumeFlipsPublishing() {
   await slowFirstHrOutsideCeiling();
   await restoreBudgets();
   await shortHideNoOverlay();
+  await shimCarriesRelayRefused();
   clearTimeout(watchdog);
   console.log('\n' + (failures === 0 ? 'ALL PASS' : failures + ' FAILED'));
   process.exit(failures === 0 ? 0 : 1);

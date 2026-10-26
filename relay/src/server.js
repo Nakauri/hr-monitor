@@ -19,6 +19,8 @@ import { routePartykitRequest, Server } from 'partyserver';
 // the key, never the proof. See docs/relay-publish-secret.md.
 const OWNER_KEY = 'publisherHash';
 const PROOF = /^[0-9a-f]{32}$/;
+// Close code for a publisher with no proof at all in a claimed room (an app build older than the proof).
+const OLD_BUILD_CODE = 4001;
 // A tick carries three chart arrays (45 s of live points plus two 3-min trend
 // series) and runs past 12 KB late in a session. The cap exists to drop junk,
 // so it must stay well clear of our own wire format. See RELAY_TICK.md.
@@ -54,7 +56,11 @@ export class Main extends Server {
       await this.ctx.storage.put(OWNER_KEY, hash);
       // Proofless publishers already here lose their voice now; tell them, so none reports itself live.
       for (const c of this.getConnections()) {
-        if (c.state?.publisher && !c.state.proven) c.send(JSON.stringify({ type: 'publisher_rejected' }));
+        if (c.state?.publisher && !c.state.proven) {
+          c.setState({ ...c.state, publisher: false });
+          c.send(JSON.stringify({ type: 'publisher_rejected' }));
+          if (c.state.oldBuild) c.close(OLD_BUILD_CODE, 'proof required');
+        }
       }
     }
     // An unclaimed room still takes a proofless publisher (installs older than
@@ -62,10 +68,13 @@ export class Main extends Server {
     // The verdict goes back to the publisher: a client writes its secret into the account's config only
     // once accepted, so the config never holds a secret the room refuses.
     if (!owner || hash === owner) {
-      conn.setState({ publisher: true, proven: !!hash });
+      conn.setState({ publisher: true, proven: !!hash, oldBuild: proof == null });
       if (hash) conn.send(JSON.stringify({ type: 'publisher_accepted' }));
     } else {
       conn.send(JSON.stringify({ type: 'publisher_rejected' }));
+      // A build older than the proof ignores the verdict and would show live while nothing reaches the overlay;
+      // closing it makes it show connecting. Current builds always send a proof and handle the verdict.
+      if (proof == null) conn.close(OLD_BUILD_CODE, 'proof required');
     }
   }
 
@@ -93,8 +102,7 @@ export class Main extends Server {
 
     // Subscribers never publish.
     if (!sender.state?.publisher) return;
-    // A proofless publisher let in before the room was claimed loses its voice once it is.
-    if (!sender.state?.proven && await this.ctx.storage.get(OWNER_KEY)) return;
+    // A proofless publisher let in before the room was claimed lost `publisher` in the claim loop above.
 
     // Fan out to every OTHER connection in this room (not back to the sender).
     // Room id === broadcast key, so isolation between users is automatic:

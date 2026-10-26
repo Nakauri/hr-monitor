@@ -42,7 +42,8 @@ const BASE = (scriptExtra) => [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https://api.qrserver.com https://*.googleusercontent.com",
-  `connect-src 'self' https://www.googleapis.com https://accounts.google.com https://api.github.com ${RELAY} https://*.vercel-insights.com`,
+  // web3forms: the landing page's contact form posts with fetch, which connect-src governs (form-action does not).
+  `connect-src 'self' https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.web3forms.com ${RELAY} https://*.vercel-insights.com`,
   "worker-src 'self' blob:",
   "frame-src 'self' https://accounts.google.com",
   "media-src 'self' data: blob:",

@@ -487,7 +487,8 @@ public final class HrEngine implements HrDevice.Callback {
         relayLastOpenAtMs = android.os.SystemClock.elapsedRealtime();
         Request req = new Request.Builder()
             .url("wss://hr-relay.nakauri.workers.dev/parties/main/" + broadcastKey + "?role=publisher"
-                + (publishSecret != null && publishSecret.matches("[0-9a-f]{32}") ? "&proof=" + publishSecret : ""))
+                // Always a proof field, empty with no secret yet: the relay closes only a publisher with none at all (a build older than the proof).
+                + "&proof=" + (publishSecret != null && publishSecret.matches("[0-9a-f]{32}") ? publishSecret : ""))
             .build();
         // Stale callbacks (from a socket we replaced or closed) bail through isCurrentRelay.
         final WebSocket prev, opening;
