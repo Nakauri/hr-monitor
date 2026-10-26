@@ -41,6 +41,7 @@
 <script src="./auth.js"></script>
 <script src="./marks-store.js"></script>
 <script src="./relay-link.js"></script>
+<script src="./recorder.js"></script>
 <script src="./marks-drive.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <script src="./widget.js"></script>
@@ -2136,6 +2137,7 @@
     if (!pageVisible) {
       lastHiddenAt = Date.now();
       if (window.HRMLog) window.HRMLog.event('lc vis=hidden');
+      if (recorder) recorder.hidden();
       // Free GPU memory while backgrounded. Chart.js canvases hold ~320 MB
       // of GL buffers in long sessions.
       destroyCharts();
@@ -3951,17 +3953,14 @@
     try { hideStopConfirm(); flushHeldMarks(); } catch (e) {}
     stopInFlight = true;
     try {
-      // Where the session was going, read before the final save closes the folder handle.
       const ended = afterStopFacts();
-      // Web: the final save, awaited until it has reached the folder and Drive (up to 30 s), so the after-stop
-      // panel never says Drive while the last of the session is still uploading.
-      // driveOk: true reached Drive, false failed, undefined no upload made or still running at 30 s (driveLate).
+      // Web: the Recording's final, awaited up to 30 s so the panel never says Drive while the last of the session
+      // is still uploading; past that the panel follows the final (docs/web-recorder.md rule 17).
       if (!NATIVE) {
         const btn = $('session-toggle');
         if (btn) { btn.textContent = 'Saving'; btn.setAttribute('aria-busy', 'true'); }
-        const save = ended.finalSave = stopSessionAutoSave();
-        const r = await Promise.race([save.then((ok) => ({ ok }), () => ({ ok: false })), new Promise((res) => setTimeout(() => res({ late: true }), 30000))]);
-        ended.driveOk = r.ok; ended.driveLate = !!r.late; ended.folderFailed = finalLocalOk === false;
+        ended.entry = endRecording(false);
+        if (ended.entry) await Promise.race([ended.entry.rec.final.catch(() => {}), new Promise((res) => setTimeout(res, AFTER_STOP_CAP_MS))]);
         if (btn) btn.removeAttribute('aria-busy');
       }
       if (ended.start) noteRecordingEnded(ended.start, ended.end);
@@ -3979,8 +3978,13 @@
 
   // After Stop: where the recording went, the Drive result when sync is on, and View session.
   const LAST_RECORDING_KEY = 'hr_monitor_last_recording';
-  let afterStopCsv = null;
-  let afterStopSeq = 0;
+  const AFTER_STOP_CAP_MS = 30000;
+  // Every Recording from recorder.stop(), with its facts and its screen (docs/web-recorder.md rule 17): kept until
+  // its final has settled and a target is saved or its Export was taken. screen: 'await' (the Stop button shows
+  // it), 'late' (a takeover or broadcast stop: shown at 30 s or when the final settles, if not saved), 'panel',
+  // 'notice' (its own line once a Start moved the panel on), 'none'.
+  const keptRecordings = new Map();
+  let panelEntry = null;
   function noteRecordingEnded(start, end) {
     try {
       if (!(start > 0) || !(end >= start)) return;
@@ -3995,87 +3999,177 @@
   }
   function afterStopFacts() {
     const start = state.startTime || 0;
-    const f = { start, end: Date.now(), native: NATIVE, folder: null, drive: false, csv: null };
-    if (NATIVE) {
-      f.drive = !!(window.aortiAuth && window.aortiAuth.isSignedIn && window.aortiAuth.isSignedIn());
-    } else {
-      f.folder = autoSaveFileHandle && autoSaveDirHandle ? (autoSaveDirHandle.name || 'folder') : null;
-      f.drive = driveSyncOn() && !!driveAccessToken && !!driveFolderId;
-      if (!f.folder && !f.drive && start && state.hrSeries.length) f.csv = buildSessionCSV();
-    }
-    f.since = Date.now();
+    const f = { start, end: Date.now(), native: NATIVE, drive: false, entry: null };
+    if (NATIVE) f.drive = !!(window.aortiAuth && window.aortiAuth.isSignedIn && window.aortiAuth.isSignedIn());
     return f;
+  }
+  // The one Stop path for the web Recording (rule 16). The Stop button awaits the final itself; a takeover or a
+  // broadcast stop (late) shows the panel at 30 s, or when the final settles, unless the session is saved by then.
+  function endRecording(late) {
+    if (!recorder) return null;
+    const rec = recorder.stop();
+    if (!rec) return null;
+    let entry = keptRecordings.get(rec);
+    if (entry) return entry;
+    entry = { rec, start: state.startTime || rec.startMs || 0, end: Date.now(), screen: late ? 'late' : 'await', exported: false, notice: null, msg: null, exportBtn: null, timer: null };
+    keptRecordings.set(rec, entry);
+    rec.final.then(() => recordingSettled(entry), () => recordingSettled(entry));
+    if (late) {
+      entry.timer = setTimeout(() => { entry.timer = null; showLateStop(entry); }, AFTER_STOP_CAP_MS);
+      rec.final.then(() => { if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; showLateStop(entry); } }, () => {});
+    }
+    return entry;
+  }
+  function anySaved(rec) { return rec.result.folder === 'saved' || rec.result.drive === 'saved'; }
+  function anyPending(rec) { return rec.result.folder === 'pending' || rec.result.drive === 'pending'; }
+  // Rule 17: Export and the leave guard stay while a result is pending or none is saved.
+  function exportOn(entry) { return entry.rec.text != null && !entry.exported && (anyPending(entry.rec) || !anySaved(entry.rec)); }
+  function keptStill(entry) { return entry.rec.state !== 'done' || (!anySaved(entry.rec) && !entry.exported); }
+  function resultTexts(rec) {
+    const name = rec.folderName || 'folder';
+    const F = { saved: 'Saved to ' + name, failed: 'Last save to ' + name + ' failed', unwritten: 'Not saved to ' + name, pending: 'Saving to ' + name };
+    const D = { saved: 'Saved to Drive', failed: 'Drive upload failed', unwritten: 'Not saved to Drive', pending: 'Drive upload incomplete' };
+    const r = rec.result;
+    return { folder: r.folder ? F[r.folder] : null, drive: r.drive ? D[r.drive] : null,
+      folderKind: r.folder === 'failed' ? 'error' : null, driveKind: r.drive === 'failed' || r.drive === 'pending' ? 'error' : null };
+  }
+  function showLateStop(entry) {
+    if (entry.screen !== 'late') return;
+    const r = entry.rec.result;
+    const open = [r.folder, r.drive].some((v) => v && v !== 'saved') || !anySaved(entry.rec);
+    if (open) showAfterStop({ start: entry.start, end: entry.end, native: false, entry });
+    else { entry.screen = 'none'; pruneKept(entry); }
+  }
+  function recordingSettled(entry) {
+    if (panelEntry === entry) renderAfterStopPanel();
+    else if (entry.notice) updateKeptNotice(entry);
+    pruneKept(entry);
+  }
+  function pruneKept(entry) {
+    if (keptStill(entry)) return;
+    keptRecordings.delete(entry.rec);
+    if (!entry.notice) return;
+    // The line stays as plain information once its session is saved; an exported one has done its job.
+    const text = entry.msg ? entry.msg.textContent : '';
+    entry.notice.close(); entry.notice = null; entry.msg = null; entry.exportBtn = null;
+    const host = document.querySelector('.session-ctl');
+    if (anySaved(entry.rec) && host && window.UI) UI.notice({ kind: 'info', host, text });
   }
   function showAfterStop(f) {
     const box = $('after-stop');
     if (!box) return;
-    const seq = ++afterStopSeq;
-    afterStopCsv = f && f.csv ? f.csv : null;
     if (!f || !f.start) { box.hidden = true; return; }
     const dur = ' · ' + statusElapsed(f.end - f.start);
     const saved = $('after-stop-saved'), drive = $('after-stop-drive'), view = $('after-stop-view'), exp = $('after-stop-export');
-    let driveEl = drive;
-    if (f.native) saved.textContent = 'Saved on this phone' + dur;
-    else if (f.folder && f.folderFailed) saved.textContent = 'Last save to ' + f.folder + ' failed' + dur;
-    else if (f.folder) saved.textContent = 'Saved to ' + f.folder + dur;
-    else if (f.drive) driveEl = saved;
-    else saved.textContent = 'Not saved' + dur;
-    drive.hidden = !(f.drive && driveEl === drive);
     saved.removeAttribute('data-kind');
     drive.removeAttribute('data-kind');
-    if (!f.native && f.folder && f.folderFailed) saved.dataset.kind = 'error';
-    // A folder write still running at the 30 s cap: say so, then follow it to its result.
-    if (!f.native && f.folder && f.driveLate && finalLocalOk === undefined && f.finalSave) {
-      saved.textContent = 'Saving to ' + f.folder + dur;
-      f.finalSave.then(() => {
-        if (seq !== afterStopSeq) return;
-        if (finalLocalOk === false) { saved.textContent = 'Last save to ' + f.folder + ' failed' + dur; saved.dataset.kind = 'error'; }
-        else saved.textContent = 'Saved to ' + f.folder + dur;
-      }, () => {});
-    }
-    if (f.drive) {
-      const set = (t, kind) => {
-        driveEl.textContent = t + (driveEl === saved ? dur : '');
-        if (kind) driveEl.dataset.kind = kind; else driveEl.removeAttribute('data-kind');
-      };
-      // The phone's engine uploads after Stop and reports no result to the page.
-      if (f.native) set('Queued for Drive');
-      else if (f.driveOk === true) set('Saved to Drive');
-      else if (f.driveOk === false) set('Drive upload failed', 'error');
-      else if (f.driveLate) {
-        // Past 30 s the save keeps going; the line follows it until it lands or the panel moves on.
-        set('Drive upload incomplete', 'error');
-        if (f.finalSave) f.finalSave.then((ok) => {
-          if (seq !== afterStopSeq) return;
-          if (ok === true) set('Saved to Drive');
-          else if (ok === false) set('Drive upload failed', 'error');
-          else set('Drive upload not confirmed', 'error');
-        }, () => { if (seq === afterStopSeq) set('Drive upload failed', 'error'); });
-      }
-      else {
-        set('Uploading to Drive');
-        const t0 = Date.now();
-        const poll = () => {
-          if (seq !== afterStopSeq) return;
-          if (autoSaveStatusAt >= f.since && autoSaveStatusCls === 'ok') return set('Saved to Drive');
-          if (autoSaveStatusAt >= f.since && autoSaveStatusCls === 'error' && /^drive/i.test(autoSaveStatusText)) return set('Drive upload failed', 'error');
-          if (Date.now() - t0 < 60000) setTimeout(poll, 250);
-          else set('Drive upload not confirmed', 'error');
-        };
-        poll();
-      }
-    }
     view.href = './hrv_viewer.html#/day/' + localDayIso(f.start);
-    view.hidden = !(f.native || f.folder || f.drive);
-    exp.hidden = !afterStopCsv;
+    if (f.native) {
+      panelEntry = null;
+      saved.textContent = 'Saved on this phone' + dur;
+      // The phone's engine uploads after Stop and reports no result to the page.
+      drive.textContent = 'Queued for Drive';
+      drive.hidden = !f.drive;
+      view.hidden = false;
+      exp.hidden = true;
+      box.hidden = false;
+      return;
+    }
+    if (panelEntry && panelEntry !== f.entry && panelEntry.screen === 'panel') { panelEntry.screen = 'none'; pruneKept(panelEntry); }
+    panelEntry = f.entry || null;
+    if (!panelEntry) {
+      saved.textContent = 'Not saved' + dur;
+      drive.hidden = true; view.hidden = true; exp.hidden = true;
+      box.hidden = false;
+      return;
+    }
+    panelEntry.screen = 'panel';
+    renderAfterStopPanel();
     box.hidden = false;
   }
+  // Rule 17: per target "Saved to", "Last save to ... failed", "Not saved to", "Saving to"; the Drive line alone takes
+  // the first line. Rendered again when the final settles.
+  function renderAfterStopPanel() {
+    const entry = panelEntry;
+    if (!entry) return;
+    const rec = entry.rec;
+    const saved = $('after-stop-saved'), drive = $('after-stop-drive'), view = $('after-stop-view'), exp = $('after-stop-export');
+    const dur = ' · ' + statusElapsed(entry.end - entry.start);
+    const t = resultTexts(rec);
+    const first = t.folder ? [t.folder, t.folderKind] : (t.drive ? [t.drive, t.driveKind] : ['Not saved', null]);
+    saved.textContent = first[0] + dur;
+    if (first[1]) saved.dataset.kind = first[1]; else saved.removeAttribute('data-kind');
+    const both = !!(t.folder && t.drive);
+    drive.hidden = !both;
+    if (both) {
+      drive.textContent = t.drive;
+      if (t.driveKind) drive.dataset.kind = t.driveKind; else drive.removeAttribute('data-kind');
+    }
+    view.hidden = !(rec.result.folder || rec.result.drive);
+    exp.hidden = !exportOn(entry);
+  }
+  function clock12(ms) {
+    const d = new Date(ms);
+    const h = d.getHours();
+    return (h % 12 || 12) + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + (h < 12 ? 'am' : 'pm');
+  }
+  // A kept Recording the panel has moved on from: its own line with its result texts and its own Export.
+  function createKeptNotice(entry) {
+    const host = document.querySelector('.session-ctl');
+    if (!host || !window.UI || entry.notice) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn';
+    b.textContent = 'Export CSV';
+    b.addEventListener('click', () => exportKept(entry));
+    entry.exportBtn = b;
+    entry.notice = UI.notice({ kind: 'warning', host, dismiss: false, text: '', actions: [b] });
+    entry.msg = entry.notice.querySelector('.msg');
+    entry.screen = 'notice';
+    updateKeptNotice(entry);
+  }
+  function updateKeptNotice(entry) {
+    if (!entry.notice) return;
+    const t = resultTexts(entry.rec);
+    const parts = [t.folder, t.drive].filter(Boolean);
+    entry.msg.textContent = 'Session from ' + clock12(entry.start) + ': ' + (parts.length ? parts.join('. ') : 'Not saved');
+    entry.exportBtn.hidden = !exportOn(entry);
+  }
+  // Export after Stop downloads the text built at Stop, as the session's file name (never the live buffers).
+  function exportKept(entry) {
+    if (!entry || entry.rec.text == null) return;
+    downloadCSV({ csv: entry.rec.text, filename: entry.rec.filename });
+    entry.exported = true;
+    if (panelEntry === entry) renderAfterStopPanel();
+    else updateKeptNotice(entry);
+    pruneKept(entry);
+  }
+  // A Start, or a session on screen: the panel leaves, a Recording still kept gets its notice line, and a late show
+  // still pending is cancelled (rule 17).
   function hideAfterStop() {
     const box = $('after-stop');
-    if (!box || (box.hidden && !afterStopCsv)) return;
-    box.hidden = true;
-    afterStopCsv = null;
-    afterStopSeq++;
+    if (box && !box.hidden) box.hidden = true;
+    if (panelEntry) {
+      const e = panelEntry;
+      panelEntry = null;
+      if (keptRecordings.has(e.rec)) createKeptNotice(e); else e.screen = 'none';
+    }
+    keptRecordings.forEach((e) => {
+      if (e.screen !== 'late') return;
+      if (e.timer) { clearTimeout(e.timer); e.timer = null; }
+      createKeptNotice(e);
+    });
+  }
+  // True while a Recording of this session has been stopped: marks are refused (rule 16), the notice stays quiet.
+  function recordingEnded() {
+    const rec = recorder ? recorder.current() : null;
+    return !!(rec && rec.id === sessionSeq && rec.state !== 'arming' && rec.state !== 'live');
+  }
+  // The leave guard: a running session nothing saves, or a stopped one not yet saved or exported.
+  function leaveGuardOn() {
+    if (sessionUnsaved()) return true;
+    for (const e of keptRecordings.values()) if (keptStill(e)) return true;
+    return false;
   }
 
   // Web: a running session that nothing saves gets a notice, and leaving the page asks first.
@@ -4084,7 +4178,9 @@
     if (NATIVE) return false;
     if (state.connState !== 'live' && state.connState !== 'reconnecting') return false;
     if (!state.startTime || Date.now() - state.startTime < 3000) return false;
-    return !autoSaveFileHandle && !(driveSyncOn() && driveAccessToken && driveFolderId);
+    if (recordingEnded()) return false;
+    const t = recorder ? recorder.targets() : { folder: false, drive: false };
+    return !t.folder && !t.drive;
   }
   // Called from updateSessionToggle, so it must never throw.
   function updateUnsavedNotice() {
@@ -4107,7 +4203,7 @@
     } catch (e) {}
   }
   window.addEventListener('beforeunload', function (e) {
-    if (!sessionUnsaved() && !afterStopCsv) return;
+    if (!leaveGuardOn()) return;
     e.preventDefault();
     e.returnValue = '';
   });
@@ -4222,18 +4318,20 @@
         }
       }
       device.addEventListener('gattserverdisconnected', onDisconnected);
-      // Fresh session starts with empty buffers. Without this, any stale
-      // hrSeries from a prior session (e.g. one that died via FGS kill so
-      // resetSession never ran) gets dumped into the new file by autosave.
+      // The old Recording is stopped before the session id moves on (rule 19), so none is ever live under a new id;
+      // the id, the buffers and the start change in one step, and the after-stop panel leaves (rule 17).
+      endRecording(true);
+      sessionSeq++;
       resetLiveDataBuffers();
       // setSessionStart keeps an existing start, so clear the one a dead session left behind.
       state.startTime = null;
       setSessionStart(Date.now());
       state.lastDataTime = Date.now();
+      hideAfterStop();
       await attachConnection();
       saveLastStrap(device);
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-      startSessionAutoSave();
+      startRecording();
       acquireWakeLock();
       updateSessionToggle();
 
@@ -5235,7 +5333,7 @@
     // toast only fires when the session actually had a Drive target.
     const nativeWasPublishing = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isPublishing && window.HRMNativeHrSession.isPublishing());
     const driveActive = !!driveAccessToken || nativeWasPublishing;
-    stopSessionAutoSave();
+    endRecording(true);
     releaseWakeLock();
     if (window.HRMForegroundService) { try { window.HRMForegroundService.stop(); } catch (e) {} }
     // Native HR session shutdown — flushes CSV + final Drive push before
@@ -5460,8 +5558,8 @@
   }
   function logMark(m, word) {
     if (!m.label) return;
-    // stopInFlight: the final file is already built, so a mark during "Saving" would be lost.
-    if (!state.startTime || stopInFlight || (state.connState !== 'live' && state.connState !== 'reconnecting')) {
+    // stopInFlight or a stopped Recording: the final file is already built, so a mark during "Saving" would be lost.
+    if (!state.startTime || stopInFlight || recordingEnded() || (state.connState !== 'live' && state.connState !== 'reconnecting')) {
       UI.toast(word + ' not logged. The session has ended.');
       return;
     }
@@ -5574,14 +5672,14 @@
     noteComposer = { commit: () => { if (commit()) sheet.close('done'); else sheet.close('stop'); } };
   }
 
-  window.addEventListener('pagehide', () => {
-    if (!heldMarks.length && !noteComposer) return;
-    flushHeldMarks();
-    // Forced past the once-a-minute rebuild, so a mark flushed on close reaches the folder file.
-    try { writeAutoSave(false, true).catch(() => {}); } catch (e) {}
-  });
+  // Rule 18: a close flushes held marks and the note, then the recorder gets its last write.
+  function onPageHide() {
+    try { flushHeldMarks(); } catch (e) {}
+    if (recorder) recorder.closing();
+  }
+  window.addEventListener('pagehide', onPageHide);
 
-  // ----- Auto-save: write the session CSV into a user-picked folder every 10 s (once a minute past SAVE_BIG) -----
+  // ----- Auto-save: the recorder (recorder.js) writes the session CSV into a user-picked folder and to Drive -----
   // Uses File System Access API (Chromium-only). Directory handle persists across
   // reloads via IndexedDB; Chrome may require a one-time re-grant click after a full
   // browser restart (handled by requesting permission on the Connect user-gesture).
@@ -5634,8 +5732,10 @@
   }
 
   let autoSaveDirHandle = null;
-  let autoSaveFileHandle = null;
-  let autoSaveInterval = null;
+  // The web recorder (recorder.js); null on the phone, where the engine records. Rules in docs/web-recorder.md.
+  let recorder = null;
+  // The page's session id: moved on with the buffer reset at Start, after the old Recording was stopped (rule 19).
+  let sessionSeq = 0;
 
   async function pickAutoSaveFolder() {
     if (!window.showDirectoryPicker) {
@@ -5645,6 +5745,7 @@
     try {
       const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'hr-monitor-sessions' });
       autoSaveDirHandle = handle;
+      if (recorder) recorder.folderChanged(handle);
       await idbSet('autosave-dir', handle);
       updateAutoSaveUI();
     } catch (e) { /* user canceled */ }
@@ -5652,6 +5753,7 @@
 
   async function clearAutoSaveFolder() {
     autoSaveDirHandle = null;
+    if (recorder) recorder.folderChanged(null);
     await idbDel('autosave-dir');
     updateAutoSaveUI();
   }
@@ -5685,11 +5787,7 @@
     }
   }
 
-  let autoSaveStatusAt = 0, autoSaveStatusCls = '', autoSaveStatusText = '';
   function setAutoSaveStatus(text, cls) {
-    autoSaveStatusAt = Date.now();
-    autoSaveStatusCls = cls || '';
-    autoSaveStatusText = text || '';
     const el = $('autosave-status');
     if (!el) return;
     el.textContent = text || '';
@@ -5709,113 +5807,30 @@
     }
   }
 
-  async function startSessionAutoSave() {
-    // Native: the engine is the only recorder.
-    if (NATIVE) return;
-    // New session begins — reset per-session Drive file so a new one is created.
-    driveFileIdForSession = null;
-    autoSaveGen++; autoSaveFinal = null; finalLocalOk = undefined; autoSaveBytes = 0; autoSaveBuiltAt = 0; driveUploadAt = 0;
-    // A folder lookup that failed at load (a Drive 5xx) is tried again, or the whole session would miss Drive.
-    if (driveAccessToken && !driveFolderId) driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
-    // Need either a local folder OR Drive sign-in to do anything useful.
-    if (!autoSaveDirHandle && !driveAccessToken) return;
-    // On native, JS autosave runs only for a local folder; native owns Drive.
-    if (!autoSaveDirHandle && window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable) return;
-    // A Stop (or another Start) while the folder prompt is up ends this start: it must not arm saves for a
-    // session that has finished, which would overwrite its files with an empty one.
-    const gen = autoSaveGen;
-    const gone = () => gen !== autoSaveGen || !!autoSaveFinal;
-    if (autoSaveDirHandle) {
-      const ok = await ensureAutoSavePermission();
-      if (gone()) return;
-      if (!ok) {
-        setAutoSaveStatus('denied', 'denied');
-        if (!driveAccessToken) return;
-      } else {
-        const filename = 'hrv_session_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.csv';
-        try {
-          const handle = await autoSaveDirHandle.getFileHandle(filename, { create: true });
-          if (gone()) return;
-          autoSaveFileHandle = handle;
-          setAutoSaveStatus('writing', 'writing');
-        } catch (e) {
-          console.error('Auto-save file creation failed:', e);
-          if (gone()) return;
-          autoSaveFileHandle = null;
-          setAutoSaveStatus('error', 'error');
-        }
-      }
-    }
-    if (autoSaveInterval) clearInterval(autoSaveInterval);
-    autoSaveInterval = setInterval(writeAutoSave, 10000);
-    writeAutoSave();
+  // The recorder runs over the page: the data and the session id, the folder handles, Drive and the status line.
+  function makeRecorder() {
+    if (NATIVE || (window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable)) return null;
+    return AortiRecorder.create({
+      now: () => Date.now(),
+      setInterval: (fn, ms) => setInterval(fn, ms), clearInterval: (t) => clearInterval(t),
+      setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (t) => clearTimeout(t),
+      // An old Recording can never build new data: a stale id gets null.
+      buildCsv: (id) => (id === sessionSeq ? buildSessionCSV().csv : null),
+      rowCount: () => { const F = state.full; return F.hrSeries.length + F.rmssdSeries.length + F.events.length + F.warnings.length + F.ectopicEvents.length + F.connectionEvents.length + F.postureLog.length; },
+      // Arming only queries: the Start click asked already (rule 20).
+      ensurePermission: async (dir) => { try { return (await dir.queryPermission({ mode: 'readwrite' })) === 'granted'; } catch (e) { return false; } },
+      createFile: (dir, name) => dir.getFileHandle(name, { create: true }),
+      writeFile: async (handle, text) => { const w = await handle.createWritable(); await w.write(text); await w.close(); },
+      token: () => driveAccessToken, folderId: () => driveFolderId, ensureFolder: () => driveEnsureFolder(),
+      syncOn: () => driveSyncOn(), loginTag: () => relayLink.loginTag,
+      fetch: (url, init) => fetch(url, init), authHeader: () => driveAuthHeader(), refresh: () => window.aortiAuth.refreshIfNeeded(),
+      onStatus: (text, cls) => setAutoSaveStatus(text, cls), warn: (...a) => console.warn(...a),
+    });
   }
-
-  // Track consecutive autosave failures so a single transient FS error doesn't
-  // tear down the whole interval. Reset on every success.
-  let autoSaveFailStreak = 0;
-  const AUTOSAVE_FAIL_GIVEUP = 3;
-  // The file holds the whole session. Past SAVE_BIG it is rebuilt at most once a minute, and goes to Drive a
-  // minute per MB apart (at most 10 min), so a 48 h session costs half a second a minute and a few hundred MB,
-  // not a rebuild every 10 s and 10 GB. The final save at stop always runs.
-  const SAVE_BIG = 512 * 1024;
-  // autoSaveGen counts sessions: an old session's save or upload that settles after a new Start leaves the new
-  // session's file handle, status and Drive file alone.
-  // finalLocalOk: the stop's folder write, true or false; undefined when there was no folder file.
-  let autoSaveBytes = 0, autoSaveBuiltAt = 0, autoSaveFinal = null, autoSaveGen = 0, finalLocalOk;
-  function drivePaceMs(bytes) {
-    return bytes <= SAVE_BIG ? 0 : Math.min(600000, Math.max(60000, (bytes / 1048576) * 60000));
-  }
-  async function writeAutoSave(final, force) {
-    if (NATIVE) return;
-    if (!autoSaveFileHandle && !driveAccessToken) return;
-    if (!final && !force && autoSaveBytes > SAVE_BIG && Date.now() - autoSaveBuiltAt < 60000) return;
-    const gen = autoSaveGen;
-    // The native plugin owns Drive uploads whenever it exists; JS only writes the local folder.
-    const nativeDriveActive = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable);
-    const { csv, filename } = buildSessionCSV();
-    autoSaveBytes = csv.length; autoSaveBuiltAt = Date.now();
-    if (autoSaveFileHandle) {
-      try {
-        const writable = await autoSaveFileHandle.createWritable();
-        await writable.write(csv);
-        await writable.close();
-        autoSaveFailStreak = 0;
-        if (final) finalLocalOk = true;
-      } catch (e) {
-        if (gen !== autoSaveGen) return false;
-        if (final) finalLocalOk = false;
-        autoSaveFailStreak++;
-        console.error('Auto-save write failed (streak=' + autoSaveFailStreak + '):', e);
-        setAutoSaveStatus('write error (' + autoSaveFailStreak + '/' + AUTOSAVE_FAIL_GIVEUP + ')', 'error');
-        if (autoSaveFailStreak >= AUTOSAVE_FAIL_GIVEUP) {
-          autoSaveFileHandle = null;
-          if (autoSaveInterval && !driveAccessToken) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
-        }
-      }
-    }
-    if (driveAccessToken && driveFolderId && !nativeDriveActive) {
-      if (final) return await driveUploadSession(filename, csv, true, gen);
-      driveUploadSession(filename, csv, false, gen);
-    }
-  }
-
-  // Once per session: the stop flow awaits it, and disconnect's later call returns the same save.
-  function stopSessionAutoSave() {
-    if (autoSaveFinal) return autoSaveFinal;
-    const gen = autoSaveGen;
-    autoSaveFinal = (async () => {
-      if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
-      // false when the final Drive upload failed; undefined when there was none to make.
-      const driveOk = await writeAutoSave(true);
-      if (gen === autoSaveGen) {
-        autoSaveFileHandle = null;
-        // A failed final folder write keeps its error showing.
-        if (autoSaveDirHandle && finalLocalOk !== false) setAutoSaveStatus('idle');
-      }
-      return driveOk;
-    })();
-    return autoSaveFinal;
+  // Start: the Recording for this session id, saving to the folder picked and to Drive from its first tick.
+  function startRecording() {
+    if (!recorder) return;
+    recorder.start(sessionSeq, state.startTime || Date.now(), autoSaveDirHandle);
   }
 
   // ===== Google Drive dual-save =====
@@ -5850,8 +5865,6 @@
   let driveFolderId = null;
   // The login behind the token, kept by the relay link: its email (for the account-switch check) and its tag.
   function setDriveLogin(record) { relayLink.setLogin(record); }
-  let driveUploadInFlight = null;
-  let driveFileIdForSession = null;
   let driveRefreshing = false;
 
   function syncAuthStateLocal() {
@@ -5920,7 +5933,6 @@
       // is invisible to it, and syncing there would mint links it never needed.
       if (record && record.email && relayLink.loginEmail && record.email !== relayLink.loginEmail) {
         driveFolderId = null;
-        driveFileIdForSession = null;
         relayLink.forgetAccount();
       }
       setDriveLogin(record);
@@ -5928,9 +5940,9 @@
         if (!driveFolderId) driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
       } else {
         driveFolderId = null;
-        driveFileIdForSession = null;
       }
       driveUpdateUI();
+      if (recorder) recorder.authChanged();
     });
     syncAuthStateLocal();
     driveUpdateUI();
@@ -6083,88 +6095,8 @@
   }
 
 
-  // Upload or update the current session's CSV on Drive. Called alongside local
-  // auto-save. Reuses the same Drive file for the whole session (updates in place)
-  // so Drive doesn't fill up with 600 partial files per session.
-  // Paced by drivePaceMs as the file grows. A final upload (session stop) is never skipped: it waits for one in
-  // flight, then goes, and the returned promise settles when it has reached Drive.
-  let driveUploadAt = 0;
-  // gen is the session the CSV belongs to; an old session's upload that outlives a new Start goes nowhere.
-  // false means failed or superseded; no caller can see a superseded one (the panel has moved on by then).
-  async function driveUploadSession(filename, csvText, final, gen) {
-    if (gen !== autoSaveGen) return false;
-    if (!driveSyncOn()) return;
-    if (!driveAccessToken || !driveFolderId) return;
-    if (driveUploadInFlight) {
-      if (!final) return; // skip if one is already running
-      try { await driveUploadInFlight; } catch (e) {}
-      if (gen !== autoSaveGen) return false;
-      if (driveUploadInFlight) return driveUploadSession(filename, csvText, final, gen);
-    }
-    if (!final && Date.now() - driveUploadAt < drivePaceMs(csvText.length)) return;
-    driveUploadAt = Date.now();
-    // A create that lands after another account signed in is that old account's file, never this session's.
-    const login = relayLink.loginTag;
-    const job = driveUploadInFlight = (async () => {
-      try {
-        if (!driveFileIdForSession) {
-          // Create the file once, then PATCH updates to the same fileId
-          const metadata = { name: filename, parents: [driveFolderId], mimeType: 'text/csv' };
-          const boundary = '-------hr-monitor-' + Math.random().toString(36).slice(2);
-          const body =
-            `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-            `--${boundary}\r\nContent-Type: text/csv\r\n\r\n${csvText}\r\n--${boundary}--`;
-          const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id';
-          const init = {
-            method: 'POST',
-            headers: {
-              'Authorization': await driveAuthHeader(),
-              'Content-Type': 'multipart/related; boundary=' + boundary,
-            },
-            body,
-          };
-          let resp = await fetch(url, init);
-          if (resp.status === 401) {
-            // Token expired between read and call. Force refresh + retry once.
-            await window.aortiAuth.refreshIfNeeded();
-            init.headers['Authorization'] = await driveAuthHeader();
-            resp = await fetch(url, init);
-          }
-          if (!resp.ok) throw new Error('Drive create HTTP ' + resp.status);
-          const data = await resp.json();
-          if (gen === autoSaveGen && relayLink.loginTag === login) driveFileIdForSession = data.id;
-        } else {
-          // PATCH the existing file's contents. resp.ok must be checked —
-          // a silent 401/403/5xx leaves the Drive copy stale without any
-          // signal to the user, which gets discovered hours later.
-          const url = 'https://www.googleapis.com/upload/drive/v3/files/' + driveFileIdForSession + '?uploadType=media';
-          const init = {
-            method: 'PATCH',
-            headers: { 'Authorization': await driveAuthHeader(), 'Content-Type': 'text/csv' },
-            body: csvText,
-          };
-          let resp = await fetch(url, init);
-          if (resp.status === 401) {
-            await window.aortiAuth.refreshIfNeeded();
-            init.headers['Authorization'] = await driveAuthHeader();
-            resp = await fetch(url, init);
-          }
-          if (!resp.ok) throw new Error('Drive patch HTTP ' + resp.status);
-        }
-        // Surface success — clears any prior 'Drive error' status.
-        if (gen === autoSaveGen && typeof setAutoSaveStatus === 'function') setAutoSaveStatus('synced', 'ok');
-        return true;
-      } catch (e) {
-        console.error('Drive upload failed:', e);
-        if (gen === autoSaveGen && typeof setAutoSaveStatus === 'function') setAutoSaveStatus('drive error: ' + (e.message || e), 'error');
-        return false;
-      } finally {
-        driveUploadInFlight = null;
-      }
-    })();
-    return job;
-  }
-
+  // A free-text cell that would open as a formula in a spreadsheet gets a leading apostrophe (security audit L3).
+  function csvCell(s) { return /^[=+\-@]/.test(s) ? "'" + s : s; }
   function buildSessionCSV() {
     // epoch_ms: absolute Unix-ms timestamp per row. Makes the CSV self-describing
     // for cross-file analysis (e.g. sleep spanning midnight in daily-mode files)
@@ -6195,7 +6127,7 @@
     sorted.forEach(t => {
       const k = t.toFixed(4);
       const epochMs = Math.round(startEpoch + t * 60000);
-      rows.push([t.toFixed(4), epochMs, hrMap.get(k) ?? '', rmssdMap.get(k)?.toFixed(2) ?? '', sdnnMatchMap.get(k)?.toFixed(2) ?? '', sdnn5minMap.get(k)?.toFixed(2) ?? '', sdnnFullMap.get(k)?.toFixed(2) ?? '', palpSet.has(k) ? '1' : '', evMap.get(k) ?? '', warnMap.get(k) ?? '', connMap.get(k) ?? '', postureMap.get(k) ?? '']);
+      rows.push([t.toFixed(4), epochMs, hrMap.get(k) ?? '', rmssdMap.get(k)?.toFixed(2) ?? '', sdnnMatchMap.get(k)?.toFixed(2) ?? '', sdnn5minMap.get(k)?.toFixed(2) ?? '', sdnnFullMap.get(k)?.toFixed(2) ?? '', palpSet.has(k) ? '1' : '', csvCell(evMap.get(k) ?? ''), warnMap.get(k) ?? '', connMap.get(k) ?? '', postureMap.get(k) ?? '']);
     });
     const csv = rows.map(r => r.join(',')).join('\n');
     const filename = 'hrv_session_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.csv';
@@ -6991,15 +6923,11 @@
         pickAutoSaveFolder();
       }
     });
+    recorder = makeRecorder();
     restoreAutoSaveFolder();
     renderDriveSyncToggle();
     $('drive-sync-toggle').addEventListener('click', () => setDriveSync(!driveSyncOn()));
-    $('after-stop-export').addEventListener('click', () => {
-      if (!afterStopCsv) return;
-      downloadCSV({ csv: afterStopCsv.csv, filename: afterStopCsv.filename });
-      afterStopCsv = null;
-      $('after-stop-export').hidden = true;
-    });
+    $('after-stop-export').addEventListener('click', () => { if (panelEntry) exportKept(panelEntry); });
     marksInitMonitor();
     // Google Drive big toggle: click signs in when signed out. When signed in,
     // the toggle is informational (email shown below); a separate Sign-out
