@@ -73,7 +73,7 @@
     sessionStorage.removeItem(LS_OAUTH_STATE);
   }
 
-  // ---------- crypto (PKCE + state) ----------------------------------------
+  // ---------- crypto (the sign-in state token) ------------------------------
 
   function base64UrlEncode(bytes) {
     let str = '';

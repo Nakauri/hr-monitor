@@ -1632,7 +1632,7 @@
   const FULL_CAP = 200000; // about 55 h at 1 Hz
   function freshFullRecord() {
     return { hrSeries: [], rmssdSeries: [], sdnnMatchSeries: [], sdnn5minSeries: [], sdnnFullSeries: [],
-      warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [] };
+      warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [], events: [] };
   }
   function track(name, point, cap) {
     const live = state[name];
@@ -2968,9 +2968,11 @@
   });
   let relaySocket = null;
   let relayReconnectTimer = null;
-  // Retry after 5 s, doubling to a minute while the relay stays down; an open socket starts it over.
-  let relayRetryMs = 5000;
+  // Retry after 5 s, doubling to a minute while the relay stays down. A socket that stays open 30 s starts it
+  // over, so one the relay opens and then drops at once still backs off.
+  let relayRetryMs = 5000, relayHealthyTimer = null;
   function scheduleRelayRetry() {
+    if (relayHealthyTimer) { clearTimeout(relayHealthyTimer); relayHealthyTimer = null; }
     relayReconnectTimer = setTimeout(connectRelay, relayRetryMs);
     relayRetryMs = Math.min(60000, relayRetryMs * 2);
   }
@@ -2980,6 +2982,8 @@
       relaySocket = null;
     }
     if (relayReconnectTimer) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
+    // A deliberate reconnect (a new key or secret) starts the backoff over.
+    relayRetryMs = 5000;
     connectRelay();
   }
   function connectRelay() {
@@ -3002,7 +3006,8 @@
       const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key + '?role=publisher&proof=' + getOrCreatePublishSecret());
       relaySocket = ws;
       ws.addEventListener('open', () => {
-        relayRetryMs = 5000;
+        if (relayHealthyTimer) clearTimeout(relayHealthyTimer);
+        relayHealthyTimer = setTimeout(() => { relayHealthyTimer = null; if (relaySocket === ws) relayRetryMs = 5000; }, 30000);
         refreshRelayStatus();
         // Catch-up tick so OBS sees current state right after (re)connect.
         if (isPublisherLive()) { try { broadcastTick(); } catch (e) {} }
@@ -3946,15 +3951,17 @@
     try {
       hideStopConfirm();
       flushHeldMarks();
-      // Web: an upload still running would make the final one skip (single flight).
+      // Where the session was going, read before the final save closes the folder handle.
+      const ended = afterStopFacts();
+      // Web: the final save, awaited until it has reached the folder and Drive (up to 30 s), so the after-stop
+      // panel never says Drive while the last of the session is still uploading.
       let driveLate = false;
-      if (!NATIVE && driveUploadInFlight) {
+      if (!NATIVE) {
         const btn = $('session-toggle');
         if (btn) { btn.textContent = 'Saving'; btn.setAttribute('aria-busy', 'true'); }
-        driveLate = await Promise.race([driveUploadInFlight.then(() => false), new Promise((r) => setTimeout(() => r(true), 15000))]);
+        driveLate = await Promise.race([stopSessionAutoSave().then((driveOk) => driveOk === false, () => true), new Promise((r) => setTimeout(() => r(true), 30000))]);
         if (btn) btn.removeAttribute('aria-busy');
       }
-      const ended = afterStopFacts();
       ended.driveLate = driveLate;
       if (ended.start) noteRecordingEnded(ended.start, ended.end);
       try { await disconnect(); } catch (e) {}
@@ -4836,7 +4843,8 @@
     }
     if (lastHr != null) state.currentHR = lastHr;
     if (lastRmssd != null) state.currentRMSSD = lastRmssd;
-    // The whole recording stays in the full record for the session stats; only the chart's series are trimmed.
+    // The snapshot is only the engine's tail (tailMinutes), so after a reload the stats cover that tail plus what
+    // follows; the engine's own file keeps the whole recording. The chart's series are trimmed further below.
     state.full.hrSeries = state.hrSeries.slice();
     state.full.rmssdSeries = state.rmssdSeries.slice();
     // Trim to the most recent REHYDRATE_KEEP_MIN so the live chart isn't
@@ -5383,10 +5391,13 @@
     if (!state.startTime || !label) return false;
     const tsMs = Number.isFinite(atMs) ? atMs : Date.now();
     const ev = { t: (tsMs - state.startTime) / 60000, label, hr: hr == null ? null : hr, rmssd: rmssd == null ? null : rmssd };
-    let i = state.events.length;
-    while (i > 0 && state.events[i - 1].t > ev.t) i--;
-    state.events.splice(i, 0, ev);
-    if (state.events.length > 500) state.events.shift();
+    // In time order in both the Marks list (its newest 500) and the session's full record (the saved file).
+    for (const [list, cap] of [[state.events, 500], [state.full.events, FULL_CAP]]) {
+      let i = list.length;
+      while (i > 0 && list[i - 1].t > ev.t) i--;
+      list.splice(i, 0, ev);
+      if (list.length > cap) list.shift();
+    }
     logNativeFact(/^sym:/i.test(label) ? 'symptom' : 'marker', { tsMs, text: label });
     renderEvents();
     return true;
@@ -5468,6 +5479,8 @@
       const t = (m.at - state.startTime) / 60000;
       const i = state.events.findIndex((ev) => ev.t === t && ev.label === m.label);
       if (i >= 0) { state.events.splice(i, 1); renderEvents(); }
+      const j = state.full.events.findIndex((ev) => ev.t === t && ev.label === m.label);
+      if (j >= 0) state.full.events.splice(j, 1);
     }).catch((e) => console.warn('[marks] undo failed', e && e.message));
   }
 
@@ -5676,6 +5689,9 @@
     if (NATIVE) return;
     // New session begins — reset per-session Drive file so a new one is created.
     driveFileIdForSession = null;
+    autoSaveFinal = null; autoSaveBytes = 0; autoSaveBuiltAt = 0; driveUploadAt = 0;
+    // A folder lookup that failed at load (a Drive 5xx) is tried again, or the whole session would miss Drive.
+    if (driveAccessToken && !driveFolderId) driveEnsureFolder().catch(e => console.error('Drive folder init:', e));
     // Need either a local folder OR Drive sign-in to do anything useful.
     if (!autoSaveDirHandle && !driveAccessToken) return;
     // On native, JS autosave runs only for a local folder; native owns Drive.
@@ -5706,12 +5722,22 @@
   // tear down the whole interval. Reset on every success.
   let autoSaveFailStreak = 0;
   const AUTOSAVE_FAIL_GIVEUP = 3;
+  // The file holds the whole session. Past SAVE_BIG it is rebuilt at most once a minute, and goes to Drive a
+  // minute per MB apart (at most 10 min), so a 48 h session costs half a second a minute and a few hundred MB,
+  // not a rebuild every 10 s and 10 GB. The final save at stop always runs.
+  const SAVE_BIG = 512 * 1024;
+  let autoSaveBytes = 0, autoSaveBuiltAt = 0, autoSaveFinal = null;
+  function drivePaceMs(bytes) {
+    return bytes <= SAVE_BIG ? 0 : Math.min(600000, Math.max(60000, (bytes / 1048576) * 60000));
+  }
   async function writeAutoSave(final) {
     if (NATIVE) return;
     if (!autoSaveFileHandle && !driveAccessToken) return;
+    if (!final && autoSaveBytes > SAVE_BIG && Date.now() - autoSaveBuiltAt < 60000) return;
     // The native plugin owns Drive uploads whenever it exists; JS only writes the local folder.
     const nativeDriveActive = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable);
     const { csv, filename } = buildSessionCSV();
+    autoSaveBytes = csv.length; autoSaveBuiltAt = Date.now();
     if (autoSaveFileHandle) {
       try {
         const writable = await autoSaveFileHandle.createWritable();
@@ -5729,16 +5755,23 @@
       }
     }
     if (driveAccessToken && driveFolderId && !nativeDriveActive) {
-      if (final) await driveUploadSession(filename, csv, true);
-      else driveUploadSession(filename, csv);
+      if (final) return await driveUploadSession(filename, csv, true);
+      driveUploadSession(filename, csv);
     }
   }
 
-  async function stopSessionAutoSave() {
-    if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
-    await writeAutoSave(true);
-    autoSaveFileHandle = null;
-    if (autoSaveDirHandle) setAutoSaveStatus('idle');
+  // Once per session: the stop flow awaits it, and disconnect's later call returns the same save.
+  function stopSessionAutoSave() {
+    if (autoSaveFinal) return autoSaveFinal;
+    autoSaveFinal = (async () => {
+      if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
+      // false when the final Drive upload failed; undefined when there was none to make.
+      const driveOk = await writeAutoSave(true);
+      autoSaveFileHandle = null;
+      if (autoSaveDirHandle) setAutoSaveStatus('idle');
+      return driveOk;
+    })();
+    return autoSaveFinal;
   }
 
   // ===== Google Drive dual-save =====
@@ -5979,6 +6012,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
       });
+      if (!create.ok) throw new Error('folder create ' + create.status);
       const cd = await create.json();
       if (relayLink.loginTag !== login || !driveAccessToken) return;
       driveFolderId = cd.id;
@@ -5994,10 +6028,9 @@
   // Upload or update the current session's CSV on Drive. Called alongside local
   // auto-save. Reuses the same Drive file for the whole session (updates in place)
   // so Drive doesn't fill up with 600 partial files per session.
-  // The file now holds the whole session, so past 512 KB it goes up at most once a minute; the local folder still
-  // saves every 10 s. A final upload (session stop) is never skipped: it waits for one in flight, then goes.
+  // Paced by drivePaceMs as the file grows. A final upload (session stop) is never skipped: it waits for one in
+  // flight, then goes, and the returned promise settles when it has reached Drive.
   let driveUploadAt = 0;
-  const DRIVE_UPLOAD_BIG = 512 * 1024, DRIVE_UPLOAD_BIG_MS = 60000;
   async function driveUploadSession(filename, csvText, final) {
     if (!driveSyncOn()) return;
     if (!driveAccessToken || !driveFolderId) return;
@@ -6006,9 +6039,9 @@
       try { await driveUploadInFlight; } catch (e) {}
       if (driveUploadInFlight) return driveUploadSession(filename, csvText, final);
     }
-    if (!final && csvText.length > DRIVE_UPLOAD_BIG && Date.now() - driveUploadAt < DRIVE_UPLOAD_BIG_MS) return;
+    if (!final && Date.now() - driveUploadAt < drivePaceMs(csvText.length)) return;
     driveUploadAt = Date.now();
-    driveUploadInFlight = (async () => {
+    const job = driveUploadInFlight = (async () => {
       try {
         if (!driveFileIdForSession) {
           // Create the file once, then PATCH updates to the same fileId
@@ -6056,13 +6089,16 @@
         }
         // Surface success — clears any prior 'Drive error' status.
         if (typeof setAutoSaveStatus === 'function') setAutoSaveStatus('synced', 'ok');
+        return true;
       } catch (e) {
         console.error('Drive upload failed:', e);
         if (typeof setAutoSaveStatus === 'function') setAutoSaveStatus('drive error: ' + (e.message || e), 'error');
+        return false;
       } finally {
         driveUploadInFlight = null;
       }
     })();
+    return job;
   }
 
   function buildSessionCSV() {
@@ -6075,7 +6111,7 @@
     const allTimes = new Set();
     F.hrSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
     F.rmssdSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
-    state.events.forEach(e => allTimes.add(e.t.toFixed(4)));
+    F.events.forEach(e => allTimes.add(e.t.toFixed(4)));
     F.warnings.forEach(w => allTimes.add(w.t.toFixed(4)));
     F.ectopicEvents.forEach(e => allTimes.add(e.t.toFixed(4)));
     F.connectionEvents.forEach(c => allTimes.add(c.t.toFixed(4)));
@@ -6086,7 +6122,7 @@
     const sdnnMatchMap = new Map(F.sdnnMatchSeries.map(p => [p.t.toFixed(4), p.v]));
     const sdnn5minMap = new Map(F.sdnn5minSeries.map(p => [p.t.toFixed(4), p.v]));
     const sdnnFullMap = new Map(F.sdnnFullSeries.map(p => [p.t.toFixed(4), p.v]));
-    const evMap = new Map(state.events.map(e => [e.t.toFixed(4), e.label]));
+    const evMap = new Map(F.events.map(e => [e.t.toFixed(4), e.label]));
     const warnMap = new Map(F.warnings.map(w => [w.t.toFixed(4), w.type]));
     const palpSet = new Set(F.ectopicEvents.map(e => e.t.toFixed(4)));
     const connMap = new Map(F.connectionEvents.map(c => [c.t.toFixed(4), c.type]));

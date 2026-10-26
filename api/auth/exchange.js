@@ -1,5 +1,5 @@
 // POST /api/auth/exchange
-// Swaps an authorization code (web PKCE) or serverAuthCode (Capacitor
+// Swaps an authorization code (web popup, no PKCE) or serverAuthCode (Capacitor
 // native) for access + refresh tokens. Refresh token lands in an HttpOnly
 // cookie for web; returned in the JSON body for native (stored in
 // Android Keystore by the caller).

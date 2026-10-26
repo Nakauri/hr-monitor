@@ -114,7 +114,7 @@ check('buildSessionCSV and sanitizeNote found', fnSrc.every(Boolean));
 if (fnSrc.every(Boolean) && noteMax) {
   const t0 = 1760000000000;
   const series = () => ({ hrSeries: [{ t: 0.5, v: 88 }], rmssdSeries: [{ t: 0.5, v: 40 }], sdnnMatchSeries: [], sdnn5minSeries: [], sdnnFullSeries: [],
-    warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [] });
+    warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [], events: [] });
   const ctx = { NOTE_MAX: Number(noteMax), state: Object.assign({ startTime: t0, events: [], full: series() }, series()) };
   vm.createContext(ctx);
   vm.runInContext(fnSrc.join('\n'), ctx);
@@ -124,7 +124,7 @@ if (fnSrc.every(Boolean) && noteMax) {
   const rejected = ['sym:dizzy', 'SYM:x', ' Ctx:water', 'ctx:'].filter((t) => ctx.sanitizeNote(t).rejected);
   check('Note sanitiser rejects a leading sym: or ctx: in any case', rejected.length === 4, rejected.join('|'));
   check('Note sanitiser keeps sym: inside the text', !ctx.sanitizeNote('ran out of sym: meds').rejected);
-  ctx.state.events.push({ t: 1, label: symConst }, { t: 2, label: note.text }, { t: 3, label: 'ctx:water' });
+  ctx.state.full.events = [{ t: 1, label: symConst }, { t: 2, label: note.text }, { t: 3, label: 'ctx:water' }];
   const out = ctx.buildSessionCSV().csv.split('\n');
   const head = out[0].split(',');
   const ev = head.indexOf('event');
@@ -165,9 +165,31 @@ check('addMarker sends kind symptom for a sym: label, marker otherwise',
   /logNativeFact\(\s*\/\^sym:\/i\.test\(label\)\s*\?\s*'symptom'\s*:\s*'marker'/.test(add));
 // S9: a native Undo removes its own mark from the Marks list (the row stays in the segment; a rev hides it).
 const undo = jsFunction(monitor, 'undoNativeMark') || '';
-check('addMarker is the only writer of state.events; undoNativeMark only removes one',
-  (monitor.match(/state\.events\.(push|splice|unshift)\(/g) || []).length === 2 && /state\.events\.splice\(i, 0, ev\)/.test(add)
-  && /state\.events\.splice\(i, 1\)/.test(undo) && !/state\.events\.(push|unshift)\(|splice\([^)]*,[^)]*,/.test(undo));
+// The whole-session file is paced as it grows (review 2026-10-25: a 48 h file rebuilt every 10 s took half a
+// second each time, and uploaded whole once a minute came to about 10 GB), and the stop waits for the last upload.
+const paceSrc = jsFunction(monitor, 'drivePaceMs');
+const saveBig = (monitor.match(/const SAVE_BIG = (\d+) \* 1024;/) || [])[1];
+if (paceSrc && saveBig) {
+  const pctx = { SAVE_BIG: Number(saveBig) * 1024 };
+  vm.createContext(pctx); vm.runInContext(paceSrc, pctx);
+  const MB = 1048576;
+  check('Drive pace: small files every save, then a minute per MB, at most 10 min',
+    pctx.drivePaceMs(100 * 1024) === 0 && pctx.drivePaceMs(600 * 1024) === 60000 && pctx.drivePaceMs(2 * MB) === 120000 && pctx.drivePaceMs(20 * MB) === 600000);
+} else check('drivePaceMs and SAVE_BIG found', false);
+const was = jsFunction(monitor, 'writeAutoSave') || '';
+const stopNow = jsFunction(monitor, 'stopSessionNow') || '';
+const stopSave = jsFunction(monitor, 'stopSessionAutoSave') || '';
+check('a big file is rebuilt at most once a minute, the final save always',
+  /if \(!final && autoSaveBytes > SAVE_BIG && Date\.now\(\) - autoSaveBuiltAt < 60000\) return;/.test(was) && /if \(final\) return await driveUploadSession\(filename, csv, true\);/.test(was));
+check('the stop reads its facts, then awaits the final save before the after-stop panel, once per session',
+  stopNow.indexOf('const ended = afterStopFacts();') >= 0 && stopNow.indexOf('const ended = afterStopFacts();') < stopNow.indexOf('await Promise.race([stopSessionAutoSave()')
+  && stopNow.indexOf('await Promise.race([stopSessionAutoSave()') < stopNow.indexOf('showAfterStop(ended)')
+  && /if \(autoSaveFinal\) return autoSaveFinal;/.test(stopSave) && /return job;/.test(jsFunction(monitor, 'driveUploadSession') || ''));
+// The Marks list and the session's full record (the saved file) move together: one insert, one undo, no other writer.
+check('addMarker is the only writer of the marks; undoNativeMark removes one from each list',
+  /for \(const \[list, cap\] of \[\[state\.events, 500\], \[state\.full\.events, FULL_CAP\]\]\)/.test(add) && /list\.splice\(i, 0, ev\)/.test(add)
+  && (monitor.match(/state\.events\.(push|splice|unshift)\(/g) || []).length === 1 && (monitor.match(/state\.full\.events\.(push|splice|unshift)\(/g) || []).length === 1
+  && /state\.events\.splice\(i, 1\)/.test(undo) && /state\.full\.events\.splice\(j, 1\)/.test(undo) && !/\.(push|unshift)\(|splice\([^)]*,[^)]*,/.test(undo));
 check('the free-text marker input is gone', !/id="marker-label"|id="add-marker"/.test(monitor));
 
 if (failures) {
