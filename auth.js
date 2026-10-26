@@ -3,15 +3,13 @@
 // cross-tab sync across index.html, hr_monitor.html, hrv_viewer.html,
 // app-home.html, and diagnostics.js.
 //
-// Web uses Authorization Code + PKCE via GIS initCodeClient; refresh
-// token lives in an HttpOnly cookie set by /api/auth/exchange. Access
-// token and a little metadata live in localStorage for UI state.
+// Web: the GIS code flow (initCodeClient popup, a state token, no PKCE: see signInWeb); /api/auth/exchange swaps
+// the code server-side with the client secret and sets the refresh token in an HttpOnly cookie. The access token
+// and a little metadata live in localStorage for UI state.
 //
-// Capacitor Android currently delegates sign-in to the old
-// drive-auth-native.js shim (access token only, no refresh). Stage 3
-// replaces that with serverAuthCode → /api/auth/exchange → Keystore
-// refresh-token storage. Everything outside auth.js calls the same
-// window.aortiAuth.* methods; the platform branch is hidden here.
+// Android: serverAuthCode → /api/auth/exchange → refresh token in the Android Keystore (NativeHrSession
+// storeAuthTokens). Everything outside auth.js calls the same window.aortiAuth.* methods; the platform branch
+// is hidden here.
 
 (function () {
   'use strict';
@@ -87,18 +85,6 @@
     const buf = new Uint8Array(n);
     crypto.getRandomValues(buf);
     return buf;
-  }
-
-  async function sha256(str) {
-    const enc = new TextEncoder().encode(str);
-    const hash = await crypto.subtle.digest('SHA-256', enc);
-    return new Uint8Array(hash);
-  }
-
-  async function makePkcePair() {
-    const verifier = base64UrlEncode(randomBytes(32));
-    const challenge = base64UrlEncode(await sha256(verifier));
-    return { verifier, challenge };
   }
 
   function makeStateToken() {

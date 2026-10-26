@@ -36,9 +36,10 @@
       account: null, poll: null, running: null, again: false, run: 0,
     };
 
+    // A stored key that is not 16 hex characters is replaced: it goes into the socket URL as the room name.
     function key() {
       let k = store.getItem(KEY);
-      if (!k) { k = hex(8); store.setItem(KEY, k); }
+      if (!k || !KEY_RE.test(k)) { k = hex(8); store.setItem(KEY, k); }
       return k;
     }
     function secret() {
@@ -226,7 +227,10 @@
       }
       store.setItem(LINK_ACCOUNT, acct);
       // The config takes this device's secret only once the relay accepted it for this very key.
-      if (owner && cfg.publishSecret !== p) await writeConfig(id, { broadcastKey: k, publishSecret: p, linkAt: cfgAt }, folder);
+      if (owner && cfg.publishSecret !== p) {
+        await writeConfig(id, { broadcastKey: k, publishSecret: p, linkAt: cfgAt }, folder);
+        if (s.run !== run) return;
+      }
       // Refused while holding the account's own pair, or refused for 3 min with no owner's secret ever appearing in
       // the config: someone else claimed the room first.
       s.taken = s.refused && !keyChanged && !secretChanged && (secretOk || now() - s.refusedAt > TAKEN_AFTER_MS);

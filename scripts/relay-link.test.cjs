@@ -451,6 +451,27 @@ CHECKS.K1 = async (src) => {
     hungGivenUp && reached && lateUploads === 0 && d.store.get('hr_monitor_broadcast_key') === madeKey && cfgOf(fake).broadcastKey === madeKey,
     [hungGivenUp, reached, lateUploads].join(',')]);
 
+  // A stored key that is not 16 hex characters never becomes the room name in the socket URL.
+  d = monitor(new FakeDrive(), { hr_monitor_broadcast_key: 'room/../x?y', hr_monitor_publish_secret: S1 });
+  const fixedKey = d.link.key();
+  out.push(['K1 a malformed stored key is replaced before it names a room', /^[0-9a-f]{16}$/.test(fixedKey) && d.store.get('hr_monitor_broadcast_key') === fixedKey, fixedKey]);
+
+  // A sync given up while its owner write hangs acts on nothing once that write lands.
+  fake = withConfig({ broadcastKey: KA, publishSecret: S2, linkAt: 7 });
+  d = monitor(fake, { hr_monitor_broadcast_key: KA, hr_monitor_publish_secret: S1, hr_monitor_link_at: '7' }, { relayAccepted: true, relayKey: KA, syncLimitMs: 40 });
+  let releaseWrite;
+  const writeHeld = new Promise((r) => { releaseWrite = r; });
+  const realUp = d.ctx.fetch;
+  d.ctx.fetch = (u, i) => writeHeld.then(() => realUp(u, i));
+  const ownerRun = d.ctx.driveSyncConfig().then(() => false, (e) => /timed out/.test(e.message));
+  await new Promise((r) => setTimeout(r, 80));
+  const ownerGivenUp = await ownerRun;
+  d.ctx.configSyncedAt = 0;
+  releaseWrite();
+  await settle(); await settle();
+  out.push(['K1 a sync given up during its owner write leaves no trace once the write lands',
+    ownerGivenUp && d.ctx.configSyncedAt === 0, [ownerGivenUp, d.ctx.configSyncedAt].join(',')]);
+
   // The page's own wiring, run for real: its create() object, followRelayCredentials and the engine push.
   {
     const M0 = src.monitor;
@@ -648,6 +669,9 @@ CHECKS.K1 = async (src) => {
     && /relayLink\.newLink\(\);\s*followRelayCredentials\(true\);/.test(M)
     && /if \(relayLink\.otherTabChanged\(e\.key, e\.newValue\)\) followRelayCredentials\(false\);/.test(M)
     && /<script src="\.\/relay-link\.js"><\/script>/.test(M)
+    // A relay that stays down is retried at 5 s doubling to a minute, not every 5 s for ever (re-grade 2026-10-25).
+    && /relayRetryMs = Math\.min\(60000, relayRetryMs \* 2\);/.test(M) && /ws\.addEventListener\('open', \(\) => \{\s*relayRetryMs = 5000;/.test(M)
+    && !/setTimeout\(connectRelay, 5000\)/.test(M)
     && !/let relayRefused|let configBehind|function driveSyncConfig\(\) \{\s*if|const LINK_AT/.test(M)]);
   // One home for the relay's address: the pages read it from the module, the CSP generator reads the module, and
   // the engine's copy (Java cannot load the module) must match it.

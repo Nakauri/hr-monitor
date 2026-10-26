@@ -2100,6 +2100,8 @@
     const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
     // Oldest root wins, id breaking ties: the same pick as the phone's uploaders.
     const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
+    // A failed listing is an error to show, not "no folder yet".
+    if (!resp.ok) throw new Error('folder list ' + resp.status);
     const data = await resp.json();
     if (data.files && data.files.length) {
       driveFolderId = data.files.reduce((a, b) => (driveFileIsOlder(b, a) ? b : a)).id;

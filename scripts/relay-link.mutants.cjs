@@ -1,6 +1,8 @@
 // The relay link mutants, as [name, file key, find, replace]; written out as JS rows by the generator.
 module.exports = [
-  ['old config not given a secret', 'link', '      if (owner && cfg.publishSecret !== p) await writeConfig(id, { broadcastKey: k, publishSecret: p, linkAt: cfgAt }, folder);\n', ''],
+  ['old config not given a secret', 'link', '        await writeConfig(id, { broadcastKey: k, publishSecret: p, linkAt: cfgAt }, folder);\n', ''],
+  ['a given-up sync acts after its owner write (re-grade)', 'link', '        await writeConfig(id, { broadcastKey: k, publishSecret: p, linkAt: cfgAt }, folder);\n        if (s.run !== run) return;', '        await writeConfig(id, { broadcastKey: k, publishSecret: p, linkAt: cfgAt }, folder);'],
+  ['a malformed stored key is used as the room (re-grade)', 'link', 'if (!k || !KEY_RE.test(k)) { k = hex(8);', 'if (!k) { k = hex(8);'],
   ['the owner write drops the link time', 'link', 'publishSecret: p, linkAt: cfgAt }, folder);', 'publishSecret: p }, folder);'],
   ['secret written before acceptance (the 10-24 lock-out)', 'link', 'const owner = s.accepted && s.socketKey === k && !keyChanged && !foreign;', 'const owner = !keyChanged && !foreign;'],
   ['secret written for another key', 'link', 'const owner = s.accepted && s.socketKey === k && !keyChanged && !foreign;', 'const owner = s.accepted && s.socketKey === k && !foreign;'],
@@ -67,6 +69,7 @@ module.exports = [
   ['an unknown account keeps the old binding (round 8)', 'link', 'mint(env.token() ? knownAccount() : undefined);', 'mint(knownAccount() || undefined);'],
   ['the viewer prefers a stale slot (round 8)', 'viewer', "return localStorage.getItem('hr_monitor_broadcast_key') || localStorage.getItem(VIEWER_WATCH_KEY);", "return localStorage.getItem(VIEWER_WATCH_KEY) || localStorage.getItem('hr_monitor_broadcast_key');"],
   ['the sync weighs what it saw before the click (round 3)', 'link', '      let cfg = null;\n      if (id) {', '      let k = key(), p = secret(), at = linkAt();\n      let cfg = null;\n      if (id) {'],
+  ['the web relay retries every 5 s for ever (re-grade)', 'monitor', '    relayRetryMs = Math.min(60000, relayRetryMs * 2);\n', ''],
   ['the page drops the module (refactor)', 'monitor', '    if (relayLink.verdict(msg.type)) return;', '    if (false) return;'],
   ['the relay host copied in the engine (refactor)', 'engine', 'wss://hr-relay.nakauri.workers.dev/parties/main/', 'wss://hr-relay2.nakauri.workers.dev/parties/main/'],
 ];

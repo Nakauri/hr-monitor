@@ -2968,6 +2968,12 @@
   });
   let relaySocket = null;
   let relayReconnectTimer = null;
+  // Retry after 5 s, doubling to a minute while the relay stays down; an open socket starts it over.
+  let relayRetryMs = 5000;
+  function scheduleRelayRetry() {
+    relayReconnectTimer = setTimeout(connectRelay, relayRetryMs);
+    relayRetryMs = Math.min(60000, relayRetryMs * 2);
+  }
   function reconnectRelay() {
     if (relaySocket) {
       try { relaySocket.close(); } catch (e) {}
@@ -2996,6 +3002,7 @@
       const ws = new WebSocket(RELAY_HOST + '/parties/main/' + key + '?role=publisher&proof=' + getOrCreatePublishSecret());
       relaySocket = ws;
       ws.addEventListener('open', () => {
+        relayRetryMs = 5000;
         refreshRelayStatus();
         // Catch-up tick so OBS sees current state right after (re)connect.
         if (isPublisherLive()) { try { broadcastTick(); } catch (e) {} }
@@ -3010,13 +3017,13 @@
         // Native plugin owns its own WebSocket on Capacitor; refreshRelayStatus
         // checks isPublishing() first and shows 'live' when native is healthy.
         refreshRelayStatus();
-        relayReconnectTimer = setTimeout(connectRelay, 5000);
+        scheduleRelayRetry();
       });
       ws.addEventListener('error', () => refreshRelayStatus());
     } catch (e) {
       console.error('Relay connect failed:', e);
       refreshRelayStatus();
-      relayReconnectTimer = setTimeout(connectRelay, 5000);
+      scheduleRelayRetry();
     }
   }
   // True when we're actually producing live HR data right now (BLE connected
@@ -5956,6 +5963,8 @@
     const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
     // Oldest root wins, id breaking ties: the same pick as the viewer and the phone's uploaders.
     const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
+    // A failed listing is not "no folder": read that way, it made a second root and a fresh config in it.
+    if (!resp.ok) throw new Error('folder list ' + resp.status);
     const data = await resp.json();
     if (relayLink.loginTag !== login || !driveAccessToken) return;
     if (data.files && data.files.length) {

@@ -55,16 +55,6 @@ jobs:
       - name: Run ./check
         run: sh ./check
 
-      # The browser tier needs the local ux-audit kit, but a stale CSP hash blocks a page's scripts on the live
-      # site, so CI checks vercel.json against the pages with the same Chromium parser the pre-push hook uses.
-      - name: Check the CSP hashes are current
-        run: |
-          mkdir -p "$RUNNER_TEMP/ux/kit" && cd "$RUNNER_TEMP/ux/kit"
-          npm init -y > /dev/null
-          npm install --no-audit --no-fund playwright@1.64.0 > /dev/null
-          npx playwright install --with-deps chromium > /dev/null
-          cd "$GITHUB_WORKSPACE" && node scripts/csp-hashes.mjs --check --ux "$RUNNER_TEMP/ux"
-
   build:
     needs: check
     runs-on: ubuntu-latest
