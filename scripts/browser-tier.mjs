@@ -94,9 +94,12 @@ for (const n of names) {
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', n + '.mjs'), ...TIER[n][1]], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const secs = Math.round((Date.now() - t0) / 1000);
   const ok = r.status === 0;
-  const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(-3).join(' | ').slice(0, 220);
+  const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n');
+  const tail = lines.slice(-3).join(' | ').slice(0, 220);
   results.push([n, ok, secs, tail]);
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${n.padEnd(20)} ${String(secs).padStart(4)} s  ${ok ? '' : tail}`);
+  // The tail alone hid which assertion failed (landing, 2026-10-25, failed once under load and passed 4 times alone).
+  if (!ok) for (const l of lines.filter((x) => /^\s*FAIL\b/.test(x)).slice(0, 10)) console.log('     ' + l.trim().slice(0, 300));
 }
 const failed = results.filter((r) => !r[1]);
 console.log(`\nbrowser-tier: ${results.length - failed.length} of ${results.length} passed in ${results.reduce((s, r) => s + r[2], 0)} s`);
