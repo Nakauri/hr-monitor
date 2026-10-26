@@ -100,6 +100,14 @@ for (const n of names) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${n.padEnd(20)} ${String(secs).padStart(4)} s  ${ok ? '' : tail}`);
   // The tail alone hid which assertion failed (landing, 2026-10-25, failed once under load and passed 4 times alone).
   if (!ok) for (const l of lines.filter((x) => /^\s*FAIL\b/.test(x)).slice(0, 10)) console.log('     ' + l.trim().slice(0, 300));
+  // A crash shows only Node's last line in the tail (monitor-status and native-rmssd, 2026-10-25), so keep it all.
+  if (!ok) {
+    const dir = path.join(ROOT, '_scratch', 'browser-tier');
+    fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, n + '.log');
+    fs.writeFileSync(f, `exit ${r.status} signal ${r.signal || '-'} after ${secs} s\n--- stdout\n${r.stdout || ''}\n--- stderr\n${r.stderr || ''}`);
+    console.log('     full output: ' + path.relative(ROOT, f));
+  }
 }
 const failed = results.filter((r) => !r[1]);
 console.log(`\nbrowser-tier: ${results.length - failed.length} of ${results.length} passed in ${results.reduce((s, r) => s + r[2], 0)} s`);
