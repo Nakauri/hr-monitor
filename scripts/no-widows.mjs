@@ -8,8 +8,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { uxDir } from './ux-dir.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const require = createRequire(path.join(ROOT, 'ux-audit', 'kit', 'package.json'));
+// The kit (and its Playwright) lives in the main checkout only, so a worktree run finds it through git.
+const require = createRequire(path.join(uxDir(ROOT, null), 'kit', 'package.json'));
 const { chromium } = require('playwright');
 const MUT = process.argv.includes('--mutants');
 const TYPES = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png' };

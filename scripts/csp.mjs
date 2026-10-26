@@ -25,7 +25,8 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 
 // Rule sources compile the way Vercel compiles them (@vercel/routing-utils sourceToRegex: path-to-regexp,
 // strict and case-sensitive). A plain RegExp let "/(index...)?" match "/" here while Vercel sent "/" no CSP.
-const { pathToRegexp } = createRequire(path.join(ROOT, 'relay', 'package.json'))('path-to-regexp');
+// relay/node_modules is installed in the main checkout only (the parent of the ux-audit folder), so a worktree finds it there.
+const { pathToRegexp } = createRequire(path.join(path.dirname(UX), 'relay', 'package.json'))('path-to-regexp');
 export const vercelRegex = (source) => pathToRegexp(source, [], { strict: true, sensitive: true, delimiter: '/' });
 
 function serve(config) {
