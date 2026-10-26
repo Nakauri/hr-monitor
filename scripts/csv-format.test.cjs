@@ -113,9 +113,9 @@ const fnSrc = ['buildSessionCSV', 'sanitizeNote'].map((n) => jsFunction(monitor,
 check('buildSessionCSV and sanitizeNote found', fnSrc.every(Boolean));
 if (fnSrc.every(Boolean) && noteMax) {
   const t0 = 1760000000000;
-  const ctx = { NOTE_MAX: Number(noteMax), state: {
-    startTime: t0, hrSeries: [{ t: 0.5, v: 88 }], rmssdSeries: [{ t: 0.5, v: 40 }], sdnnMatchSeries: [], sdnn5minSeries: [], sdnnFullSeries: [],
-    events: [], warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [] } };
+  const series = () => ({ hrSeries: [{ t: 0.5, v: 88 }], rmssdSeries: [{ t: 0.5, v: 40 }], sdnnMatchSeries: [], sdnn5minSeries: [], sdnnFullSeries: [],
+    warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [] });
+  const ctx = { NOTE_MAX: Number(noteMax), state: Object.assign({ startTime: t0, events: [], full: series() }, series()) };
   vm.createContext(ctx);
   vm.runInContext(fnSrc.join('\n'), ctx);
   const note = ctx.sanitizeNote('drank water,\r\nsat down, felt odd');
@@ -133,6 +133,32 @@ if (fnSrc.every(Boolean) && noteMax) {
   const cells = rows.map((r) => r[ev]).filter(Boolean);
   check('legacy event cells read sym:symptom, the note, ctx:water', cells.join('|') === 'sym:symptom|drank water sat down felt odd|ctx:water', cells.join('|'));
   check('the sym:symptom row carries its epoch', rows.some((r) => r[ev] === 'sym:symptom' && Number(r[1]) === t0 + 60000));
+}
+// A long web session keeps its start: the chart's series stop at 5000 points, but the saved file is built from the
+// session's full record (2026-10-25 re-grade: past about 83 min at 1 Hz the file lost its first rows, and the live
+// palpitation list keeps only 10 min, so older palpitations never reached the file at all).
+const longSrc = ['freshFullRecord', 'track', 'buildSessionCSV'].map((n) => jsFunction(monitor, n));
+const fullCap = (monitor.match(/const FULL_CAP = (\d+);/) || [])[1];
+check('track, freshFullRecord and FULL_CAP found', longSrc.every(Boolean) && !!fullCap);
+if (longSrc.every(Boolean) && fullCap) {
+  const t0 = 1760000000000;
+  const lctx = { FULL_CAP: Number(fullCap), state: { startTime: t0, events: [], hrSeries: [], rmssdSeries: [], sdnnMatchSeries: [], sdnn5minSeries: [],
+    sdnnFullSeries: [], warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [] } };
+  vm.createContext(lctx);
+  vm.runInContext(longSrc.join('\n') + '\nstate.full = freshFullRecord();', lctx);
+  for (let i = 0; i < 6000; i++) lctx.track('hrSeries', { t: i / 60, v: 70 + (i % 9) }, 5000);
+  lctx.track('ectopicEvents', { t: 1, rr: 600, dev: 0.3 }, 1000);
+  // The live palpitation list keeps 10 min; the trim never touches the full record.
+  lctx.state.ectopicEvents = lctx.state.ectopicEvents.filter((e) => e.t >= 90);
+  const out = lctx.buildSessionCSV().csv.split('\n');
+  const head = out[0].split(',');
+  const rows = out.slice(1).map((l) => l.split(','));
+  const hrCol = head.indexOf('hr_bpm'), palpCol = head.indexOf('palpitation');
+  check('a 6000-sample web session saves its first sample and its last',
+    rows.length >= 6000 && rows[0][0] === '0.0000' && rows[0][hrCol] === '70' && Number(rows[rows.length - 1][0]) > 99.9,
+    rows.length + ' rows, first ' + (rows[0] || []).slice(0, 3).join(','));
+  check('the chart series still stops at 5000 points', lctx.state.hrSeries.length === 5000 && lctx.state.full.hrSeries.length === 6000);
+  check('a palpitation older than the live list\'s 10 min still reaches the file', rows.some((r) => r[0] === '1.0000' && r[palpCol] === '1'));
 }
 const add = jsFunction(monitor, 'addMarker') || '';
 check('addMarker sends kind symptom for a sym: label, marker otherwise',

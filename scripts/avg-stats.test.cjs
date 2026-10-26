@@ -29,8 +29,10 @@ function grab(name) {
 const stats = grab('seriesStats');
 check('seriesStats exists', !!stats);
 const upd = grab('updateStats') || '';
-check('Avg HRV goes through seriesStats', /seriesStats\(state\.rmssdSeries\)/.test(upd));
-check('Avg HR goes through seriesStats', /seriesStats\(state\.hrSeries\)/.test(upd));
+// Over the session's full record, not the chart's capped series (a long session's averages lost their start).
+check('Avg HRV goes through seriesStats over the full record', /seriesStats\(state\.full\.rmssdSeries\)/.test(upd));
+check('Avg HR goes through seriesStats over the full record', /seriesStats\(state\.full\.hrSeries\)/.test(upd));
+check('the Palps and Warnings counts read the full record', /state\.full\.ectopicEvents\.length/.test(upd) && /state\.full\.warnings\.length/.test(upd));
 check('no average divides by a raw series length', !/\/\s*\w+\.length\)/.test(upd.replace(/\/\/.*$/gm, '')));
 if (stats) {
   const s = vm.runInNewContext(stats + '; seriesStats', {});

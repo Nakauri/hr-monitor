@@ -1623,8 +1623,25 @@
     lastDataTime: 0,
     audioOn: true,
     autoReconnect: false,
+    // The session's full record beside the capped series the charts draw; see track().
+    full: freshFullRecord(),
   };
   const thresholds = { high: 130, low: 55, rmssd: 15, palpPerMin: 5 };
+  // The live series stop at 5000 points (the chart's working set); the saved file, the session stats and the counts
+  // read the full record, so a session past about 83 min at 1 Hz keeps its start (the cap used to drop it).
+  const FULL_CAP = 200000; // about 55 h at 1 Hz
+  function freshFullRecord() {
+    return { hrSeries: [], rmssdSeries: [], sdnnMatchSeries: [], sdnn5minSeries: [], sdnnFullSeries: [],
+      warnings: [], ectopicEvents: [], connectionEvents: [], postureLog: [] };
+  }
+  function track(name, point, cap) {
+    const live = state[name];
+    live.push(point);
+    if (live.length > cap) live.shift();
+    const full = state.full[name];
+    full.push(point);
+    if (full.length > FULL_CAP) full.shift();
+  }
 
   const $ = id => document.getElementById(id);
   const setStatus = (msg, cls = '') => {
@@ -2223,9 +2240,9 @@
     const nowMin = state.startTime ? (Date.now() - state.startTime) / 60000 : 0;
     const on = !!state.startTime;
     const palpMin = on ? ectopicsPerMinute(nowMin) : null;
-    UI.setKpi($('warn-count'), on ? state.warnings.length : null);
+    UI.setKpi($('warn-count'), on ? state.full.warnings.length : null);
     UI.setKpi($('palp-rate'), palpMin);
-    UI.setKpi($('palp-total'), on ? state.ectopicEvents.length : null);
+    UI.setKpi($('palp-total'), on ? state.full.ectopicEvents.length : null);
     updateUptimeStat(nowMin);
     if (state.hrSeries.length === 0) {
       ['avg-hr', 'max-hr', 'min-hr'].forEach((id) => setHr(id, null));
@@ -2233,7 +2250,7 @@
       updateSectionMeta();
       return;
     }
-    const hr = seriesStats(state.hrSeries), rm = seriesStats(state.rmssdSeries);
+    const hr = seriesStats(state.full.hrSeries), rm = seriesStats(state.full.rmssdSeries);
     setHr('avg-hr', hr.n ? Math.round(hr.sum / hr.n) : null);
     setHr('max-hr', hr.n ? hr.max : null);
     setHr('min-hr', hr.n ? hr.min : null);
@@ -2255,7 +2272,7 @@
     if (!state.startTime || nowMin <= 0) { UI.setKpi(el, null); return; }
     let connectedMin = 0;
     let openConnect = null;
-    for (const ev of state.connectionEvents) {
+    for (const ev of state.full.connectionEvents) {
       if (ev.type === 'connect') {
         if (openConnect == null) openConnect = ev.t;
       } else if (ev.type === 'disconnect') {
@@ -2554,8 +2571,7 @@
                           : newWarn === 'warn-palp' ? thresholds.palpPerMin
                           : thresholds.rmssd;
       logNativeFact('warning', { tsMs: Date.now(), text: newWarn, value: warnThreshold });
-      state.warnings.push({ t: (Date.now() - state.startTime) / 60000, type: newWarn, hr: state.currentHR, rmssd: state.currentRMSSD });
-      if (state.warnings.length > 500) state.warnings.shift();
+      track('warnings', { t: (Date.now() - state.startTime) / 60000, type: newWarn, hr: state.currentHR, rmssd: state.currentRMSSD }, 500);
     }
     state.currentWarn = newWarn;
   }
@@ -2648,9 +2664,8 @@
         const longEnough = (rr - c.baselineMedian) / c.baselineMedian >= longPct;
         c.age++;
         if (longEnough) {
-          state.ectopicEvents.push({ t: c.t, rr: c.rr, dev: c.dev });
+          track('ectopicEvents', { t: c.t, rr: c.rr, dev: c.dev }, 1000);
           logNativeFact('ectopic', { tsMs: state.startTime ? state.startTime + c.t * 60000 : Date.now() });
-          if (state.ectopicEvents.length > 1000) state.ectopicEvents.shift();
           ectopicCandidates.splice(i, 1);
         } else if (c.age >= 2) {
           ectopicCandidates.splice(i, 1);
@@ -2812,11 +2827,10 @@
     if (state.hrSeries.length) {
       const last = state.hrSeries[state.hrSeries.length - 1];
       if (last && last.v != null && (now - last.t) > 10 / 60) {
-        state.hrSeries.push({ t: now - 0.001, v: null });
+        track('hrSeries', { t: now - 0.001, v: null }, 5000);
       }
     }
-    state.hrSeries.push({ t: now, v: hr });
-    if (state.hrSeries.length > 5000) state.hrSeries.shift();
+    track('hrSeries', { t: now, v: hr }, 5000);
 
     // Keep the Android foreground-service notification current. The wrapper
     // throttles updates to 1 Hz internally; calling every tick is fine.
@@ -2867,18 +2881,14 @@
         if (state.rmssdSeries.length) {
           const last = state.rmssdSeries[state.rmssdSeries.length - 1];
           if (last && last.v != null && (now - last.t) > 10 / 60) {
-            state.rmssdSeries.push({ t: now - 0.001, v: null });
+            track('rmssdSeries', { t: now - 0.001, v: null }, 5000);
           }
         }
-        state.rmssdSeries.push({ t: now, v: rmssd });
-        if (state.rmssdSeries.length > 5000) state.rmssdSeries.shift();
+        track('rmssdSeries', { t: now, v: rmssd }, 5000);
       }
-      if (sdnnMatch != null) state.sdnnMatchSeries.push({ t: now, v: sdnnMatch });
-      if (sdnn5min != null) state.sdnn5minSeries.push({ t: now, v: sdnn5min });
-      if (sdnnFull != null) state.sdnnFullSeries.push({ t: now, v: sdnnFull });
-      if (state.sdnnMatchSeries.length > 5000) state.sdnnMatchSeries.shift();
-      if (state.sdnn5minSeries.length > 5000) state.sdnn5minSeries.shift();
-      if (state.sdnnFullSeries.length > 5000) state.sdnnFullSeries.shift();
+      if (sdnnMatch != null) track('sdnnMatchSeries', { t: now, v: sdnnMatch }, 5000);
+      if (sdnn5min != null) track('sdnn5minSeries', { t: now, v: sdnn5min }, 5000);
+      if (sdnnFull != null) track('sdnnFullSeries', { t: now, v: sdnnFull }, 5000);
       state.breathBuffer.push(...rrs.map(rr => ({ t: now, rr })));
       const breathCutoff = now - 0.75;
       state.breathBuffer = state.breathBuffer.filter(r => r.t >= breathCutoff);
@@ -4819,6 +4829,9 @@
     }
     if (lastHr != null) state.currentHR = lastHr;
     if (lastRmssd != null) state.currentRMSSD = lastRmssd;
+    // The whole recording stays in the full record for the session stats; only the chart's series are trimmed.
+    state.full.hrSeries = state.hrSeries.slice();
+    state.full.rmssdSeries = state.rmssdSeries.slice();
     // Trim to the most recent REHYDRATE_KEEP_MIN so the live chart isn't
     // backfilled with hours of stale points. The chart's visible window is
     // 3 min anyway; older points just bloat the array.
@@ -5058,8 +5071,7 @@
   function logConnectionEvent(type) {
     if (!state.startTime) return;
     const t = (Date.now() - state.startTime) / 60000;
-    state.connectionEvents.push({ t, type });
-    if (state.connectionEvents.length > 500) state.connectionEvents.shift();
+    track('connectionEvents', { t, type }, 500);
   }
 
   async function readBattery() {
@@ -5242,8 +5254,7 @@
         logNativeFact('posture', { tsMs: Date.now(), text: p });
         if (state.startTime) {
           const t = (Date.now() - state.startTime) / 60000;
-          state.postureLog.push({ t, posture: p });
-          if (state.postureLog.length > 500) state.postureLog.shift();
+          track('postureLog', { t, posture: p }, 500);
         }
       });
     });
@@ -5331,6 +5342,7 @@
     state.connectionEvents = [];
     state.postureLog = [];
     state.breathBuffer = [];
+    state.full = freshFullRecord();
   }
 
   function resetSession() {
@@ -5687,7 +5699,7 @@
   // tear down the whole interval. Reset on every success.
   let autoSaveFailStreak = 0;
   const AUTOSAVE_FAIL_GIVEUP = 3;
-  async function writeAutoSave() {
+  async function writeAutoSave(final) {
     if (NATIVE) return;
     if (!autoSaveFileHandle && !driveAccessToken) return;
     // The native plugin owns Drive uploads whenever it exists; JS only writes the local folder.
@@ -5710,13 +5722,14 @@
       }
     }
     if (driveAccessToken && driveFolderId && !nativeDriveActive) {
-      driveUploadSession(filename, csv);
+      if (final) await driveUploadSession(filename, csv, true);
+      else driveUploadSession(filename, csv);
     }
   }
 
   async function stopSessionAutoSave() {
     if (autoSaveInterval) { clearInterval(autoSaveInterval); autoSaveInterval = null; }
-    await writeAutoSave();
+    await writeAutoSave(true);
     autoSaveFileHandle = null;
     if (autoSaveDirHandle) setAutoSaveStatus('idle');
   }
@@ -5972,10 +5985,20 @@
   // Upload or update the current session's CSV on Drive. Called alongside local
   // auto-save. Reuses the same Drive file for the whole session (updates in place)
   // so Drive doesn't fill up with 600 partial files per session.
-  async function driveUploadSession(filename, csvText) {
+  // The file now holds the whole session, so past 512 KB it goes up at most once a minute; the local folder still
+  // saves every 10 s. A final upload (session stop) is never skipped: it waits for one in flight, then goes.
+  let driveUploadAt = 0;
+  const DRIVE_UPLOAD_BIG = 512 * 1024, DRIVE_UPLOAD_BIG_MS = 60000;
+  async function driveUploadSession(filename, csvText, final) {
     if (!driveSyncOn()) return;
     if (!driveAccessToken || !driveFolderId) return;
-    if (driveUploadInFlight) return; // skip if one is already running
+    if (driveUploadInFlight) {
+      if (!final) return; // skip if one is already running
+      try { await driveUploadInFlight; } catch (e) {}
+      if (driveUploadInFlight) return driveUploadSession(filename, csvText, final);
+    }
+    if (!final && csvText.length > DRIVE_UPLOAD_BIG && Date.now() - driveUploadAt < DRIVE_UPLOAD_BIG_MS) return;
+    driveUploadAt = Date.now();
     driveUploadInFlight = (async () => {
       try {
         if (!driveFileIdForSession) {
@@ -6038,25 +6061,27 @@
     // for cross-file analysis (e.g. sleep spanning midnight in daily-mode files)
     // without having to parse the filename.
     const rows = [['time_min', 'epoch_ms', 'hr_bpm', 'rmssd_ms', 'sdnn_match_ms', 'sdnn_5min_ms', 'sdnn_full_ms', 'palpitation', 'event', 'warning', 'connection', 'posture']];
+    // The whole session, never the chart's capped series.
+    const F = state.full;
     const allTimes = new Set();
-    state.hrSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
-    state.rmssdSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
+    F.hrSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
+    F.rmssdSeries.forEach(p => allTimes.add(p.t.toFixed(4)));
     state.events.forEach(e => allTimes.add(e.t.toFixed(4)));
-    state.warnings.forEach(w => allTimes.add(w.t.toFixed(4)));
-    state.ectopicEvents.forEach(e => allTimes.add(e.t.toFixed(4)));
-    state.connectionEvents.forEach(c => allTimes.add(c.t.toFixed(4)));
-    state.postureLog.forEach(p => allTimes.add(p.t.toFixed(4)));
+    F.warnings.forEach(w => allTimes.add(w.t.toFixed(4)));
+    F.ectopicEvents.forEach(e => allTimes.add(e.t.toFixed(4)));
+    F.connectionEvents.forEach(c => allTimes.add(c.t.toFixed(4)));
+    F.postureLog.forEach(p => allTimes.add(p.t.toFixed(4)));
     const sorted = Array.from(allTimes).map(Number).sort((a,b) => a-b);
-    const hrMap = new Map(state.hrSeries.map(p => [p.t.toFixed(4), p.v]));
-    const rmssdMap = new Map(state.rmssdSeries.map(p => [p.t.toFixed(4), p.v]));
-    const sdnnMatchMap = new Map(state.sdnnMatchSeries.map(p => [p.t.toFixed(4), p.v]));
-    const sdnn5minMap = new Map(state.sdnn5minSeries.map(p => [p.t.toFixed(4), p.v]));
-    const sdnnFullMap = new Map(state.sdnnFullSeries.map(p => [p.t.toFixed(4), p.v]));
+    const hrMap = new Map(F.hrSeries.map(p => [p.t.toFixed(4), p.v]));
+    const rmssdMap = new Map(F.rmssdSeries.map(p => [p.t.toFixed(4), p.v]));
+    const sdnnMatchMap = new Map(F.sdnnMatchSeries.map(p => [p.t.toFixed(4), p.v]));
+    const sdnn5minMap = new Map(F.sdnn5minSeries.map(p => [p.t.toFixed(4), p.v]));
+    const sdnnFullMap = new Map(F.sdnnFullSeries.map(p => [p.t.toFixed(4), p.v]));
     const evMap = new Map(state.events.map(e => [e.t.toFixed(4), e.label]));
-    const warnMap = new Map(state.warnings.map(w => [w.t.toFixed(4), w.type]));
-    const palpSet = new Set(state.ectopicEvents.map(e => e.t.toFixed(4)));
-    const connMap = new Map(state.connectionEvents.map(c => [c.t.toFixed(4), c.type]));
-    const postureMap = new Map(state.postureLog.map(p => [p.t.toFixed(4), p.posture]));
+    const warnMap = new Map(F.warnings.map(w => [w.t.toFixed(4), w.type]));
+    const palpSet = new Set(F.ectopicEvents.map(e => e.t.toFixed(4)));
+    const connMap = new Map(F.connectionEvents.map(c => [c.t.toFixed(4), c.type]));
+    const postureMap = new Map(F.postureLog.map(p => [p.t.toFixed(4), p.posture]));
     const startEpoch = state.startTime || Date.now();
     sorted.forEach(t => {
       const k = t.toFixed(4);
