@@ -202,7 +202,8 @@ async function syncOffCase(url, label) {
 
 try {
   check(gateCount === 1, 'hr_monitor.html: the gate line appears once, as the first line of driveUploadSession', String(gateCount));
-  check(/async function driveUploadSession\(filename, csvText\) \{\n    if \(!driveSyncOn\(\)\) return;\n/.test(monitorSrc), 'driveUploadSession opens with the gate line');
+  // The session check comes first (an old session's save uploads nothing), then the sync gate.
+  check(/async function driveUploadSession\(filename, csvText, final, gen\) \{\r?\n    if \(gen !== autoSaveGen\) return false;\r?\n    if \(!driveSyncOn\(\)\) return;\r?\n/.test(monitorSrc), 'driveUploadSession opens with the session check, then the gate line');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const monLinks = idx.match(/href="[^"]*hr_monitor\.html[^"]*"/g) || [];
   check(!/mode=offline/.test(idx) && monLinks.length >= 2 && monLinks.every((h) => h === 'href="./hr_monitor.html"'), 'index.html: every Open monitor link is a plain link to the monitor', monLinks.join(' '));

@@ -72,6 +72,9 @@ const ALLOW = /^https?:\/\/(127\.0\.0\.1|fonts\.googleapis\.com|fonts\.gstatic\.
 
 // Shifted clock so a minute of beats runs in milliseconds.
 const CLOCK = `(() => { const n = Date.now.bind(Date); let s = 0; window.__shift = (ms) => { s += ms; }; Date.now = () => n() + s; })();`;
+// (d) compares two pages fed the same beats, so its clock is frozen at one fixed instant and moves only by the
+// shift: real milliseconds leaking in near a one-second chart boundary moved an RMSSD point in 2 runs of 4.
+const FROZEN = `(() => { const t0 = Date.UTC(2026, 9, 1, 12); let s = 0; window.__shift = (ms) => { s += ms; }; Date.now = () => t0 + s; })();`;
 
 // In-page beat generator, seeded so both builds see the same beats.
 const FEED = `window.__feed = (seconds, kind, seed) => {
@@ -120,7 +123,7 @@ const WEB = `(() => {
   };
 })();`;
 
-async function open(file, web) {
+async function open(file, web, frozen) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
@@ -129,7 +132,7 @@ async function open(file, web) {
     const js = /\.js(\?|$)/.test(u) || route.request().resourceType() === 'script';
     return route.fulfill({ status: js ? 200 : 204, contentType: js ? 'text/javascript' : 'text/plain', body: '' });
   });
-  await ctx.addInitScript(CLOCK);
+  await ctx.addInitScript(frozen ? FROZEN : CLOCK);
   if (web) await ctx.addInitScript(WEB);
   else await ctx.addInitScript(fakeBridge({ scenario: 'live', savedStrap: true, signedIn: true, sessionAgeMs: 600000 }));
   if (!web) await ctx.addInitScript(`(() => { const h = window.Capacitor && window.Capacitor.Plugins.NativeHrSession; if (!h) return;
@@ -239,7 +242,7 @@ const feed = (page, s, kind, seed) => page.evaluate(([a, b, c]) => window.__feed
 
 // (d) Same beats through the build without the check: every shown and recorded value must match.
 async function snapshot(file, web) {
-  const { ctx, page, errs } = await open(file, web);
+  const { ctx, page, errs } = await open(file, web, true);
   await feed(page, 50, 'junk50', 9);
   await feed(page, 30, 'pvc20', 10);
   await page.waitForTimeout(300);
@@ -262,7 +265,13 @@ const webWithout = await snapshot('/web-bare.html', true);
 const webHrv = JSON.parse(webWith).ids[1];
 if (!/^\d+$/.test(webHrv)) fail('(d) web: page RMSSD did not run, HRV shows "' + webHrv + '"');
 else if (webWith === webWithout) pass(`(d) web: computeRMSSD path, HRV ${webHrv}, byte-identical without the check (${webWith.length} bytes)`);
-else fail('(d) web values differ with the check: ' + webWith.slice(0, 160) + ' vs ' + webWithout.slice(0, 160));
+else {
+  let i = 0; while (i < webWith.length && webWith[i] === webWithout[i]) i++;
+  const A = JSON.parse(webWith).charts, B = JSON.parse(webWithout).charts;
+  A.forEach(([id, sets], ci) => sets.forEach((d, di) => { const e = (B[ci] && B[ci][1][di]) || [];
+    const k = d.findIndex((v, j) => v !== e[j]); if (k >= 0 || d.length !== e.length) fail(`(d) web chart ${id} dataset ${di} first differs at point ${k} of ${d.length}/${e.length}`); }));
+  fail('(d) web values differ with the check at char ' + i + ': ' + webWith.slice(Math.max(0, i - 120), i + 60) + ' vs ' + webWithout.slice(Math.max(0, i - 120), i + 60));
+}
 
 await browser.close();
 server.close();
