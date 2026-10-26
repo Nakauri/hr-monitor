@@ -3959,7 +3959,8 @@
       if (!NATIVE) {
         const btn = $('session-toggle');
         if (btn) { btn.textContent = 'Saving'; btn.setAttribute('aria-busy', 'true'); }
-        const r = await Promise.race([stopSessionAutoSave().then((ok) => ({ ok }), () => ({ ok: false })), new Promise((res) => setTimeout(() => res({ late: true }), 30000))]);
+        const save = ended.finalSave = stopSessionAutoSave();
+        const r = await Promise.race([save.then((ok) => ({ ok }), () => ({ ok: false })), new Promise((res) => setTimeout(() => res({ late: true }), 30000))]);
         ended.driveOk = r.ok; ended.driveLate = !!r.late;
         if (btn) btn.removeAttribute('aria-busy');
       }
@@ -4030,7 +4031,15 @@
       if (f.native) set('Queued for Drive');
       else if (f.driveOk === true) set('Saved to Drive');
       else if (f.driveOk === false) set('Drive upload failed', 'error');
-      else if (f.driveLate) set('Drive upload incomplete', 'error');
+      else if (f.driveLate) {
+        // Past 30 s the save keeps going; the line follows it until it lands or the panel moves on.
+        set('Drive upload incomplete', 'error');
+        if (f.finalSave) f.finalSave.then((ok) => {
+          if (seq !== afterStopSeq) return;
+          if (ok === true) set('Saved to Drive');
+          else if (ok === false) set('Drive upload failed', 'error');
+        }, () => { if (seq === afterStopSeq) set('Drive upload failed', 'error'); });
+      }
       else {
         set('Uploading to Drive');
         const t0 = Date.now();
@@ -5739,6 +5748,7 @@
     if (NATIVE) return;
     if (!autoSaveFileHandle && !driveAccessToken) return;
     if (!final && !force && autoSaveBytes > SAVE_BIG && Date.now() - autoSaveBuiltAt < 60000) return;
+    const gen = autoSaveGen;
     // The native plugin owns Drive uploads whenever it exists; JS only writes the local folder.
     const nativeDriveActive = !!(window.HRMNativeHrSession && window.HRMNativeHrSession.isAvailable);
     const { csv, filename } = buildSessionCSV();
@@ -5750,6 +5760,7 @@
         await writable.close();
         autoSaveFailStreak = 0;
       } catch (e) {
+        if (gen !== autoSaveGen) return false;
         autoSaveFailStreak++;
         console.error('Auto-save write failed (streak=' + autoSaveFailStreak + '):', e);
         setAutoSaveStatus('write error (' + autoSaveFailStreak + '/' + AUTOSAVE_FAIL_GIVEUP + ')', 'error');
@@ -5760,8 +5771,8 @@
       }
     }
     if (driveAccessToken && driveFolderId && !nativeDriveActive) {
-      if (final) return await driveUploadSession(filename, csv, true);
-      driveUploadSession(filename, csv);
+      if (final) return await driveUploadSession(filename, csv, true, gen);
+      driveUploadSession(filename, csv, false, gen);
     }
   }
 
@@ -5996,11 +6007,18 @@
     return resp;
   }
 
-  // One lookup at a time: the load-time lookup and a session start's retry share it, so a first-ever sign-in
-  // cannot create two root folders.
-  let driveFolderLookup = null;
+  // One lookup per login at a time: the load-time lookup and a session start's retry share it, so a first-ever
+  // sign-in cannot create two root folders. A new login waits for the old lookup (which then drops itself) and
+  // runs its own.
+  let driveFolderLookup = null, driveFolderLookupTag = null;
   function driveEnsureFolder() {
-    if (!driveFolderLookup) driveFolderLookup = driveLookUpFolder().finally(() => { driveFolderLookup = null; });
+    const tag = relayLink.loginTag;
+    if (!driveFolderLookup || driveFolderLookupTag !== tag) {
+      const prev = driveFolderLookup || Promise.resolve();
+      driveFolderLookupTag = tag;
+      const p = driveFolderLookup = prev.catch(() => {}).then(() => driveLookUpFolder())
+        .finally(() => { if (driveFolderLookup === p) driveFolderLookup = null; });
+    }
     return driveFolderLookup;
   }
   async function driveLookUpFolder() {
@@ -6046,17 +6064,18 @@
   // Paced by drivePaceMs as the file grows. A final upload (session stop) is never skipped: it waits for one in
   // flight, then goes, and the returned promise settles when it has reached Drive.
   let driveUploadAt = 0;
-  async function driveUploadSession(filename, csvText, final) {
+  // gen is the session the CSV belongs to; an old session's upload that outlives a new Start goes nowhere.
+  async function driveUploadSession(filename, csvText, final, gen) {
     if (!driveSyncOn()) return;
     if (!driveAccessToken || !driveFolderId) return;
     if (driveUploadInFlight) {
       if (!final) return; // skip if one is already running
       try { await driveUploadInFlight; } catch (e) {}
-      if (driveUploadInFlight) return driveUploadSession(filename, csvText, final);
+      if (gen !== autoSaveGen) return false;
+      if (driveUploadInFlight) return driveUploadSession(filename, csvText, final, gen);
     }
     if (!final && Date.now() - driveUploadAt < drivePaceMs(csvText.length)) return;
     driveUploadAt = Date.now();
-    const gen = autoSaveGen;
     const job = driveUploadInFlight = (async () => {
       try {
         if (!driveFileIdForSession) {

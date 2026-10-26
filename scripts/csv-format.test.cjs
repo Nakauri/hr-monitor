@@ -180,10 +180,11 @@ const was = jsFunction(monitor, 'writeAutoSave') || '';
 const stopNow = jsFunction(monitor, 'stopSessionNow') || '';
 const stopSave = jsFunction(monitor, 'stopSessionAutoSave') || '';
 check('a big file is rebuilt at most once a minute, the final save always',
-  /if \(!final && !force && autoSaveBytes > SAVE_BIG && Date\.now\(\) - autoSaveBuiltAt < 60000\) return;/.test(was) && /if \(final\) return await driveUploadSession\(filename, csv, true\);/.test(was));
+  /if \(!final && !force && autoSaveBytes > SAVE_BIG && Date\.now\(\) - autoSaveBuiltAt < 60000\) return;/.test(was) && /if \(final\) return await driveUploadSession\(filename, csv, true, gen\);/.test(was));
+const RACE = 'const save = ended.finalSave = stopSessionAutoSave();';
 check('the stop reads its facts, then awaits the final save before the after-stop panel, once per session',
-  stopNow.indexOf('const ended = afterStopFacts();') >= 0 && stopNow.indexOf('const ended = afterStopFacts();') < stopNow.indexOf('await Promise.race([stopSessionAutoSave()')
-  && stopNow.indexOf('await Promise.race([stopSessionAutoSave()') < stopNow.indexOf('showAfterStop(ended)')
+  stopNow.indexOf('const ended = afterStopFacts();') >= 0 && stopNow.indexOf('const ended = afterStopFacts();') < stopNow.indexOf(RACE)
+  && stopNow.indexOf(RACE) >= 0 && /await Promise\.race\(\[save\.then/.test(stopNow) && stopNow.indexOf(RACE) < stopNow.indexOf('showAfterStop(ended)')
   && /if \(autoSaveFinal\) return autoSaveFinal;/.test(stopSave) && /return job;/.test(jsFunction(monitor, 'driveUploadSession') || ''));
 // Confirm 2026-10-25: the panel polled a status the save itself then overwrote (every folder+Drive stop read "not
 // confirmed"), and a final save settling after the next Start cleared that session's folder file and Drive id.
@@ -202,8 +203,34 @@ check('addMarker is the only writer of the marks; undoNativeMark removes one fro
   && /state\.events\.splice\(i, 1\)/.test(undo) && /state\.full\.events\.splice\(j, 1\)/.test(undo) && !/\.(push|unshift)\(|splice\([^)]*,[^)]*,/.test(undo));
 check('the free-text marker input is gone', !/id="marker-label"|id="add-marker"/.test(monitor));
 
-if (failures) {
-  console.log(failures + ' check(s) failed');
-  process.exit(1);
+// Confirm round 2: an old session's final waits on a running upload, Start happens meanwhile; it must upload nothing
+// and leave the new session's Drive file id alone. Run on the real driveUploadSession.
+async function oldFinalAfterStart() {
+  let release;
+  const calls = [];
+  const u = { driveSyncOn: () => true, driveAccessToken: 'tok', driveFolderId: 'f', driveFileIdForSession: null, autoSaveGen: 1,
+    driveUploadAt: 0, drivePaceMs: () => 0, driveAuthHeader: async () => 'Bearer x', setAutoSaveStatus() {}, console: { error() {} },
+    window: { aortiAuth: { refreshIfNeeded: async () => {} } },
+    fetch: async (url, init) => { calls.push(init.method); return { ok: true, status: 200, json: async () => ({ id: 'old-file' }) }; } };
+  u.driveUploadInFlight = new Promise((r) => { release = r; });
+  vm.createContext(u);
+  const usrc = jsFunction(monitor, 'driveUploadSession');
+  vm.runInContext(/^async /.test(usrc) ? usrc : 'async ' + usrc, u);
+  const pending = u.driveUploadSession('old.csv', 'csv', true, 1);
+  u.autoSaveGen = 2; u.driveFileIdForSession = null; // Start
+  u.driveUploadInFlight = null; release();
+  const ok = await pending;
+  return { ok, calls: calls.length, id: u.driveFileIdForSession };
 }
-console.log('All CSV format checks passed');
+const bounded = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('stalled')), 5000))]);
+bounded(oldFinalAfterStart()).then((r) => {
+  check('an old final that waited past a new Start uploads nothing', r.ok === false && r.calls === 0 && r.id === null, r);
+}, (e) => check('an old final that waited past a new Start uploads nothing', false, String(e))).then(() => {
+  if (failures) {
+    console.log(failures + ' check(s) failed');
+    process.exit(1);
+  }
+  console.log('All CSV format checks passed');
+  process.exitCode = 0;
+});
+process.exitCode = 1; // a promise that never settles must not read as a pass
