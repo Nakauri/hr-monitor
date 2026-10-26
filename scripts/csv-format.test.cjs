@@ -194,7 +194,7 @@ check('the after-stop panel shows the final save\'s own result',
   /ended\.driveOk = r\.ok;/.test(stopNow) && /else if \(f\.driveOk === true\) set\('Saved to Drive'\);/.test(after) && /else if \(f\.driveOk === false\) set\('Drive upload failed', 'error'\);/.test(after));
 check('an old session\'s save never touches the new session',
   /autoSaveGen\+\+;/.test(jsFunction(monitor, 'startSessionAutoSave') || '') && /if \(gen === autoSaveGen\) \{\s*autoSaveFileHandle = null;/.test(stopSave)
-  && /if \(gen === autoSaveGen\) driveFileIdForSession = data\.id;/.test(upload) && (upload.match(/gen === autoSaveGen && typeof setAutoSaveStatus/g) || []).length === 2);
+  && /if \(gen === autoSaveGen && relayLink\.loginTag === login\) driveFileIdForSession = data\.id;/.test(upload) && (upload.match(/gen === autoSaveGen && typeof setAutoSaveStatus/g) || []).length === 2);
 check('a page close writes a flushed mark past the rebuild pace', /writeAutoSave\(false, true\)/.test(monitor) && /if \(!final && !force && autoSaveBytes > SAVE_BIG/.test(was));
 // The Marks list and the session's full record (the saved file) move together: one insert, one undo, no other writer.
 check('addMarker is the only writer of the marks; undoNativeMark removes one from each list',
@@ -210,7 +210,7 @@ async function oldFinalAfterStart(waitOnUpload) {
   const calls = [];
   const u = { driveSyncOn: () => true, driveAccessToken: 'tok', driveFolderId: 'f', driveFileIdForSession: null, autoSaveGen: 1,
     driveUploadAt: 0, drivePaceMs: () => 0, driveAuthHeader: async () => 'Bearer x', setAutoSaveStatus() {}, console: { error() {} },
-    window: { aortiAuth: { refreshIfNeeded: async () => {} } },
+    window: { aortiAuth: { refreshIfNeeded: async () => {} } }, relayLink: { loginTag: null },
     fetch: async (url, init) => { calls.push(init.method); return { ok: true, status: 200, json: async () => ({ id: 'old-file' }) }; } };
   u.driveUploadInFlight = waitOnUpload ? new Promise((r) => { release = r; }) : null;
   vm.createContext(u);
@@ -230,12 +230,45 @@ async function oldFinalAfterStart(waitOnUpload) {
   }
   return { ok, calls: calls.length, id: u.driveFileIdForSession };
 }
+// Round 4: Stop while Chrome's folder prompt is up; the start resuming afterwards must arm no saves (they would
+// overwrite the finished session's files with an empty one). Run on the real startSessionAutoSave.
+async function stopDuringFolderPrompt() {
+  let grant;
+  const armed = [];
+  const s = { NATIVE: false, driveFileIdForSession: null, autoSaveGen: 0, autoSaveFinal: null, finalLocalOk: undefined,
+    autoSaveBytes: 0, autoSaveBuiltAt: 0, driveUploadAt: 0, driveAccessToken: null, driveFolderId: null, autoSaveInterval: null,
+    autoSaveFileHandle: null, window: {}, console: { error() {} }, Date, setAutoSaveStatus() {},
+    autoSaveDirHandle: { getFileHandle: async () => ({ fake: true }) },
+    ensureAutoSavePermission: () => new Promise((r) => { grant = r; }),
+    setInterval: () => { armed.push('interval'); return 1; }, clearInterval() {}, writeAutoSave: () => { armed.push('write'); },
+    driveEnsureFolder: () => Promise.resolve() };
+  vm.createContext(s);
+  const src = jsFunction(monitor, 'startSessionAutoSave');
+  vm.runInContext(/^async /.test(src) ? src : 'async ' + src, s);
+  const p = s.startSessionAutoSave();
+  s.autoSaveFinal = Promise.resolve(); // Stop
+  grant(true);
+  await p;
+  return { armed: armed.length, handle: s.autoSaveFileHandle };
+}
+const stopNow2 = jsFunction(monitor, 'stopSessionNow') || '';
+const after2 = jsFunction(monitor, 'showAfterStop') || '';
+check('a failed final folder write says so and keeps its error',
+  /ended\.folderFailed = finalLocalOk === false;/.test(stopNow2) && /'Last save to ' \+ f\.folder \+ ' failed'/.test(after2)
+  && /if \(autoSaveDirHandle && finalLocalOk !== false\) setAutoSaveStatus\('idle'\);/.test(stopSave)
+  && /if \(final\) finalLocalOk = true;/.test(was) && /if \(final\) finalLocalOk = false;/.test(was));
+check('a mark or note during "Saving" is refused, not lost',
+  /if \(!state\.startTime \|\| stopInFlight \|\|/.test(jsFunction(monitor, 'logMark') || '') && /if \(!state\.startTime \|\| stopInFlight \|\| noteComposer\) return;/.test(jsFunction(monitor, 'openNoteComposer') || ''));
 const bounded = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('stalled')), 5000))]);
 const OLD = ['an old final that waited past a new Start uploads nothing', 'an old final held up in its local write past a new Start uploads nothing'];
 bounded(Promise.all([oldFinalAfterStart(true), oldFinalAfterStart(false)])).then((rs) => rs.forEach((r, i) => {
   const pass = r.ok === false && r.calls === 0 && r.id === null;
   check(OLD[i], pass, pass ? undefined : JSON.stringify(r));
-}), (e) => check(OLD[0], false, String(e))).then(() => {
+}), (e) => check(OLD[0], false, String(e)))
+  .then(() => bounded(stopDuringFolderPrompt())).then((r) => {
+    const pass = r.armed === 0 && r.handle === null;
+    check('a Stop during the folder prompt leaves no saves armed', pass, pass ? undefined : JSON.stringify(r));
+  }, (e) => check('a Stop during the folder prompt leaves no saves armed', false, String(e))).then(() => {
   if (failures) {
     console.log(failures + ' check(s) failed');
     process.exit(1);
