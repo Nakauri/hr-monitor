@@ -4038,6 +4038,7 @@
           if (seq !== afterStopSeq) return;
           if (ok === true) set('Saved to Drive');
           else if (ok === false) set('Drive upload failed', 'error');
+          else set('Drive upload not confirmed', 'error');
         }, () => { if (seq === afterStopSeq) set('Drive upload failed', 'error'); });
       }
       else {
@@ -6065,7 +6066,9 @@
   // flight, then goes, and the returned promise settles when it has reached Drive.
   let driveUploadAt = 0;
   // gen is the session the CSV belongs to; an old session's upload that outlives a new Start goes nowhere.
+  // false means failed or superseded; no caller can see a superseded one (the panel has moved on by then).
   async function driveUploadSession(filename, csvText, final, gen) {
+    if (gen !== autoSaveGen) return false;
     if (!driveSyncOn()) return;
     if (!driveAccessToken || !driveFolderId) return;
     if (driveUploadInFlight) {

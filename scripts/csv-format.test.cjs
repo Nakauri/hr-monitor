@@ -205,27 +205,37 @@ check('the free-text marker input is gone', !/id="marker-label"|id="add-marker"/
 
 // Confirm round 2: an old session's final waits on a running upload, Start happens meanwhile; it must upload nothing
 // and leave the new session's Drive file id alone. Run on the real driveUploadSession.
-async function oldFinalAfterStart() {
+async function oldFinalAfterStart(waitOnUpload) {
   let release;
   const calls = [];
   const u = { driveSyncOn: () => true, driveAccessToken: 'tok', driveFolderId: 'f', driveFileIdForSession: null, autoSaveGen: 1,
     driveUploadAt: 0, drivePaceMs: () => 0, driveAuthHeader: async () => 'Bearer x', setAutoSaveStatus() {}, console: { error() {} },
     window: { aortiAuth: { refreshIfNeeded: async () => {} } },
     fetch: async (url, init) => { calls.push(init.method); return { ok: true, status: 200, json: async () => ({ id: 'old-file' }) }; } };
-  u.driveUploadInFlight = new Promise((r) => { release = r; });
+  u.driveUploadInFlight = waitOnUpload ? new Promise((r) => { release = r; }) : null;
   vm.createContext(u);
   const usrc = jsFunction(monitor, 'driveUploadSession');
   vm.runInContext(/^async /.test(usrc) ? usrc : 'async ' + usrc, u);
-  const pending = u.driveUploadSession('old.csv', 'csv', true, 1);
-  u.autoSaveGen = 2; u.driveFileIdForSession = null; // Start
-  u.driveUploadInFlight = null; release();
-  const ok = await pending;
+  let ok;
+  if (waitOnUpload) {
+    const pending = u.driveUploadSession('old.csv', 'csv', true, 1);
+    u.autoSaveGen = 2; u.driveFileIdForSession = null; // Start
+    u.driveUploadInFlight = null; release();
+    ok = await pending;
+  } else {
+    // The old save was held up in its local write instead; Start already ran and made the new file.
+    u.autoSaveGen = 2; u.driveFileIdForSession = 'new-file';
+    ok = await u.driveUploadSession('old.csv', 'csv', true, 1);
+    return { ok, calls: calls.length, id: u.driveFileIdForSession === 'new-file' ? null : u.driveFileIdForSession };
+  }
   return { ok, calls: calls.length, id: u.driveFileIdForSession };
 }
 const bounded = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('stalled')), 5000))]);
-bounded(oldFinalAfterStart()).then((r) => {
-  check('an old final that waited past a new Start uploads nothing', r.ok === false && r.calls === 0 && r.id === null, r);
-}, (e) => check('an old final that waited past a new Start uploads nothing', false, String(e))).then(() => {
+const OLD = ['an old final that waited past a new Start uploads nothing', 'an old final held up in its local write past a new Start uploads nothing'];
+bounded(Promise.all([oldFinalAfterStart(true), oldFinalAfterStart(false)])).then((rs) => rs.forEach((r, i) => {
+  const pass = r.ok === false && r.calls === 0 && r.id === null;
+  check(OLD[i], pass, pass ? undefined : JSON.stringify(r));
+}), (e) => check(OLD[0], false, String(e))).then(() => {
   if (failures) {
     console.log(failures + ' check(s) failed');
     process.exit(1);
