@@ -29,6 +29,7 @@ run node scripts/day-gaps.test.cjs
 run node scripts/row-epoch.test.cjs
 run node scripts/catch-floor.mjs
 run node scripts/coverage.mjs
+run node scripts/section-map.mjs
 # The JVM tier (compiles the real native Java, about 4 min) runs in CI always, and locally only when the
 # push touches the Java or these tests (or origin/main is unknown).
 if [ -n "$CI" ] || ! git rev-parse -q --verify origin/main >/dev/null \
