@@ -156,8 +156,10 @@ try {
     check(!(await logShown(page)), 'web idle: Log row hidden with no session');
     await startWeb(page);
     check(await logShown(page), 'web live: Log row shown');
+    // The recorder's first folder write is its first 10 s tick (docs/web-recorder.md S29).
+    await page.waitForFunction(() => window.__written.length > 0, null, { timeout: 13000 }).catch(() => {});
     const n0 = await page.evaluate(() => window.__written.length);
-    check(n0 > 0, 'web live: the fake folder receives auto-save writes', 'writes ' + n0);
+    check(n0 > 0, 'web live: the fake folder receives auto-save writes within the first tick', 'writes ' + n0);
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'web-live-360.png'), fullPage: false });
 
     await page.click('#log-symptom');
