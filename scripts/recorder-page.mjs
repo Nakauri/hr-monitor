@@ -411,6 +411,32 @@ const scenarios = {
     check(!(await page.evaluate(() => [...document.querySelectorAll('.toast-host .toast')].some((t) => /Undo/.test(t.textContent)))), 'S18 the Undo toast is gone once the tab is left');
     if (errs.length) fail('S18: page errors ' + errs.join('; '));
     await ctx.close();
+    // Round 4: the 10 s save is mid-write when the tab is left; the mark goes in the write after it (rule 21).
+    {
+      const { ctx, page, errs } = await newPage();
+      await startWeb(page);
+      await tick(page);
+      await page.evaluate(() => document.getElementById('log-symptom').click());
+      await page.waitForTimeout(300);
+      await page.evaluate(() => { window.__folderMode = 'hang'; window.__tick(); });
+      await page.waitForTimeout(200);
+      const before = await page.evaluate(() => window.__written.length);
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await page.waitForTimeout(300);
+      const during = await page.evaluate(() => window.__written.length);
+      await page.evaluate(() => { window.__folderMode = 'ok'; window.__releaseFolder(true); });
+      await page.waitForTimeout(800);
+      const w = await page.evaluate((b) => window.__written.slice(b).map((x) => x.c), before);
+      check(during === before && w.length >= 1 && /sym:symptom/.test(w[w.length - 1]),
+        'S18 a save mid-write when the tab is left: nothing beside it, then the mark in the write after it', JSON.stringify({ before, during, n: w.length }));
+      if (errs.length) fail('S18 mid-write: page errors ' + errs.join('; '));
+      await ctx.close();
+    }
   },
   // S31: A hung, Start, a takeover stops B with Drive failing, then A saves: B's panel stays failed, A's line saved.
   async S31() {

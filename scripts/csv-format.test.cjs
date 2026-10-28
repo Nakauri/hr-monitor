@@ -176,7 +176,10 @@ check('the stop awaits the Recording\'s final, capped, before the after-stop pan
 check('Start stops the old Recording before the session id moves (rule 19)',
   /endRecording\(true\);\s*sessionSeq\+\+;\s*resetLiveDataBuffers\(\);/.test(connectSrc) && connectSrc.indexOf('sessionSeq++') < connectSrc.indexOf('startRecording();'));
 check('an old Recording never builds new data', /buildCsv: \(id\) => \(id === sessionSeq \? buildSessionCSV\(\)\.csv : null\)/.test(monitor));
-check('a page close flushes marks, then the recorder writes', /function onPageHide\(\) \{\s*try \{ flushHeldMarks\(\); \} catch \(e\) \{\}\s*if \(recorder\) recorder\.closing\(\);/.test(monitor));
+check('a page close flushes marks, then the recorder writes, urgent when something was entered',
+  /function onPageHide\(\) \{\s*let entered = false;\s*try \{ entered = flushHeldMarks\(\); \} catch \(e\) \{\}\s*if \(recorder\) recorder\.closing\(entered\);/.test(monitor));
+check('leaving the tab commits held marks before the hidden save, urgent when it did',
+  /try \{ entered = commitHeldMarks\(\); \} catch \(e\) \{\}\s*if \(recorder\) recorder\.hidden\(entered\);/.test(monitor));
 // Page review 2026-10-28: a reconnect with no Recording starts one; Stop never takes an older session's Recording;
 // a session with no data keeps no Export and no guard.
 check('a reconnect that brings a session live starts its Recording',

@@ -17,7 +17,7 @@ other module-level state.
   for page session `id` with the folder `dir` (or null); `filename` comes from `startMs`. Returns it. A folder
   picked or cleared with no Recording, or while the current one is stopping, is simply passed at the next start.
 - `stop()`: the current Recording (the same one on every call; its `final` settles when both targets have a result); null if none.
-- `hidden()`, `closing()`: page lifecycle (rule 12).
+- `hidden(urgent)`, `closing(urgent)`: page lifecycle (rules 12, 18, 21).
 - `folderChanged(dirOrNull)`, `authChanged()`: targets changed (rule 15, rule 8).
 - `targets()`: `{ folder, drive }` booleans for the current Recording (the unsaved notice reads this).
 - `current()`: the current Recording or null (status filtering, the page's tests).
@@ -120,12 +120,17 @@ other module-level state.
     Export (`rec.text` as `rec.filename`, never `buildSessionCSV()`), and the leave guard stays on while any is kept.
     The panel shows only the newest Recording from `stop()`. A settle or 30 s timer of any other Recording updates
     only its own notice line. A Start hides the panel and cancels its pending 30 s show.
-18. PAGE: leaving the tab (hidden) commits held marks before `recorder.hidden()`, so that write carries them; Undo
-    ends there. pagehide flushes the note (and any mark held since), then calls `recorder.closing()`.
+18. PAGE: leaving the tab (hidden) commits held marks, then calls `recorder.hidden(urgent)`; Undo ends there.
+    pagehide flushes the note and any mark held since, then calls `recorder.closing(urgent)`. urgent is true when
+    either committed something the user entered (rule 21).
 19. PAGE: `connectWeb` calls `recorder.stop()` immediately before the session id bump, so no path reaches a new
     id with a Recording still live (today every path to idle runs `disconnect()`; this makes it a rule).
 20. PAGE: the Start click asks `dir.requestPermission` before `connect` (Chrome denies it after the strap
     picker's async work); in `arming`, `env.ensurePermission` only queries.
+21. urgent: a forced save that skips the pacing (rules 11, 12). If a folder write is in flight, the Recording is
+    owed one write: when that write settles, or a newly picked file is made, text built then goes to the file that
+    is current then, only while `live` and never beside another write (rule 4). A dropped handle (strike 3, a pick or
+    a clear) never gets it; after Stop the final carries everything.
 
 ## Scenarios (recorder.test.cjs; PAGE ones in a page check)
 | # | scenario | expected |
@@ -179,9 +184,9 @@ and the open part paced, about 12 MB an hour and at most a minute behind; it nee
 
 ## Accepted limits
 - A crash while visible loses at most one folder tick and one Drive pace; no event fires.
-- A note left open when the tab closes is written only if no folder write is in flight then (the hidden write
-  usually is). Held marks are not affected: they commit on leaving the tab (rule 18). Design pass 2026-10-28, after
-  three review rounds each found a defect in queueing a close write behind the hidden one.
+- Something entered at tab close reaches the folder only if the browser lets the page finish that write (rule 21).
+  Drive gets it only when its pace allows; the folder file and Export are the record. Design pass 2026-10-28 (rule
+  21), after review rounds 1 to 4 each found a defect on this path.
 - Three account switches during one final create save it under the middle account (rule 8).
 - Points recorded during the "Saving" wait are not in the file (the final text is built at Stop).
 - An ambiguous Drive create can leave a duplicate file (Block 3b: `files.generateIds`).

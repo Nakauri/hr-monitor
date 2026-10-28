@@ -886,6 +886,60 @@ CHECKS.R = async (src) => {
     row('R12 hidden write ' + (mode === 'ok' ? 'landing' : 'hung') + ' at pagehide: it carries the mark; the close writes nothing beside it',
       overlapFree && /MARK/.test(h.content), JSON.stringify({ writes: h.writes.length, content: h.content, max: h.maxInflight }));
   }
+  // Rule 21 (round 4): something the user entered, committed on leaving the tab, reaches the folder.
+  const mark = (v, t) => { v.page.text = 'time,hr\n' + t + '\n'; v.page.rows++; };
+  // a) The tick's write is in flight at hidden: one owed write after it, fresh text, never beside it.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  h.modes.push('hang');
+  await w.advance(10000);
+  mark(w, '2,90\nMARK'); w.R.hidden(true); w.R.closing(true);
+  const a21 = h.writes.length;
+  await flush(); h.hung.shift().ok(); await w.advance(500);
+  row('R21 a write in flight when a mark is committed: one more write after it, with the mark, never beside it',
+    h.writes.length === a21 + 1 && /MARK/.test(h.content) && h.maxInflight === 1 && !rec.owed, JSON.stringify({ n: h.writes.length, a21, c: h.content, max: h.maxInflight }));
+  // b) Above SAVE_BIG, a rebuild 5 s ago: an urgent save skips the minute; a plain hidden one does not.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  w.page.text = 'x'.repeat(600 * 1024); w.page.rows++;
+  await w.advance(10000);
+  await w.advance(5000);
+  const b0 = h.writes.length;
+  w.page.rows++; w.R.hidden(); await flush();
+  const plain = h.writes.length;
+  mark(w, 'x'.repeat(600 * 1024) + '\nMARK'); w.R.hidden(true); await flush();
+  row('R21 above SAVE_BIG an urgent save skips the minute; a plain one waits',
+    plain === b0 && h.writes.length === b0 + 1 && /MARK/.test(h.writes[h.writes.length - 1]), JSON.stringify([b0, plain, h.writes.length]));
+  // c) The write in flight is the third strike: the owed write never goes to the dropped handle.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  h.modes.push('fail', 'fail', 'hang');
+  await w.advance(30000);
+  mark(w, '2,90\nMARK'); w.R.hidden(true);
+  const c21 = h.writes.length;
+  await flush(); h.hung.shift().fail(); await w.advance(500);
+  row('R21 the write in flight strikes out: nothing owed is written to the dropped handle',
+    rec.file === null && h.writes.length === c21 && h.maxInflight === 1, JSON.stringify({ file: !!rec.file, n: h.writes.length, c21 }));
+  // d) A pick while the owed write waits: it goes to the new file with fresh text, never to the old one.
+  w = world(src); dir = mkDir('A'); rec = await w.live(dir); h = dir.handles[0];
+  h.modes.push('hang');
+  await w.advance(10000);
+  mark(w, '2,90\nMARK'); w.R.hidden(true);
+  // B's file is still being made when A's write settles, so only B's arrival can pay what is owed.
+  const d21 = mkDir('B', { creates: ['hang'] }); w.R.folderChanged(d21); await flush();
+  const old21 = h.writes.length;
+  h.hung.shift().ok(); await flush();
+  d21.hungCreates.shift().ok(); await w.advance(500);
+  const hb = d21.handles[0];
+  row('R21 a pick while owed: the new file gets the mark once it exists; the old handle gets nothing more',
+    h.writes.length === old21 && !!hb && hb.writes.length === 1 && /MARK/.test(hb.content) && !rec.owed, JSON.stringify({ old: h.writes.length, old21, b: hb && hb.writes }));
+  // e) Stop while owed: nothing owed is written after Stop; the final carries the mark.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  h.modes.push('hang');
+  await w.advance(10000);
+  mark(w, '2,90\nMARK'); w.R.hidden(true);
+  fin = track(w.R.stop());
+  await flush(); h.hung.shift().ok(); await w.advance(500);
+  row('R21 Stop while owed: only the final writes after it, with the mark',
+    fin.done && rec.result.folder === 'saved' && /MARK/.test(h.content) && h.writes.length === 2 && h.maxInflight === 1, JSON.stringify({ n: h.writes.length, r: rec.result }));
+
   // Rule 12: a forced save goes to Drive only when its pace allows.
   w = world(src); rec = await w.live();
   await w.advance(5000);

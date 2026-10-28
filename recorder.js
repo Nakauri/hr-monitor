@@ -51,7 +51,7 @@
         // pick: the newest folder pick; pending: its createFile. pendingDir: a pick made while arming (15).
         // noStatus: a routine PATCH on driveFileId ended with no HTTP status (4). finalFailed: a final write was
         // made and did not land (13).
-        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null,
+        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null, owed: false,
       };
     }
 
@@ -129,6 +129,7 @@
           if (rec.pick !== pick) return;
           rec.file = handle; rec.folderName = dir.name || 'folder';
           if (rec.state === 'live') status(rec, 'writing', 'writing');
+          payOwed(rec);
         } catch (e) {
           warn('folder file:', e);
           if (rec.pick !== pick) return;
@@ -181,15 +182,17 @@
       return Promise.all(jobs).then(() => {});
     }
 
-    // 12: hidden or closing, in live only: a forced write when rows grew, paced.
-    function forced(rec, atClose) {
+    // 12: hidden or closing, in live only: a forced write when rows grew, paced. urgent: the page just committed
+    // something the user entered (a mark, a note); it skips the pacing, and a folder write in flight leaves the folder
+    // owed one write of fresh text when it settles (21).
+    function forced(rec, atClose, urgent) {
       if (!rec || rec.state !== 'live') return;
       const rows = env.rowCount ? env.rowCount() : 0;
       if (rows <= rec.rows) return;
       const t = now();
-      // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart, except at close, where
-      // a mark flushed by pagehide must still reach the file.
-      if (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : !atClose && t - rec.forcedAt < forcedMs) return;
+      // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart, except at close.
+      if (!urgent && (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : !atClose && t - rec.forcedAt < forcedMs)) return;
+      if (urgent && rec.file && rec.folderBusy) rec.owed = true;
       const folderWants = !!rec.file && !rec.folderBusy;
       const driveWants = driveReady(rec) && !rec.upload && t - rec.driveAt >= pace(rec.bytes);
       if (!folderWants && !driveWants) return;
@@ -199,11 +202,26 @@
       if (folderWants) folderWrite(rec, rec.file, text, false);
       if (driveWants) driveUpload(rec, text, rec.bytes, false);
     }
-    function hidden() { forced(cur); }
-    function closing() { forced(cur, true); }
+    function hidden(urgent) { forced(cur, false, !!urgent); }
+    function closing(urgent) { forced(cur, true, !!urgent); }
 
-    // 4, 10, 15: the one folder write of a Recording; its outcome counts only while the handle is still the file.
+    // 21: an owed write goes to whatever the file is now, with text built now, once nothing holds the folder; never
+    // after Stop (the final carries everything) and never to a handle that was dropped.
+    function payOwed(rec) {
+      if (!rec.owed || rec.state !== 'live' || !rec.file || rec.folderBusy) return;
+      rec.owed = false;
+      const text = build(rec);
+      if (text != null) folderWrite(rec, rec.file, text, false);
+    }
+
+    // 4, 10, 15: the one folder write of a Recording; then any owed write (21).
     async function folderWrite(rec, handle, text, final) {
+      const r = await folderWriteOnce(rec, handle, text, final);
+      payOwed(rec);
+      return r;
+    }
+    // Its outcome counts only while the handle is still the file.
+    async function folderWriteOnce(rec, handle, text, final) {
       let p;
       try { p = Promise.resolve(env.writeFile(handle, text)); } catch (e) { p = Promise.reject(e); }
       const job = { p, handle };
