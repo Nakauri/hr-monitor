@@ -3489,6 +3489,19 @@
     const m = parseSessionFilename(filename);
     return m ? m.date.getTime() : 0;
   }
+  // The one row-epoch rule: the epoch_ms cell when it parses to a number, else the file start plus elapsed minutes t.
+  // A cell may already be a number (v2 rows). checks: scripts/row-epoch.test.cjs.
+  function rowEpochFn(idx, fileStartEpoch) {
+    const col = idx.epoch_ms;
+    return (row, t) => {
+      const c = col == null ? '' : row[col];
+      if (c !== '') {
+        const e = typeof c === 'number' ? c : parseFloat(c);
+        if (!isNaN(e)) return e;
+      }
+      return fileStartEpoch + t * 60000;
+    };
+  }
 
   // Given a session summary and an ISO date, return the portion of the
   // session that falls within that day's local-time boundaries. Used by
@@ -3715,7 +3728,7 @@
     if (head) _parseTimer = setTimeout(() => failParseWorker(w, 'no reply'), 20000 + head.size / 100);
   }
   function parseWorkerSource() {
-    const fns = [summarizeCSV, parseCSV, deriveFileStartEpoch, parseSessionFilename, rowElapsedMinFn, elapsedRule, mergeGaps,
+    const fns = [summarizeCSV, parseCSV, deriveFileStartEpoch, rowEpochFn, parseSessionFilename, rowElapsedMinFn, elapsedRule, mergeGaps,
       trimGapsByData, dataJumpGaps, rollingTrailingMean, detectChillsWindows, nearestRmssdAt, dayKeyOf, isoAddDays,
       localDateLabel, localDateKeyFromEpoch, dayWindow];
     const consts = { ELAPSED_MAX_START_MIN, ELAPSED_MAX_DRIFT_MIN, DATA_JUMP_GAP_MIN, DAY_START_HOUR, SUMMARY_SCHEMA_V };
@@ -4066,16 +4079,7 @@
     const postureLog = [];  // {t, posture}
 
     const fileStartEpoch = deriveFileStartEpoch(filename);
-    const hasEpochCol = idx.epoch_ms != null;
-    function epochFor(t, row) {
-      // Prefer the CSV's epoch_ms column when present (post-schema-bump writer).
-      // Fall back to filename-derived start + elapsed time_min for older files.
-      if (hasEpochCol && row[idx.epoch_ms] !== '') {
-        const e = parseFloat(row[idx.epoch_ms]);
-        if (!isNaN(e)) return e;
-      }
-      return fileStartEpoch + t * 60000;
-    }
+    const epochFor = rowEpochFn(idx, fileStartEpoch);
     // Insert a null break-point when consecutive rows are more than
     // GAP_MIN minutes apart. With spanGaps:false on the chart, this
     // renders as a visible gap instead of a long straight line across
@@ -4092,7 +4096,7 @@
         rmssd.push({ t: t - 0.001, v: null });
       }
       lastT = t;
-      const ep = epochFor(t, r);
+      const ep = epochFor(r, t);
       const h = r[idx.hr_bpm] !== '' ? parseFloat(r[idx.hr_bpm]) : null;
       if (h != null && !isNaN(h)) hr.push({ t, v: h, ep });
       const rm = r[idx.rmssd_ms] !== '' ? parseFloat(r[idx.rmssd_ms]) : null;
@@ -4547,13 +4551,15 @@
     const rule = elapsedRule(T.length, (i) => T[i], (i) => E[i]);
     const elapsed = rule.mode === 0 ? (i) => T[i] : (i) => rule.at(T[i], E[i]);
     const hr = [], rmssd = [], sdnnMatch = [], sdnn5min = [];
+    const epochAt = rowEpochFn({ epoch_ms: 0 }, fileStartEpoch), cell = [NaN];
     // S61: every h row's epoch, HR byte and raw RR cell, for the detector's beat check only.
     const beats = { ep: new Float64Array(hRows.length), hr: new Uint16Array(hRows.length), rr: new Array(hRows.length) };
     hRows.forEach((r, i) => { beats.ep[i] = r.ep; beats.hr[i] = +r.f[0] || 0; beats.rr[i] = r.f[2]; });
     for (let i = 0; i < T.length; i++) {
       const t = elapsed(i);
       if (isNaN(t)) continue;
-      const ep = isNaN(E[i]) ? fileStartEpoch + t * 60000 : E[i];
+      cell[0] = E[i];
+      const ep = epochAt(cell, t);
       const h = hIdx[i];
       if (h < 0) continue;
       const r = hRows[h], s = sd[h];
@@ -4581,18 +4587,13 @@
     const { rows, header } = parseCSV(text);
     const idx = {};
     header.forEach((h, i) => idx[h.trim()] = i);
-    const fileStartEpoch = deriveFileStartEpoch(filename);
-    const hasEpochCol = idx.epoch_ms != null;
+    const epochAt = rowEpochFn(idx, deriveFileStartEpoch(filename));
     const hr = [], rmssd = [], sdnnMatch = [], sdnn5min = [];
     const elapsedMin = rowElapsedMinFn(rows, idx);
     for (const r of rows) {
       const t = elapsedMin(r);
       if (isNaN(t)) continue;
-      let ep = fileStartEpoch + t * 60000;
-      if (hasEpochCol && r[idx.epoch_ms] !== '') {
-        const parsed = parseFloat(r[idx.epoch_ms]);
-        if (!isNaN(parsed)) ep = parsed;
-      }
+      const ep = epochAt(r, t);
       if (r[idx.hr_bpm] !== '') hr.push({ x: t, y: parseFloat(r[idx.hr_bpm]), ep });
       if (r[idx.rmssd_ms] !== '') {
         const v = parseFloat(r[idx.rmssd_ms]);
@@ -5800,12 +5801,12 @@
         const idx = {};
         header.forEach((h, i) => idx[h.trim()] = i);
         const elapsedMin = rowElapsedMinFn(rows, idx);
-        const fileStart = deriveFileStartEpoch(fn);
+        const epochAt = rowEpochFn(idx, deriveFileStartEpoch(fn));
         for (const r of rows) {
           const h = parseFloat(r[idx.hr_bpm]);
           if (!Number.isFinite(h)) continue;
-          let ep = idx.epoch_ms != null ? parseFloat(r[idx.epoch_ms]) : NaN;
-          if (!Number.isFinite(ep)) { const t = elapsedMin(r); if (!Number.isFinite(t)) continue; ep = fileStart + t * 60000; }
+          const ep = epochAt(r, elapsedMin(r));
+          if (!Number.isFinite(ep)) continue;
           const k = Math.floor((ep - dayStart) / BMS);
           if (k < 0 || k >= B) continue;
           sums[k] += h; counts[k]++;
