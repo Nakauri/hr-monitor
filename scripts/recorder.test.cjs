@@ -6,7 +6,7 @@
 // The module runs over a fake env: a hand-advanced clock and timers, a fake folder whose writes resolve, reject or
 // hang on command, and a fake Drive (create, PATCH, size) that records each body, file id and login. Each check
 // reruns against mutated code from recorder.mutants.cjs, and every mutant must make a check FAIL.
-// Run: node scripts/recorder.test.cjs
+// Runtime: about 6 s. Run: node scripts/recorder.test.cjs
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

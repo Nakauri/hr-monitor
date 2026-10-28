@@ -199,7 +199,7 @@ const SAVE_STATE = ['autoSaveGen', 'autoSaveFinal', 'autoSaveFileHandle', 'autoS
   'finalLocalOk', 'driveFileIdForSession', 'driveUploadInFlight', 'driveUploadAt', 'autoSaveFailStreak', 'afterStopCsv', 'afterStopSeq'];
 const leftover = SAVE_STATE.filter((n) => new RegExp('\\b' + n + '\\b').test(monitor));
 check('the page holds none of the old save state', leftover.length === 0, leftover.join(', '));
-const recSrc = fs.readFileSync(path.join(__dirname, '..', 'recorder.js'), 'utf8');
+const recSrc = fs.readFileSync(path.join(__dirname, '..', 'recorder.js'), 'utf8').replace(/\r\n/g, '\n');
 const recBody = (recSrc.match(/function create\(env\) \{([\s\S]*)\n  \}\n\n  const api/) || [])[1] || '';
 const recLets = (recBody.match(/^    let \w+/gm) || []).map((l) => l.trim());
 check('recorder.js keeps one mutable binding, the current Recording', recLets.length === 1 && recLets[0] === 'let cur', recLets.join(', '));

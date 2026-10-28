@@ -4,7 +4,7 @@
 // two upgrading devices locking the account out of its room, a new link reverting to the old taken one, a failed
 // listing wiping a newer link, one account's key and secret written into another's config, an owner throwing its
 // own secret away before the relay's verdict. Files: relay-link.js, the wiring in hr_monitor.html, the watch key in
-// hrv_viewer.html. Runtime: about 30 s; ./check runs it.
+// hrv_viewer.html. Runtime: about 120 s (its mutant loop); ./check runs it.
 // The module runs over the fake Drive from marks-store.test.cjs; each check reruns against mutated code, and every
 // mutant must make a check FAIL.
 // Run: node scripts/relay-link.test.cjs

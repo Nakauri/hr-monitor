@@ -2,7 +2,7 @@
 // Monitor stats over a series with dropout gaps.
 // Guards: Avg HRV counted gap markers ({ v: null }) as zero and read low after every dropout
 // (replay 2026-10-24: 103 of 984 recordings shown 1 to 3 ms low).
-// Run: node scripts/avg-stats.test.cjs [path/to/hr_monitor.html]   (exit 0 = OK; main before grade-a must FAIL)
+// Runtime: under 1 s. Run: node scripts/avg-stats.test.cjs [path/to/hr_monitor.html]   (exit 0 = OK; main before grade-a must FAIL)
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
