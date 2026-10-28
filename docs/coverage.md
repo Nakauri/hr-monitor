@@ -5,12 +5,13 @@ listed test changed since it was written. Controls = negative controls (mutants)
 
 | health-data path | tests (controls) | browser checks |
 |---|---|---|
-| Web folder save | `recorder.test.cjs` (88) | `recorder-page`, `monitor-log` |
-| Web Drive save | `recorder.test.cjs` (88) | `monitor-sync`, `recorder-page` |
-| Native segment write | `run-segment-test.cjs` (17), `segment-format.test.cjs` (0) | none |
-| Native upload | `run-upload-test.cjs` (44) | none |
-| Marks | `marks-store.test.cjs` (38), `csv-format.test.cjs` (0), `recorder.test.cjs` (88) | `symptom-marks`, `recorder-page` |
-| Viewer parse | `segment-format.test.cjs` (0), `day-boundary.test.cjs` (0), `day-gaps.test.cjs` (1) | `parse-worker`, `v2-series`, `session-time` |
+| Web folder save | `recorder.test.cjs` (86) | `recorder-page`, `monitor-log` |
+| Web Drive save | `recorder.test.cjs` (86) | `monitor-sync`, `recorder-page` |
+| Native segment write | `run-segment-test.cjs` (16), `segment-format.test.cjs` (0) | none |
+| Native upload | `run-upload-test.cjs` (43) | none |
+| Marks | `marks-store.test.cjs` (35), `csv-format.test.cjs` (0), `recorder.test.cjs` (86) | `symptom-marks`, `recorder-page` |
+| Viewer parse | `segment-format.test.cjs` (0), `day-boundary.test.cjs` (0), `day-gaps.test.cjs` (1), `row-epoch.test.cjs` (3) | `parse-worker`, `v2-series`, `session-time` |
+| Native reconnect (no gap in the recording) | `run-reconnect-test.cjs` (22), `engine-boundary.test.cjs` (0) | `strap-switch` |
 | HR and HRV numbers (JS and native) | `rmssd-parity.test.js` (6), `avg-stats.test.cjs` (0) | `native-rmssd` |
 
-<!-- hashes {"scripts/recorder.test.cjs":"ef97846b96fd","scripts/jvm/run-segment-test.cjs":"e67a1edcfb5e","scripts/segment-format.test.cjs":"d3236d4b533a","scripts/jvm/run-upload-test.cjs":"b20e3c3aec1f","scripts/marks-store.test.cjs":"2288a3674839","scripts/csv-format.test.cjs":"bfd9d979e83e","scripts/day-boundary.test.cjs":"7d0222c3c6f0","scripts/day-gaps.test.cjs":"f1b069a90f4f","scripts/rmssd-parity.test.js":"2dbf6aec9563","scripts/avg-stats.test.cjs":"94b4cb0f8520"} -->
+<!-- hashes {"scripts/recorder.test.cjs":"ef97846b96fd","scripts/jvm/run-segment-test.cjs":"e67a1edcfb5e","scripts/segment-format.test.cjs":"d3236d4b533a","scripts/jvm/run-upload-test.cjs":"b20e3c3aec1f","scripts/marks-store.test.cjs":"2288a3674839","scripts/csv-format.test.cjs":"bfd9d979e83e","scripts/day-boundary.test.cjs":"7d0222c3c6f0","scripts/day-gaps.test.cjs":"f1b069a90f4f","scripts/row-epoch.test.cjs":"e9e6ea2e2381","scripts/jvm/run-reconnect-test.cjs":"3357fe059b0d","scripts/engine-boundary.test.cjs":"f935e33f3423","scripts/rmssd-parity.test.js":"2dbf6aec9563","scripts/avg-stats.test.cjs":"94b4cb0f8520"} -->

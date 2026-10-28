@@ -21,18 +21,20 @@ const PATHS = [
   ['Native segment write', ['scripts/jvm/run-segment-test.cjs', 'scripts/segment-format.test.cjs'], []],
   ['Native upload', ['scripts/jvm/run-upload-test.cjs'], []],
   ['Marks', ['scripts/marks-store.test.cjs', 'scripts/csv-format.test.cjs', 'scripts/recorder.test.cjs'], ['symptom-marks', 'recorder-page']],
-  ['Viewer parse', ['scripts/segment-format.test.cjs', 'scripts/day-boundary.test.cjs', 'scripts/day-gaps.test.cjs'], ['parse-worker', 'v2-series', 'session-time']],
+  ['Viewer parse', ['scripts/segment-format.test.cjs', 'scripts/day-boundary.test.cjs', 'scripts/day-gaps.test.cjs', 'scripts/row-epoch.test.cjs'], ['parse-worker', 'v2-series', 'session-time']],
+  ['Native reconnect (no gap in the recording)', ['scripts/jvm/run-reconnect-test.cjs', 'scripts/engine-boundary.test.cjs'], ['strap-switch']],
   ['HR and HRV numbers (JS and native)', ['scripts/rmssd-parity.test.js', 'scripts/avg-stats.test.cjs'], ['native-rmssd']],
 ];
 
 const hash = (f) => crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n')).digest('hex').slice(0, 12);
 const tests = [...new Set(PATHS.flatMap((p) => p[1]))];
 
-// A test's negative controls: its own summary count when it prints one, else the lines that report a caught mutant.
+// A test's negative controls: its own total ("all N negative controls fail") when it prints one, else the lines
+// that each report one control caught, counted once per line.
 function controls(out) {
-  const sums = [...out.matchAll(/(\d+)\s+(?:of\s+\d+\s+)?(?:negative controls?|mutants?|controls)\b/gi)].map((m) => Number(m[1]));
-  const lines = (out.match(/FAILED as required|\bcaught\b|negative control[^\n]*(?:fails|FAIL)/gi) || []).length;
-  return Math.max(lines, ...sums, 0);
+  const total = [...out.matchAll(/\ball (\d+) (?:negative controls? fail|mutants caught)/gi)].map((m) => Number(m[1]));
+  if (total.length) return total[total.length - 1];
+  return out.split('\n').filter((l) => /FAILED as required|^caught\b|^(?:OK|PASS|ok)\b.*(?:negative control|mutant)/i.test(l)).length;
 }
 
 if (process.argv.includes('--write')) {
