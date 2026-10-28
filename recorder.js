@@ -51,7 +51,7 @@
         // pick: the newest folder pick; pending: its createFile. pendingDir: a pick made while arming (15).
         // noStatus: a routine PATCH on driveFileId ended with no HTTP status (4). finalFailed: a final write was
         // made and did not land (13).
-        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null,
+        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null, closeText: null,
       };
     }
 
@@ -190,13 +190,15 @@
       // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart, except at close, where
       // a mark flushed by pagehide must still reach the file.
       if (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : !atClose && t - rec.forcedAt < forcedMs) return;
-      const folderWants = !!rec.file && !rec.folderBusy;
+      // At close a write already in flight (the hidden one) gets this text queued after it, never beside it (4).
+      const folderWants = !!rec.file && (!rec.folderBusy || !!atClose);
       const driveWants = driveReady(rec) && !rec.upload && t - rec.driveAt >= pace(rec.bytes);
       if (!folderWants && !driveWants) return;
       rec.forcedAt = t;
       const text = build(rec);
       if (text == null) return;
-      if (folderWants) folderWrite(rec, rec.file, text, false);
+      if (folderWants && rec.folderBusy) rec.closeText = text;
+      else if (folderWants) folderWrite(rec, rec.file, text, false);
       if (driveWants) driveUpload(rec, text, rec.bytes, false);
     }
     function hidden() { forced(cur); }
@@ -211,6 +213,10 @@
       let ok = false;
       try { await p; ok = true; } catch (e) { warn('folder write:', e); }
       if (rec.folderBusy === job) rec.folderBusy = null;
+      // 12: text queued at close goes next, on this handle, once nothing else holds the folder.
+      if (rec.closeText != null && rec.state === 'live' && rec.file === handle && !rec.folderBusy) {
+        const q = rec.closeText; rec.closeText = null; folderWrite(rec, handle, q, false);
+      }
       if (rec.file !== handle) return undefined;
       if (ok) {
         rec.wrote.folder = true;
@@ -248,7 +254,7 @@
       if (!final && !routineOk()) return undefined;
       // 9: a routine 5xx waits for the next pace from the attempt.
       if (!final) rec.driveAt = now();
-      let refreshed = false, retried = false, recreated = false, created = false;
+      let refreshed = false, retried = false, recreated = false, created = false, looked = false;
       for (;;) {
         const h = await header();
         if (!final && !routineOk()) return undefined;
@@ -264,7 +270,14 @@
           return fail(rec, final, 'Drive auth failed');
         }
         const patching = !!rec.driveFileId;
-        if (!patching && folderId == null) return undefined;
+        if (!patching && folderId == null) {
+          // 5, 8: a final that must create (the login changed, or a 403/404 cleared the file) looks the folder up once.
+          if (!final) return undefined;
+          if (looked) return fail(rec, final, 'Drive folder not found');
+          looked = true;
+          try { await env.ensureFolder(); } catch (e) { warn('Drive folder:', e); }
+          continue;
+        }
         let url, init;
         if (patching) {
           url = UPLOAD + '/files/' + encodeURIComponent(rec.driveFileId) + '?uploadType=media';
@@ -368,7 +381,12 @@
     async function folderFinal(rec, text) {
       while (rec.pending) { const p = rec.pending; try { await p; } catch (e) {} if (rec.pending === p) rec.pending = null; }
       while (rec.folderBusy) { const b = rec.folderBusy; try { await b.p; } catch (e) {} if (rec.folderBusy === b) rec.folderBusy = null; }
-      if (!rec.file) { settle(rec, 'folder', false, false); return; }
+      // 13: a folder dropped by three failed writes is a failure to show, not a quiet idle.
+      if (!rec.file) {
+        if (rec.dir && rec.strikes >= maxStrikes) rec.failMsg = rec.failMsg || 'write error (' + maxStrikes + '/' + maxStrikes + ')';
+        settle(rec, 'folder', false, !!(rec.dir && rec.strikes >= maxStrikes));
+        return;
+      }
       const ok = await folderWrite(rec, rec.file, text, true);
       settle(rec, 'folder', ok === true, true);
     }
@@ -384,7 +402,13 @@
       }
       if (!driveOn()) { settle(rec, 'drive', false, false); return; }
       if (!rec.driveFileId && env.folderId() == null) { try { await env.ensureFolder(); } catch (e) { warn('Drive folder:', e); } }
-      if (!driveReady(rec)) { settle(rec, 'drive', false, false); return; }
+      if (!driveReady(rec)) {
+        // Signed in with sync on but no Drive folder: a failure to show (rule 13); a sign-out is not (rule 14).
+        const shown = driveOn();
+        if (shown) rec.failMsg = rec.failMsg || 'drive error: Drive folder not found';
+        settle(rec, 'drive', false, shown);
+        return;
+      }
       const ok = await driveUpload(rec, text, bytes, true);
       settle(rec, 'drive', ok === true, ok !== undefined);
     }
@@ -427,7 +451,7 @@
       const on = !!rec && (rec.state === 'arming' || rec.state === 'live');
       return {
         folder: !!(on && (rec.file || rec.pending || (rec.state === 'arming' && rec.dir))),
-        drive: !!(on && driveOn() && env.folderId() != null),
+        drive: !!(on && driveReady(rec)),
       };
     }
     function current() { return cur; }

@@ -651,6 +651,9 @@ CHECKS.R = async (src) => {
   w.page.rows++; w.R.hidden(); await flush();
   row('R4 one folder write and one upload at a time: ticks and forced saves skip while one is in flight',
     h.writes.length === 1 && w.reqs().length === 1 && h.maxInflight === 1 && w.drive.maxInflight === 1, JSON.stringify([h.writes.length, w.reqs().length]));
+  // Only a close queues behind the write in flight; a hidden save that skipped leaves nothing queued.
+  h.hung.shift().ok(); await flush();
+  row('R4 a hidden save skipped behind a write queues nothing', h.writes.length === 1 && rec.closeText == null, JSON.stringify([h.writes.length, rec.closeText != null]));
 
   // Rule 1: an old final that waited behind its routine upload still writes only its own Drive file.
   w = world(src);
@@ -693,6 +696,29 @@ CHECKS.R = async (src) => {
   row('R5 a known Drive file with the folder id gone: routine ticks and the final still PATCH it; saved',
     r5k && fin.done && rec.result.drive === 'saved' && w.reqs().map((r) => r.kind).join() === 'create,patch,patch' && w.reqs('patch').every((r) => r.id === 'f1'),
     JSON.stringify([rec.result, w.reqs().map((r) => r.kind)]));
+  // Round 2: a final that must create with no folder id looks it up once (an account switch while it waited; a 404).
+  w = world(src); rec = await w.live();
+  await w.advance(10000); w.text('1,81'); w.drive.plan.push({ kind: 'patch', act: 'hang' });
+  await w.advance(60000); w.text('1,82');
+  fin = track(w.R.stop()); await flush();
+  w.signIn('B'); w.drive.folderId = null; w.R.authChanged();
+  w.drive.hung.shift().commit(); await w.advance(10000);
+  const sw = w.reqs().map((r) => r.kind + ':' + r.owner).join();
+  row('R5 an account switch while the final waits, folder id not yet known: one lookup, then created under B; saved',
+    fin.done && rec.result.drive === 'saved' && w.drive.lookups >= 1 && sw === 'create:A,patch:A,create:B', JSON.stringify([rec.result, sw]));
+  w = world(src); rec = await w.live();
+  await w.advance(10000);
+  w.drive.folderId = null; w.drive.plan.push({ kind: 'patch', act: 404 });
+  w.text('1,85'); fin = track(w.R.stop()); await w.advance(10000);
+  row('R5 a final PATCH answered 404 with no folder id: looked up, created again; saved',
+    fin.done && rec.result.drive === 'saved' && w.reqs().map((r) => r.kind + ':' + r.status).join() === 'create:200,patch:404,create:200', JSON.stringify(w.reqs().map((r) => r.kind + ':' + r.status)));
+  // Rule 13: signed in, sync on, the folder never found: the final's failure shows, not idle.
+  w = world(src); w.drive.folderId = null; w.drive.lookupMode = 'fail';
+  rec = await w.live();
+  await w.advance(10000); w.text('1,86');
+  fin = track(w.R.stop()); await w.advance(10000);
+  row('R13 no Drive folder ever found: the Drive result is not saved and the status shows the failure',
+    fin.done && rec.result.drive === 'unwritten' && /^drive error/.test(w.status()), JSON.stringify([rec.result, w.status()]));
 
   // Rule 6: the lookup runs at Start only when the folder id is null.
   w = world(src); rec = await w.live();
@@ -848,6 +874,19 @@ CHECKS.R = async (src) => {
   await w.advance(2000);
   w.page.rows++; w.R.closing(); await flush();
   row('R12 a close right after a hidden write still writes (a mark flushed at close reaches the file)', h.writes.length === hw + 1, JSON.stringify([hw, h.writes.length]));
+  // Round 2: the hidden write is still in flight at pagehide (Chrome fires hidden first): the mark is queued after it.
+  for (const mode of ['ok', 'hang']) {
+    w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+    await w.advance(10000);
+    h.modes.push(mode);
+    w.t += 3000; w.text('2,90'); w.R.hidden();
+    w.text('2,90\nMARK'); w.R.closing();
+    const overlapFree = h.maxInflight === 1;
+    if (mode === 'hang') { await flush(); h.hung.shift().ok(); }
+    await w.advance(1000);
+    row('R12 hidden write ' + (mode === 'ok' ? 'landing' : 'hung') + ' at pagehide: the flushed mark is written after it, never beside it',
+      overlapFree && h.maxInflight === 1 && /MARK/.test(h.content), JSON.stringify({ writes: h.writes.length, content: h.content, max: h.maxInflight }));
+  }
   // Rule 12: a forced save goes to Drive only when its pace allows.
   w = world(src); rec = await w.live();
   await w.advance(5000);
