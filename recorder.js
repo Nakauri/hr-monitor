@@ -38,6 +38,8 @@
     function nameAt(ms) { return 'hrv_session_' + new Date(ms).toISOString().slice(0, 19).replace(/:/g, '-') + '.csv'; }
     // 13: a status belongs to the Recording on screen.
     function status(rec, text, cls) { if (cur === rec && env.onStatus) env.onStatus(text, cls || ''); }
+    // 13: after Stop, routine outcomes leave "saving" alone.
+    function routineStatus(rec, text, cls) { if (rec.state === 'live' || rec.state === 'arming') status(rec, text, cls); }
 
     function recording(id, startMs, dir) {
       return {
@@ -74,10 +76,11 @@
       if (cur && cur.state !== 'done') stop();
       const prev = cur;
       const rec = recording(id, startMs, dir);
-      const at = startMs || now();
-      let name = nameAt(at);
-      if (prev && prev.filename === name) name = nameAt(at + 1000);
-      rec.filename = name;
+      // File names only move forward, so no Start reopens an earlier session's file.
+      let sec = Math.floor((startMs || now()) / 1000) * 1000;
+      if (prev && sec <= prev.nameSec) sec = prev.nameSec + 1000;
+      rec.nameSec = sec;
+      rec.filename = nameAt(sec);
       cur = rec;
       if (driveOn()) { rec.seen.drive = true; lookupFolder(rec); }
       rec.interval = env.setInterval(function recorderTick() { return routine(rec); }, tickMs);
@@ -94,7 +97,7 @@
         if (rec.state !== 'arming') return;
         if (!ok) {
           if (rec.pick === pick) status(rec, 'denied', 'denied');
-        } else {
+        } else if (rec.pick === pick) {
           try {
             const handle = await env.createFile(dir, rec.filename);
             if (rec.state === 'arming' && rec.pick === pick) { rec.file = handle; status(rec, 'writing', 'writing'); }
@@ -155,6 +158,9 @@
       if (driveOn()) { rec.seen.drive = true; rec.lookupAt = 0; }
     }
 
+    // 5: a Drive file already made needs no folder id; only a create does.
+    function driveReady(rec) { return driveOn() && (!!rec.driveFileId || env.folderId() != null); }
+
     // 3, 11: a tick builds once, for the targets whose pace allows, only while arming (Drive) or live.
     function routine(rec) {
       if (rec.state !== 'arming' && rec.state !== 'live') return Promise.resolve();
@@ -165,7 +171,7 @@
       }
       const canBuild = rec.bytes <= saveBig || t - rec.builtAt >= rebuildMs;
       const folderWants = rec.state === 'live' && !!rec.file && !rec.folderBusy && canBuild;
-      const driveWants = driveOn() && env.folderId() != null && !rec.upload && t - rec.driveAt >= pace(rec.bytes) && canBuild;
+      const driveWants = driveReady(rec) && !rec.upload && t - rec.driveAt >= pace(rec.bytes) && canBuild;
       if (!folderWants && !driveWants) return Promise.resolve();
       const text = build(rec);
       if (text == null) return Promise.resolve();
@@ -184,7 +190,7 @@
       // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart.
       if (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : t - rec.forcedAt < forcedMs) return;
       const folderWants = !!rec.file && !rec.folderBusy;
-      const driveWants = driveOn() && env.folderId() != null && !rec.upload && t - rec.driveAt >= pace(rec.bytes);
+      const driveWants = driveReady(rec) && !rec.upload && t - rec.driveAt >= pace(rec.bytes);
       if (!folderWants && !driveWants) return;
       rec.forcedAt = t;
       const text = build(rec);
@@ -207,13 +213,13 @@
       if (rec.file !== handle) return undefined;
       if (ok) {
         rec.wrote.folder = true;
-        if (rec.strikes) { rec.strikes = 0; if (!final) status(rec, 'writing', 'writing'); }
+        if (rec.strikes) { rec.strikes = 0; if (!final) routineStatus(rec, 'writing', 'writing'); }
         return true;
       }
       rec.strikes++;
       // 13: a final's failure shows once nothing is pending.
       if (final) rec.failMsg = 'write error (' + rec.strikes + '/' + maxStrikes + ')';
-      else status(rec, 'write error (' + rec.strikes + '/' + maxStrikes + ')', 'error');
+      else routineStatus(rec, 'write error (' + rec.strikes + '/' + maxStrikes + ')', 'error');
       if (rec.strikes >= maxStrikes) rec.file = null;
       return false;
     }
@@ -302,14 +308,14 @@
           } else if (id) { rec.driveFileId = id; rec.noStatus = false; }
         }
         rec.wrote.drive = true;
-        if (!final) { status(rec, 'synced', 'ok'); return true; }
+        if (!final) { routineStatus(rec, 'synced', 'ok'); return true; }
         if (patching && rec.noStatus) return verifySize(rec, text, bytes);
         return true;
       }
     }
     function fail(rec, final, msg) {
       if (final) rec.failMsg = 'drive error: ' + msg;
-      else status(rec, 'drive error: ' + msg, 'error');
+      else routineStatus(rec, 'drive error: ' + msg, 'error');
       return false;
     }
 
@@ -368,10 +374,16 @@
 
     // 4, 5: the Drive final waits for the routine upload in flight, looks the folder up if unknown, then uploads.
     async function driveFinal(rec, text, bytes) {
-      while (rec.upload) { const p = rec.upload; try { await p; } catch (e) {} if (rec.upload === p) rec.upload = null; }
+      // 14: a sign-out during the wait settles the result then, checked each tick, not when a hung upload ends.
+      while (rec.upload) {
+        const p = rec.upload;
+        const done = await Promise.race([p.then(() => true, () => true), sleep(tickMs).then(() => false)]);
+        if (!driveOn()) { settle(rec, 'drive', false, false); return; }
+        if (done && rec.upload === p) rec.upload = null;
+      }
       if (!driveOn()) { settle(rec, 'drive', false, false); return; }
-      if (env.folderId() == null) { try { await env.ensureFolder(); } catch (e) { warn('Drive folder:', e); } }
-      if (!driveOn() || env.folderId() == null) { settle(rec, 'drive', false, false); return; }
+      if (!rec.driveFileId && env.folderId() == null) { try { await env.ensureFolder(); } catch (e) { warn('Drive folder:', e); } }
+      if (!driveReady(rec)) { settle(rec, 'drive', false, false); return; }
       const ok = await driveUpload(rec, text, bytes, true);
       settle(rec, 'drive', ok === true, ok !== undefined);
     }
