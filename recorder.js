@@ -52,9 +52,9 @@
         // noStatus: a routine PATCH on driveFileId ended with no HTTP status (4). finalFailed: a final write was
         // made and did not land (13).
         pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null, owed: false,
-        // enterSeq: entries the page committed (21); builtSeq: as of the last build; folderSentSeq: as of the last
-        // text sent to the folder.
-        enterSeq: 0, builtSeq: 0, folderSentSeq: 0,
+        // enterSeq: entries the page committed (21); builtSeq: as of the last build; folderSavedSeq: as of the last
+        // text that landed in the folder file.
+        enterSeq: 0, builtSeq: 0, folderSavedSeq: 0,
       };
     }
 
@@ -191,7 +191,7 @@
     // folder write in flight leaves the folder owed one write of fresh text when it settles (21).
     function forced(rec, atClose) {
       if (!rec || rec.state !== 'live') return;
-      const urgent = rec.enterSeq > rec.folderSentSeq;
+      const urgent = rec.enterSeq > rec.folderSavedSeq;
       const rows = env.rowCount ? env.rowCount() : 0;
       if (rows <= rec.rows) return;
       const t = now();
@@ -229,8 +229,8 @@
     }
     // Its outcome counts only while the handle is still the file.
     async function folderWriteOnce(rec, handle, text, final) {
-      // Every caller built the text just before this call.
-      rec.folderSentSeq = rec.builtSeq;
+      // Every caller built the text just before this call; its entries count as saved only once it lands.
+      const seq = rec.builtSeq;
       let p;
       try { p = Promise.resolve(env.writeFile(handle, text)); } catch (e) { p = Promise.reject(e); }
       const job = { p, handle };
@@ -241,6 +241,7 @@
       if (rec.file !== handle) return undefined;
       if (ok) {
         rec.wrote.folder = true;
+        if (seq > rec.folderSavedSeq) rec.folderSavedSeq = seq;
         if (rec.strikes) { rec.strikes = 0; if (!final) routineStatus(rec, 'writing', 'writing'); }
         return true;
       }

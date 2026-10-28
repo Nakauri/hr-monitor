@@ -899,14 +899,31 @@ CHECKS.R = async (src) => {
   w.R.hidden(); w.R.closing(); await flush();
   row('R21 a mark committed while visible, then a close inside the rebuild minute: written at close',
     h.writes.length === r5 + 1 && /MARK/.test(h.content), JSON.stringify([r5, h.writes.length]));
-  // A mark already in the write in flight leaves nothing owed.
+  // A mark counts as saved only when a write carrying it lands: the write in flight carrying it fails, then a close
+  // inside the rebuild minute still writes it.
   w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
-  mark(w, '1,80\nMARK');
+  w.page.text = 'x'.repeat(600 * 1024); w.page.rows++;
+  mark(w, 'x'.repeat(600 * 1024) + '\nMARK');
   h.modes.push('hang');
   await w.advance(10000);
   w.page.rows++; w.R.hidden();
-  row('R21 a mark the write in flight already carries: nothing owed', !rec.owed, String(rec.owed));
-  await flush(); h.hung.shift().ok(); await w.advance(500);
+  const owedWhileCarried = rec.owed;
+  await flush(); h.hung.shift().fail(); await w.advance(500);
+  const f21 = h.writes.length;
+  w.page.rows++; w.R.closing(); await w.advance(500);
+  // Cost: once a write carrying the mark lands, a hide inside the rebuild minute is plain again.
+  {
+    const v = world(src); const dv = mkDir('X'); await v.live(dv); const hv = dv.handles[0];
+    v.page.text = 'x'.repeat(600 * 1024); v.page.rows++;
+    mark(v, 'x'.repeat(600 * 1024) + '\nMARK');
+    await v.advance(10000);
+    const landed = hv.writes.length;
+    await v.advance(5000);
+    v.page.rows++; v.R.hidden(); await flush();
+    row('R21 a mark already saved makes no later hide urgent', landed >= 1 && hv.writes.length === landed, JSON.stringify([landed, hv.writes.length]));
+  }
+  row('R21 a mark whose write failed is not counted saved: written at hide or close inside the rebuild minute',
+    owedWhileCarried && h.writes.length >= f21 && /MARK/.test(h.content), JSON.stringify({ owedWhileCarried, f21, n: h.writes.length, last: h.content.slice(-6) }));
   // a) The tick's write is in flight at hidden: one owed write after it, fresh text, never beside it.
   w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
   h.modes.push('hang');

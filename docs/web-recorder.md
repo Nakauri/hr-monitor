@@ -128,7 +128,7 @@ other module-level state.
 20. PAGE: the Start click asks `dir.requestPermission` before `connect` (Chrome denies it after the strap
     picker's async work); in `arming`, `env.ensurePermission` only queries.
 21. A forced save is urgent when an entry was committed (`entered()`) since the text last sent to the folder was
-    built, however long ago; it skips the pacing (rules 11, 12). If a folder write is in flight, the Recording is
+    built and has landed, however long ago (a write that failed does not count); it skips the pacing (rules 11, 12). If a folder write is in flight, the Recording is
     owed one write: when that write settles, or a newly picked file is made, text built then goes to the file that
     is current then, only while `live` and never beside another write (rule 4). A dropped handle (strike 3, a pick or
     a clear) never gets it; after Stop the final carries everything.
