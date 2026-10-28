@@ -513,10 +513,11 @@ function step2Checks() {
       check('a close the relay starts marks the link down and is answered',
         /public void onClosing\(WebSocket ws, int code, String reason\) \{\s*if \(!markDownIfCurrent\(ws\)\) return;\s*try \{ ws\.close\(1000, null\); \}/.test(relayOpen));
       const hb = E.slice(E.indexOf('private final Runnable heartbeatRunnable'), E.indexOf('private final Runnable heartbeatRunnable') + 2500);
+      const RP = readSource('ReconnectPolicy.java') || '';
       check('the heartbeat reopens a relay left down, no retry queued, no attempt for 2 min',
-        /if \(relayWatchdogDue\(broadcastEnabled, hasBroadcastKey\(\), relayLive\.get\(\), relayRetryPending, up, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocketSafely\(\)/.test(hb)
-        && !/if \(relayWatchdogDue\([^{]*\{[^}]*relayReconnectAttempts = 0/.test(hb)
-        && /RELAY_WATCHDOG_MS = 120_000L/.test(E) && /return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(E)
+        /if \(ReconnectPolicy\.relayWatchdogDue\(broadcastEnabled, hasBroadcastKey\(\), relayLive\.get\(\), relayRetryPending, up, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocketSafely\(\)/.test(hb)
+        && !/if \(ReconnectPolicy\.relayWatchdogDue\([^{]*\{[^}]*relayReset\(\)/.test(hb)
+        && /RELAY_WATCHDOG_MS = 120_000L/.test(RP) && /return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(RP)
         && /relayLastOpenAtMs = android\.os\.SystemClock\.elapsedRealtime\(\);/.test(relayOpen)
         && /relayRetryPending = true;/.test(E) && /removeCallbacks\(relayReconnectRunnable\);\s*relayRetryPending = false;/.test(relayClose)
         && /if \(!sessionActive\.get\(\) \|\| !hasBroadcastKey\(\)\) return;/.test(relayOpen));
