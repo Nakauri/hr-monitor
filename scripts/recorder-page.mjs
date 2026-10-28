@@ -1,6 +1,6 @@
 // Guards: the web monitor after Stop on the recorder (docs/web-recorder.md rules 16 and 17): a false "Saved", a lost
-// Export, an Export of the wrong text, a mark taken after the final file was built. Scenarios S3, S8, S9, S11, S21,
-// S25, S26, S31. Files: hr_monitor.html, recorder.js, ui.js. Runtime: about 70 s.
+// Export, an Export of the wrong text, a mark taken after the final file was built. Scenarios S3, S8, S9, S11, S18
+// (rule 18, a held mark at tab close), S21, S25, S26, S31. Files: hr_monitor.html, recorder.js, ui.js. Runtime: about 70 s.
 // Harness from monitor-sync.mjs: fake strap, fake folder, fetch spy on Drive, window.__tick from recorderTick with the
 // clock 61 s on per tick. Added here: folder writes that hang or fail on demand, uploads held until released, a fake
 // relay socket (takeover is a control stop message on it), the recorder instance as window.__rec, and the page's
@@ -389,6 +389,29 @@ const scenarios = {
     }
   },
 
+  // Rule 18 (design pass 2026-10-28): a held mark, then the tab closes (Chrome fires hidden, then pagehide). The hidden
+  // save carries the mark; Undo is gone once the tab is left.
+  async S18() {
+    const { ctx, page, errs } = await newPage();
+    await startWeb(page);
+    await tick(page);
+    await page.evaluate(() => document.getElementById('log-symptom').click());
+    await page.waitForTimeout(300);
+    const before = await page.evaluate(() => window.__written.length);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await page.waitForTimeout(800);
+    const r = await recFacts(page);
+    const w = await page.evaluate((b) => window.__written.slice(b).map((x) => x.c), before);
+    check(w.length >= 1 && /sym:symptom/.test(w[0]), 'S18 the save on leaving the tab carries the held symptom', JSON.stringify({ n: w.length, tail: w[0] ? w[0].slice(-80) : null, file: r && r.filename }));
+    check(!(await page.evaluate(() => [...document.querySelectorAll('.toast-host .toast')].some((t) => /Undo/.test(t.textContent)))), 'S18 the Undo toast is gone once the tab is left');
+    if (errs.length) fail('S18: page errors ' + errs.join('; '));
+    await ctx.close();
+  },
   // S31: A hung, Start, a takeover stops B with Drive failing, then A saves: B's panel stays failed, A's line saved.
   async S31() {
     const { ctx, page, errs } = await newPage({ signedIn: true });

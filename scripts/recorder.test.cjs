@@ -651,9 +651,6 @@ CHECKS.R = async (src) => {
   w.page.rows++; w.R.hidden(); await flush();
   row('R4 one folder write and one upload at a time: ticks and forced saves skip while one is in flight',
     h.writes.length === 1 && w.reqs().length === 1 && h.maxInflight === 1 && w.drive.maxInflight === 1, JSON.stringify([h.writes.length, w.reqs().length]));
-  // Only a close queues behind the write in flight; a hidden save that skipped leaves nothing queued.
-  h.hung.shift().ok(); await flush();
-  row('R4 a hidden save skipped behind a write queues nothing', h.writes.length === 1 && rec.closeText == null, JSON.stringify([h.writes.length, rec.closeText != null]));
 
   // Rule 1: an old final that waited behind its routine upload still writes only its own Drive file.
   w = world(src);
@@ -874,18 +871,20 @@ CHECKS.R = async (src) => {
   await w.advance(2000);
   w.page.rows++; w.R.closing(); await flush();
   row('R12 a close right after a hidden write still writes (a mark flushed at close reaches the file)', h.writes.length === hw + 1, JSON.stringify([hw, h.writes.length]));
-  // Round 2: the hidden write is still in flight at pagehide (Chrome fires hidden first): the mark is queued after it.
+  // Design pass 2026-10-28: the page commits held marks before hidden(), so the hidden write carries them; a close
+  // while that write is in flight writes nothing beside it.
   for (const mode of ['ok', 'hang']) {
     w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
     await w.advance(10000);
     h.modes.push(mode);
-    w.t += 3000; w.text('2,90'); w.R.hidden();
-    w.text('2,90\nMARK'); w.R.closing();
-    const overlapFree = h.maxInflight === 1;
+    w.t += 3000; w.text('2,90\nMARK'); w.R.hidden();
+    const n = h.writes.length;
+    w.page.rows++; w.R.closing();
+    const overlapFree = h.maxInflight === 1 && h.writes.length === n;
     if (mode === 'hang') { await flush(); h.hung.shift().ok(); }
     await w.advance(1000);
-    row('R12 hidden write ' + (mode === 'ok' ? 'landing' : 'hung') + ' at pagehide: the flushed mark is written after it, never beside it',
-      overlapFree && h.maxInflight === 1 && /MARK/.test(h.content), JSON.stringify({ writes: h.writes.length, content: h.content, max: h.maxInflight }));
+    row('R12 hidden write ' + (mode === 'ok' ? 'landing' : 'hung') + ' at pagehide: it carries the mark; the close writes nothing beside it',
+      overlapFree && /MARK/.test(h.content), JSON.stringify({ writes: h.writes.length, content: h.content, max: h.maxInflight }));
   }
   // Rule 12: a forced save goes to Drive only when its pace allows.
   w = world(src); rec = await w.live();

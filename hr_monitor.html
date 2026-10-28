@@ -2137,6 +2137,9 @@
     if (!pageVisible) {
       lastHiddenAt = Date.now();
       if (window.HRMLog) window.HRMLog.event('lc vis=hidden');
+      // Held marks are committed on leaving the tab, so the hidden save carries them; a close right after has
+      // nothing new to write (docs/web-recorder.md rule 18). Undo ends here. An open note stays open.
+      try { commitHeldMarks(); } catch (e) {}
       if (recorder) recorder.hidden();
       // Free GPU memory while backgrounded. Chart.js canvases hold ~320 MB
       // of GL buffers in long sessions.
@@ -5566,6 +5569,9 @@
   // Called before every stop path and on pagehide, so a held mark reaches the final CSV.
   function flushHeldMarks() {
     if (noteComposer) noteComposer.commit();
+    commitHeldMarks();
+  }
+  function commitHeldMarks() {
     while (heldMarks.length) commitHeld(heldMarks[0]);
     if (heldToast) { heldToast.close(); heldToast = null; }
   }

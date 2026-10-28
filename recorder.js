@@ -51,7 +51,7 @@
         // pick: the newest folder pick; pending: its createFile. pendingDir: a pick made while arming (15).
         // noStatus: a routine PATCH on driveFileId ended with no HTTP status (4). finalFailed: a final write was
         // made and did not land (13).
-        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null, closeText: null,
+        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null,
       };
     }
 
@@ -190,15 +190,13 @@
       // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart, except at close, where
       // a mark flushed by pagehide must still reach the file.
       if (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : !atClose && t - rec.forcedAt < forcedMs) return;
-      // At close a write already in flight (the hidden one) gets this text queued after it, never beside it (4).
-      const folderWants = !!rec.file && (!rec.folderBusy || !!atClose);
+      const folderWants = !!rec.file && !rec.folderBusy;
       const driveWants = driveReady(rec) && !rec.upload && t - rec.driveAt >= pace(rec.bytes);
       if (!folderWants && !driveWants) return;
       rec.forcedAt = t;
       const text = build(rec);
       if (text == null) return;
-      if (folderWants && rec.folderBusy) rec.closeText = text;
-      else if (folderWants) folderWrite(rec, rec.file, text, false);
+      if (folderWants) folderWrite(rec, rec.file, text, false);
       if (driveWants) driveUpload(rec, text, rec.bytes, false);
     }
     function hidden() { forced(cur); }
@@ -213,10 +211,6 @@
       let ok = false;
       try { await p; ok = true; } catch (e) { warn('folder write:', e); }
       if (rec.folderBusy === job) rec.folderBusy = null;
-      // 12: text queued at close goes next, on this handle, once nothing else holds the folder.
-      if (rec.closeText != null && rec.state === 'live' && rec.file === handle && !rec.folderBusy) {
-        const q = rec.closeText; rec.closeText = null; folderWrite(rec, handle, q, false);
-      }
       if (rec.file !== handle) return undefined;
       if (ok) {
         rec.wrote.folder = true;
