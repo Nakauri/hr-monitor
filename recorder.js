@@ -20,6 +20,8 @@
     const lookupMs = env.lookupMs || 60000;
     const warn = env.warn || (() => {});
     const sleep = (ms) => new Promise((r) => env.setTimeout(r, ms));
+    // Waits for a write or create to finish either way; its own path has already counted the outcome.
+    const settled = (p) => Promise.resolve(p).then(() => true, () => false);
     const driveOn = () => !!env.token() && !!env.syncOn();
     const pace = (bytes) => Math.min(paceMaxMs, Math.max(paceMinMs, (bytes / MB) * 60000));
 
@@ -373,7 +375,7 @@
         if (h == null || !driveOn()) return null;
         const resp = await send(API + '/files/' + encodeURIComponent(rec.driveFileId) + '?fields=size', { method: 'GET', headers: { 'Authorization': h } });
         if (resp == null) return null;
-        if (resp.status === 401 && i === 0) { try { await env.refresh(); } catch (e) {} continue; }
+        if (resp.status === 401 && i === 0) { try { await env.refresh(); } catch (e) { warn('Drive refresh:', e); } continue; }
         if (!resp.ok) return null;
         try { const n = Number((await resp.json()).size); return Number.isFinite(n) ? n : null; } catch (e) { return null; }
       }
@@ -385,7 +387,7 @@
         if (h == null || !driveOn()) return false;
         const resp = await send(UPLOAD + '/files/' + encodeURIComponent(rec.driveFileId) + '?uploadType=media', { method: 'PATCH', headers: { 'Authorization': h, 'Content-Type': 'text/csv' }, body: text });
         if (resp == null) return false;
-        if (resp.status === 401 && i === 0) { try { await env.refresh(); } catch (e) {} continue; }
+        if (resp.status === 401 && i === 0) { try { await env.refresh(); } catch (e) { warn('Drive refresh:', e); } continue; }
         return !!resp.ok;
       }
       return false;
@@ -402,8 +404,8 @@
 
     // 4, 5: the folder final waits for the newest pick's file and the write in flight on it, however long.
     async function folderFinal(rec, text) {
-      while (rec.pending) { const p = rec.pending; try { await p; } catch (e) {} if (rec.pending === p) rec.pending = null; }
-      while (rec.folderBusy) { const b = rec.folderBusy; try { await b.p; } catch (e) {} if (rec.folderBusy === b) rec.folderBusy = null; }
+      while (rec.pending) { const p = rec.pending; await settled(p); if (rec.pending === p) rec.pending = null; }
+      while (rec.folderBusy) { const b = rec.folderBusy; await settled(b.p); if (rec.folderBusy === b) rec.folderBusy = null; }
       // 13: a folder dropped by three failed writes is a failure to show, not a quiet idle.
       if (!rec.file) {
         if (rec.dir && rec.strikes >= maxStrikes) rec.failMsg = rec.failMsg || 'write error (' + maxStrikes + '/' + maxStrikes + ')';
