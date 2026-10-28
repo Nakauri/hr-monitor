@@ -3414,6 +3414,30 @@
     return out;
   }
 
+  // A day's gaps less the stretches any recording has HR for: one recording's gap (a web monitor left waiting
+  // while the phone recorded) never hides another's data. pts: the day's HR points, sorted, { x } in minutes.
+  function gapsOutsideData(gaps, pts) {
+    const cover = [];
+    for (const p of pts) {
+      if (p.y == null) continue;
+      const last = cover[cover.length - 1];
+      if (last && p.x - last[1] <= DATA_JUMP_GAP_MIN) last[1] = p.x;
+      else cover.push([p.x, p.x]);
+    }
+    const out = [];
+    let k = 0;
+    for (const g of gaps) {
+      let s = g.start;
+      while (k < cover.length && cover[k][1] < s) k++;
+      for (let j = k; j < cover.length && cover[j][0] < g.end; j++) {
+        if (cover[j][0] - s >= DATA_JUMP_GAP_MIN) out.push({ start: s, end: cover[j][0] });
+        s = Math.max(s, cover[j][1]);
+      }
+      if (g.end - s >= DATA_JUMP_GAP_MIN) out.push({ start: s, end: g.end });
+    }
+    return out;
+  }
+
   function mergeGaps(gaps) {
     const sorted = gaps.filter(g => g.end > g.start).sort((a, b) => a.start - b.start);
     const out = [];
@@ -4725,7 +4749,7 @@
     }
 
     // Gaps inside recordings, before the time between recordings joins them.
-    const recGaps = mergeGaps(connGaps);
+    const recGaps = gapsOutsideData(mergeGaps(connGaps), hr);
     // Day boundaries between consecutive sessions count as connection gaps so
     // the chart line breaks instead of drawing a horizontal bridge across
     // strap-off time.
@@ -4785,7 +4809,7 @@
     // The whole day window (23, 24 or 25 h) for a virtual day, wherever the data sits in it.
     // activeDuration is the union of actual recorded minutes, shown as the recording total.
     const duration = DAY_MAX;
-    connGaps.splice(0, connGaps.length, ...mergeGaps(connGaps));
+    connGaps.splice(0, connGaps.length, ...gapsOutsideData(mergeGaps(connGaps), hr));
     const gapTotalMin = connGaps.reduce((s, g) => s + Math.max(0, g.end - g.start), 0);
     const hrAvg = hrVals.length ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : 0;
     const rmssdAvg = rmssdVals.length ? Math.round(rmssdVals.reduce((a, b) => a + b, 0) / rmssdVals.length) : null;
