@@ -17,7 +17,7 @@ other module-level state.
   for page session `id` with the folder `dir` (or null); `filename` comes from `startMs`. Returns it. A folder
   picked or cleared with no Recording, or while the current one is stopping, is simply passed at the next start.
 - `stop()`: the current Recording (the same one on every call; its `final` settles when both targets have a result); null if none.
-- `hidden(urgent)`, `closing(urgent)`: page lifecycle (rules 12, 18, 21).
+- `hidden()`, `closing()`: page lifecycle (rules 12, 18). `entered()`: the page committed a mark or note (rule 21).
 - `folderChanged(dirOrNull)`, `authChanged()`: targets changed (rule 15, rule 8).
 - `targets()`: `{ folder, drive }` booleans for the current Recording (the unsaved notice reads this).
 - `current()`: the current Recording or null (status filtering, the page's tests).
@@ -120,14 +120,15 @@ other module-level state.
     Export (`rec.text` as `rec.filename`, never `buildSessionCSV()`), and the leave guard stays on while any is kept.
     The panel shows only the newest Recording from `stop()`. A settle or 30 s timer of any other Recording updates
     only its own notice line. A Start hides the panel and cancels its pending 30 s show.
-18. PAGE: leaving the tab (hidden) commits held marks, then calls `recorder.hidden(urgent)`; Undo ends there.
-    pagehide flushes the note and any mark held since, then calls `recorder.closing(urgent)`. urgent is true when
-    either committed something the user entered (rule 21).
+18. PAGE: leaving the tab (hidden) commits held marks, then calls `recorder.hidden()`; Undo ends there. pagehide
+    flushes the note and any mark held since, then calls `recorder.closing()`. `addMarker`, the one writer of marks,
+    calls `recorder.entered()` for each (rule 21).
 19. PAGE: `connectWeb` calls `recorder.stop()` immediately before the session id bump, so no path reaches a new
     id with a Recording still live (today every path to idle runs `disconnect()`; this makes it a rule).
 20. PAGE: the Start click asks `dir.requestPermission` before `connect` (Chrome denies it after the strap
     picker's async work); in `arming`, `env.ensurePermission` only queries.
-21. urgent: a forced save that skips the pacing (rules 11, 12). If a folder write is in flight, the Recording is
+21. A forced save is urgent when an entry was committed (`entered()`) since the text last sent to the folder was
+    built, however long ago; it skips the pacing (rules 11, 12). If a folder write is in flight, the Recording is
     owed one write: when that write settles, or a newly picked file is made, text built then goes to the file that
     is current then, only while `live` and never beside another write (rule 4). A dropped handle (strike 3, a pick or
     a clear) never gets it; after Stop the final carries everything.

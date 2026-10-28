@@ -52,6 +52,9 @@
         // noStatus: a routine PATCH on driveFileId ended with no HTTP status (4). finalFailed: a final write was
         // made and did not land (13).
         pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null, owed: false,
+        // enterSeq: entries the page committed (21); builtSeq: as of the last build; folderSentSeq: as of the last
+        // text sent to the folder.
+        enterSeq: 0, builtSeq: 0, folderSentSeq: 0,
       };
     }
 
@@ -61,6 +64,7 @@
       rec.rows = env.rowCount ? env.rowCount() : 0;
       rec.bytes = byteLength(text);
       rec.builtAt = now();
+      rec.builtSeq = rec.enterSeq;
       return text;
     }
 
@@ -182,11 +186,12 @@
       return Promise.all(jobs).then(() => {});
     }
 
-    // 12: hidden or closing, in live only: a forced write when rows grew, paced. urgent: the page just committed
-    // something the user entered (a mark, a note); it skips the pacing, and a folder write in flight leaves the folder
-    // owed one write of fresh text when it settles (21).
-    function forced(rec, atClose, urgent) {
+    // 12: hidden or closing, in live only: a forced write when rows grew, paced. Urgent when the page committed
+    // something the user entered (a mark, a note) since the last text sent to the folder: it skips the pacing, and a
+    // folder write in flight leaves the folder owed one write of fresh text when it settles (21).
+    function forced(rec, atClose) {
       if (!rec || rec.state !== 'live') return;
+      const urgent = rec.enterSeq > rec.folderSentSeq;
       const rows = env.rowCount ? env.rowCount() : 0;
       if (rows <= rec.rows) return;
       const t = now();
@@ -202,8 +207,10 @@
       if (folderWants) folderWrite(rec, rec.file, text, false);
       if (driveWants) driveUpload(rec, text, rec.bytes, false);
     }
-    function hidden(urgent) { forced(cur, false, !!urgent); }
-    function closing(urgent) { forced(cur, true, !!urgent); }
+    function hidden() { forced(cur, false); }
+    function closing() { forced(cur, true); }
+    // 21: the page committed something the user entered.
+    function entered() { if (cur && (cur.state === 'live' || cur.state === 'arming')) cur.enterSeq++; }
 
     // 21: an owed write goes to whatever the file is now, with text built now, once nothing holds the folder; never
     // after Stop (the final carries everything) and never to a handle that was dropped.
@@ -222,6 +229,8 @@
     }
     // Its outcome counts only while the handle is still the file.
     async function folderWriteOnce(rec, handle, text, final) {
+      // Every caller built the text just before this call.
+      rec.folderSentSeq = rec.builtSeq;
       let p;
       try { p = Promise.resolve(env.writeFile(handle, text)); } catch (e) { p = Promise.reject(e); }
       const job = { p, handle };
@@ -468,7 +477,7 @@
     }
     function current() { return cur; }
 
-    return { start, stop, hidden, closing, folderChanged, authChanged, targets, current };
+    return { start, stop, hidden, closing, entered, folderChanged, authChanged, targets, current };
   }
 
   const api = { create };

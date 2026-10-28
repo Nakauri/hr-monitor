@@ -2137,11 +2137,10 @@
     if (!pageVisible) {
       lastHiddenAt = Date.now();
       if (window.HRMLog) window.HRMLog.event('lc vis=hidden');
-      // Held marks are committed on leaving the tab and saved past the pacing, or right after a write in flight
-      // (docs/web-recorder.md rules 18, 21). Undo ends here. An open note stays open.
-      let entered = false;
-      try { entered = commitHeldMarks(); } catch (e) {}
-      if (recorder) recorder.hidden(entered);
+      // Held marks are committed on leaving the tab, so the hidden save carries them (docs/web-recorder.md rules 18,
+      // 21). Undo ends here. An open note stays open.
+      try { commitHeldMarks(); } catch (e) {}
+      if (recorder) recorder.hidden();
       // Free GPU memory while backgrounded. Chart.js canvases hold ~320 MB
       // of GL buffers in long sessions.
       destroyCharts();
@@ -5537,6 +5536,8 @@
       if (list.length > cap) list.shift();
     }
     logNativeFact(/^sym:/i.test(label) ? 'symptom' : 'marker', { tsMs, text: label });
+    // The recorder saves what the user entered past its pacing at hide and close (docs/web-recorder.md rule 21).
+    if (recorder) recorder.entered();
     renderEvents();
     return true;
   }
@@ -5568,17 +5569,13 @@
     if (dropHeld(m)) addMarker(m.label, m.at, m.hr, m.rmssd);
   }
   // Called before every stop path and on pagehide, so a held mark reaches the final CSV.
-  // Both return true when they committed something the user entered.
   function flushHeldMarks() {
-    const note = !!noteComposer;
     if (noteComposer) noteComposer.commit();
-    return commitHeldMarks() || note;
+    commitHeldMarks();
   }
   function commitHeldMarks() {
-    const any = heldMarks.length > 0;
     while (heldMarks.length) commitHeld(heldMarks[0]);
     if (heldToast) { heldToast.close(); heldToast = null; }
-    return any;
   }
   function logMark(m, word) {
     if (!m.label) return;
@@ -5698,9 +5695,8 @@
 
   // Rule 18: a close flushes held marks and the note, then the recorder gets its last write.
   function onPageHide() {
-    let entered = false;
-    try { entered = flushHeldMarks(); } catch (e) {}
-    if (recorder) recorder.closing(entered);
+    try { flushHeldMarks(); } catch (e) {}
+    if (recorder) recorder.closing();
   }
   window.addEventListener('pagehide', onPageHide);
 

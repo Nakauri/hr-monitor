@@ -886,13 +886,32 @@ CHECKS.R = async (src) => {
     row('R12 hidden write ' + (mode === 'ok' ? 'landing' : 'hung') + ' at pagehide: it carries the mark; the close writes nothing beside it',
       overlapFree && /MARK/.test(h.content), JSON.stringify({ writes: h.writes.length, content: h.content, max: h.maxInflight }));
   }
-  // Rule 21 (round 4): something the user entered, committed on leaving the tab, reaches the folder.
-  const mark = (v, t) => { v.page.text = 'time,hr\n' + t + '\n'; v.page.rows++; };
+  // Rule 21 (rounds 4, 5): something the user entered reaches the folder at hide and close, whenever it was committed.
+  const mark = (v, t) => { v.page.text = 'time,hr\n' + t + '\n'; v.page.rows++; v.R.entered(); };
+  // Round 5: above SAVE_BIG, a mark the Undo timer committed 15 s after a rebuild, then the tab closes: written.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  w.page.text = 'x'.repeat(600 * 1024); w.page.rows++;
+  await w.advance(10000);
+  await w.advance(15000);
+  mark(w, 'x'.repeat(600 * 1024) + '\nMARK');
+  await w.advance(5000);
+  const r5 = h.writes.length;
+  w.R.hidden(); w.R.closing(); await flush();
+  row('R21 a mark committed while visible, then a close inside the rebuild minute: written at close',
+    h.writes.length === r5 + 1 && /MARK/.test(h.content), JSON.stringify([r5, h.writes.length]));
+  // A mark already in the write in flight leaves nothing owed.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  mark(w, '1,80\nMARK');
+  h.modes.push('hang');
+  await w.advance(10000);
+  w.page.rows++; w.R.hidden();
+  row('R21 a mark the write in flight already carries: nothing owed', !rec.owed, String(rec.owed));
+  await flush(); h.hung.shift().ok(); await w.advance(500);
   // a) The tick's write is in flight at hidden: one owed write after it, fresh text, never beside it.
   w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
   h.modes.push('hang');
   await w.advance(10000);
-  mark(w, '2,90\nMARK'); w.R.hidden(true); w.R.closing(true);
+  mark(w, '2,90\nMARK'); w.R.hidden(); w.R.closing();
   const a21 = h.writes.length;
   await flush(); h.hung.shift().ok(); await w.advance(500);
   row('R21 a write in flight when a mark is committed: one more write after it, with the mark, never beside it',
@@ -905,14 +924,14 @@ CHECKS.R = async (src) => {
   const b0 = h.writes.length;
   w.page.rows++; w.R.hidden(); await flush();
   const plain = h.writes.length;
-  mark(w, 'x'.repeat(600 * 1024) + '\nMARK'); w.R.hidden(true); await flush();
+  mark(w, 'x'.repeat(600 * 1024) + '\nMARK'); w.R.hidden(); await flush();
   row('R21 above SAVE_BIG an urgent save skips the minute; a plain one waits',
     plain === b0 && h.writes.length === b0 + 1 && /MARK/.test(h.writes[h.writes.length - 1]), JSON.stringify([b0, plain, h.writes.length]));
   // c) The write in flight is the third strike: the owed write never goes to the dropped handle.
   w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
   h.modes.push('fail', 'fail', 'hang');
   await w.advance(30000);
-  mark(w, '2,90\nMARK'); w.R.hidden(true);
+  mark(w, '2,90\nMARK'); w.R.hidden();
   const c21 = h.writes.length;
   await flush(); h.hung.shift().fail(); await w.advance(500);
   row('R21 the write in flight strikes out: nothing owed is written to the dropped handle',
@@ -921,7 +940,7 @@ CHECKS.R = async (src) => {
   w = world(src); dir = mkDir('A'); rec = await w.live(dir); h = dir.handles[0];
   h.modes.push('hang');
   await w.advance(10000);
-  mark(w, '2,90\nMARK'); w.R.hidden(true);
+  mark(w, '2,90\nMARK'); w.R.hidden();
   // B's file is still being made when A's write settles, so only B's arrival can pay what is owed.
   const d21 = mkDir('B', { creates: ['hang'] }); w.R.folderChanged(d21); await flush();
   const old21 = h.writes.length;
@@ -934,7 +953,7 @@ CHECKS.R = async (src) => {
   w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
   h.modes.push('hang');
   await w.advance(10000);
-  mark(w, '2,90\nMARK'); w.R.hidden(true);
+  mark(w, '2,90\nMARK'); w.R.hidden();
   fin = track(w.R.stop());
   await flush(); h.hung.shift().ok(); await w.advance(500);
   row('R21 Stop while owed: only the final writes after it, with the mark',
