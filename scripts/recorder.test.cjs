@@ -683,6 +683,16 @@ CHECKS.R = async (src) => {
   rec = await w.live();
   fin = track(w.R.stop()); await flush();
   row('R5 the final with no Drive folder found: unwritten, settles', fin.done && rec.result.drive === 'unwritten' && w.reqs().length === 0, JSON.stringify(rec.result));
+  // Rule 5: a known Drive file needs no folder id, for routine PATCHes and the final alike.
+  w = world(src); rec = await w.live();
+  await w.advance(10000);
+  w.drive.folderId = null; w.drive.lookupMode = 'fail';
+  await w.advance(60000);
+  const r5k = w.reqs().map((r) => r.kind).join() === 'create,patch';
+  fin = track(w.R.stop()); await flush();
+  row('R5 a known Drive file with the folder id gone: routine ticks and the final still PATCH it; saved',
+    r5k && fin.done && rec.result.drive === 'saved' && w.reqs().map((r) => r.kind).join() === 'create,patch,patch' && w.reqs('patch').every((r) => r.id === 'f1'),
+    JSON.stringify([rec.result, w.reqs().map((r) => r.kind)]));
 
   // Rule 6: the lookup runs at Start only when the folder id is null.
   w = world(src); rec = await w.live();
@@ -893,6 +903,19 @@ CHECKS.R = async (src) => {
   await w.live();
   w.R.stop(); await flush();
   row('R13 a Stop with no target shows no saving', !w.statuses.includes('saving'), JSON.stringify(w.statuses));
+  // Rule 13: routine outcomes that land after Stop leave "saving" alone.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  await w.advance(60000);
+  h.modes.push('hang');
+  w.drive.plan.push({ kind: 'patch', act: 'hang' });
+  await w.advance(10000);
+  const r13n = w.statuses.length, r13hung = h.hung.length === 1 && w.drive.hung.length === 1;
+  fin = track(w.R.stop()); await flush();
+  h.hung.shift().fail(); await flush();
+  w.drive.hung.shift().commit(); await flush();
+  row('R13 a routine folder failure and a routine Drive success after Stop: only saving, then idle',
+    r13hung && fin.done && rec.result.folder === 'saved' && rec.result.drive === 'saved' && w.statuses.slice(r13n).join() === 'saving,idle',
+    JSON.stringify([r13hung, rec.result, w.statuses.slice(r13n)]));
 
   // Rule 14: seen-and-gone targets are never saved; a null final text leaves seen targets unwritten.
   w = world(src); dir = mkDir('X'); rec = await w.live(dir);
@@ -932,6 +955,18 @@ CHECKS.R = async (src) => {
   w.drive.sync = false;
   w.drive.hung.shift().commit(); await flush();
   row('R14 sync turned off during the final\'s wait: failed after a landed write, settles', fin.done && rec.result.drive === 'failed' && w.reqs().length === 1, JSON.stringify(rec.result));
+  // Rule 14: a sign-out while the final waits on a hung routine PATCH settles at the next tick, not when the PATCH ends.
+  w = world(src); rec = await w.live();
+  await w.advance(10000);
+  w.drive.plan.push({ kind: 'patch', act: 'hang' });
+  await w.advance(60000);
+  fin = track(w.R.stop()); await flush();
+  const r14hung = rec.driveFileId === 'f1' && w.drive.hung.length === 1 && !fin.done;
+  w.signOut();
+  await w.advance(10000);
+  row('R14 a sign-out during the wait on a hung PATCH: failed within a tick, PATCH still hung',
+    r14hung && fin.done && rec.result.drive === 'failed' && w.drive.hung.length === 1 && w.reqs().length === 2,
+    JSON.stringify([r14hung, fin.done, rec.result, w.drive.hung.length]));
   // Rule 14: a folder final write that fails after earlier writes: failed; one that never wrote: unwritten.
   w = world(src); w.signOut(); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
   h.modes.push('fail');
@@ -969,6 +1004,15 @@ CHECKS.R = async (src) => {
   row('R15 a pick while arming is taken at the end of arming; the first folder\'s file is never written',
     rec.state === 'live' && rec.file === d15q.handles[0] && d15q.handles[0].landed.length === 1 && d15p.handles.every((x) => x.writes.length === 0) && rec.folderName === 'Q',
     JSON.stringify([rec.folderName, d15p.handles.length]));
+  // Rule 15: a pick while arming means the first folder's createFile is never called.
+  w = world(src); const d15c = mkDir('A', { perm: 'hang' }), d15d = mkDir('B');
+  rec = w.R.start(1, w.t, d15c); await flush();
+  w.R.folderChanged(d15d);
+  d15c.hungPerm.resolve(true); await flush();
+  await w.advance(10000);
+  row('R15 a pick while arming: no createFile on the first folder; the session writes the second',
+    d15c.createCalls === 0 && d15d.createCalls === 1 && rec.file === d15d.handles[0] && d15d.handles[0].landed.length === 1,
+    JSON.stringify([d15c.createCalls, d15d.createCalls]));
   // Rule 15: picks and clears while stopping are ignored.
   w = world(src); dir = mkDir('X'); const d15s = mkDir('S');
   rec = await w.live(dir);
