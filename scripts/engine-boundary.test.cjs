@@ -891,8 +891,10 @@ function detangleChecks() {
     const wl = fnBody('acquireWakeLock');
     check('[step 4] acquireWakeLock returns on NATIVE before the native CPU lock', !!wl && /if\s*\(\s*NATIVE\s*\)\s*return/.test(wl)
       && wl.search(/if\s*\(\s*NATIVE\s*\)\s*return/) < wl.indexOf('HRMWakeLock'));
-    const as = fnBody('startSessionAutoSave');
-    check('[step 4] startSessionAutoSave returns on NATIVE', !!as && /if\s*\(\s*NATIVE\s*\)\s*return/.test(as));
+    // The web recorder (recorder.js) replaced startSessionAutoSave; on the phone the page makes none.
+    const as = fnBody('makeRecorder');
+    check('[step 4] makeRecorder makes no recorder on NATIVE or with the native session plugin',
+      !!as && /if\s*\(\s*NATIVE\s*\|\|\s*\(window\.HRMNativeHrSession && window\.HRMNativeHrSession\.isAvailable\)\s*\)\s*return null;/.test(as));
     const gone = ['prepareLiveUiFromNativeSession', 'adoptNativeSessionUi', 'adoptNativeSenderIdentity', 'adoptLateNativeSession',
       'syncConnStateWithNative', '_nativeRelayLive'].filter(n => M.includes(n));
     check('[step 3] the merged adopt functions and _nativeRelayLive are gone', gone.length === 0, gone.join(', '));
