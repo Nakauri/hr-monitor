@@ -4163,9 +4163,10 @@
       panelEntry = null;
       if (keptRecordings.has(e.rec)) createKeptNotice(e); else e.screen = 'none';
     }
-    // 'await' here means its Stop threw before the panel showed; it still gets its line.
+    // 'await' here means its Stop threw before the panel showed; it still gets its line. While a Stop is still
+    // waiting, its entry is the panel's to show.
     keptRecordings.forEach((e) => {
-      if (e.screen !== 'late' && e.screen !== 'await') return;
+      if (e.screen !== 'late' && (e.screen !== 'await' || stopInFlight)) return;
       if (e.timer) { clearTimeout(e.timer); e.timer = null; }
       createKeptNotice(e);
     });
@@ -5289,7 +5290,7 @@
     // Strap is advertising. If we're not already connected, jump on it.
     if (!device || device._native) return;
     if (device.gatt && device.gatt.connected) return;
-    try { await attachConnection(); state.lastDataTime = Date.now(); resetReconnectBackoff(); ensureRecording(); }
+    try { await attachConnection(); if (stopReconnectAfterStop()) return; state.lastDataTime = Date.now(); resetReconnectBackoff(); ensureRecording(); }
     catch (e) { /* polling tryReconnect will pick up if this fails */ }
   }
   async function tryReconnect() {
@@ -5304,6 +5305,7 @@
     startWatchingAdvertisements();
     try {
       await attachConnection();
+      if (stopReconnectAfterStop()) return;
       state.lastDataTime = Date.now();
       resetReconnectBackoff();
       ensureRecording();
@@ -5842,6 +5844,12 @@
   function startRecording() {
     if (!recorder) return;
     recorder.start(sessionSeq, state.startTime || Date.now(), autoSaveDirHandle);
+  }
+  // A reconnect that lands after Stop (its connect was already pending) drops the link instead of reviving the session.
+  function stopReconnectAfterStop() {
+    if (state.autoReconnect) return false;
+    try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) {}
+    return true;
   }
   // A reconnect that brings a session live with no Recording of its own (Start's attach threw) starts one.
   function ensureRecording() {

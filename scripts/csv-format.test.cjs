@@ -182,6 +182,10 @@ check('a page close flushes marks, then the recorder writes', /function onPageHi
 check('a reconnect that brings a session live starts its Recording',
   (monitor.match(/resetReconnectBackoff\(\);\s*ensureRecording\(\);/g) || []).length === 2
   && /function ensureRecording\(\) \{[\s\S]{0,120}if \(!c \|\| c\.id !== sessionSeq\) startRecording\(\);/.test(monitor));
+check('a reconnect landing after Stop drops the link before it can revive the session',
+  (monitor.match(/await attachConnection\(\);\s*if \(stopReconnectAfterStop\(\)\) return;/g) || []).length === 2
+  && /function stopReconnectAfterStop\(\) \{\s*if \(state\.autoReconnect\) return false;/.test(monitor));
+check('a Stop still waiting keeps its entry off the notice lines', /e\.screen !== 'await' \|\| stopInFlight/.test(jsFunction(monitor, 'hideAfterStop') || ''));
 check('Stop never takes an older session\'s Recording', /if \(!was \|\| was\.id !== sessionSeq\) return null;/.test(jsFunction(monitor, 'endRecording') || ''));
 check('a session with no data keeps no Export and no guard',
   /function exportOn\(entry\) \{ return hasData\(entry\) &&/.test(monitor) && /function keptStill\(entry\) \{ return hasData\(entry\) &&/.test(monitor));
