@@ -182,13 +182,14 @@
     }
 
     // 12: hidden or closing, in live only: a forced write when rows grew, paced.
-    function forced(rec) {
+    function forced(rec, atClose) {
       if (!rec || rec.state !== 'live') return;
       const rows = env.rowCount ? env.rowCount() : 0;
       if (rows <= rec.rows) return;
       const t = now();
-      // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart.
-      if (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : t - rec.forcedAt < forcedMs) return;
+      // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart, except at close, where
+      // a mark flushed by pagehide must still reach the file.
+      if (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : !atClose && t - rec.forcedAt < forcedMs) return;
       const folderWants = !!rec.file && !rec.folderBusy;
       const driveWants = driveReady(rec) && !rec.upload && t - rec.driveAt >= pace(rec.bytes);
       if (!folderWants && !driveWants) return;
@@ -199,7 +200,7 @@
       if (driveWants) driveUpload(rec, text, rec.bytes, false);
     }
     function hidden() { forced(cur); }
-    function closing() { forced(cur); }
+    function closing() { forced(cur, true); }
 
     // 4, 10, 15: the one folder write of a Recording; its outcome counts only while the handle is still the file.
     async function folderWrite(rec, handle, text, final) {

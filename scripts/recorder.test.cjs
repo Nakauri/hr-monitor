@@ -832,14 +832,22 @@ CHECKS.R = async (src) => {
   w.R.hidden(); await flush(); c.push(h.writes.length);
   w.page.rows++; w.R.hidden(); await flush(); c.push(h.writes.length);
   await w.advance(5000);
-  w.page.rows++; w.R.closing(); await flush(); c.push(h.writes.length);
+  w.page.rows++; w.R.hidden(); await flush(); c.push(h.writes.length);
   await w.advance(4000);
-  w.page.rows++; w.R.closing(); await flush(); c.push(h.writes.length);
+  w.page.rows++; w.R.hidden(); await flush(); c.push(h.writes.length);
   // 20 s: the tick writes, then a forced write 10 s after the last forced one is allowed.
   await w.advance(1000);
-  w.page.rows++; w.R.closing(); await flush(); c.push(h.writes.length);
+  w.page.rows++; w.R.hidden(); await flush(); c.push(h.writes.length);
   row('R12 hidden or closing: nothing while arming or with no new rows; a forced write at most every 10 s',
     armQuiet && c.join() === '1,2,3,3,3,5', JSON.stringify([armQuiet, c]));
+  // Rule 18 with 12: a close 2 s after a hidden write still writes the mark pagehide just flushed.
+  w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
+  await w.advance(10000);
+  w.page.rows++; w.R.hidden(); await flush();
+  const hw = h.writes.length;
+  await w.advance(2000);
+  w.page.rows++; w.R.closing(); await flush();
+  row('R12 a close right after a hidden write still writes (a mark flushed at close reaches the file)', h.writes.length === hw + 1, JSON.stringify([hw, h.writes.length]));
   // Rule 12: a forced save goes to Drive only when its pace allows.
   w = world(src); rec = await w.live();
   await w.advance(5000);

@@ -177,6 +177,14 @@ check('Start stops the old Recording before the session id moves (rule 19)',
   /endRecording\(true\);\s*sessionSeq\+\+;\s*resetLiveDataBuffers\(\);/.test(connectSrc) && connectSrc.indexOf('sessionSeq++') < connectSrc.indexOf('startRecording();'));
 check('an old Recording never builds new data', /buildCsv: \(id\) => \(id === sessionSeq \? buildSessionCSV\(\)\.csv : null\)/.test(monitor));
 check('a page close flushes marks, then the recorder writes', /function onPageHide\(\) \{\s*try \{ flushHeldMarks\(\); \} catch \(e\) \{\}\s*if \(recorder\) recorder\.closing\(\);/.test(monitor));
+// Page review 2026-10-28: a reconnect with no Recording starts one; Stop never takes an older session's Recording;
+// a session with no data keeps no Export and no guard.
+check('a reconnect that brings a session live starts its Recording',
+  (monitor.match(/resetReconnectBackoff\(\);\s*ensureRecording\(\);/g) || []).length === 2
+  && /function ensureRecording\(\) \{[\s\S]{0,120}if \(!c \|\| c\.id !== sessionSeq\) startRecording\(\);/.test(monitor));
+check('Stop never takes an older session\'s Recording', /if \(!was \|\| was\.id !== sessionSeq\) return null;/.test(jsFunction(monitor, 'endRecording') || ''));
+check('a session with no data keeps no Export and no guard',
+  /function exportOn\(entry\) \{ return hasData\(entry\) &&/.test(monitor) && /function keptStill\(entry\) \{ return hasData\(entry\) &&/.test(monitor));
 // One owner for the save (A- plan Block 3): the page keeps no save state of its own, and recorder.js keeps only `cur`.
 const SAVE_STATE = ['autoSaveGen', 'autoSaveFinal', 'autoSaveFileHandle', 'autoSaveInterval', 'autoSaveBytes', 'autoSaveBuiltAt',
   'finalLocalOk', 'driveFileIdForSession', 'driveUploadInFlight', 'driveUploadAt', 'autoSaveFailStreak', 'afterStopCsv', 'afterStopSeq'];

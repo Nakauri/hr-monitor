@@ -4008,7 +4008,8 @@
   function endRecording(late) {
     if (!recorder) return null;
     const was = recorder.current();
-    if (!was) return null;
+    // An older session's Recording is never this session's Stop.
+    if (!was || was.id !== sessionSeq) return null;
     if (keptRecordings.has(was)) return keptRecordings.get(was);
     // Already stopped and let go (saved, or exported): a later disconnect() is not a second Stop.
     if (was.state === 'stopping' || was.state === 'done') return null;
@@ -4026,8 +4027,10 @@
   function anySaved(rec) { return rec.result.folder === 'saved' || rec.result.drive === 'saved'; }
   function anyPending(rec) { return rec.result.folder === 'pending' || rec.result.drive === 'pending'; }
   // Rule 17: Export and the leave guard stay while a result is pending or none is saved.
-  function exportOn(entry) { return entry.rec.text != null && !entry.exported && (anyPending(entry.rec) || !anySaved(entry.rec)); }
-  function keptStill(entry) { return entry.rec.state !== 'done' || (!anySaved(entry.rec) && !entry.exported); }
+  // A session stopped before any data (rows 0 at Stop) has nothing to lose: no Export, no guard, nothing kept.
+  function hasData(entry) { return entry.rec.rows > 0; }
+  function exportOn(entry) { return hasData(entry) && entry.rec.text != null && !entry.exported && (anyPending(entry.rec) || !anySaved(entry.rec)); }
+  function keptStill(entry) { return hasData(entry) && (entry.rec.state !== 'done' || (!anySaved(entry.rec) && !entry.exported)); }
   function resultTexts(rec) {
     const name = rec.folderName || 'folder';
     const F = { saved: 'Saved to ' + name, failed: 'Last save to ' + name + ' failed', unwritten: 'Not saved to ' + name, pending: 'Saving to ' + name };
@@ -4078,7 +4081,10 @@
       box.hidden = false;
       return;
     }
-    if (panelEntry && panelEntry !== f.entry && panelEntry.screen === 'panel') { panelEntry.screen = 'none'; pruneKept(panelEntry); }
+    // A kept session the panel moves on from keeps its own notice line.
+    if (panelEntry && panelEntry !== f.entry && panelEntry.screen === 'panel') {
+      if (keptRecordings.has(panelEntry.rec)) createKeptNotice(panelEntry); else panelEntry.screen = 'none';
+    }
     panelEntry = f.entry || null;
     if (!panelEntry) {
       saved.textContent = 'Not saved' + dur;
@@ -4157,8 +4163,9 @@
       panelEntry = null;
       if (keptRecordings.has(e.rec)) createKeptNotice(e); else e.screen = 'none';
     }
+    // 'await' here means its Stop threw before the panel showed; it still gets its line.
     keptRecordings.forEach((e) => {
-      if (e.screen !== 'late') return;
+      if (e.screen !== 'late' && e.screen !== 'await') return;
       if (e.timer) { clearTimeout(e.timer); e.timer = null; }
       createKeptNotice(e);
     });
@@ -5282,7 +5289,7 @@
     // Strap is advertising. If we're not already connected, jump on it.
     if (!device || device._native) return;
     if (device.gatt && device.gatt.connected) return;
-    try { await attachConnection(); state.lastDataTime = Date.now(); resetReconnectBackoff(); }
+    try { await attachConnection(); state.lastDataTime = Date.now(); resetReconnectBackoff(); ensureRecording(); }
     catch (e) { /* polling tryReconnect will pick up if this fails */ }
   }
   async function tryReconnect() {
@@ -5299,6 +5306,7 @@
       await attachConnection();
       state.lastDataTime = Date.now();
       resetReconnectBackoff();
+      ensureRecording();
     } catch (e) {
       const msg = (e && e.message) ? e.message : String(e);
       const is133 = /status[\s:=]*133|GATT_ERROR/i.test(msg);
@@ -5834,6 +5842,12 @@
   function startRecording() {
     if (!recorder) return;
     recorder.start(sessionSeq, state.startTime || Date.now(), autoSaveDirHandle);
+  }
+  // A reconnect that brings a session live with no Recording of its own (Start's attach threw) starts one.
+  function ensureRecording() {
+    if (!recorder) return;
+    const c = recorder.current();
+    if (!c || c.id !== sessionSeq) startRecording();
   }
 
   // ===== Google Drive dual-save =====

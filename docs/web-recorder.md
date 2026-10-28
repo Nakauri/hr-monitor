@@ -90,7 +90,8 @@ other module-level state.
 11. Pacing: folder every tick below SAVE_BIG, above it at most one rebuild a minute. Drive pace =
     clamp(file MB x 60 s, 60 s, 10 min). No target: nothing is built.
 12. Hidden or closing, only in `live`: a forced folder write if `env.rowCount()` grew since the last build, at
-    most once per 10 s below SAVE_BIG and once a minute above it; Drive only when its pace allows.
+    most once per 10 s below SAVE_BIG (closing skips this, so a mark pagehide flushed reaches the file) and once a
+    minute above it, shared with the tick's rebuild; Drive only when its pace allows.
 13. Status (`writing`, `synced`, `drive error: ...`, `denied`, `error`, `write error (n/3)`) is set only while
     `current()` is the Recording reporting it. After Stop: `saving` while any result is `pending`, then `idle`
     unless a final write failed, then the failure.
