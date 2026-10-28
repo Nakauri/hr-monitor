@@ -193,7 +193,8 @@
       if (!rec || rec.state !== 'live') return;
       const urgent = rec.enterSeq > rec.folderSavedSeq;
       const rows = env.rowCount ? env.rowCount() : 0;
-      if (rows <= rec.rows) return;
+      // An entry not yet landed is written even with no new rows (its last write may have failed).
+      if (rows <= rec.rows && !urgent) return;
       const t = now();
       // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart, except at close.
       if (!urgent && (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : !atClose && t - rec.forcedAt < forcedMs)) return;

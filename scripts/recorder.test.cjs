@@ -896,9 +896,10 @@ CHECKS.R = async (src) => {
   mark(w, 'x'.repeat(600 * 1024) + '\nMARK');
   await w.advance(5000);
   const r5 = h.writes.length;
-  w.R.hidden(); w.R.closing(); await flush();
+  w.R.hidden(); w.R.closing(); await w.advance(500);
+  // The close owes one more write while the hide's is unlanded: at most two, never at once.
   row('R21 a mark committed while visible, then a close inside the rebuild minute: written at close',
-    h.writes.length === r5 + 1 && /MARK/.test(h.content), JSON.stringify([r5, h.writes.length]));
+    h.writes.length >= r5 + 1 && h.writes.length <= r5 + 2 && h.maxInflight === 1 && /MARK/.test(h.content), JSON.stringify([r5, h.writes.length]));
   // A mark counts as saved only when a write carrying it lands: the write in flight carrying it fails, then a close
   // inside the rebuild minute still writes it.
   w = world(src); dir = mkDir('X'); rec = await w.live(dir); h = dir.handles[0];
@@ -911,6 +912,16 @@ CHECKS.R = async (src) => {
   await flush(); h.hung.shift().fail(); await w.advance(500);
   const f21 = h.writes.length;
   w.page.rows++; w.R.closing(); await w.advance(500);
+  // Round 6: no new rows since a build whose write failed; the entry in it is still written at hide.
+  {
+    const v = world(src); const dv = mkDir('X'); await v.live(dv); const hv = dv.handles[0];
+    mark(v, '1,80\nMARK');
+    hv.modes.push('fail');
+    await v.advance(10000);
+    const n6 = hv.writes.length;
+    v.R.hidden(); await flush();
+    row('R21 an entry whose write failed is written at hide with no new rows', hv.writes.length === n6 + 1 && /MARK/.test(hv.content), JSON.stringify([n6, hv.writes.length]));
+  }
   // Cost: once a write carrying the mark lands, a hide inside the rebuild minute is plain again.
   {
     const v = world(src); const dv = mkDir('X'); await v.live(dv); const hv = dv.handles[0];
