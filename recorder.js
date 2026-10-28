@@ -49,7 +49,7 @@
         // pick: the newest folder pick; pending: its createFile. pendingDir: a pick made while arming (15).
         // noStatus: a routine PATCH on driveFileId ended with no HTTP status (4). finalFailed: a final write was
         // made and did not land (13).
-        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false,
+        pick: 0, pending: null, pendingDir: undefined, noStatus: false, lookupAt: 0, finalFailed: false, failMsg: null,
       };
     }
 
@@ -181,7 +181,8 @@
       const rows = env.rowCount ? env.rowCount() : 0;
       if (rows <= rec.rows) return;
       const t = now();
-      if (t - rec.forcedAt < (rec.bytes > saveBig ? rebuildMs : forcedMs)) return;
+      // Above saveBig the tick's limit is shared (builtAt); below it, forced writes 10 s apart.
+      if (rec.bytes > saveBig ? t - rec.builtAt < rebuildMs : t - rec.forcedAt < forcedMs) return;
       const folderWants = !!rec.file && !rec.folderBusy;
       const driveWants = driveOn() && env.folderId() != null && !rec.upload && t - rec.driveAt >= pace(rec.bytes);
       if (!folderWants && !driveWants) return;
@@ -210,7 +211,9 @@
         return true;
       }
       rec.strikes++;
-      status(rec, 'write error (' + rec.strikes + '/' + maxStrikes + ')', 'error');
+      // 13: a final's failure shows once nothing is pending.
+      if (final) rec.failMsg = 'write error (' + rec.strikes + '/' + maxStrikes + ')';
+      else status(rec, 'write error (' + rec.strikes + '/' + maxStrikes + ')', 'error');
       if (rec.strikes >= maxStrikes) rec.file = null;
       return false;
     }
@@ -305,7 +308,8 @@
       }
     }
     function fail(rec, final, msg) {
-      if (!final) status(rec, 'drive error: ' + msg, 'error');
+      if (final) rec.failMsg = 'drive error: ' + msg;
+      else status(rec, 'drive error: ' + msg, 'error');
       return false;
     }
 
@@ -347,7 +351,10 @@
     // 14: a target's result once its final write has settled or there was none to make.
     function settle(rec, target, saved, attempted) {
       rec.result[target] = saved ? 'saved' : (rec.wrote[target] ? 'failed' : 'unwritten');
-      if (attempted && !saved) rec.finalFailed = true;
+      if (attempted && !saved) {
+        rec.finalFailed = true;
+        if (!rec.failMsg) rec.failMsg = target === 'drive' ? 'drive error: Drive upload not confirmed' : 'write error';
+      }
     }
 
     // 4, 5: the folder final waits for the newest pick's file and the write in flight on it, however long.
@@ -371,8 +378,9 @@
 
     function finish(rec) {
       rec.state = 'done';
-      if (cur !== rec || rec.finalFailed) return;
-      if (rec.dir || rec.seen.folder) status(rec, 'idle', '');
+      if (cur !== rec) return;
+      if (rec.finalFailed) status(rec, rec.failMsg, 'error');
+      else if (rec.dir || rec.seen.folder || rec.seen.drive) status(rec, 'idle', '');
     }
 
     // The final text is built here, before any await (S7); every later step writes that text.

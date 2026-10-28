@@ -19,7 +19,7 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 
 | Column | JS writer | Native writer | Authority | Enforcement |
 |--------|-----------|---------------|-----------|-------------|
-| CSV header order | `hr_monitor.html:writeAutoSave` | `NativeCsvWriter.java:appendHrRow` | `time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture` | Viewer's `summarizeCSV` parses by column name, not position — normalizes across sources. Gap: no parity test |
+| CSV header order | `hr_monitor.html:buildSessionCSV`, written by `recorder.js` (the one web writer) | `NativeCsvWriter.java:appendHrRow` | `time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture` | Viewer's `summarizeCSV` parses by column name, not position — normalizes across sources. Gap: no parity test |
 | `connection` value | `hr_monitor.html` writes `connect` / `disconnect` | native writes `connected` / `disconnected` | Viewer normalizes both to `connect` / `disconnect` at parse time (`hrv_viewer.html:~L3575`) | Normalization is itself load-bearing; if removed, viewer gap-rendering breaks on native CSVs |
 
 ## Data output (schema v2 hourly segments)

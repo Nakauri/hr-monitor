@@ -24,6 +24,7 @@ run node scripts/lifecycle-deadline.test.cjs
 run node scripts/demo-synthetic.test.cjs
 run node scripts/marks-store.test.cjs
 run node scripts/relay-link.test.cjs
+run node scripts/recorder.test.cjs
 # The JVM tier (compiles the real native Java, about 4 min) runs in CI always, and locally only when the
 # push touches the Java or these tests (or origin/main is unknown).
 if [ -n "$CI" ] || ! git rev-parse -q --verify origin/main >/dev/null \

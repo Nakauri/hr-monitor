@@ -16,7 +16,7 @@ other module-level state.
 - `start(id, startMs, dir)`: stops any Recording not `done` (its `final` keeps running), then creates a new one
   for page session `id` with the folder `dir` (or null); `filename` comes from `startMs`. Returns it. A folder
   picked or cleared with no Recording, or while the current one is stopping, is simply passed at the next start.
-- `stop()`: the current Recording's `final` (the same promise on every call); null if none.
+- `stop()`: the current Recording (the same one on every call; its `final` settles when both targets have a result); null if none.
 - `hidden()`, `closing()`: page lifecycle (rule 12).
 - `folderChanged(dirOrNull)`, `authChanged()`: targets changed (rule 15, rule 8).
 - `targets()`: `{ folder, drive }` booleans for the current Recording (the unsaved notice reads this).

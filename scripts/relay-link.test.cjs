@@ -512,7 +512,7 @@ CHECKS.K1 = async (src) => {
 
   // Round 6: another account signed in over this one drops the old account's folder.
   out.push(['K1 a different account signing in drops the old folder and account id',
-    /if \(record && record\.email && relayLink\.loginEmail && record\.email !== relayLink\.loginEmail\) \{\s*driveFolderId = null;\s*driveFileIdForSession = null;\s*relayLink\.forgetAccount\(\);/.test(src.monitor)]);
+    /if \(record && record\.email && relayLink\.loginEmail && record\.email !== relayLink\.loginEmail\) \{\s*driveFolderId = null;\s*relayLink\.forgetAccount\(\);/.test(src.monitor)]);
 
   // Round 5: signing out and back into the same account before Drive took a new link keeps the link.
   fake = withConfig({ broadcastKey: KA, publishSecret: S1 });

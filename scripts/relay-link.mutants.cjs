@@ -35,7 +35,7 @@ module.exports = [
   ['another account\'s newer link is written (round 6)', 'link', 'valid && !foreign && cfg.broadcastKey !== k', 'valid && cfg.broadcastKey !== k'],
   ['a link read back is never restored (round 6)', 'link', 'const newer = valid && !foreign && cfg.broadcastKey !== k && at > cfgAt && (cfgAt > 0 || mine);', 'const newer = mine && valid && !foreign && cfg.broadcastKey !== k && at > cfgAt;'],
   ['two syncs interleave (module)', 'link', '      if (s.running) { s.again = true; return s.running; }\n', ''],
-  ['a new login keeps the old folder (round 6)', 'monitor', '        driveFolderId = null;\n        driveFileIdForSession = null;\n        relayLink.forgetAccount();\n', ''],
+  ['a new login keeps the old folder (round 6)', 'monitor', '        driveFolderId = null;\n        relayLink.forgetAccount();\n', ''],
   ['the viewer writes the monitor\'s key (round 7)', 'viewer', '      localStorage.setItem(VIEWER_WATCH_KEY, cfg.broadcastKey);', "      localStorage.setItem('hr_monitor_broadcast_key', cfg.broadcastKey);"],
   ['the viewer keeps a stale watch key (round 7)', 'viewer', '{ localStorage.removeItem(VIEWER_WATCH_KEY); return; }', '{ return; }'],
   ['a sync spanning an account change writes (round 7)', 'link', '      if (s.run !== run || env.folder() !== folder || env.token() !== token) return;\n', ''],

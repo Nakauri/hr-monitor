@@ -109,8 +109,8 @@ function jsFunction(src, name) {
 const symConst = (monitor.match(/const SYMPTOM_LABEL = '([^']*)';/) || [])[1];
 check('web Symptom label is sym:symptom', symConst === 'sym:symptom', String(symConst));
 const noteMax = (monitor.match(/const NOTE_MAX = (\d+);/) || [])[1];
-const fnSrc = ['buildSessionCSV', 'sanitizeNote'].map((n) => jsFunction(monitor, n));
-check('buildSessionCSV and sanitizeNote found', fnSrc.every(Boolean));
+const fnSrc = ['buildSessionCSV', 'sanitizeNote', 'csvCell'].map((n) => jsFunction(monitor, n));
+check('buildSessionCSV, sanitizeNote and csvCell found', fnSrc.every(Boolean));
 if (fnSrc.every(Boolean) && noteMax) {
   const t0 = 1760000000000;
   const series = () => ({ hrSeries: [{ t: 0.5, v: 88 }], rmssdSeries: [{ t: 0.5, v: 40 }], sdnnMatchSeries: [], sdnn5minSeries: [], sdnnFullSeries: [],
@@ -137,7 +137,7 @@ if (fnSrc.every(Boolean) && noteMax) {
 // A long web session keeps its start: the chart's series stop at 5000 points, but the saved file is built from the
 // session's full record (2026-10-25 re-grade: past about 83 min at 1 Hz the file lost its first rows, and the live
 // palpitation list keeps only 10 min, so older palpitations never reached the file at all).
-const longSrc = ['freshFullRecord', 'track', 'buildSessionCSV'].map((n) => jsFunction(monitor, n));
+const longSrc = ['freshFullRecord', 'track', 'buildSessionCSV', 'csvCell'].map((n) => jsFunction(monitor, n));
 const fullCap = (monitor.match(/const FULL_CAP = (\d+);/) || [])[1];
 check('track, freshFullRecord and FULL_CAP found', longSrc.every(Boolean) && !!fullCap);
 if (longSrc.every(Boolean) && fullCap) {
@@ -165,37 +165,27 @@ check('addMarker sends kind symptom for a sym: label, marker otherwise',
   /logNativeFact\(\s*\/\^sym:\/i\.test\(label\)\s*\?\s*'symptom'\s*:\s*'marker'/.test(add));
 // S9: a native Undo removes its own mark from the Marks list (the row stays in the segment; a rev hides it).
 const undo = jsFunction(monitor, 'undoNativeMark') || '';
-// The whole-session file is paced as it grows (review 2026-10-25: a 48 h file rebuilt every 10 s took half a
-// second each time, and uploaded whole once a minute came to about 10 GB), and the stop waits for the last upload.
-const paceSrc = jsFunction(monitor, 'drivePaceMs');
-const saveBig = (monitor.match(/const SAVE_BIG = (\d+) \* 1024;/) || [])[1];
-if (paceSrc && saveBig) {
-  const pctx = { SAVE_BIG: Number(saveBig) * 1024 };
-  vm.createContext(pctx); vm.runInContext(paceSrc, pctx);
-  const MB = 1048576;
-  check('Drive pace: small files every save, then a minute per MB, at most 10 min',
-    pctx.drivePaceMs(100 * 1024) === 0 && pctx.drivePaceMs(600 * 1024) === 60000 && pctx.drivePaceMs(2 * MB) === 120000 && pctx.drivePaceMs(20 * MB) === 600000);
-} else check('drivePaceMs and SAVE_BIG found', false);
-const was = jsFunction(monitor, 'writeAutoSave') || '';
+// The save itself is recorder.js, tested scenario by scenario in scripts/recorder.test.cjs. The page pins: the Stop
+// awaits the Recording's final before the after-stop panel, and Start stops the old Recording before the id moves.
 const stopNow = jsFunction(monitor, 'stopSessionNow') || '';
-const stopSave = jsFunction(monitor, 'stopSessionAutoSave') || '';
-check('a big file is rebuilt at most once a minute, the final save always',
-  /if \(!final && !force && autoSaveBytes > SAVE_BIG && Date\.now\(\) - autoSaveBuiltAt < 60000\) return;/.test(was) && /if \(final\) return await driveUploadSession\(filename, csv, true, gen\);/.test(was));
-const RACE = 'const save = ended.finalSave = stopSessionAutoSave();';
-check('the stop reads its facts, then awaits the final save before the after-stop panel, once per session',
-  stopNow.indexOf('const ended = afterStopFacts();') >= 0 && stopNow.indexOf('const ended = afterStopFacts();') < stopNow.indexOf(RACE)
-  && stopNow.indexOf(RACE) >= 0 && /await Promise\.race\(\[save\.then/.test(stopNow) && stopNow.indexOf(RACE) < stopNow.indexOf('showAfterStop(ended)')
-  && /if \(autoSaveFinal\) return autoSaveFinal;/.test(stopSave) && /return job;/.test(jsFunction(monitor, 'driveUploadSession') || ''));
-// Confirm 2026-10-25: the panel polled a status the save itself then overwrote (every folder+Drive stop read "not
-// confirmed"), and a final save settling after the next Start cleared that session's folder file and Drive id.
-const upload = jsFunction(monitor, 'driveUploadSession') || '';
-const after = jsFunction(monitor, 'showAfterStop') || '';
-check('the after-stop panel shows the final save\'s own result',
-  /ended\.driveOk = r\.ok;/.test(stopNow) && /else if \(f\.driveOk === true\) set\('Saved to Drive'\);/.test(after) && /else if \(f\.driveOk === false\) set\('Drive upload failed', 'error'\);/.test(after));
-check('an old session\'s save never touches the new session',
-  /autoSaveGen\+\+;/.test(jsFunction(monitor, 'startSessionAutoSave') || '') && /if \(gen === autoSaveGen\) \{\s*autoSaveFileHandle = null;/.test(stopSave)
-  && /if \(gen === autoSaveGen && relayLink\.loginTag === login\) driveFileIdForSession = data\.id;/.test(upload) && (upload.match(/gen === autoSaveGen && typeof setAutoSaveStatus/g) || []).length === 2);
-check('a page close writes a flushed mark past the rebuild pace', /writeAutoSave\(false, true\)/.test(monitor) && /if \(!final && !force && autoSaveBytes > SAVE_BIG/.test(was));
+const connectSrc = jsFunction(monitor, 'connectWeb') || '';
+check('the stop awaits the Recording\'s final, capped, before the after-stop panel',
+  stopNow.indexOf('ended.entry = endRecording(false);') >= 0
+  && stopNow.indexOf('ended.entry = endRecording(false);') < stopNow.indexOf('await Promise.race([ended.entry.rec.final')
+  && stopNow.indexOf('await Promise.race([ended.entry.rec.final') < stopNow.indexOf('showAfterStop(ended)'));
+check('Start stops the old Recording before the session id moves (rule 19)',
+  /endRecording\(true\);\s*sessionSeq\+\+;\s*resetLiveDataBuffers\(\);/.test(connectSrc) && connectSrc.indexOf('sessionSeq++') < connectSrc.indexOf('startRecording();'));
+check('an old Recording never builds new data', /buildCsv: \(id\) => \(id === sessionSeq \? buildSessionCSV\(\)\.csv : null\)/.test(monitor));
+check('a page close flushes marks, then the recorder writes', /function onPageHide\(\) \{\s*try \{ flushHeldMarks\(\); \} catch \(e\) \{\}\s*if \(recorder\) recorder\.closing\(\);/.test(monitor));
+// One owner for the save (A- plan Block 3): the page keeps no save state of its own, and recorder.js keeps only `cur`.
+const SAVE_STATE = ['autoSaveGen', 'autoSaveFinal', 'autoSaveFileHandle', 'autoSaveInterval', 'autoSaveBytes', 'autoSaveBuiltAt',
+  'finalLocalOk', 'driveFileIdForSession', 'driveUploadInFlight', 'driveUploadAt', 'autoSaveFailStreak', 'afterStopCsv', 'afterStopSeq'];
+const leftover = SAVE_STATE.filter((n) => new RegExp('\\b' + n + '\\b').test(monitor));
+check('the page holds none of the old save state', leftover.length === 0, leftover.join(', '));
+const recSrc = fs.readFileSync(path.join(__dirname, '..', 'recorder.js'), 'utf8');
+const recBody = (recSrc.match(/function create\(env\) \{([\s\S]*)\n  \}\n\n  const api/) || [])[1] || '';
+const recLets = (recBody.match(/^    let \w+/gm) || []).map((l) => l.trim());
+check('recorder.js keeps one mutable binding, the current Recording', recLets.length === 1 && recLets[0] === 'let cur', recLets.join(', '));
 // The Marks list and the session's full record (the saved file) move together: one insert, one undo, no other writer.
 check('addMarker is the only writer of the marks; undoNativeMark removes one from each list',
   /for \(const \[list, cap\] of \[\[state\.events, 500\], \[state\.full\.events, FULL_CAP\]\]\)/.test(add) && /list\.splice\(i, 0, ev\)/.test(add)
@@ -203,79 +193,22 @@ check('addMarker is the only writer of the marks; undoNativeMark removes one fro
   && /state\.events\.splice\(i, 1\)/.test(undo) && /state\.full\.events\.splice\(j, 1\)/.test(undo) && !/\.(push|unshift)\(|splice\([^)]*,[^)]*,/.test(undo));
 check('the free-text marker input is gone', !/id="marker-label"|id="add-marker"/.test(monitor));
 
-// Confirm round 2: an old session's final waits on a running upload, Start happens meanwhile; it must upload nothing
-// and leave the new session's Drive file id alone. Run on the real driveUploadSession.
-async function oldFinalAfterStart(waitOnUpload) {
-  let release;
-  const calls = [];
-  const u = { driveSyncOn: () => true, driveAccessToken: 'tok', driveFolderId: 'f', driveFileIdForSession: null, autoSaveGen: 1,
-    driveUploadAt: 0, drivePaceMs: () => 0, driveAuthHeader: async () => 'Bearer x', setAutoSaveStatus() {}, console: { error() {} },
-    window: { aortiAuth: { refreshIfNeeded: async () => {} } }, relayLink: { loginTag: null },
-    fetch: async (url, init) => { calls.push(init.method); return { ok: true, status: 200, json: async () => ({ id: 'old-file' }) }; } };
-  u.driveUploadInFlight = waitOnUpload ? new Promise((r) => { release = r; }) : null;
-  vm.createContext(u);
-  const usrc = jsFunction(monitor, 'driveUploadSession');
-  vm.runInContext(/^async /.test(usrc) ? usrc : 'async ' + usrc, u);
-  let ok;
-  if (waitOnUpload) {
-    const pending = u.driveUploadSession('old.csv', 'csv', true, 1);
-    u.autoSaveGen = 2; u.driveFileIdForSession = null; // Start
-    u.driveUploadInFlight = null; release();
-    ok = await pending;
-  } else {
-    // The old save was held up in its local write instead; Start already ran and made the new file.
-    u.autoSaveGen = 2; u.driveFileIdForSession = 'new-file';
-    ok = await u.driveUploadSession('old.csv', 'csv', true, 1);
-    return { ok, calls: calls.length, id: u.driveFileIdForSession === 'new-file' ? null : u.driveFileIdForSession };
-  }
-  return { ok, calls: calls.length, id: u.driveFileIdForSession };
-}
-// Round 4: Stop while Chrome's folder prompt is up; the start resuming afterwards must arm no saves (they would
-// overwrite the finished session's files with an empty one). Run on the real startSessionAutoSave.
-async function stopDuringFolderPrompt() {
-  let grant;
-  const armed = [];
-  const s = { NATIVE: false, driveFileIdForSession: null, autoSaveGen: 0, autoSaveFinal: null, finalLocalOk: undefined,
-    autoSaveBytes: 0, autoSaveBuiltAt: 0, driveUploadAt: 0, driveAccessToken: null, driveFolderId: null, autoSaveInterval: null,
-    autoSaveFileHandle: null, window: {}, console: { error() {} }, Date, setAutoSaveStatus() {},
-    autoSaveDirHandle: { getFileHandle: async () => ({ fake: true }) },
-    ensureAutoSavePermission: () => new Promise((r) => { grant = r; }),
-    setInterval: () => { armed.push('interval'); return 1; }, clearInterval() {}, writeAutoSave: () => { armed.push('write'); },
-    driveEnsureFolder: () => Promise.resolve() };
-  vm.createContext(s);
-  const src = jsFunction(monitor, 'startSessionAutoSave');
-  vm.runInContext(/^async /.test(src) ? src : 'async ' + src, s);
-  const p = s.startSessionAutoSave();
-  s.autoSaveFinal = Promise.resolve(); // Stop
-  grant(true);
-  await p;
-  return { armed: armed.length, handle: s.autoSaveFileHandle };
-}
 const stopNow2 = jsFunction(monitor, 'stopSessionNow') || '';
 const after2 = jsFunction(monitor, 'showAfterStop') || '';
-check('a failed final folder write says so and keeps its error',
-  /ended\.folderFailed = finalLocalOk === false;/.test(stopNow2) && /'Last save to ' \+ f\.folder \+ ' failed'/.test(after2)
-  && /if \(autoSaveDirHandle && finalLocalOk !== false\) setAutoSaveStatus\('idle'\);/.test(stopSave)
-  && /if \(final\) finalLocalOk = true;/.test(was) && /if \(final\) finalLocalOk = false;/.test(was));
 check('a mark or note during "Saving" is refused, not lost',
-  /if \(!state\.startTime \|\| stopInFlight \|\|/.test(jsFunction(monitor, 'logMark') || '') && /if \(!state\.startTime \|\| stopInFlight \|\| noteComposer\) return;/.test(jsFunction(monitor, 'openNoteComposer') || ''));
+  /if \(!state\.startTime \|\| stopInFlight \|\| recordingEnded\(\) \|\|/.test(jsFunction(monitor, 'logMark') || '') && /if \(!state\.startTime \|\| stopInFlight \|\| noteComposer\) return;/.test(jsFunction(monitor, 'openNoteComposer') || ''));
 // Round 5: an open note is committed through logMark, which refuses once stopInFlight is set, so the flush comes first.
 check('a note open at Stop is flushed before marks are refused',
   stopNow2.indexOf('flushHeldMarks();') >= 0 && stopNow2.indexOf('flushHeldMarks();') < stopNow2.indexOf('stopInFlight = true;')
   && stopNow2.indexOf('if (stopInFlight) return;') < stopNow2.indexOf('flushHeldMarks();'));
-check('a folder write still running at the cap is followed to its result',
-  /if \(!f\.native && f\.folder && f\.driveLate && finalLocalOk === undefined && f\.finalSave\) \{\s*saved\.textContent = 'Saving to ' \+ f\.folder \+ dur;/.test(after2)
-  && /if \(finalLocalOk === false\) \{ saved\.textContent = 'Last save to ' \+ f\.folder \+ ' failed' \+ dur;/.test(after2));
-const bounded = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('stalled')), 5000))]);
-const OLD = ['an old final that waited past a new Start uploads nothing', 'an old final held up in its local write past a new Start uploads nothing'];
-bounded(Promise.all([oldFinalAfterStart(true), oldFinalAfterStart(false)])).then((rs) => rs.forEach((r, i) => {
-  const pass = r.ok === false && r.calls === 0 && r.id === null;
-  check(OLD[i], pass, pass ? undefined : JSON.stringify(r));
-}), (e) => check(OLD[0], false, String(e)))
-  .then(() => bounded(stopDuringFolderPrompt())).then((r) => {
-    const pass = r.armed === 0 && r.handle === null;
-    check('a Stop during the folder prompt leaves no saves armed', pass, pass ? undefined : JSON.stringify(r));
-  }, (e) => check('a Stop during the folder prompt leaves no saves armed', false, String(e))).then(() => {
+// A note typed as =cmd|... must not open as a formula when the file is opened in a spreadsheet (security audit L3).
+const cellSrc = jsFunction(monitor, 'csvCell');
+if (cellSrc) {
+  const cctx = {}; vm.createContext(cctx); vm.runInContext(cellSrc, cctx);
+  check('a text cell that starts like a formula is quoted', cctx.csvCell('=1+1') === "'=1+1" && cctx.csvCell('+a') === "'+a" && cctx.csvCell('-a') === "'-a" && cctx.csvCell('@a') === "'@a" && cctx.csvCell('sym:dizzy') === 'sym:dizzy');
+} else check('csvCell found', false);
+check('the event column goes through csvCell', /csvCell\(evMap\.get\(k\) \?\? ''\)/.test(monitor));
+Promise.resolve().then(() => {
   if (failures) {
     console.log(failures + ' check(s) failed');
     process.exit(1);

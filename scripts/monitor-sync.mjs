@@ -1,6 +1,6 @@
 // Guards: web uploads while Drive sync is off; a Stop skipping the final upload (S4c). Files: hr_monitor.html, app-home.html. Runtime: about 90 s.
 // S4c checks, headless. Web monitor on a fake strap, a fake folder and a fetch spy on Drive:
-// sync on gives one upload per autosave tick and holds single flight; sync off gives zero uploads across
+// sync on gives one upload per recorder tick (each tick moves the page clock past the pace) and holds single flight; sync off gives zero uploads across
 // five ticks while the folder write still happens; an old ?mode=offline link and a stored offline mode
 // both read as sync off with no account prompt; a fresh install keeps broadcast off. After Stop on the
 // web and the phone: where the recording went, the Drive line only when sync is on, View session; the
@@ -31,15 +31,18 @@ for (const [www, src] of [['hr_monitor.html', 'function driveSyncOn'], ['index.h
   if (!fs.existsSync(f) || !fs.readFileSync(f, 'utf8').includes(src)) { console.log(`FAIL mobile/www/${www} is stale: run npm run copy-web in mobile first`); process.exit(1); }
 }
 
-const GATE = '    if (!driveSyncOn()) return;\n';
+// The sync gate lives in recorder.js (the pace check and the upload itself); the negative control opens both.
+const GATE = 'const driveOn = () => !!env.token() && !!env.syncOn();';
+const GATE2 = 'if (!token || !env.syncOn()) return undefined;';
+const recorderSrc = fs.readFileSync(path.join(ROOT, 'recorder.js'), 'utf8').replace(/\r\n/g, '\n');
+const gateCount = recorderSrc.split(GATE).length - 1 + (recorderSrc.split(GATE2).length - 1);
+const NEG = recorderSrc.replace(GATE, 'const driveOn = () => !!env.token();').replace(GATE2, 'if (!token) return undefined;');
 const monitorSrc = fs.readFileSync(path.join(ROOT, 'hr_monitor.html'), 'utf8').replace(/\r\n/g, '\n');
-const gateCount = monitorSrc.split(GATE).length - 1;
-const NEG = monitorSrc.replace(GATE, '');
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
 const server = http.createServer((req, res) => {
   let rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  if (rel === '/neg/hr_monitor.html') { res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' }); res.end(NEG); return; }
+  if (rel === '/neg/recorder.js') { res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' }); res.end(NEG); return; }
   if (rel.startsWith('/neg/')) rel = rel.slice(4);
   let base = ROOT;
   if (rel.startsWith('/www/')) { base = path.join(ROOT, 'mobile', 'www'); rel = rel.slice(4); }
@@ -92,7 +95,9 @@ const FAKE_WEB = (o) => `(() => {
   };
   const realOpen = window.open; window.open = function () { window.__prompts++; return null; };
   const realSI = window.setInterval;
-  window.setInterval = function (fn, ms) { if (fn && fn.name === 'writeAutoSave') { window.__tick = fn; return 990001; } return realSI.apply(this, arguments); };
+  // A tick moves the page clock a minute on, past the recorder's Drive pace (one upload a minute at most).
+  const realNow = Date.now; let skew = 0; Date.now = () => realNow() + skew;
+  window.setInterval = function (fn, ms) { if (fn && fn.name === 'recorderTick') { window.__tick = () => { skew += 61000; return fn(); }; return 990001; } return realSI.apply(this, arguments); };
   const file = (n) => ({ createWritable: async () => ({ write: async (c) => { window.__written.push({ n, c: String(c), at: Date.now() }); }, close: async () => {} }) });
   window.showDirectoryPicker = async () => ({ name: 'Sessions', kind: 'directory', queryPermission: async () => 'granted', requestPermission: async () => 'granted', getFileHandle: async (n) => file(n) });
   const listeners = [];
@@ -201,9 +206,8 @@ async function syncOffCase(url, label) {
 }
 
 try {
-  check(gateCount === 1, 'hr_monitor.html: the gate line appears once, as the first line of driveUploadSession', String(gateCount));
-  // The session check comes first (an old session's save uploads nothing), then the sync gate.
-  check(/async function driveUploadSession\(filename, csvText, final, gen\) \{\r?\n    if \(gen !== autoSaveGen\) return false;\r?\n    if \(!driveSyncOn\(\)\) return;\r?\n/.test(monitorSrc), 'driveUploadSession opens with the session check, then the gate line');
+  check(gateCount === 2, 'recorder.js: both sync gate lines found', String(gateCount));
+  check(/syncOn: \(\) => driveSyncOn\(\)/.test(monitorSrc), 'hr_monitor.html: the recorder reads the Drive sync setting');
   const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const monLinks = idx.match(/href="[^"]*hr_monitor\.html[^"]*"/g) || [];
   check(!/mode=offline/.test(idx) && monLinks.length >= 2 && monLinks.every((h) => h === 'href="./hr_monitor.html"'), 'index.html: every Open monitor link is a plain link to the monitor', monLinks.join(' '));
@@ -257,7 +261,7 @@ try {
     check(per === 5, 'sync on: five ticks give five uploads, one per tick', String(per));
     await page.evaluate(() => { window.__uploadDelay = 1500; });
     const u1 = await sessionUploads(page);
-    await page.evaluate(async () => { await window.__tick(); await window.__tick(); await window.__tick(); });
+    await page.evaluate(() => { window.__tick(); window.__tick(); window.__tick(); });
     await page.waitForTimeout(200);
     const burst = (await sessionUploads(page)) - u1;
     check(burst === 1, 'sync on: three ticks during one running upload give one upload (single flight)', String(burst));
@@ -320,6 +324,9 @@ try {
     const { ctx, page, errs } = await newPage({ size: '1440', web: { signedIn: true }, url: '/hr_monitor.html' });
     await page.waitForFunction(() => /Syncing to Drive/.test(document.getElementById('drive-status').textContent), null, { timeout: 6000 }).catch(() => {});
     await startWeb(page);
+    await settle(page);
+    // One routine upload lands first, so the failed final reads "failed" rather than "Not saved" (rule 14).
+    await page.evaluate(() => window.__tick());
     await settle(page);
     await page.evaluate(() => { window.__uploadFail = true; });
     await tapToggle(page);

@@ -4007,10 +4007,13 @@
   // broadcast stop (late) shows the panel at 30 s, or when the final settles, unless the session is saved by then.
   function endRecording(late) {
     if (!recorder) return null;
+    const was = recorder.current();
+    if (!was) return null;
+    if (keptRecordings.has(was)) return keptRecordings.get(was);
+    // Already stopped and let go (saved, or exported): a later disconnect() is not a second Stop.
+    if (was.state === 'stopping' || was.state === 'done') return null;
     const rec = recorder.stop();
-    if (!rec) return null;
-    let entry = keptRecordings.get(rec);
-    if (entry) return entry;
+    let entry;
     entry = { rec, start: state.startTime || rec.startMs || 0, end: Date.now(), screen: late ? 'late' : 'await', exported: false, notice: null, msg: null, exportBtn: null, timer: null };
     keptRecordings.set(rec, entry);
     rec.final.then(() => recordingSettled(entry), () => recordingSettled(entry));
