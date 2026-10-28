@@ -144,7 +144,7 @@ public final class HrEngine implements HrDevice.Callback {
     // Seeded at session start so a link that never delivers a first HR is caught too.
     private volatile long lastHrAtMs = 0;
     private volatile boolean firstHrSeen = false;
-    private int gattReconnectAttempts = 0;
+    private final ReconnectPolicy reconnect = new ReconnectPolicy(Math::random);
     // A backoff reconnect is posted and not yet fired/cancelled. The heartbeat
     // only schedules when none is pending, so a long backoff (>15 s heartbeat
     // interval) isn't cancelled and rescheduled forever.
@@ -330,7 +330,7 @@ public final class HrEngine implements HrDevice.Callback {
                     networkWasLost = false;
                     if ((changed || back) && sessionActive.get() && broadcastEnabled) {
                         Log.i(TAG, "Network " + (changed ? "changed" : "back") + " — forcing relay reconnect");
-                        relayReconnectAttempts = 0;
+                        reconnect.relayReset();
                         mainHandler.post(() -> {
                             try { closeRelaySocket(); } catch (Throwable ignored) {}
                             openRelaySocketSafely();
@@ -384,7 +384,7 @@ public final class HrEngine implements HrDevice.Callback {
                     .commit();
             } catch (Throwable ignored) {}
             if (sessionActive.get() && broadcastEnabled) {
-                relayReconnectAttempts = 0;
+                reconnect.relayReset();
                 openRelaySocketSafely();
             } else {
                 emitState();
@@ -402,7 +402,7 @@ public final class HrEngine implements HrDevice.Callback {
         if (sessionActive.get() && enabled != prev) {
             mainHandler.post(() -> {
                 if (enabled && broadcastKey != null && !broadcastKey.isEmpty()) {
-                    relayReconnectAttempts = 0;
+                    reconnect.relayReset();
                     openRelaySocketSafely();
                 } else {
                     try { closeRelaySocket(); } catch (Throwable ignored) {}
@@ -415,23 +415,7 @@ public final class HrEngine implements HrDevice.Callback {
 
     // ---- Relay WebSocket --------------------------------------------------
 
-    // Reconnect backoff. 2s → 4s → 8s ... capped at 60s, with ±25% jitter
-    // so devices behind the same outage don't synchronise their retries
-    // and so a hard server outage isn't hammered at 0.5 Hz indefinitely.
-    private int relayReconnectAttempts = 0;
-    private static final long RELAY_RECONNECT_BASE_MS = 2_000L;
-    private static final long RELAY_RECONNECT_MAX_MS = 60_000L;
-    // After this many consecutive failures, surface the situation to JS so
-    // the UI can show "relay unreachable" instead of just sitting silent.
-    private static final int RELAY_RECONNECT_NOTIFY_AFTER = 10;
-
-    private long nextRelayBackoffMs() {
-        long base = Math.min(RELAY_RECONNECT_MAX_MS,
-                             RELAY_RECONNECT_BASE_MS * (1L << Math.min(relayReconnectAttempts, 5)));
-        double jitter = 1.0 + (Math.random() * 0.5 - 0.25);
-        return (long) (base * jitter);
-    }
-
+    // Relay backoff, jitter and the unreachable notice: ReconnectPolicy.
     private final Runnable relayReconnectRunnable = this::openRelaySocketSafely;
     // Main-looper opens (retry, watchdog, start) never throw into the looper; the watchdog tries again later.
     private void openRelaySocketSafely() {
@@ -452,26 +436,20 @@ public final class HrEngine implements HrDevice.Callback {
     // Cancelling it routes the stall through onFailure, which logs and backs off.
     // Clear of the client's 15 s connect timeout plus a second route and TLS on a weak network.
     static final long RELAY_HANDSHAKE_MS = 35_000L;
-    // Safety net under the backoff: down, no retry queued and no attempt for this long, so reopen once.
-    static final long RELAY_WATCHDOG_MS = 120_000L;
     private volatile long relayLastOpenAtMs = 0;
     private volatile boolean relayRetryPending = false;
-    static boolean relayWatchdogDue(boolean broadcast, boolean hasKey, boolean live, boolean retryPending, long now, long lastOpenAtMs) {
-        return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;
-    }
     private boolean hasBroadcastKey() { return broadcastKey != null && !broadcastKey.isEmpty(); }
 
     private void scheduleRelayReconnect() {
         if (!sessionActive.get() || !broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
         relayRetryPending = true;
-        relayReconnectAttempts++;
-        long delay = nextRelayBackoffMs();
-        Log.i(TAG, "Relay reconnect scheduled in " + delay + "ms (attempt " + relayReconnectAttempts + ")");
-        if (relayReconnectAttempts == RELAY_RECONNECT_NOTIFY_AFTER) {
+        long delay = reconnect.nextRelayDelayMs();
+        Log.i(TAG, "Relay reconnect scheduled in " + delay + "ms (attempt " + reconnect.relayAttempts() + ")");
+        if (reconnect.relayNotifyNow()) {
             JSONObject ev = new JSONObject();
             putSafe(ev, "kind", "relayUnreachable");
-            putSafe(ev, "attempts", relayReconnectAttempts);
+            putSafe(ev, "attempts", reconnect.relayAttempts());
             emit("relayError", ev);
         }
         mainHandler.postDelayed(relayReconnectRunnable, delay);
@@ -513,7 +491,7 @@ public final class HrEngine implements HrDevice.Callback {
                 // Checked and set under the lock: a socket replaced since must never mark the link live, which would
                 // hide a stalled successor from the handshake limit and the watchdog.
                 synchronized (relayLock) { if (ws != relaySocket) return; relayLive.set(true); }
-                relayReconnectAttempts = 0;
+                reconnect.relayReset();
                 Log.i(TAG, "Relay open");
                 emitState();
             }
@@ -786,9 +764,7 @@ public final class HrEngine implements HrDevice.Callback {
 
     // ---- Reconnect policy -------------------------------------------------
 
-    // Backoff reconnect: 2 → 4 → 8 → 16 → 30 s, capped. After 5 attempts on
-    // the cached gatt, do a full reconnect (close + new connectGatt) which
-    // recovers from a borked GATT object that gatt.connect() can't reset.
+    // Backoff and the full-reconnect switch (close + new connectGatt resets a gatt connect() cannot): ReconnectPolicy.
     private final Runnable gattReconnectRunnable = this::doGattReconnect;
     private void scheduleGattReconnect() {
         if (!sessionActive.get()) return;
@@ -796,18 +772,16 @@ public final class HrEngine implements HrDevice.Callback {
         if (!LinkStatePolicy.heartbeatMayReconnect(link.state())) return;
         mainHandler.removeCallbacks(gattReconnectRunnable);
         reconnectPending = true;
-        gattReconnectAttempts++;
-        long base = Math.min(30_000L, 2_000L * (1L << Math.min(gattReconnectAttempts - 1, 4)));
-        long delay = (long) (base * (1.0 + (Math.random() * 0.4 - 0.2)));
-        Log.i(TAG, "GATT reconnect scheduled in " + delay + "ms (attempt " + gattReconnectAttempts + ")");
+        long delay = reconnect.nextGattDelayMs();
+        Log.i(TAG, "GATT reconnect scheduled in " + delay + "ms (attempt " + reconnect.gattAttempts() + ")");
         mainHandler.postDelayed(gattReconnectRunnable, delay);
     }
     private void doGattReconnect() {
         reconnectPending = false;
         if (!sessionActive.get()) return;
         if (!LinkStatePolicy.heartbeatMayReconnect(link.state())) return;
-        if (gattReconnectAttempts > 5 || !device.hasHandle()) {
-            Log.i(TAG, "GATT reconnect: full reconnect (attempts=" + gattReconnectAttempts + ")");
+        if (reconnect.gattFullReconnect(device.hasHandle())) {
+            Log.i(TAG, "GATT reconnect: full reconnect (attempts=" + reconnect.gattAttempts() + ")");
             fullReconnectGatt();
             return;
         }
@@ -886,7 +860,7 @@ public final class HrEngine implements HrDevice.Callback {
             }
             postSegmentTick();
             long up = android.os.SystemClock.elapsedRealtime();
-            if (relayWatchdogDue(broadcastEnabled, hasBroadcastKey(), relayLive.get(), relayRetryPending, up, relayLastOpenAtMs)) {
+            if (ReconnectPolicy.relayWatchdogDue(broadcastEnabled, hasBroadcastKey(), relayLive.get(), relayRetryPending, up, relayLastOpenAtMs)) {
                 Log.w(TAG, "Relay watchdog: down with no attempt for " + (up - relayLastOpenAtMs) + "ms, reopening");
                 NativeHrService.logLifecycle(appCtx, "relay_watchdog_reopen");
                 openRelaySocketSafely();
@@ -2139,7 +2113,7 @@ public final class HrEngine implements HrDevice.Callback {
             startNativeForegroundService();
             lastHrAtMs = System.currentTimeMillis();
             firstHrSeen = false;
-            gattReconnectAttempts = 0;
+            reconnect.gattReset();
             mainHandler.removeCallbacks(heartbeatRunnable);
             mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
             startSegmentUploadTick();
@@ -2471,7 +2445,7 @@ public final class HrEngine implements HrDevice.Callback {
         lastHrValue = hr;
         applyLink(link.onHr(now));
         firstHrSeen = true;
-        gattReconnectAttempts = 0;
+        reconnect.gattReset();
         if (now - lastAliveWriteMs >= ALIVE_WRITE_INTERVAL_MS) {
             lastAliveWriteMs = now;
             try {
