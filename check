@@ -31,6 +31,7 @@ run node scripts/recorder.test.cjs
 run node scripts/day-gaps.test.cjs
 run node scripts/session-dedup.test.cjs
 run node scripts/row-epoch.test.cjs
+run node scripts/viewer-parse.test.cjs
 run node scripts/catch-floor.mjs
 run node scripts/coverage.mjs
 run node scripts/section-map.mjs

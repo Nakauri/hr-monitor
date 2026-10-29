@@ -156,6 +156,8 @@
       sleepWeights: (function () {
         try { return localStorage.getItem('hrv_viewer_sleep_weights') === 'personal' ? 'personal' : 'general'; } catch (e) { return 'general'; }
       })(),
+      // Viewer only: where session summaries run (hrv_viewer.html parseWorker).
+      parseMode: typeof window.__hrmParseMode === 'string' ? window.__hrmParseMode : null,
       marks: (function () {
         if (isDemoView() || !window.AortiMarksPage || typeof window.AortiMarksPage.diag !== 'function') return null;
         try { return window.AortiMarksPage.diag(); } catch (e) { return null; }
@@ -414,6 +416,9 @@
           ['Viewer cache (sessions)', String(d.driveMetaCount), d.driveMetaCount > 0 ? 'ok' : ''],
           ['Last viewer sync', d.driveLastSync || 'never', d.driveLastSync ? 'ok' : ''],
         ])}
+        ${d.parseMode ? rows('Viewer parsing', [
+          ['Summaries run in', d.parseMode, d.parseMode === 'worker' ? 'ok' : /^main thread/.test(d.parseMode) ? 'warn' : ''],
+        ]) : ''}
         ${d.marks ? rows('Marks', [
           ['Device', d.marks.device || '—'],
           ['Marks', String(d.marks.records)],

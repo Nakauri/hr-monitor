@@ -30,7 +30,7 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 | File name, header, row kinds and field counts | `SegmentWriter.java` (`NAME_REGEX`, `HEADER_FORMAT`, `KINDS`) | `hrv_viewer.html:SEG_NAME_RE`, `parseSegmentV2` | `SegmentWriter.java` (`KINDS`, `HEADER_FORMAT`) | `scripts/segment-format.test.cjs` (writer and viewer regex), `scripts/jvm/run-segment-test.cjs` |
 | `rr` column | `HrEngine.java:onHr` passes post-conversion RR (`Math.round`) to `HrSink.appendHr` | viewer `buildV2Model` | Raw RR in ms, `;`-joined, same values `computeRmssd` sees | `scripts/rmssd-parity.test.js` covers the conversion; RMSSD maths unchanged |
 | SDNN (30 s, 5 min, full) | Legacy columns from `HrEngine.java:computeSdnn` | `hrv_viewer.html:sdnnFromRr` recomputes from `rr` | Filter RR in [300, 2000] ms; windows stamped with packet time; full value is running Welford; reset on `g` start and resume | Local harness (not in the repo), 0.01 ms against tee fixtures |
-| Day boundary | n/a | `hrv_viewer.html` day helper module (`dayWindow`, `dayKeyOf`, `localDateLabel`) | Local midnight | `scripts/day-boundary.test.cjs` |
+| Day boundary | n/a | `viewer-parse.js` day helper module (`dayWindow`, `dayKeyOf`, `localDateLabel`) | Local midnight | `scripts/day-boundary.test.cjs` |
 
 ## Marks store (viewer-made marks, `ux-audit/redesign/S9-MARKS-STORE-SPEC.md`)
 
@@ -59,7 +59,7 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 
 ## Viewer post-hoc detectors (single-implementation)
 
-These live only in `hrv_viewer.html:summarizeCSV` and consume CSV data after the session has ended. No native mirror exists, so no drift risk — but listing them here because any future decision to pre-compute them on native would introduce parity risk.
+These live only in `viewer-parse.js:summarizeCSV` (run by hrv_viewer.html and its parse Worker) and consume CSV data after the session has ended. No native mirror exists, so no drift risk — but listing them here because any future decision to pre-compute them on native would introduce parity risk.
 
 - `detectFlushes` — sympathetic surge detection (rewrite 2026-04-23 grounded in POTS diagnostic criteria; see `docs/autonomic_events_research.md`)
 - `detectChillsWindows` — chills (sympathetic + vagal paths, same research doc)

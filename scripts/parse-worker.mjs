@@ -1,10 +1,11 @@
 // Guards: S29 parse off the main thread. Named bug: AUDIT-NOTES 2026-10-11 item 13, phone trace 2026-10-12 11:15
 // (perf-2026-10-12/spin/phone-trace-1.json), one 1,674 ms main-thread task after a Drive reply that froze the sync
-// icon and scrolling. Files: hrv_viewer.html (summarizeCSVAsync, parseWorkerSource). Runtime: about 40 s; run when
+// icon and scrolling. Files: hrv_viewer.html (summarizeCSVAsync, parseWorker), viewer-parse.js (the Worker file). Runtime: about 40 s; run when
 // hrv_viewer.html's parse path changes and before a push. The never-replies case alone waits about 20 s.
 // Checks: worker and main-thread summaries are identical on every demo file; a 60k-row recording parses at 360 with
 // the CPU slowed 6x and no main-thread task over 100 ms; the same parse with the worker off (negative control) MUST
-// exceed 100 ms, or the measurement proves nothing.
+// exceed 100 ms, or the measurement proves nothing. The Worker loads ./viewer-parse.js?v=<schema> from this server, a
+// reply from another schema is refused, and window.__hrmParseMode (diagnostics) names where summaries ran.
 // Usage: node scripts/parse-worker.mjs [--ux <ux-audit dir>]
 import http from 'node:http';
 import fs from 'node:fs';
@@ -58,6 +59,8 @@ const ctx = await browser.newContext({ viewport: { width: 360, height: 740 } });
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
+const workerUrls = [];
+page.on('worker', (w) => workerUrls.push(new URL(w.url()).pathname + new URL(w.url()).search));
 await page.goto(BASE + '/hrv_viewer.html?demo=1#/month', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => window.__hrmParse, null, { timeout: 15000 });
 
@@ -76,6 +79,8 @@ const parity = await page.evaluate(async (files) => {
 for (const [fn, same, n] of parity) ok(same, `worker and main thread give the same summary: ${fn} (${n} chars)`);
 ok(parity.length === files.length && parity.length > 0, `parity ran on all ${files.length} demo files`);
 ok(await page.evaluate(() => !!window.Worker), 'the browser has Worker');
+ok(await page.evaluate(() => window.__hrmParseMode) === 'worker', 'diagnostics marker reads worker after the parity run (' + await page.evaluate(() => window.__hrmParseMode) + ')');
+ok(workerUrls.length === 1 && /^\/viewer-parse\.js\?v=\d+$/.test(workerUrls[0]), 'the Worker is the real file: ' + workerUrls.join(', '));
 
 // ---- Freeze: 60k rows at 360, CPU 6x ----
 const cdp = await ctx.newCDPSession(page);
@@ -112,6 +117,8 @@ const FALLBACKS = {
   'a Worker that dies': 'window.Worker = class { constructor() {} postMessage() { setTimeout(() => this.onerror && this.onerror({ message: "boom" }), 20); } terminate() {} };',
   // The S29 review's hang: no reply, no error. The watchdog must hand the file to the main thread (about 20 s).
   'a Worker that never replies': 'window.Worker = class { constructor() {} postMessage() {} terminate() {} };',
+  // A cached Worker file from another build: its replies carry another schema and must be refused.
+  'a Worker from another build': 'window.Worker = class { constructor() {} postMessage(m) { setTimeout(() => this.onmessage({ data: { id: m.id, __schemaV: -1, summary: { stale: true } } }), 20); } terminate() {} };',
 };
 for (const [name, init] of Object.entries(FALLBACKS)) {
   const c2 = await browser.newContext({ viewport: { width: 360, height: 740 } });
@@ -128,6 +135,8 @@ for (const [name, init] of Object.entries(FALLBACKS)) {
     return { same: a === b, b: b.slice(0, 40) };
   }, files[0]);
   ok(r.same, `${name}: the summary comes from the main thread instead (${r.b})`);
+  const mode = await p2.evaluate(() => window.__hrmParseMode);
+  ok(/^main thread: /.test(mode || ''), `${name}: diagnostics marker names the main thread (${mode})`);
   ok(!errs2.length, `${name}: no page errors ` + errs2.join(' | '));
   await c2.close();
 }

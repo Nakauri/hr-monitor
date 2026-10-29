@@ -131,9 +131,14 @@ const strip = (from) => {
   for (const rule of c.headers) for (const h of rule.headers) if (h.key === 'Content-Security-Policy') h.value = h.value.split(from).join('');
   return c;
 };
+const swap = (from, to) => {
+  const c = JSON.parse(JSON.stringify(REAL));
+  for (const rule of c.headers) for (const h of rule.headers) if (h.key === 'Content-Security-Policy') h.value = h.value.split(from).join(to);
+  return c;
+};
 const MUTANTS = [
   ['policy without the Chart.js CDN', strip(' https://cdnjs.cloudflare.com')],
-  ['policy without blob workers', strip(" worker-src 'self' blob:;")],
+  ['policy with no Worker source (the viewer parse Worker)', swap(" worker-src 'self';", " worker-src 'none';")],
   ['policy without the relay socket', strip(' wss://hr-relay.nakauri.workers.dev')],
   ['policy without the contact form host', strip(' https://api.web3forms.com')],
   // A page script edited without regenerating: its old hash no longer matches, so the script is blocked.

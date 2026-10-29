@@ -34,6 +34,9 @@ const S54 = path.join(UX, 'redesign', 's54', 'data');
 const MANIFEST = path.join(UX, 'redesign', 's61', 'replay-manifest.json');
 const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const REAL = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+// The summary code lives in viewer-parse.js; a mutant there is served as /viewer-parse.js?mutant=<n> (page and Worker).
+const PARSE = fs.readFileSync(path.join(ROOT, 'viewer-parse.js'), 'utf8').replace(/\r\n/g, '\n');
+const PARSE_MUT = new Map();
 const T0 = Date.now();
 const need = (p) => { if (!fs.existsSync(p)) { console.log('MISSING ' + p); process.exit(2); } };
 
@@ -134,7 +137,11 @@ function oldFile(rel) {
   return oldCache.get(rel);
 }
 const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  const u = new URL(req.url, 'http://x');
+  const rel = decodeURIComponent(u.pathname);
+  if (rel === '/viewer-parse.js' && PARSE_MUT.has(u.searchParams.get('mutant'))) {
+    res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' }); res.end(PARSE_MUT.get(u.searchParams.get('mutant'))); return;
+  }
   if (rel.startsWith('/old/')) {
     const body = oldFile(rel.slice(5));
     if (!body) { res.writeHead(404); res.end(); return; }
@@ -875,7 +882,18 @@ function mutate(n, pairs) {
     if (!s.includes(a) || !s.includes('    const lines = d.moments.map(x => {')) return null;
     return s.replace(a, det + alt + a).replace('    const lines = d.moments.map(x => {', '    const lines = s61Alt(d).map(x => {');
   }
-  for (const [a, b] of pairs) { if (!s.includes(a)) return null; s = s.replace(a, b); }
+  let p = PARSE, inParse = false;
+  for (const [a, b] of pairs) {
+    if (s.includes(a)) s = s.replace(a, b);
+    else if (p.includes(a)) { p = p.replace(a, b); inParse = true; }
+    else return null;
+  }
+  if (inParse) {
+    const tag = '<script src="./viewer-parse.js"></script>', wk = "new Worker('./viewer-parse.js?v=' + SUMMARY_SCHEMA_V)";
+    if (!s.includes(tag) || !s.includes(wk)) return null;
+    PARSE_MUT.set(String(n), p);
+    s = s.replace(tag, `<script src="./viewer-parse.js?mutant=${n}"></script>`).replace(wk, `new Worker('./viewer-parse.js?mutant=${n}&v=' + SUMMARY_SCHEMA_V)`);
+  }
   return s;
 }
 async function runPart(name, src, only) {

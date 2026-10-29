@@ -357,7 +357,7 @@ report([['L1 page: without navigator.locks diagnostics says marks sync is unavai
 
 console.log('\nNegative controls (each must FAIL):');
 const MUTANTS = [
-  ['M7', 'summarizeCSV drops ep', { '/hrv_viewer.html': ['events.push({ t, label: r[idx.event], ep });', 'events.push({ t, label: r[idx.event] });'] }, checkM7],
+  ['M7', 'summarizeCSV drops ep', { '/viewer-parse.js': ['events.push({ t, label: r[idx.event], ep });', 'events.push({ t, label: r[idx.event] });'] }, checkM7],
   ['M7', 'markers list ignores marks', { '/hrv_viewer.html': ["      for (const e of viewMarks(s).events) {\n        items.push({ type: 'event'", "      for (const e of s.events) {\n        items.push({ type: 'event'"] }, checkM7],
   ['M10', 'no month lock', { '/marks-drive.js': ["      return locks.request('aorti-marks:' + m, lockOpts || {}, (lock) => (lock ? fn() : 'busy'));", '      return fn();'] }, checkM10],
   ['X1', 'the Day view ignores sleep marks', { '/hrv_viewer.html': ['    const marked = viewMarks(s).sleep;', '    const marked = [];'] }, checkX1],

@@ -44,7 +44,8 @@ const BASE = (scriptExtra) => [
   "img-src 'self' data: blob: https://api.qrserver.com https://*.googleusercontent.com",
   // web3forms: the landing page's contact form posts with fetch, which connect-src governs (form-action does not).
   `connect-src 'self' https://www.googleapis.com https://accounts.google.com https://api.github.com https://api.web3forms.com ${RELAY} https://*.vercel-insights.com`,
-  "worker-src 'self' blob:",
+  // The viewer's parse Worker is ./viewer-parse.js, same origin; no blob: Worker remains.
+  "worker-src 'self'",
   "frame-src 'self' https://accounts.google.com",
   "media-src 'self' data: blob:",
   "manifest-src 'self'",

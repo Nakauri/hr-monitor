@@ -3,20 +3,23 @@
 // the same row lands on a different minute or day in the summary, the session chart and the day sparkline (A-MINUS
 // Block 4: four copies in summarizeCSV, v2SeriesFromRows, loadFullSession, drawDaySparkline). Every caller must give
 // the same epoch per row as its pre-rowEpochFn source (77d068a), with and without epoch_ms, with empty and junk cells,
-// on a web UTC and a native local-time file name; a mutated rowEpochFn must fail. Files: hrv_viewer.html rowEpochFn
-// and its callers, the parse Worker function list. Runtime: under 2 s (needs git for the old source).
+// on a web UTC and a native local-time file name; a mutated rowEpochFn must fail. Files: viewer-parse.js rowEpochFn
+// and the hrv_viewer.html callers. Runtime: under 2 s (needs git for the old source).
 // Run: node scripts/row-epoch.test.cjs   (exit 0 = OK)
 process.env.TZ = 'America/Denver';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { execFileSync } = require('child_process');
-const { viewerSource } = require('./viewer-src.cjs');
+const { readViewerParts } = require('./viewer-src.cjs');
 
 const ROOT = path.join(__dirname, '..');
 const BASE_REV = '77d068a';
 const norm = (s) => s.replace(/\r\n/g, '\n');
-const cur = viewerSource(); // the page plus viewer-parse.js
+const parts = readViewerParts();
+const cur = parts.html + '\n' + parts.mod; // the page plus viewer-parse.js, the parse Worker's file
+// The Worker runs viewer-parse.js whole, so its functions are the Worker's code.
+const MOD_NAMES = [...parts.mod.matchAll(/^ {2}function (\w+)\(/gm)].map((m) => m[1]);
 let old = null;
 try { old = norm(execFileSync('git', ['show', BASE_REV + ':hrv_viewer.html'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 << 20 })); } catch (e) {}
 
@@ -40,7 +43,8 @@ function jsFunction(src, name) {
 const constOf = (src, name) => (src.match(new RegExp('const ' + name + ' = ([^;]+);')) || [])[1];
 const workerNames = (src) => {
   const m = src.match(/const fns = \[([^\]]+)\];/);
-  return m ? m[1].split(',').map((s) => s.trim()).filter(Boolean) : null;
+  if (m) return m[1].split(',').map((s) => s.trim()).filter(Boolean);
+  return /= AortiViewerParse;/.test(src) && MOD_NAMES.length ? MOD_NAMES : null;
 };
 
 // Loads every caller of one source into a context. The summary runs from exactly the Worker's function list.
@@ -51,8 +55,8 @@ function load(src) {
   const fns = [...new Set([...(names || []), ...extra])].map((n) => [n, jsFunction(src, n)]);
   const missing = fns.filter(([, f]) => !f).map(([n]) => n);
   if (!names || missing.length) return { error: 'missing ' + (names ? missing.join(', ') : 'Worker fns list') };
-  const consts = ['ELAPSED_MAX_START_MIN', 'ELAPSED_MAX_DRIFT_MIN', 'DATA_JUMP_GAP_MIN', 'DAY_START_HOUR', 'SUMMARY_SCHEMA_V']
-    .map((n) => 'const ' + n + ' = ' + constOf(src, n) + ';').join('\n');
+  const consts = ['ELAPSED_MAX_START_MIN', 'ELAPSED_MAX_DRIFT_MIN', 'DATA_JUMP_GAP_MIN', 'DAY_START_HOUR', 'SUMMARY_SCHEMA_V', 'HR_SHIFT_DEFAULT']
+    .filter((n) => constOf(src, n) != null).map((n) => 'const ' + n + ' = ' + constOf(src, n) + ';').join('\n');
   const ctx = { console, Intl, files: {}, charts: [] };
   vm.createContext(ctx);
   vm.runInContext([
@@ -146,8 +150,7 @@ async function compare(label, ctxNew, ctxOld) {
 
 (async () => {
   if (!old) { check('old source from git show ' + BASE_REV, false, 'git show failed'); process.exit(1); }
-  const names = workerNames(cur) || [];
-  check('rowEpochFn is in the parse Worker function list', names.includes('rowEpochFn'));
+  check('rowEpochFn lives in viewer-parse.js, the file the parse Worker runs', MOD_NAMES.includes('rowEpochFn') && !/^[ \t]*function rowEpochFn\(/m.test(parts.html));
   // One copy of the rule: no other file-start-plus-elapsed rebuild left outside rowEpochFn.
   const body = jsFunction(cur, 'rowEpochFn') || '';
   const rest = cur.replace(body, '');

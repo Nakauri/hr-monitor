@@ -21,7 +21,7 @@ const PATHS = [
   ['Native segment write', ['scripts/jvm/run-segment-test.cjs', 'scripts/segment-format.test.cjs'], []],
   ['Native upload', ['scripts/jvm/run-upload-test.cjs'], []],
   ['Marks', ['scripts/marks-store.test.cjs', 'scripts/csv-format.test.cjs', 'scripts/recorder.test.cjs'], ['symptom-marks', 'recorder-page']],
-  ['Viewer parse', ['scripts/segment-format.test.cjs', 'scripts/day-boundary.test.cjs', 'scripts/day-gaps.test.cjs', 'scripts/row-epoch.test.cjs'], ['parse-worker', 'v2-series', 'session-time']],
+  ['Viewer parse', ['scripts/viewer-parse.test.cjs', 'scripts/segment-format.test.cjs', 'scripts/day-boundary.test.cjs', 'scripts/day-gaps.test.cjs', 'scripts/row-epoch.test.cjs'], ['parse-worker', 'v2-series', 'session-time']],
   ['Native reconnect (no gap in the recording)', ['scripts/jvm/run-reconnect-test.cjs', 'scripts/engine-boundary.test.cjs'], ['strap-switch']],
   ['HR and HRV numbers (JS and native)', ['scripts/rmssd-parity.test.js', 'scripts/avg-stats.test.cjs'], ['native-rmssd']],
   ['Native CSV writer (legacy file)', ['scripts/csv-format.test.cjs', 'scripts/segment-format.test.cjs'], []],

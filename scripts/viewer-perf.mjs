@@ -211,7 +211,8 @@ if (args.includes('--cold')) {
     if (prof) { const { profile } = await cdp.send('Profiler.stop'); const st = selfTimes(profile, 16); console.log('direct self ms: ' + st.top.map(([k, v]) => v + ' ' + k).join(' | ')); }
     const cov = (await cdp.send('Profiler.takePreciseCoverage')).result;
     const calls = {};
-    for (const sc of cov) if (sc.url.endsWith('hrv_viewer.html')) for (const f of sc.functions) if (['v2SessionCsv', 'parseCSV', 'v2SeriesFromRows'].includes(f.functionName)) calls[f.functionName] = (calls[f.functionName] || 0) + f.ranges[0].count;
+    // parseCSV lives in viewer-parse.js, loaded by the page as a script.
+    for (const sc of cov) if (/(hrv_viewer\.html|viewer-parse\.js)(\?|$)/.test(sc.url)) for (const f of sc.functions) if (['v2SessionCsv', 'parseCSV', 'v2SeriesFromRows'].includes(f.functionName)) calls[f.functionName] = (calls[f.functionName] || 0) + f.ranges[0].count;
     const longest = await page.evaluate(() => Math.round(Math.max(0, ...window.__perf.lt.map((x) => x[1]))));
     // S61: the entry counter copied at the first paint, then detection within 3 s of it.
     const s61 = await page.evaluate(async () => {
