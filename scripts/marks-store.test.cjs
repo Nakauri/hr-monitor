@@ -6,7 +6,7 @@
 // Every check then reruns against a mutated copy of the code, and that mutant must make the check FAIL.
 // Run: node scripts/marks-store.test.cjs            (exit 0 = all checks pass and every mutant fails)
 //      node scripts/marks-store.test.cjs --only M3  (one check, real code only)
-process.env.TZ = 'America/Edmonton';
+process.env.TZ = 'America/Denver';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

@@ -25,7 +25,7 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const PARTS = ['carets', 'picker', 'week', 'month', 'kpi'];
@@ -60,7 +60,7 @@ let browser;
 try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
 async function open(width, hash, textScale = 1) {
   const phone = width < 600;
-  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith(BASE) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -306,7 +306,7 @@ async function partKpi() {
     ok(r.n > 0 && !bad.length, `${tag}: ${r.gaps.length ? r.gaps.length + ' stat pairs, each ' + r.token + ' px apart within 2 px' : r.n + ' stats in one column'}`, bad.map((g) => `${g.pair} ${g.gap.toFixed(1)}`).join(', '));
     ok(!r.outside.length && (r.minClear == null || r.minClear >= r.token - 2), `${tag}: 24:00:00 and every other value stay inside their column (closest ${r.minClear == null ? 'n/a' : r.minClear.toFixed(1)} px)`, r.outside.join(', '));
     ok(r.tab && r.scroll, `${tag}: tabular figures, no sideways scroll`);
-    // Khal 2026-10-12: 10 stats wrapped 8 and 2 at 1440, the same lopsided wrap as the 11 plus 1 chips (item 7).
+    // 2026-10-12: 10 stats wrapped 8 and 2 at 1440, the same lopsided wrap as the 11 plus 1 chips (item 7).
     ok(Math.max(...r.rows) - Math.min(...r.rows) <= 1, `${tag}: rows balanced (${r.rows.join(' + ')})`);
     if (SHOTS && w === 360 && scale === 1 && !collapsed) await page.locator('#summary-bar').screenshot({ path: path.join(SHOTS, 's30-kpi-360.png') });
     if (SHOTS && w === 360 && scale === 2) await page.locator('#summary-bar').screenshot({ path: path.join(SHOTS, 's30-kpi-360-200.png') });

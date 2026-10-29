@@ -1,16 +1,16 @@
 // Landing, changelog and legal checks.
 // Guards: LANDING-AUDIT 2026-10-11 (eyebrows, Inter + Space Grotesk, hero warnings flashing every loop,
-//   legal draft banner, health wording in meta) and Khal's 2026-10-12 calls ("Open monitor" leads the
+//   legal draft banner, health wording in meta) and the owner's 2026-10-12 calls ("Open monitor" leads the
 //   hero, the story line stays in his words, Work Sans, streamers first, a hero widget that looks real,
 //   widget variants, one footer with the GitHub link, privacy text that matches the code).
-// S40 (AUDIT-NOTES item 35, Khal 2026-10-12): button hover contrast on all three pages (rules.mjs --states,
+// S40 (AUDIT-NOTES item 35, 2026-10-12): button hover contrast on all three pages (rules.mjs --states,
 //   named bug: "Open monitor" hover went dark on dark), hero H1 at most 3 lines with no one-word last line
 //   ("records." alone), story logo centred on its text, the 16:9 stream frame with the widget at true scale
-//   and a full-width variant row, equal Day and Month shots with one-line captions (before/after moved to new-look.html, Khal 2026-10-12), the logo back-to-top, one
+//   and a full-width variant row, equal Day and Month shots with one-line captions (before/after moved to new-look.html, 2026-10-12), the logo back-to-top, one
 //   shared nav on all three pages, Google sign-in (signed in leads to the viewer, never the monitor), and the
 //   changelog: every month git shows activity has entries, area chips filter and the hash keeps the filter,
 //   headings are not self-links, a shared link lands below the nav, the copy button copies the right URL.
-// S43 (Khal 2026-10-12, brand motion): hovering a .btn runs one 800 ms bell-curve lap of the border trail, then a
+// S43 (2026-10-12, brand motion): hovering a .btn runs one 800 ms bell-curve lap of the border trail, then a
 //   0.35 resting edge, and leaving fades it; the Android card's lap ends bare; keyboard focus shows the edge with no
 //   lap; boxes never move; the head crosses long and short edges at one speed (named bug: the mock's conic ring
 //   ran fast on short ends and slow on long edges; that mutant must fail).
@@ -116,7 +116,7 @@ function staticChecks(files, fail) {
     const meta = headMeta(h);
     fail(!CONDITION_WORDS.test(meta), `${n}: title, meta, OG and Twitter carry no condition words${CONDITION_WORDS.test(meta) ? ' (found "' + meta.match(CONDITION_WORDS)[0] + '")' : ''}`);
   }
-  fail(index.includes(STORY), 'index.html keeps the story line exactly as Khal wrote it');
+  fail(index.includes(STORY), 'index.html keeps the story line exactly as the owner wrote it');
   fail(/<title>[^<]*OBS/.test(index) && /og:title" content="[^"]*OBS/.test(index), 'index.html title and og:title aim at the OBS search');
   fail(!/Draft document/i.test(legal) && !/reviewed by a lawyer/i.test(legal), 'legal.html has no draft banner or lawyer line');
   for (const c of PRIVACY_CLAIMS) fail(legal.includes(c), `legal.html states: ${c}`);
@@ -143,7 +143,7 @@ function staticChecks(files, fail) {
     const top = (h.match(/<button class="to-top" id="back-to-top"[\s\S]*?<\/button>/) || [''])[0];
     fail(/aria-label="Back to top"/.test(top) && /viewBox="0 0 1779 1642"/.test(top) && (top.match(/<path /g) || []).length === 2, `${n}: back-to-top is the aorti logo`);
   }
-  // Khal 2026-10-12: the hero sign-in button sat on its own row; sign-in lives in the nav as "Sign in" with the G.
+  // 2026-10-12: the hero sign-in button sat on its own row; sign-in lives in the nav as "Sign in" with the G.
   const g = (index.match(/<a class="nav-link nav-signin"[\s\S]*?<\/a>/) || [''])[0];
   fail(/>Sign in<\/a>$/.test(g) && /#4285F4/.test(g) && /#EA4335/.test(g) && /#FBBC05/.test(g) && /#34A853/.test(g) && !/id="hero-google"/.test(index), 'nav "Sign in" carries the four-colour G and the hero has no sign-in button');
   fail(!/<h3><a href="#/.test(changelog), 'changelog entry headings are not links to themselves');
@@ -189,7 +189,7 @@ function runStatic() {
   console.log(`${pcBad || clBad ? 'FAIL' : 'ok  '} parse-check: index.html, legal.html, changelog.html`);
   if (pcBad || clBad) fails.push('parse-check');
   // Copylint.
-  // Khal kept "This page is not legal advice." word for word (2026-10-12); the narrates-the-app rule flags "this page".
+  // The owner kept "This page is not legal advice." word for word (2026-10-12); the narrates-the-app rule flags "this page".
   const COPY_ALLOWED = [/^ERROR\s+narrates the app\s+legal\.html:\d+\s+Last updated: [^\n]*This page is not legal advice\.$/];
   const cl = spawnSync(process.execPath, [path.join(os.homedir(), '.claude', 'tools', 'copylint', 'cli.mjs'), 'index.html', 'legal.html', 'changelog.html'], { cwd: ROOT, encoding: 'utf8' });
   const clOut = cl.stdout + cl.stderr;
@@ -385,7 +385,7 @@ async function runtime(fails) {
 }
 
 // ---- S40 checks ----
-// The pre-S40 hero column and H1 rule: at 1440 it left "records." alone on a 4th line (Khal 2026-10-12).
+// The pre-S40 hero column and H1 rule: at 1440 it left "records." alone on a 4th line (2026-10-12).
 const OLD_HERO_CSS = '.hero{grid-template-columns:minmax(0,7fr) minmax(0,5fr)!important}.hero-title{font-size:clamp(36px,4.6vw,60px)!important;line-height:1.06!important;max-width:14em!important;text-wrap:wrap!important}';
 // The hover rule behind item 35a, applied to the shared button: dark text on a dark fill.
 const OLD_HOVER_CSS = '<style>.btn.primary:hover{background:#0a0a0a!important;border-color:#0a0a0a!important;filter:none!important}</style>';
@@ -564,7 +564,7 @@ async function s40Checks({ browser, base, open, check, shotPath }) {
   }
 }
 
-// ---- S43 checks: brand border trail (Khal 2026-10-12: "it doesnt feel smooth, maybe it needs a bell curve
+// ---- S43 checks: brand border trail (2026-10-12: "it doesnt feel smooth, maybe it needs a bell curve
 // animation with 800ms?"). Named bug: the mock's rotating conic ring ran fast on short ends and slow on long
 // edges. The even-speed check reads the head off screenshots (brightest red outside the element), maps it onto
 // the outline, and compares how fast it crosses a long edge and a short edge per unit of the 800 ms bell curve.

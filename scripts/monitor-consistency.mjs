@@ -1,4 +1,4 @@
-// Guards: the monitor drifting off the shared components (CONSISTENCY-2026-10-12, S39; Khal 2026-10-12 "can we make sure our components are consistent?"). Files: hr_monitor.html, ui.css. Runtime: about 40 s; --mutants about 50 s.
+// Guards: the monitor drifting off the shared components (CONSISTENCY-2026-10-12, S39; 2026-10-12 "can we make sure our components are consistent?"). Files: hr_monitor.html, ui.css. Runtime: about 40 s; --mutants about 50 s.
 // Headless, on the fake phone bridge at 360 (touch) and 1440 (mouse), every section open and every Settings tab shown:
 // every visible button in a section body is .btn, .row-btn, .toggle, a segmented button or a tab, inside .ui;
 // every visible control meets the page's --target height (44 px on touch; ui.css sets 36 px for a mouse above 600 px), a checkbox measured by its label row;
@@ -23,8 +23,8 @@ const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
 const TAG = argVal('--tag') || 'after';
 const MUTANTS = args.includes('--mutants');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
-const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
+const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 
 if (!SHOTS) {

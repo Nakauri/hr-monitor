@@ -1,5 +1,5 @@
 // Guards: a session showing 70:38:35 with 3 minutes of chart at 8:21 AM because the viewer trusted a stale
-// time_min column (AUDIT-NOTES 2026-10-11 item 31, Khal 2026-10-12; step S35). Files: hrv_viewer.html
+// time_min column (AUDIT-NOTES 2026-10-11 item 31, 2026-10-12; step S35). Files: hrv_viewer.html
 // rowElapsedMinFn, summarizeCSV, loadFullSession, the cached-index re-read. Runtime: about 5 s; run when
 // hrv_viewer.html parsing or summary code changes.
 // Checks: the synthetic stale fixture summarizes to about 3 min with a 9:46 AM axis origin; demo files and a
@@ -13,6 +13,7 @@ import vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { staleTimeMinCsv, S35_FIXTURE_NAME } from './fixtures/s35-stale-timemin.mjs';
+import { uxDir } from './ux-dir.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -20,7 +21,9 @@ const MUTANTS = args.includes('--mutants');
 const refI = args.indexOf('--ref');
 const REF = refI >= 0 ? args[refI + 1] : '02aef18';
 const EVIDENCE = path.join(ROOT, '..', 'HR Monitor', 'ux-audit', 'redesign', 'build-shots', 'evidence-stale-timemin-2026-10-05.csv');
-const EVIDENCE_ALT = 'C:/Users/Khal/Desktop/Mine/HR Monitor/ux-audit/redesign/build-shots/evidence-stale-timemin-2026-10-05.csv';
+// From a worktree: the main checkout's local ux-audit folder.
+let EVIDENCE_ALT = EVIDENCE;
+try { EVIDENCE_ALT = path.join(uxDir(path.dirname(fileURLToPath(import.meta.url))), 'redesign', 'build-shots', 'evidence-stale-timemin-2026-10-05.csv'); } catch (e) { /* no git: the first path only */ }
 
 function grabFrom(text, name) {
   // A declaration at the start of a line: the S29 worker builder holds a getHrShiftSettings stub inside a string.
@@ -111,7 +114,7 @@ const srcBefore = execFileSync('git', ['-C', ROOT, 'show', REF + ':hrv_viewer.ht
 const results = [];
 const check = (name, ok, detail) => { results.push(ok); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail ? '  (' + detail + ')' : '')); };
 const hms = (min) => { const s = Math.round(min * 60); return Math.floor(s / 3600) + ':' + String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
-const clock = (ep) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Edmonton', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(ep));
+const clock = (ep) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(ep));
 
 // 1. Synthetic stale fixture.
 const fxIn = { name: S35_FIXTURE_NAME, text: staleTimeMinCsv() };
@@ -125,8 +128,8 @@ if (s) {
   const full = (await A.full)[0];
   const xs = full.hr.map(p => p.x);
   const startClock = clock(s.startEpoch + xs[0] * 60000), endClock = clock(s.startEpoch + xs[xs.length - 1] * 60000);
-  check('session axis starts 9:46 AM Edmonton', /^9:46/.test(startClock), startClock);
-  check('session axis ends 9:49 AM Edmonton', /^9:49/.test(endClock), endClock);
+  check('session axis starts 9:46 AM Denver', /^9:46/.test(startClock), startClock);
+  check('session axis ends 9:49 AM Denver', /^9:49/.test(endClock), endClock);
   check('session view x runs 0 to the duration', xs[0] === 0 && xs[xs.length - 1] === s.duration, xs[0] + ' to ' + xs[xs.length - 1]);
   const gaps = full.hr.filter(p => p.y == null).length;
   check('no gap markers in a gapless 1 Hz file', gaps === 0, gaps + ' gaps');

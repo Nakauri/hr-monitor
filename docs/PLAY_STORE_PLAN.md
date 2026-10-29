@@ -6,7 +6,7 @@ End-state: aorti listed in Play, Internal Testing → Closed Testing → Product
 
 - **Package name** stays `com.nakauri.hrmonitor`. Once published it's immutable, so confirm now.
 - **App title** for the store: e.g. "aorti — HR & HRV Monitor". Limit 30 chars.
-- **Studio CG branding**: developer name shown in Play. Either personal name or "Studio CG" / "Nakauri". Affects both Play Console signup and Drive OAuth consent screen.
+- **Developer name** shown in Play: a personal name, a studio name or "Nakauri". Affects both Play Console signup and Drive OAuth consent screen.
 - **Pricing**: free, no IAP, no ads. Simplifies review + privacy form.
 - **Distribution**: all countries, or restricted? Default to all unless there's a regulatory reason not to (no HIPAA / GDPR-special handling needed because we don't process data on a server).
 - **Health Connect integration**: out of scope for v1. Can add later. Reviewers may ask why we don't sync to Health; answer is "user data stays in user's own Drive, no third-party sync". Not a blocker.
@@ -57,7 +57,7 @@ Expected permissions:
 - `POST_NOTIFICATIONS` — Android 13+ to show the recording notification.
 - `WAKE_LOCK` — keep CPU active while recording with screen off.
 - `INTERNET` — relay WebSocket + Drive uploads.
-- `ACCESS_NETWORK_STATE` — for the relay handoff watcher (currently throws on Samsung S8 if missing — verify it's declared).
+- `ACCESS_NETWORK_STATE` — for the relay handoff watcher (currently throws on the test phone if missing — verify it's declared).
 - `RECEIVE_BOOT_COMPLETED` — only if we want session resume after reboot. Probably skip for v1.
 - `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` — battery optimisation prompt. Already used.
 
@@ -65,7 +65,7 @@ Service `<service android:name=".NativeHrService" android:foregroundServiceType=
 
 ### 1.5 Renderer + WebView quirks
 
-The `WebViewRenderProcessClient` `ClassNotFoundException` we hit on Samsung S8 (API 28) is a Capacitor 6 + AndroidX webkit thing on first install. Doesn't break anything but looks bad. Investigate before launch:
+The `WebViewRenderProcessClient` `ClassNotFoundException` we hit on the test phone (API 28) is a Capacitor 6 + AndroidX webkit thing on first install. Doesn't break anything but looks bad. Investigate before launch:
 
 - Check if Capacitor 6 truly requires API 29+ at runtime, or if the missing class is only used in optional code paths.
 - If unavoidable, bump `minSdkVersion` to 29 (Android 10). Cuts off ~10% of devices but ends the crash.
@@ -152,7 +152,7 @@ Play now requires a way for users to request account deletion **without re-insta
 
 - **App icon**: 512×512 PNG, 32-bit, no alpha background. Reuse our existing `ic_launcher` design at 512×512.
 - **Feature graphic**: 1024×500 PNG/JPG. Hero banner shown above screenshots in the Play listing. Needs a real design pass — current branding is just the wordmark.
-- **Phone screenshots**: minimum 2, maximum 8. JPG/PNG, between 320-3840px, aspect ratio 16:9 to 9:16. Capture from actual device (Galaxy S8 works) showing:
+- **Phone screenshots**: minimum 2, maximum 8. JPG/PNG, between 320-3840px, aspect ratio 16:9 to 9:16. Capture from actual device (the test phone works) showing:
   - Live monitor with HR + HRV
   - Viewer day timeline
   - Session detail with autonomic events

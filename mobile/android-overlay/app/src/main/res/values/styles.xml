@@ -18,7 +18,7 @@
     </style>
 
     <!-- Launch theme. API 31+ uses the SplashScreen API (animated icon
-         on dark background). Pre-API-31 (e.g. Galaxy S8 / Android 9)
+         on dark background). Pre-API-31 (Android 9, for one)
          falls back to android:windowBackground, which now points at a
          layer-list drawable that paints the dark colour AND centres the
          aorti glyph — so older devices get branded launch frame instead

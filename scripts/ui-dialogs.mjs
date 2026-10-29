@@ -21,8 +21,8 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
-const { fakeBridge, fakeWebSocket } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
+const { fakeBridge, fakeWebSocket } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 for (const f of ['ui.css', 'ui.js', 'diagnostics.js', 'hr_monitor.html']) {
@@ -72,15 +72,15 @@ const SPIES = `(() => {
 const RECOVERY = `(() => {
   try { localStorage.removeItem('hrm_oem_whitelist_prompt'); } catch (e) {}
   const F = window.__fake; if (!F || !window.Capacitor) return;
-  const ctx = { mac: 'AA:BB:CC:DD:00:25', strapName: '808S 0025153', sessionStartMs: Date.now() - 3600000, senderId: '0bf9c4', csvFile: 'hrv_session_demo.csv' };
+  const ctx = { mac: 'AA:BB:CC:DD:00:25', strapName: '808S 0012345', sessionStartMs: Date.now() - 3600000, senderId: 'a1b2c3', csvFile: 'hrv_session_demo.csv' };
   F.snapshot = { sessionActive: false, interruptedRecovery: true, recoveryContext: ctx, bleConnected: false, relayLive: false, linkState: 'none' };
   const hr = window.Capacitor.Plugins.NativeHrSession;
   hr.resumeSession = () => {
-    F.snapshot = { sessionActive: true, senderId: '0bf9c4', senderLabel: 'HR Monitor Android', sessionStartMs: ctx.sessionStartMs, csvFile: ctx.csvFile,
+    F.snapshot = { sessionActive: true, senderId: 'a1b2c3', senderLabel: 'HR Monitor Android', sessionStartMs: ctx.sessionStartMs, csvFile: ctx.csvFile,
       bleConnected: true, linkUp: true, relayLive: true, linkState: 'recording', generation: 3, targetMac: ctx.mac, strapName: ctx.strapName, interruptedRecovery: false };
     let n = 0;
     setInterval(() => { n++; const cb = F.listeners.hr; if (cb) cb({ hr: 80 + (n % 4), rrIntervals: [740], timestampMs: Date.now(), contactOff: false }); }, 1000);
-    return Promise.resolve({ resumed: true, senderId: '0bf9c4', senderLabel: 'HR Monitor Android', sessionStartMs: ctx.sessionStartMs });
+    return Promise.resolve({ resumed: true, senderId: 'a1b2c3', senderLabel: 'HR Monitor Android', sessionStartMs: ctx.sessionStartMs });
   };
 })();`;
 

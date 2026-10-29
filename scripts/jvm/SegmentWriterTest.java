@@ -49,7 +49,7 @@ public class SegmentWriterTest {
     }
 
     static final TzSource UTC = ms -> 0;
-    static final TzSource EDMONTON = ms -> TimeZone.getTimeZone("America/Edmonton").getOffset(ms) / 60_000;
+    static final TzSource DENVER = ms -> TimeZone.getTimeZone("America/Denver").getOffset(ms) / 60_000;
 
     // Expected field count after t, per kind (BLOCK-B-SPEC.md section 2).
     static final Map<String, Integer> FIELDS = new HashMap<>();
@@ -75,7 +75,7 @@ public class SegmentWriterTest {
     static long ms(String iso) { return Instant.parse(iso).toEpochMilli(); }
 
     static SegmentWriter writer(File dir, String iid, FakeClock c, TzSource tz, Log log) throws IOException {
-        return new SegmentWriter(dir, iid, c, tz, "1.2.3", "808S 0025153", "personal", log);
+        return new SegmentWriter(dir, iid, c, tz, "1.2.3", "808S 0012345", "personal", log);
     }
 
     static String read(File f) throws IOException {
@@ -127,7 +127,7 @@ public class SegmentWriterTest {
     public static void main(String[] args) throws Exception {
         rollAtHour();
         rollTimerOpensNothing();
-        dstEdmonton();
+        dstDenver();
         reopenAppends();
         partialLastLineTrimmed();
         headerOnlyPartialRestarts();
@@ -206,12 +206,12 @@ public class SegmentWriterTest {
         w.close();
     }
 
-    static void dstEdmonton() throws Exception {
+    static void dstDenver() throws Exception {
         File dir = freshDir("dst");
         Log log = new Log();
         // 2026-11-01: 02:00 MDT becomes 01:00 MST at 08:00Z; local 01:00 to 02:00 happens twice.
         FakeClock c = new FakeClock(ms("2026-11-01T06:30:00Z"));
-        SegmentWriter w = writer(dir, "abc123", c, EDMONTON, log);
+        SegmentWriter w = writer(dir, "abc123", c, DENVER, log);
         w.appendSession(c.wall, "start", c.wall);
         for (int i = 0; i < 120; i++) {
             w.appendHr(70, 50.0, 0, 0, 0, new int[] { 850 }, c.wall);
@@ -421,7 +421,7 @@ public class SegmentWriterTest {
         File f = segFiles(dir)[0];
         List<String> ls = lines(f);
         String header = ls.get(0);
-        check("header fields in order", header.matches("#hrm,v=2,base=-?\\d+,tz=-?\\d+,app=1\\.2\\.3,dev=808S 0025153,flavour=personal"), header);
+        check("header fields in order", header.matches("#hrm,v=2,base=-?\\d+,tz=-?\\d+,app=1\\.2\\.3,dev=808S 0012345,flavour=personal"), header);
         check("no time_min anywhere", !read(f).contains("time_min"));
         check("g start row", ls.get(1).equals("g,600000," + sid + ",start"), ls.get(1));
         check("h with null rmssd and no rr", ls.get(2).equals("h,600000,88,,"), ls.get(2));

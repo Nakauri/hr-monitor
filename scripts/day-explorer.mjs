@@ -33,7 +33,7 @@ const UX = uxDir(here, argVal('--ux'));
 const FIX = path.resolve(argVal('--fixtures') || path.join(UX, '..', 'docs', 'audit-2026-10-09', 'device-2026-10-10'));
 const REF = argVal('--ref') || 'f7cbb1a';
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const PART = argVal('--part');
@@ -63,7 +63,7 @@ let browser;
 try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
 async function newPage(width, textScale = 1) {
   const phone = width < 600;
-  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith('http://127.0.0.1:') || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -90,7 +90,7 @@ async function newPage(width, textScale = 1) {
 const waitExplorer = (page, sel = '#summary-bar') => page.waitForSelector(sel, { timeout: 40000 }).then(() => page.waitForTimeout(900)).catch(() => {});
 
 // ---- Fixture day (S10b, and S10a's L15): marks, warnings, palps, posture and a sleep mark ----
-// 2026-09-15 08:00 to 11:00 in America/Edmonton (MDT, UTC-6).
+// 2026-09-15 08:00 to 11:00 in America/Denver (MDT, UTC-6).
 const FX_DAY = '2026-09-15', FX0 = Date.UTC(2026, 8, 15, 14, 0, 0), FX_FILE = 'hrv_session_2026-09-15T08-00-00.000.csv';
 const FX_MIN = (m) => FX0 + m * 60000;
 function fixtureCsv() {
@@ -710,7 +710,7 @@ const whiteAt = (page, x) => page.evaluate((x) => {
   return n ? w / n : 0;
 }, x);
 
-// Reset zoom box against the plot area and both y-axis label columns (page px). S27 follow-up (Khal 10-12 via the main
+// Reset zoom box against the plot area and both y-axis label columns (page px). S27 follow-up (10-12 via the main
 // session: the button covered the right axis 45 and 40).
 const resetClear = (page) => page.evaluate(() => {
   const c = Chart.getChart(document.getElementById('session-chart'));
@@ -782,7 +782,7 @@ const LAYOUT = {
       const onBoxes = new Set(sr.filter((r) => r.on).map((r) => r.boxFill + r.boxBorder)), offBoxes = new Set(sr.filter((r) => !r.on).map((r) => r.boxFill + r.boxBorder));
       const lowText = sr.filter((r) => r.text < (r.disabled ? 3 : 4.5)).map((r) => r.t + ' ' + r.text);
       rows.push([sr.length >= 10 && !lowText.length, `${tag}: every Layers row label reads at 4.5:1 on or off, 3:1 when there is none here (lowest ${Math.min(...sr.map((r) => r.text))}${lowText.length ? '; under: ' + lowText.join(', ') : ''})`]);
-      // Khal 2026-10-12: rows with none here are dimmed a little so they read as not clickable.
+      // 2026-10-12: rows with none here are dimmed a little so they read as not clickable.
       const live = sr.filter((r) => !r.disabled).map((r) => r.text), dead = sr.filter((r) => r.disabled).map((r) => r.text);
       rows.push([dead.length > 0 && Math.max(...dead) < Math.min(...live), `${tag}: none-here rows are dimmer than every live row (dimmest live ${Math.min(...live)}, brightest none-here ${Math.max(...dead)})`]);
       rows.push([sr.every((r) => r.boxW >= 17) && onBoxes.size === 1 && offBoxes.size === 1 && [...onBoxes][0] !== [...offBoxes][0] && sr.every((r) => r.tick === r.on) && new Set(sr.map((r) => r.frame)).size === 1 && sr.some((r) => r.on) && sr.some((r) => !r.on && !r.disabled) && sr.some((r) => r.disabled),
@@ -819,7 +819,7 @@ const LAYOUT = {
     const kb2 = await page.evaluate(() => ({ open: !document.getElementById('summary-bar').classList.contains('collapsed'), exp: (document.getElementById('summary-toggle') || {}).getAttribute?.('aria-expanded') }));
     rows.push([!!kb && kb.tag === 'BUTTON' && kb.exp === 'false' && kb2.open && kb2.exp === 'true', `360: the Summary title is a button with its state, and Enter opens the card (${JSON.stringify([kb, kb2])})`]);
     await ctx.close();
-    // Open Summary on the phone (Khal 2026-10-14 "the day summary kpis look a bit funny"): every unit on its value's
+    // Open Summary on the phone (2026-10-14 "the day summary kpis look a bit funny"): every unit on its value's
     // line where they fit (one that cannot share the column moves down whole), never broken, values aligned per row,
     // two columns, one column at 200% text.
     for (const scale of [1, 2]) {
@@ -839,7 +839,7 @@ const LAYOUT = {
           cols: getComputedStyle(document.querySelector('#summary-bar .summary-grid')).gridTemplateColumns.split(' ').length,
           over: stats.filter((s) => s.scrollWidth > s.clientWidth + 1).map((s) => s.dataset.stat),
           h: Math.round(document.getElementById('summary-bar').getBoundingClientRect().height),
-          // Khal 2026-10-14 "3 kpis in a row ... and a close caret": Duration rides in the title row with a caret.
+          // 2026-10-14 "3 kpis in a row ... and a close caret": Duration rides in the title row with a caret.
           titleDur: !!(document.querySelector('#summary-toggle .summary-title-dur') || {}).offsetParent,
           caret: !!(document.querySelector('#summary-toggle .summary-chevron') || {}).getBoundingClientRect?.().width,
           gridDur: stats.some((s) => s.dataset.stat === 'duration'),

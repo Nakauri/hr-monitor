@@ -271,7 +271,7 @@ html.ui-locked, html.ui-locked body { overflow: hidden; }
 @container (max-width: 440px) { .notice .acts { margin: 0 0 0 auto; } }
 .notice .acts .btn:not(.icon) { min-height: 44px; }
 .notice.bar { border-radius: 0; border-width: 0 0 1px 4px; }
-/* A bar notice is one row: message left, actions right, never stacked (demo banner at 360, Khal 2026-10-12). */
+/* A bar notice is one row: message left, actions right, never stacked (demo banner at 360, 2026-10-12). */
 .notice.bar { flex-wrap: nowrap; align-items: center; padding-top: var(--s2); padding-bottom: var(--s2); }
 .notice.bar .msg { flex: 1 1 auto; padding-top: 0; }
 .notice.bar .acts { margin: 0 0 0 auto; }
@@ -302,6 +302,6 @@ html.ui-locked, html.ui-locked body { overflow: hidden; }
 .strip { position: relative; overflow: hidden; border-left-color: var(--strip-c, var(--border)); }
 .strip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--strip-w, 4px) - 1px); background: var(--strip-c, var(--border)); pointer-events: none; }
 
-/* No widows: a paragraph never ends with one word alone on its last line (Khal 2026-10-12). Headings balance. */
+/* No widows: a paragraph never ends with one word alone on its last line (2026-10-12). Headings balance. */
 p, li, figcaption, summary, dd, blockquote, .lede { text-wrap: pretty; }
 h1, h2, h3 { text-wrap: balance; }

@@ -15,7 +15,7 @@
 // --only G2,G13 runs those goldens. "same" and "fit" compare against main 02aef18, "dayview" flag off against 77f8fca.
 // --shots <dir> writes page 1 pictures, and with dayview the Day chart of demo 04-24 before (77f8fca) and after.
 // Usage: node scripts/sleep-split.mjs [--part <list>] [--mutants] [--only <ids>] [--month <yyyy-mm>] [--ux <dir>] [--shots <dir>]
-process.env.TZ = 'America/Edmonton';
+process.env.TZ = 'America/Denver';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -42,7 +42,7 @@ const HOME = os.homedir().split(path.sep).join('/');
 const S63 = path.join(UX, 'redesign', 's63-sleep');
 const MANIFEST = path.join(S63, 'replay-manifest.json');
 const EXPECT = path.join(S63, 'replay-expect.json');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const REAL = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
 const T0 = Date.now();
 const need = (p) => { if (!fs.existsSync(p)) { console.log('MISSING ' + p); process.exit(2); } };
@@ -215,7 +215,7 @@ async function setupCtx(ctx, o) {
 // o: { width, flag, tz, clock (ms), dir (persistent profile), init }
 async function newPage(o = {}) {
   await startServer();
-  const opts = { viewport: { width: o.width || 1440, height: 900 }, timezoneId: o.tz || 'America/Edmonton' };
+  const opts = { viewport: { width: o.width || 1440, height: 900 }, timezoneId: o.tz || 'America/Denver' };
   let ctx;
   if (o.dir) { const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright'); try { ctx = await chromium.launchPersistentContext(o.dir, opts); } catch (e) { ctx = await chromium.launchPersistentContext(o.dir, { ...opts, channel: 'chrome' }); } }
   else ctx = await (await getBrowser()).newContext(opts);

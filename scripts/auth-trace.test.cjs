@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Guards: Khal's sign-in lost overnight 10-17 to 10-18 with no log saying why (S62 item C). Files: auth.js. Runtime: under 1 s.
+// Guards: the owner's sign-in lost overnight 10-17 to 10-18 with no log saying why (S62 item C). Files: auth.js. Runtime: under 1 s.
 // auth.js runs in a vm with fake storage, fetch and native bridge. Every cleared token leaves a clear_token step with its
 // reason (refresh_null, refresh_401, sign_out) in the hrm_auth_trace ring; a native refresh traces start, ok or threw,
 // and a throw keeps the token. Then each mutant below must make a check FAIL.

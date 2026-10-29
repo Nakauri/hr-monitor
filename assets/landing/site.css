@@ -102,7 +102,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .to-top { transition: none; } }
 
-/* Brand motion (S43): the border trail ring comes from site.js. Plays with reduced motion on (Khal 2026-10-12). */
+/* Brand motion (S43): the border trail ring comes from site.js. Plays with reduced motion on (2026-10-12). */
 .trail-host { position: relative; }
 .trail { position: absolute; z-index: 1; overflow: visible; pointer-events: none; opacity: 0; transition: opacity .15s ease-out; }
 .trail-on > .trail, .trail-focus > .trail { opacity: 1; transition: none; }
@@ -131,6 +131,6 @@ details.faq-item > summary:hover { text-decoration: none; }
 .brand:hover .brand-mark { animation: brand-beat .52s ease-out 1; }
 @keyframes brand-beat { 0% { transform: scale(1); } 28% { transform: scale(1.1); } 52% { transform: scale(.97); } 100% { transform: scale(1); } }
 
-/* No widows: a paragraph never ends with one word alone on its last line (Khal 2026-10-12). Headings balance. */
+/* No widows: a paragraph never ends with one word alone on its last line (2026-10-12). Headings balance. */
 p, li, figcaption, summary, dd, blockquote, .lede { text-wrap: pretty; }
 h1, h2, h3 { text-wrap: balance; }

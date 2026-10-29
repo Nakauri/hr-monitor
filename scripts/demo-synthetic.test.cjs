@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Guards: real recordings shipping as the public sample week (AUDIT-NOTES 2026-10-11 item 36, Khal 2026-10-12). Files: scripts/generate-demo-data.cjs, demo/. Runtime: about 3 s.
+// Guards: real recordings shipping as the public sample week (AUDIT-NOTES 2026-10-11 item 36, 2026-10-12). Files: scripts/generate-demo-data.cjs, demo/. Runtime: about 3 s.
 // 1. The generator is deterministic: two runs into temp folders give the same bytes, and they match demo/.
 // 2. No demo file carries a real row: none of the old real files' first 20 data rows (git 1710c80)
 //    appears anywhere in the new file, and no new line equals any old line.

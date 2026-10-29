@@ -1,7 +1,7 @@
 // Guards: S41 (2026-10-12) the "new look" announcement page, new-look.html, and its pictures in assets/new-look/.
-// Named bugs: pages drifting to their own top bar (Khal 2026-10-12, "the home button on privacy and terms is weirdly
-// placed"), so nav and footer must equal index.html; the phone Day picture showing a tall one-column summary (Khal 10-12).
-// S46 named bugs (Khal 2026-10-12): the page "EXTREMELY bad about its right real estate" (text and pictures leaving the
+// Named bugs: pages drifting to their own top bar (2026-10-12, "the home button on privacy and terms is weirdly
+// placed"), so nav and footer must equal index.html; the phone Day picture showing a tall one-column summary (10-12).
+// S46 named bugs (2026-10-12): the page "EXTREMELY bad about its right real estate" (text and pictures leaving the
 // right side empty), the Day story missing the old "View as full-day timeline" step, the intro paragraph he cut, and
 // the Zoom copy saying the markers list moved without saying where it lives now.
 // S47: copy in a UX shape (release line, goals, problem then change per section, outcomes list).
@@ -27,7 +27,7 @@ const ROOT = path.resolve(here, '..');
 const args = process.argv.slice(2);
 const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const UX = uxDir(here, argVal('--ux'));
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const OUT = path.join(ROOT, 'assets', 'new-look');
 
@@ -37,7 +37,7 @@ export const WIDGETS = ['chip', 'slim', 'hrhrv', 'notrends'];
 // S46: Day before step 2 (the old full-day timeline page) at both sizes, and the Markers list open on the laptop.
 export const EXTRAS = ['day-before2-1440', 'day-before2-360', 'markers-after-1440'];
 const BUDGET = { display: 300 * 1024, full: 900 * 1024 };
-const DAY = '2026-04-24'; // Khal 2026-10-12: the most complete demo day
+const DAY = '2026-04-24'; // 2026-10-12: the most complete demo day
 // Widget measurements taken at capture time (local, beside the build shots): trace and trend coverage, HRV text.
 const WIDGET_LOG = path.join(UX, 'redesign', 'build-shots', 'new-look-widgets.json');
 
@@ -76,7 +76,7 @@ async function route(ctx, base) {
 // ---------------------------------------------------------------- capture
 async function capture(beforeRoot) {
   fs.mkdirSync(OUT, { recursive: true });
-  const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+  const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
   const browser = await chromium.launch().catch(() => chromium.launch({ channel: 'chrome' }));
   const enc = await (await browser.newContext()).newPage();
   const log = [];
@@ -96,7 +96,7 @@ async function capture(beforeRoot) {
       log.push(`${path.basename(file)} ${r.W}x${r.H} q${r.q} ${Math.round(fs.statSync(file).size / 1024)} KB`);
     }
   }
-  // Stream widget pictures (S46 follow-up, Khal 10-12 "the stream widget example doesnt have a trend line"):
+  // Stream widget pictures (S46 follow-up, 10-12 "the stream widget example doesnt have a trend line"):
   // Now comes from the landing page's own variant preview (real widget.js on a seeded heart-like history);
   // Before is the old monitor fed 11 minutes of beats on a shifted clock so its trend and trace fill.
   // Each picture's canvases and HRV text are measured as it is taken and written to WIDGET_LOG for the checks.
@@ -175,7 +175,7 @@ async function capture(beforeRoot) {
   if (argVal('--only') === 'widgets') {
     for (const [ver, root] of [['before', path.resolve(beforeRoot)], ['after', ROOT]].filter(([v]) => !argVal('--side') || v === argVal('--side'))) {
       const { server, base } = await serve(root, appShim(root));
-      await widgetShots(base, ver, { viewport: { width: 1440, height: 900 }, timezoneId: 'America/Edmonton' });
+      await widgetShots(base, ver, { viewport: { width: 1440, height: 900 }, timezoneId: 'America/Denver' });
       server.close();
     }
     await browser.close(); console.log(log.join('\n')); return;
@@ -189,7 +189,7 @@ async function capture(beforeRoot) {
     for (const size of [1440, 360]) {
       const phone = size === 360;
       const vp = phone ? { width: 360, height: 760 } : { width: 1440, height: 900 };
-      const opts = { viewport: vp, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' };
+      const opts = { viewport: vp, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Denver' };
       const maxW = phone ? 720 : 1440;
       // Viewer on the demo files (synthetic, identical in both builds).
       const ctx = await browser.newContext(opts); await route(ctx, base);
@@ -205,7 +205,7 @@ async function capture(beforeRoot) {
         const tall = { day: phone ? 1300 : null, month: phone ? null : 1180 }[id];
         await page.setViewportSize({ width: vp.width, height: tall || vp.height });
         await go(hash);
-        // Phone Now Day: the Summary collapsed to its four numbers, so the frame shows the chart (Khal 10-12).
+        // Phone Now Day: the Summary collapsed to its four numbers, so the frame shows the chart (10-12).
         const fold = phone && ver === 'after' && id === 'day';
         if (fold) {
           await page.evaluate(() => { const b = document.getElementById('summary-bar'); if (b && !b.classList.contains('collapsed')) b.click(); });
@@ -361,7 +361,7 @@ function staticChecks() {
   check(!/I rebuilt most of aorti/.test(PAGE) && /<time datetime="2026-10-12">October 12, 2026<\/time>/.test(PAGE), 'intro paragraph gone, the date in a time[datetime]');
   const zoomSec = (PAGE.match(/<section class="area" id="zoom"[\s\S]*?<\/section>/) || [''])[0];
   check(/Markers button above the chart/.test(zoomSec) && /markers-after-1440\.webp"[^>]*alt="[^"]*Markers · \d+ button/.test(zoomSec), 'Zoom: the copy names the Markers button and a Now picture shows its list open');
-  // S47 (Khal 2026-10-12, after the Studio C&G case study): release line, three goals, each area told as the problem
+  // S47 (2026-10-12, after a studio case study): release line, three goals, each area told as the problem
   // then the change in exactly two paragraphs, and the speed list as outcomes.
   check(/<p class="date">Released <time datetime="\d{4}-\d{2}-\d{2}">[^<]+<\/time><\/p>/.test(PAGE), 'intro: "Released" plus a time[datetime]');
   const goals = (PAGE.match(/<ul class="goals">([\s\S]*?)<\/ul>/) || ['', ''])[1];

@@ -30,6 +30,7 @@ run node scripts/row-epoch.test.cjs
 run node scripts/catch-floor.mjs
 run node scripts/coverage.mjs
 run node scripts/section-map.mjs
+run node scripts/personal-scan.mjs
 # The JVM tier (compiles the real native Java, about 4 min) runs in CI always, and locally only when the
 # push touches the Java or these tests (or origin/main is unknown).
 if [ -n "$CI" ] || ! git rev-parse -q --verify origin/main >/dev/null \
@@ -39,9 +40,10 @@ else
   echo "== JVM tier skipped: no Java or scripts/jvm change since origin/main (CI runs it)"
 fi
 # The browser tier: headless Playwright checks for the files this push changed (scripts/browser-tier.mjs).
-# It needs the gitignored ux-audit kit, so it runs on the pushing machine; CI says so instead of passing quietly.
+# The full tier needs the local ux-audit kit and real recordings, so it runs on the pushing machine. CI runs the
+# monitor checks in their own workflow step (synthetic data only) and says so here instead of passing quietly.
 if [ -n "$CI" ]; then
-  echo "== browser tier not run in CI: it needs the local ux-audit kit; the pre-push hook runs it"
+  echo "== browser tier: CI runs the monitor checks in its own step; the viewer checks run in the pre-push hook"
 else
   run node scripts/browser-tier.mjs
 fi

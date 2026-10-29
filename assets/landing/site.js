@@ -62,7 +62,7 @@
 })();
 
 // Brand border trail (S43): dashes on a pathLength-100 SVG ring move by stroke-dashoffset, so the light keeps
-// one speed along the outline (a rotating conic gradient does not). Plays with reduced motion on (Khal 2026-10-12).
+// one speed along the outline (a rotating conic gradient does not). Plays with reduced motion on (2026-10-12).
 (function () {
   const HOST = '.btn, .android-card, .strap-feature';
   const NS = 'http://www.w3.org/2000/svg';
@@ -156,7 +156,7 @@
 })();
 
 // No widows: join the last two words of every text block with a non-breaking space, so a line never
-// ends with one word alone (Khal 2026-10-12). CSS text-wrap: pretty does the same where supported.
+// ends with one word alone (2026-10-12). CSS text-wrap: pretty does the same where supported.
 (function () {
   function join(el) {
     const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);

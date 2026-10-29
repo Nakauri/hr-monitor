@@ -20,8 +20,8 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
-const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
+const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 for (const f of ['ui.css', 'ui.js', 'widget.css', 'tokens.css']) {
@@ -228,7 +228,7 @@ try {
     const cfg = STATES.live;
     const { ctx, page, errs } = await openMonitor(cfg, '360');
     for (const [label, bad] of [
-      ['odd field types', { sessionActive: true, linkState: 'recording', strapName: '808S 0025153', sessionStartMs: 'x', lastHrAtMs: NaN }],
+      ['odd field types', { sessionActive: true, linkState: 'recording', strapName: '808S 0012345', sessionStartMs: 'x', lastHrAtMs: NaN }],
       ['no linkState, strap or times', { sessionActive: true }],
     ]) {
       const before = await readState(page);

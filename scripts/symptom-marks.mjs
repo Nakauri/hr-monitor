@@ -17,7 +17,7 @@ const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
@@ -30,7 +30,7 @@ const server = http.createServer((req, res) => {
 await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-// 2026-10-05 15:00Z = 09:00 in Edmonton; 20 min of 1 Hz beats, the mark at minute 10.
+// 2026-10-05 15:00Z = 09:00 in Denver; 20 min of 1 Hz beats, the mark at minute 10.
 const BASE = Date.UTC(2026, 9, 5, 15, 0, 0);
 const SID = BASE + 5000;
 const MARK_T = 10 * 60000;
@@ -67,7 +67,7 @@ try { browser = await chromium.launch(); } catch (e) { browser = await chromium.
 
 const seen = {};
 for (const c of CASES) {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith(base) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();

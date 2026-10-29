@@ -19,7 +19,7 @@ const ROOT = path.resolve(__dirname, '..');
 const outArg = process.argv.indexOf('--out');
 const OUT = outArg > 0 ? path.resolve(process.argv[outArg + 1]) : path.join(ROOT, 'demo');
 const HEADER = 'time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture';
-// Mountain Daylight Time for every day of the sample week (no clock change in late April).
+// Mountain time for every day of the sample week (no clock change in late April).
 const LOCAL_OFFSET_MS = -6 * 3600000;
 
 // ---- Seeded random -----------------------------------------------------------------------

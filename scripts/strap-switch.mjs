@@ -25,8 +25,8 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
-const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
+const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -74,7 +74,7 @@ await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const BASE = `http://127.0.0.1:${server.address().port}`;
 const ALLOW = /^https?:\/\/(127\.0\.0\.1|fonts\.googleapis\.com|fonts\.gstatic\.com)(:|\/)/;
 
-const OLD = { name: '808S 0025153', mac: 'AA:BB:CC:DD:00:25' };
+const OLD = { name: '808S 0012345', mac: 'AA:BB:CC:DD:00:25' };
 const POLAR = { name: 'Polar H10 9A1B2C3D', mac: 'AA:BB:CC:DD:00:26' };
 const NEW = { name: 'Coospo H808S 7F2E', mac: 'AA:BB:CC:DD:00:27' };
 

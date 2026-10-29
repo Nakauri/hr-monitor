@@ -1,4 +1,4 @@
-// Guards: AUDIT-NOTES 2026-10-11 item 28 (Khal 2026-10-12, Galaxy S8: zooming into data on the phone is still hard; the strip brush was the only zoom) and the missed left brush handle on the first grab (Khal 2026-10-12, laptop and phone). Files: hrv_viewer.html chart gestures (wireChartGestures, doubleTapZoom, the brush handle hit test (brushModeAt, the overlay grab zone past the strip ends), #session-chart touch-action, wireMouseDragZoom and .drag-band, the gear popover #viewer-open-diagnostics). Runtime about 25 s; --mutants about 135 s.
+// Guards: AUDIT-NOTES 2026-10-11 item 28 (2026-10-12, the test phone: zooming into data on the phone is still hard; the strip brush was the only zoom) and the missed left brush handle on the first grab (2026-10-12, laptop and phone). Files: hrv_viewer.html chart gestures (wireChartGestures, doubleTapZoom, the brush handle hit test (brushModeAt, the overlay grab zone past the strip ends), #session-chart touch-action, wireMouseDragZoom and .drag-band, the gear popover #viewer-open-diagnostics). Runtime about 25 s; --mutants about 135 s.
 // S32 touch zoom on the Day chart, headless, CDP touch (Input.dispatchTouchEvent) on ?demo=1 Day.
 // 360: one pinch takes the range from the full day to under 1 h and keeps the time under the pinch centre there;
 //      a one-finger sideways drag pans the zoomed range; a vertical swipe scrolls the page and leaves the range;
@@ -9,7 +9,7 @@
 // 1440 brush: the left handle at the strip start grabbed by its outer half; each handle grabbed 10 px off its drawn centre;
 //      a click 18 px outside a handle keeps the zoom; cursors ew-resize on a handle, grab inside, crosshair elsewhere.
 // 1440: ctrl+wheel zooms around the pointer and leaves the page; a plain wheel scrolls the page and leaves the range.
-// 1440 S37 mouse drag-to-zoom (AUDIT-NOTES item 33, Khal 2026-10-12: "I'd rather have good performance than that feature"):
+// 1440 S37 mouse drag-to-zoom (AUDIT-NOTES item 33, 2026-10-12: "I'd rather have good performance than that feature"):
 //      a mouse drag across the plot zooms to the band within 1 min, with 0 chart updates during the drag and the band
 //      drawn while dragging; a 3 px drag is a click (range kept, the click reaches the chart); Escape mid-drag cancels;
 //      crosshair over the plot.
@@ -30,7 +30,7 @@ const args = process.argv.slice(2);
 const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const VIEWER = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.csv': 'text/csv' };
@@ -73,7 +73,7 @@ try { browser = await chromium.launch(); } catch (e) { browser = await chromium.
 
 async function openDay(base, width) {
   const phone = width < 600;
-  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith('http://127.0.0.1:') || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -197,7 +197,7 @@ async function run(html) {
     await page.waitForTimeout(500);
     const w2 = await state(page);
     add('wheel', w2.scroll - w1.scroll > 50 && Math.abs(w2.span - w1.span) < 0.01, `a plain wheel scrolls the page ${Math.round(w2.scroll - w1.scroll)} px and leaves the range`);
-    // Brush handles with a mouse (Khal missed the left handle on the first grab every time).
+    // Brush handles with a mouse (the owner missed the left handle on the first grab every time).
     await reset(page);
     const strip = () => page.evaluate(() => { const o = document.getElementById('context-overlay'); o.scrollIntoView({ block: 'center' }); const r = o.getBoundingClientRect(), b = document.getElementById('context-brush').getBoundingClientRect(); return { l: r.left, y: Math.round(r.top + r.height / 2), cl: b.left + 2, cr: b.right - 2 }; });
     const mdrag = async (x0, x1, y) => { await page.mouse.move(x0, y); await page.mouse.down(); await page.mouse.move(x1, y, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(400); };

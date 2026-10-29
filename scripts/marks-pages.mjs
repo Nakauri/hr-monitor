@@ -22,7 +22,7 @@ const args = process.argv.slice(2);
 const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const require = createRequire(import.meta.url);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const { FakeDrive } = require('./marks-store.test.cjs');
@@ -65,7 +65,7 @@ try { browser = await chromium.launch(); } catch (e) { browser = await chromium.
 
 async function context(opts) {
   const w = (opts && opts.width) || 1440;
-  const ctx = await browser.newContext({ viewport: { width: w, height: w < 600 ? 740 : 900 }, isMobile: w < 600, hasTouch: w < 600, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width: w, height: w < 600 ? 740 : 900 }, isMobile: w < 600, hasTouch: w < 600, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith(base) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -246,7 +246,7 @@ async function checkX1() {
   await seed(a.page, { 'hrm_20261005T15Z_abc123.csv': segment() }, [], 'lap001');
   await gotoDay(a.page, '2026-10-05');
   await a.page.waitForSelector('#markers-actions:not([hidden])', { state: 'attached', timeout: 15000 }).catch(() => {});
-  // 2026-10-05 15:00Z is 09:00 in Edmonton; the sleep runs 09:05 to 09:15.
+  // 2026-10-05 15:00Z is 09:00 in Denver; the sleep runs 09:05 to 09:15.
   // Add sleep lives in the laptop Markers drawer (S31).
   if (!(await a.page.isVisible('#add-sleep'))) await a.page.click('#markers-toggle', { timeout: 4000 }).catch(() => {});
   await a.page.click('#add-sleep', { timeout: 4000 }).catch(() => {});

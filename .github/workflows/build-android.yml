@@ -201,7 +201,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # Re-publish instead of swapping the asset, so the release shows this build's date (Khal 2026-10-12: the page
+      # Re-publish instead of swapping the asset, so the release shows this build's date (2026-10-12: the page
       # read "6 months ago"). Also drops the stale April native release. Both deletes are no-ops when absent.
       - name: Remove previous rolling releases
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

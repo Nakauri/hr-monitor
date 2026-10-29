@@ -1,4 +1,4 @@
-// Guards: the Day report missing the long high stretches and catching stair climbs (Khal 2026-10-17, S61 study), the dead
+// Guards: the Day report missing the long high stretches and catching stair climbs (2026-10-17, S61 study), the dead
 // "Noteworthy moments" detector (reads p.v, handed {x,y}), strap junk read as an evening above 100 (false stretches
 // without the beat check), start-of-recording posture stamps read as taps, 5 s demo rows finding nothing.
 // Files: hrv_viewer.html (S61 moments block, rptBase, rptModel, dayMoments, rptDescribe, renderInsight, the span build in
@@ -12,6 +12,7 @@
 // Usage: node scripts/day-moments.mjs [--part <list>] [--mutants] [--ux <dir>] [--shots <dir>]
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -27,10 +28,11 @@ const UX = uxDir(here, argVal('--ux'));
 const MUTANTS_ON = args.includes('--mutants');
 const PARTS = (argVal('--part') || (MUTANTS_ON ? 'golden,demo,replay,agree,same,copy,nav' : 'golden,demo,copy')).split(',');
 const BASE_REF = '38a4d96';
-const HOME = 'C:/Users/Khal';
+// The replay manifest names its files from the home folder.
+const HOME = os.homedir();
 const S54 = path.join(UX, 'redesign', 's54', 'data');
 const MANIFEST = path.join(UX, 'redesign', 's61', 'replay-manifest.json');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const REAL = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
 const T0 = Date.now();
 const need = (p) => { if (!fs.existsSync(p)) { console.log('MISSING ' + p); process.exit(2); } };
@@ -155,7 +157,7 @@ async function getBrowser() {
 }
 async function newPage(width) {
   const b = await getBrowser();
-  const ctx = await b.newContext({ viewport: { width: width || 1440, height: 900 }, timezoneId: 'America/Edmonton' });
+  const ctx = await b.newContext({ viewport: { width: width || 1440, height: 900 }, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith(BASE) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();

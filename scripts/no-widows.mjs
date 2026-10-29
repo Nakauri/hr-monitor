@@ -1,4 +1,4 @@
-// Guards: one word alone on the last line of a paragraph ("work." under the Straps lede, Khal 2026-10-12).
+// Guards: one word alone on the last line of a paragraph ("work." under the Straps lede, 2026-10-12).
 // Files: index.html, changelog.html, legal.html, new-look.html (site.css and ui.css `text-wrap: pretty`). Runtime about 30 s.
 // Every visible text block (p, li, figcaption, summary, dd, h1 to h3) that wraps to 2 or more lines must end with
 // at least 2 words, at 1440, 1024 and 360. --mutants removes the text-wrap rule and must FAIL.

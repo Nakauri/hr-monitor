@@ -1,4 +1,4 @@
-// Guards: Khal 2026-10-12 "since the share with your doctor button is so big now, i'd like us to get the reports in order",
+// Guards: 2026-10-12 "since the share with your doctor button is so big now, i'd like us to get the reports in order",
 // and the old page-print bug "Share prints the page in an ugly manner" (2026-10-12): Share printed the whole viewer page.
 // Files: hrv_viewer.html (Share menu, Day report), report.css, mobile/scripts/copy-web.js; reads mobile/src/native-pdf.js.
 // Runtime about 20 s; --mutants adds about 4 s.
@@ -31,9 +31,9 @@ const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const MUTANTS = args.includes('--mutants');
 const SHOTS = args.includes('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
-const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const VIEWER = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8');
 const NATIVE_PDF = fs.readFileSync(path.join(ROOT, 'mobile', 'src', 'native-pdf.js'), 'utf8');
 const SHOT_DIR = path.join(UX, 'redesign', 'build-shots');
@@ -60,7 +60,7 @@ try { browser = await chromium.launch(); } catch (e) { browser = await chromium.
 
 async function openDay(base, iso, o = {}) {
   const width = o.width || 1440, phone = width < 600;
-  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: o.dpr || 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: o.dpr || 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith('http://127.0.0.1:') || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -213,7 +213,7 @@ async function webDay(base, label, iso, o = {}) {
   const okLinks = linked.every((r) => nums.onPages.some((p) => p.n === r.n && p.page === r.page)) && nums.onPages.every((p) => p.head === p.n && linked.some((r) => r.n === p.n && r.page === p.page));
   const okChart = JSON.stringify(nums.chart) === JSON.stringify(nums.idx.map((r) => r.n).sort((a, b) => a - b));
   check(`${tag} moment numbers on page 1 match their pages`, okLinks && okChart && nums.onPages.length <= 6, `${linked.length} linked, ${nums.onPages.length} on pages, chart ${nums.chart.join(',')}`);
-  // S62 (Khal 10-18, half-width "Whole day" table): Summary is one full-width row of figures, each on one line.
+  // S62 (10-18, half-width "Whole day" table): Summary is one full-width row of figures, each on one line.
   // S63: plus the Asleep and Awake rows (two, or none), each cell on one line.
   const sum = await page.evaluate(() => {
     const t = document.querySelector('#rpg1 table.sum'); if (!t) return null;

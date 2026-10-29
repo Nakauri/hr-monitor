@@ -84,7 +84,7 @@ const VARIANTS = [
 ];
 
 async function compare(files) {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'America/Denver' });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));

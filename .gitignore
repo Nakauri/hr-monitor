@@ -6,7 +6,7 @@ _local_snapshot_*/
 
 # Secrets. NEVER commit. Google OAuth client JSON files, .env files,
 # private keys, anything that looks like a credential. The canonical
-# home for this project's secrets is C:/Users/Khal/.secrets/aorti/.
+# home for this project's secrets is ~/.secrets/aorti/, outside the repo.
 client_secret*.json
 credentials*.json
 *.env

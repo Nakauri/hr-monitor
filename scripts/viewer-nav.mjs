@@ -31,7 +31,7 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const { FakeDrive } = createRequire(import.meta.url)('./marks-store.test.cjs');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
@@ -369,7 +369,7 @@ async function s27Pills() {
   return rows;
 }
 
-// S62 (Khal 2026-10-18, phone bar showed a green dot and no logo, tap opened overlay.html): with the relay live,
+// S62 (2026-10-18, phone bar showed a green dot and no logo, tap opened overlay.html): with the relay live,
 // the logo stays and in the app the link is Monitor to hr_monitor.html. ?livetest=1 serves the page with the demo
 // guard off and a fake relay sending ticks; ?app=1 stands in the Capacitor bridge and the native PDF path.
 const LIVE_ANCHOR = 'const __viewerDemoFlag = (function () {';
@@ -418,7 +418,7 @@ async function s62Bar() {
   return rows;
 }
 
-// Khal 2026-10-24: on open, signed in, the cloud read "off" while the cache painted; tapping it started a needless
+// 2026-10-24: on open, signed in, the cloud read "off" while the cache painted; tapping it started a needless
 // fresh sign-in. A signed-in open must never show "Drive: off", from the first paint on.
 async function s62ColdOpen() {
   const fake = new FakeDrive();
@@ -441,7 +441,7 @@ async function s62ColdOpen() {
   ];
 }
 
-// S62 item D (Khal 10-18: 18 s of nothing between sign-in and the sync starting): from signed out, sign-in shows
+// S62 item D (10-18: 18 s of nothing between sign-in and the sync starting): from signed out, sign-in shows
 // syncing at once and holds it through the Drive listing until the sync ends; each phase logs one timed line.
 async function s62SignIn() {
   const rows = [];

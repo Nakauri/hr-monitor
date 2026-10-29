@@ -1,4 +1,4 @@
-// Guards: AUDIT-NOTES 2026-10-11 item 30 (Khal 2026-10-12, Trends "still seems weird": widgets on and off, resize, reorder). Files: hrv_viewer.html Trends view (renderAll, TREND_WIDGETS, .all-card CSS). Runtime: about 40 s, --mutants about 60 s.
+// Guards: AUDIT-NOTES 2026-10-11 item 30 (2026-10-12, Trends "still seems weird": widgets on and off, resize, reorder). Files: hrv_viewer.html Trends view (renderAll, TREND_WIDGETS, .all-card CSS). Runtime: about 40 s, --mutants about 60 s.
 // S34 Trends widgets on demo data (?demo=1#/all), headless, at 1440 and 360:
 // every widget hidden and shown again by real clicks in the Widgets list, the grid never has an empty cell
 // (each row of shown cards spans the grid; hidden cards take no space); Full and Half change the card width
@@ -20,7 +20,7 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 

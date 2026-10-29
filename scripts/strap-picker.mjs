@@ -1,5 +1,5 @@
 // S60: the native strap picker shows heart rate straps first and keeps other Bluetooth devices out of the way.
-// Bug it guards (2026-10-16 phone screenshot): "Pair a strap" listed every bonded device (headset, GoPro, PC,
+// Bug it guards (2026-10-16 phone screenshot): "Pair a strap" listed every bonded device (headset, action camera, PC,
 // BP cuff) as "paired • HR strap", because BleScanner marked every bonded device isHr, and the text overflowed
 // each card. Cases: (a) a mixed scan lists exactly the 3 straps (2 with the HR UUID, 1 known without it), the rest
 // in a closed "Other Bluetooth devices" group; (b) rows say Nearby or Paired before, never the MAC or "HR strap";
@@ -23,8 +23,8 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
-const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
+const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -71,14 +71,14 @@ const BASE = `http://127.0.0.1:${server.address().port}`;
 const ALLOW = /^https?:\/\/(127\.0\.0\.1|fonts\.googleapis\.com|fonts\.gstatic\.com)(:|\/)/;
 
 const MIX = [
-  { name: '808S 0025153', mac: 'AA:BB:CC:DD:00:25', rssi: -127, isHr: true, bonded: true },
+  { name: '808S 0012345', mac: 'AA:BB:CC:DD:00:25', rssi: -127, isHr: true, bonded: true },
   { name: 'Polar H10 9A1B2C3D', mac: 'AA:BB:CC:DD:00:26', rssi: -64, isHr: true, bonded: false },
   { name: 'Coospo H808S 7F2E', mac: 'AA:BB:CC:DD:00:27', rssi: -127, isHr: false, bonded: true },
-  { name: 'Arctis Nova 7 Wireless Gaming Headset With A Very Long Name', mac: 'AA:BB:CC:DD:00:31', rssi: -127, isHr: false, bonded: true },
-  { name: 'GoPro 4821', mac: 'AA:BB:CC:DD:00:32', rssi: -127, isHr: false, bonded: true },
-  { name: 'DESKTOP-PC', mac: 'AA:BB:CC:DD:00:33', rssi: -71, isHr: false, bonded: false },
+  { name: 'Wireless Headset 01 With A Very Long Device Name', mac: 'AA:BB:CC:DD:00:31', rssi: -127, isHr: false, bonded: true },
+  { name: 'Action Camera 02', mac: 'AA:BB:CC:DD:00:32', rssi: -127, isHr: false, bonded: true },
+  { name: 'Desktop 03', mac: 'AA:BB:CC:DD:00:33', rssi: -71, isHr: false, bonded: false },
 ];
-const STRAP_NAMES = ['Polar H10 9A1B2C3D', '808S 0025153', 'Coospo H808S 7F2E'];
+const STRAP_NAMES = ['Polar H10 9A1B2C3D', '808S 0012345', 'Coospo H808S 7F2E'];
 
 let fails = 0;
 const fail = (m) => { fails++; console.log('FAIL ' + m); };

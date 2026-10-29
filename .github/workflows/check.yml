@@ -44,3 +44,8 @@ jobs:
           npm install --no-audit --no-fund playwright@1.64.0 > /dev/null
           npx playwright install --with-deps chromium > /dev/null
           cd "$GITHUB_WORKSPACE" && node scripts/csp-hashes.mjs --check --ux "$RUNNER_TEMP/ux"
+
+      # The monitor's browser checks run on synthetic data only (scripts/fake-bridge.mjs, scripts/vendor/), so CI runs
+      # them on every push; the viewer checks read real device recordings and stay on the pushing machine.
+      - name: Monitor browser checks
+        run: node scripts/browser-tier.mjs --only monitor-log,monitor-controls,monitor-consistency,monitor-sync,monitor-status,recorder-page,native-rmssd,strap-switch,strap-picker,signal-chip,ui-dialogs --ux "$RUNNER_TEMP/ux"

@@ -6,7 +6,7 @@
 // on a web UTC and a native local-time file name; a mutated rowEpochFn must fail. Files: hrv_viewer.html rowEpochFn
 // and its callers, the parse Worker function list. Runtime: under 2 s (needs git for the old source).
 // Run: node scripts/row-epoch.test.cjs   (exit 0 = OK)
-process.env.TZ = 'America/Edmonton';
+process.env.TZ = 'America/Denver';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

@@ -1,4 +1,4 @@
-// Guards: the Day chart lagging on drag, zoom, hover and marker ease (ux-audit/redesign/perf-2026-10-12/REPORT.md, Khal 2026-10-11 "barely scroll"). Files: hrv_viewer.html chart, brush, pinch (S32), hover, marker ease, Day route. Runtime: about 70 s per --config; run when the Day chart or its route changes.
+// Guards: the Day chart lagging on drag, zoom, hover and marker ease (ux-audit/redesign/perf-2026-10-12/REPORT.md, 2026-10-11 "barely scroll"). Files: hrv_viewer.html chart, brush, pinch (S32), hover, marker ease, Day route. Runtime: about 70 s per --config; run when the Day chart or its route changes.
 // Seeds one realistic 16.5 h day (3 recordings at 1 Hz, gaps, events, palps, warnings, posture, marks)
 // into the viewer's Drive cache, opens the Day view headless, runs the REPORT actions with long-task,
 // frame and Chart.update counters, then checks the REPORT budgets as PASS/FAIL rows.
@@ -20,7 +20,7 @@ const ROOT = path.resolve(here, '..');
 const args = process.argv.slice(2);
 const argVal = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const UX = uxDir(here, argVal('--ux', null));
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const OUTDIR = argVal('--out', path.join(UX, 'redesign', 'perf-2026-10-12', 's26'));
 const COUNTS = args.includes('--counts');
@@ -62,7 +62,7 @@ if (MUTANT) {
   if (m.only && !ONLY) ONLY = m.only;
 }
 
-// ---- Fixture: 2026-09-15 in America/Edmonton (UTC-6). 06:30-12:00, 12:15-18:15, 18:40-23:40 local. ----
+// ---- Fixture: 2026-09-15 in America/Denver (UTC-6). 06:30-12:00, 12:15-18:15, 18:40-23:40 local. ----
 const DAY = '2026-09-15';
 const LOCAL = (h, m) => Date.UTC(2026, 8, 15, h + 6, m, 0);
 const SEGS = [[6, 30, 12, 0], [12, 15, 18, 15], [18, 40, 23, 40]];
@@ -177,7 +177,7 @@ if (args.includes('--cold')) {
   const segFiles = {};
   for (const n of fs.readdirSync(SEGS)) if (n.endsWith('.csv')) segFiles[n] = fs.readFileSync(SEGS + '/' + n, 'utf8');
   const coldOpen = async (viaCsv) => {
-    const ctx = await browser.newContext({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true, timezoneId: 'America/Edmonton' });
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true, timezoneId: 'America/Denver' });
     await ctx.route('**/chart.umd*.js', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(CHART) }));
     await ctx.addInitScript(INIT);
     if (viaCsv) await ctx.addInitScript(() => { window.__hrmV2ViaCsv = true; });
@@ -268,7 +268,7 @@ if (args.includes('--cold')) {
 
 async function runConfig(name, W, CPU) {
   const PHONE = W < 600, H = PHONE ? 740 : 900;
-  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: PHONE ? 2 : 1, isMobile: PHONE, hasTouch: PHONE, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: PHONE ? 2 : 1, isMobile: PHONE, hasTouch: PHONE, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith(base) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -281,7 +281,7 @@ async function runConfig(name, W, CPU) {
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
   const cdp = await ctx.newCDPSession(page);
 
-  // Seed, then a warm-up open so the summary index is built and persisted (Khal's laptop state).
+  // Seed, then a warm-up open so the summary index is built and persisted (the owner's laptop state).
   await page.goto(base + '/hrv_viewer.html#/month', { waitUntil: 'networkidle' });
   await page.evaluate(async ({ files, records }) => {
     const openDb = (name, v, stores) => new Promise((res, rej) => { const q = indexedDB.open(name, v);

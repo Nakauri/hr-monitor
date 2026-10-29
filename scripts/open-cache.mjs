@@ -22,7 +22,7 @@ const args = process.argv.slice(2);
 const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const { FakeDrive } = createRequire(import.meta.url)('./marks-store.test.cjs');
 const MUTANTS = args.includes('--mutants');
@@ -65,7 +65,7 @@ for (const name of demoNames) {
 
 let browser;
 try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, timezoneId: 'America/Edmonton' });
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, timezoneId: 'America/Denver' });
 // Every Drive call made before the gate opens is held until it does.
 const drive = { gate: 0, log: [] };
 await ctx.route('**/*', async (route) => {

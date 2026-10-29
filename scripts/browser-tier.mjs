@@ -3,13 +3,14 @@
 // pre-push hook runs every check whose guarded file (or whose own script) changed since origin/main.
 // Guards: these checks were run by hand only (report card 2026-10-24, Verification held at B+), and checks
 // run by hand drift red unnoticed (day-boundary and marks-store were failing on main the same day).
-// Needs the gitignored ux-audit kit (Playwright) and, for monitor checks, mobile/www from copy-web, which
-// this runner refreshes; so it runs on the machine that pushes, not in CI (CI prints why it skips).
+// Needs Playwright (the gitignored ux-audit kit, or --ux) and, for monitor checks, mobile/www from copy-web, which
+// this runner refreshes. CI runs the monitor checks with --ux (synthetic data only); the viewer checks read real
+// device recordings and run only on the pushing machine.
 // Left out on purpose: pdf-proof (needs a phone session), shot-diff (a picture tool, not a check),
 // viewer-perf (headless timings swing 15% run to run, so a budget there fails without a bug).
 // Runtime: 0 s with nothing changed; about 10 to 15 min when hrv_viewer.html changes; about 35 to 37 min for --all
 // (2063 s and 2204 s, 2026-10-25). Run it from a worktree of HEAD so edits elsewhere cannot change a run.
-// Usage: node scripts/browser-tier.mjs [--all | --base <ref>] [--list] [--only a,b]
+// Usage: node scripts/browser-tier.mjs [--all | --base <ref>] [--list] [--only a,b] [--ux <kit dir>]
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -77,11 +78,14 @@ else if (!args.includes('--all')) {
 if (args.includes('--list')) { console.log(names.join('\n') || '(none)'); process.exit(0); }
 if (!names.length) { console.log('browser-tier: no guarded file changed; nothing to run'); process.exit(0); }
 
+// --ux <dir>: a kit somewhere else (CI installs Playwright under $RUNNER_TEMP/ux/kit); passed on to each check.
+const UX_ARG = val('--ux');
 let kit;
-try { kit = path.join(uxDir(ROOT), 'kit'); } catch (e) { kit = null; }
+try { kit = path.join(uxDir(ROOT, UX_ARG), 'kit'); } catch (e) { kit = null; }
 if (!kit || !fs.existsSync(path.join(kit, 'node_modules', 'playwright'))) {
-  console.log(`browser-tier: SKIPPED ${names.length} check(s): the ux-audit kit with Playwright is not on this machine (expected in CI; never on the pushing machine)`);
-  process.exit(process.env.CI ? 0 : 2);
+  // A kit asked for by --ux and not found is a broken setup, in CI too: never a green run of nothing.
+  console.log(`browser-tier: SKIPPED ${names.length} check(s): no Playwright kit at ${kit || 'the ux-audit folder'}` + (UX_ARG ? ' (FAIL: --ux was given)' : ''));
+  process.exit(process.env.CI && !UX_ARG ? 0 : 2);
 }
 
 if (names.some((n) => TIER[n][2])) {
@@ -93,7 +97,7 @@ if (names.some((n) => TIER[n][2])) {
 const results = [];
 for (const n of names) {
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', n + '.mjs'), ...TIER[n][1]], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', n + '.mjs'), ...TIER[n][1], ...(UX_ARG ? ['--ux', UX_ARG] : [])], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const secs = Math.round((Date.now() - t0) / 1000);
   const ok = r.status === 0;
   const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n');

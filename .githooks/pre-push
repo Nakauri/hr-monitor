@@ -1,7 +1,7 @@
 #!/bin/sh
-# Runs before any push, from the repo itself, so it guards every pusher's machine (not only Khal's
+# Runs before any push, from the repo itself, so it guards every pusher's machine (not only the owner's
 # git-guard). Order: clean tree, then the pushed commits scanned for secrets and forbidden files,
-# then ./check. Scan adapted from Gabe's gsd/scripts/pre-push.sh. demo/*.csv is synthetic (scripts/demo-synthetic.test.cjs) and allowed.
+# then ./check. Scan adapted from another project's pre-push scan. demo/*.csv is synthetic (scripts/demo-synthetic.test.cjs) and allowed.
 fail() { printf '\n  pre-push REFUSED: %s\n\n' "$1" >&2; exit 1; }
 
 # The checks run on the working tree, so tracked files must match the commit being pushed.

@@ -1,3 +1,5 @@
 check text eol=lf
 .githooks/* text eol=lf
 *.sh text eol=lf
+# Served in place of the CDN file under its Subresource Integrity hash: never convert a byte.
+scripts/vendor/*.js -text

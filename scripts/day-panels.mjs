@@ -1,4 +1,4 @@
-// Guards: AUDIT-NOTES 2026-10-11 items 23 to 26 (Khal 2026-10-12): laptop layer chips, the markers sidebar that resized the chart and repeated the filters, the curved marker strip, uneven Day card padding; plus Reset zoom colliding with Layers, Markers or the open panel, and markers kept out of Layers. Files: hrv_viewer.html. Runtime about 60 s; --mutants about 3 min.
+// Guards: AUDIT-NOTES 2026-10-11 items 23 to 26 (2026-10-12): laptop layer chips, the markers sidebar that resized the chart and repeated the filters, the curved marker strip, uneven Day card padding; plus Reset zoom colliding with Layers, Markers or the open panel, and markers kept out of Layers. Files: hrv_viewer.html. Runtime about 60 s; --mutants about 3 min.
 // S31 Day panels, headless.
 // 1. Layers (laptop): no layer chips on the page; the Layers popover, by real clicks, toggles every available layer, the
 //    chart and the marker list follow, and a second click restores them; groups Lines, Events, Context; no marker rows
@@ -24,7 +24,7 @@ const args = process.argv.slice(2);
 const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 const VIEWER = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.csv': 'text/csv' };
@@ -45,7 +45,7 @@ let browser;
 try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
 async function openDay(base, width, scale = 1) {
   const phone = width < 600;
-  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith('http://127.0.0.1:') || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();

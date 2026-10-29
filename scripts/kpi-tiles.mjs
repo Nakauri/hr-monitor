@@ -1,4 +1,4 @@
-// Guards: five stat-tile systems drifting apart (consistency audit 2026-10-14, Khal "so our components werent laid out nice and
+// Guards: five stat-tile systems drifting apart (consistency audit 2026-10-14, "so our components werent laid out nice and
 // consistent?"), "—" read as "em dash" by screen readers, 10 px capital labels, the Summary title reading Duration while it is hidden.
 // Files: ui.css (.kpi), ui.js (UI.kpi), hrv_viewer.html (Summary, cards, Week, Month), hr_monitor.html (Session stats). Runtime: about 40 s per part.
 // --part static,day,cards,calendar,monitor,textcheck (default: all but textcheck); --mutants runs the negative controls, each must FAIL.
@@ -20,8 +20,8 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(argVal('--root') || path.join(here, '..'));
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots') ? path.resolve(argVal('--shots')) : null;
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
-const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
+const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 const PART = argVal('--part');
@@ -73,7 +73,7 @@ const blankRmssd = (csv) => csv.replace(/\r\n/g, '\n').split('\n').map((l, i) =>
 // One fresh context per page and text scale (a second text scale on one page would re-test the first).
 async function openViewer(width, hash, { scale = 1, init = [] } = {}) {
   const phone = width < 600;
-  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: { width, height: phone ? 740 : 900 }, deviceScaleFactor: 1, isMobile: phone, hasTouch: phone, timezoneId: 'America/Denver' });
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
     if (u.startsWith(BASE) && u.includes('/demo/' + BLANKED)) {

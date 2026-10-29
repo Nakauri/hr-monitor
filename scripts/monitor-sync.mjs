@@ -22,8 +22,8 @@ const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] :
 const ROOT = path.resolve(here, '..');
 const UX = uxDir(here, argVal('--ux'));
 const SHOTS = argVal('--shots');
-const CHART = path.join(UX, '..', 'docs', 'audit-2026-10-09', 'harness-DT', 'vendor', 'chart.umd.min.js');
-const { fakeBridge } = await import(pathToFileURL(path.join(UX, 'scripts', 'fake-bridge.mjs')).href);
+const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
+const { fakeBridge } = await import(new URL('./fake-bridge.mjs', import.meta.url).href);
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 for (const [www, src] of [['hr_monitor.html', 'function driveSyncOn'], ['index.html', 'hr_monitor_last_recording']]) {
@@ -214,7 +214,7 @@ try {
   check(!/mode=offline/.test(fs.readFileSync(path.join(ROOT, 'app-home.html'), 'utf8')), 'app-home.html: no Offline mode link');
   check(!/mode-offline|__hrMonitorMode/.test(monitorSrc), 'hr_monitor.html: no mode-offline rules and no __hrMonitorMode');
 
-  // 0. Signed in with an expired access token (Khal 2026-10-24: "if I'm already signed in, why would I need to tap
+  // 0. Signed in with an expired access token (2026-10-24: "if I'm already signed in, why would I need to tap
   // anything?"): the monitor refreshes silently, never says "Tap to reconnect", never opens Google sign-in. Only a
   // refresh that fails shows the reconnect prompt.
   for (const refresh of ['ok', 'fail']) {
