@@ -52,7 +52,10 @@ let fails = 0, passes = 0, QUIET = false, firstFail = null;
 const ok = (cond, msg) => { if (cond) passes++; else { fails++; if (!firstFail) firstFail = msg; } if (!QUIET) console.log((cond ? 'PASS ' : 'FAIL ') + msg); return cond; };
 
 // ---------- the S61 and S63 blocks, cut at run time ----------
+// The day helpers live in viewer-parse.js; a page source without them reads them from there.
+const PARSE_MOD = fs.readFileSync(path.join(ROOT, 'viewer-parse.js'), 'utf8').replace(/\r\n/g, '\n');
 function fnSrc(src, name) {
+  if (src.indexOf('\n  function ' + name + '(') < 0) src = PARSE_MOD;
   const i = src.indexOf('\n  function ' + name + '(');
   if (i < 0) throw new Error('function ' + name + ' missing');
   let j = src.indexOf('{', i), depth = 0, q = null;

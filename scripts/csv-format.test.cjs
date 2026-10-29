@@ -241,7 +241,7 @@ if (cellSrc) {
 check('the event column goes through csvCell', /csvCell\(evMap\.get\(k\) \?\? ''\)/.test(monitor));
 // LOW1, LOW2 (security audit 2026-10-25): a note starting with " opened as a quoted cell that swallowed the row; the
 // viewer showed the guard's '. One rule each way: csvCell guards, the viewer's parseMark unguards at display only.
-const viewerSrc = fs.readFileSync(path.join(__dirname, '..', 'hrv_viewer.html'), 'utf8');
+const viewerSrc = require('./viewer-src.cjs').viewerSource(); // the page plus viewer-parse.js
 const unSrc = jsFunction(viewerSrc, 'unguardCell'), pmSrc = jsFunction(viewerSrc, 'parseMark');
 check('viewer unguardCell and parseMark found', !!unSrc && !!pmSrc);
 if (cellSrc && pmSrc) {

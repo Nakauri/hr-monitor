@@ -16,7 +16,7 @@ const ROOT = path.join(__dirname, '..');
 const SRC = {
   store: fs.readFileSync(path.join(ROOT, 'marks-store.js'), 'utf8'),
   drive: fs.readFileSync(path.join(ROOT, 'marks-drive.js'), 'utf8'),
-  viewer: fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8'),
+  viewer: require('./viewer-src.cjs').viewerSource(), // the page plus viewer-parse.js
   monitor: fs.readFileSync(path.join(ROOT, 'hr_monitor.html'), 'utf8'),
   diag: fs.readFileSync(path.join(ROOT, 'diagnostics.js'), 'utf8'),
 };

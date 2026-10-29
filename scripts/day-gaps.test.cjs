@@ -1,18 +1,24 @@
 #!/usr/bin/env node
 // Guards: a day's gap hatch drawn over HR another recording has (2026-10-28: a web monitor left waiting all day while
-// the phone recorded showed "1 gap · 24 h missing" and slashes across the whole zone strip). Files: hrv_viewer.html
-// gapsOutsideData, mergeGaps, buildDaySession. Runtime: under 1 s.
+// the phone recorded showed "1 gap · 24 h missing" and slashes across the whole zone strip). Files: viewer-parse.js
+// gapsOutsideData, mergeGaps; hrv_viewer.html buildDaySession. Runtime: under 1 s.
 // Run: node scripts/day-gaps.test.cjs   (exit 0 = OK)
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const viewer = fs.readFileSync(path.join(__dirname, '..', 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+const { readViewerParts } = require('./viewer-src.cjs');
+
+// The gap helpers live in viewer-parse.js; buildDaySession stays in the page.
+const parts = readViewerParts();
+const viewer = parts.html + '\n' + parts.mod;
 let failures = 0;
 function check(name, ok, detail) {
   console.log((ok ? 'OK    ' : 'FAIL  ') + name + (detail && !ok ? '  ' + detail : ''));
   if (!ok) failures++;
 }
+check('the gap helpers live in viewer-parse.js, not the page',
+  ['gapsOutsideData', 'mergeGaps'].every((n) => jsFunction(parts.mod, n) && !jsFunction(parts.html, n)) && /const DATA_JUMP_GAP_MIN = /.test(parts.mod) && !/const DATA_JUMP_GAP_MIN = /.test(parts.html));
 function jsFunction(src, name) {
   const start = src.search(new RegExp('function\\s+' + name + '\\s*\\('));
   if (start < 0) return null;

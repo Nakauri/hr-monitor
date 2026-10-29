@@ -102,7 +102,8 @@ function syntheticSegment() {
   return { name: 'v2:s35-segment', segment: lines.join('\n') + '\n', segName: 'hrm_20261006T15Z_s35abc.csv', sid: SID };
 }
 
-let srcAfter = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+// The page plus viewer-parse.js, which holds the parse and summary functions.
+let srcAfter = (fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'viewer-parse.js'), 'utf8')).replace(/\r\n/g, '\n');
 if (MUTANTS) {
   const before = srcAfter;
   srcAfter = srcAfter.replace('function rowElapsedMinFn(rows, idx) {', 'function rowElapsedMinFn(rows, idx) { return (r) => parseFloat(r[idx.time_min]);');

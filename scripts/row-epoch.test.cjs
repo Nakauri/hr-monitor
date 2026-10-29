@@ -11,11 +11,12 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { execFileSync } = require('child_process');
+const { viewerSource } = require('./viewer-src.cjs');
 
 const ROOT = path.join(__dirname, '..');
 const BASE_REV = '77d068a';
 const norm = (s) => s.replace(/\r\n/g, '\n');
-const cur = norm(fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8'));
+const cur = viewerSource(); // the page plus viewer-parse.js
 let old = null;
 try { old = norm(execFileSync('git', ['show', BASE_REV + ':hrv_viewer.html'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 << 20 })); } catch (e) {}
 

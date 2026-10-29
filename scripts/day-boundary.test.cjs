@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Day boundaries in hrv_viewer.html go through one helper module (dayWindow, dayKeyOf, localDateLabel) [K6, L2, L3].
+// Day boundaries in hrv_viewer.html go through one helper module in viewer-parse.js (dayWindow, dayKeyOf, localDateLabel) [K6, L2, L3].
 // Guards: a stray midnight ('T00:00:00', setHours(0) outside the module, which drifts from the day start
 // (B6 class: UTC vs local), and label and data keys swapping callers. A line that only builds a display label
 // carries '// date-label'. Day start is midnight (decision 2026-10-09).
@@ -8,8 +8,12 @@
 const fs = require('fs');
 const path = require('path');
 
+const { readViewerParts } = require('./viewer-src.cjs');
+
 const file = process.argv[2] || path.join(__dirname, '..', 'hrv_viewer.html');
-const src = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+const parts = readViewerParts(file);
+// The page and viewer-parse.js, which holds the day helper module.
+const src = parts.mod ? parts.html + '\n' + parts.mod : parts.html;
 let failures = 0;
 function check(name, ok, detail) {
   console.log((ok ? 'OK    ' : 'FAIL  ') + name + (detail ? '  ' + detail : ''));
@@ -18,6 +22,7 @@ function check(name, ok, detail) {
 
 const BEGIN = '// ===== Day helper module BEGIN =====';
 const END = '// ===== Day helper module END =====';
+check('the day helper module lives in viewer-parse.js, not the page', parts.mod.includes(BEGIN) && !parts.html.includes(BEGIN));
 const b = src.indexOf(BEGIN), e = src.indexOf(END);
 const hasModule = b >= 0 && e > b;
 check('day helper module present', hasModule);

@@ -24,6 +24,7 @@ on:
       - 'relay-link.js'
       - 'recorder.js'
       - 'marks-drive.js'
+      - 'viewer-parse.js'
       - 'hr-math.js'
       - 'settings.js'
       - 'auth.js'

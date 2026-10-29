@@ -144,7 +144,7 @@ if (javaRegex) {
   check('regex accepts hrm_20261009T07Z_abc123.csv', re.test('hrm_20261009T07Z_abc123.csv'));
   check('regex rejects legacy and daily names', !re.test('hrv_session_2026-10-09T07-00-00.000.csv') && !re.test('hrv_daily_2026-10-09.csv'));
 }
-const viewer = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8');
+const viewer = require('./viewer-src.cjs').viewerSource(); // the page plus viewer-parse.js
 const vm = viewer.match(/\/\^hrm_[^\n]*?\.csv\$\//);
 check('viewer defines isRecordingName over SEG_NAME_RE',
   /function isRecordingName\(/.test(viewer) && /const SEG_NAME_RE = \/\^hrm_/.test(viewer));
