@@ -3237,21 +3237,28 @@ END SECTION MAP -->
     return { model, hide, trim, shadow, changed };
   }
 
-  // Dual saves of one recording under two names: keep the copy with more data.
+  // Dual saves of one recording under two names, and a mid-session export (a shorter copy with
+  // the same start second): keep the copy with more data.
   function dedupHideSet(index) {
     const dedupHide = new Set();
+    const score = (s) => (s.hrCount || 0) + (s.duration || 0) / 1000;
+    const keep = (map, key, fn) => {
+      const prev = map.get(key);
+      if (prev == null || prev === fn) { map.set(key, fn); return; }
+      if (score(index[fn]) > score(index[prev])) { dedupHide.add(prev); map.set(key, fn); }
+      else dedupHide.add(fn);
+    };
     const bySignature = new Map();
+    const byStartSecond = new Map();
     for (const fn of Object.keys(index)) {
       const s = index[fn];
       if (!s || !s.startEpoch) continue;
-      const key = Math.round(s.startEpoch / 60000) + '_' + Math.round((s.duration || 0) * 6);
-      const prev = bySignature.get(key);
-      if (prev == null) { bySignature.set(key, fn); continue; }
-      const ps = index[prev];
-      const prevScore = (ps.hrCount || 0) + (ps.duration || 0) / 1000;
-      const curScore = (s.hrCount || 0) + (s.duration || 0) / 1000;
-      if (curScore > prevScore) { dedupHide.add(prev); bySignature.set(key, fn); }
-      else { dedupHide.add(fn); }
+      keep(bySignature, Math.round(s.startEpoch / 60000) + '_' + Math.round((s.duration || 0) * 6), fn);
+    }
+    for (const fn of Object.keys(index)) {
+      const s = index[fn];
+      if (!s || !s.startEpoch || dedupHide.has(fn)) continue;
+      keep(byStartSecond, String(Math.round(s.startEpoch / 1000)), fn);
     }
     return dedupHide;
   }
@@ -5621,7 +5628,8 @@ END SECTION MAP -->
 
     const autonomicOn = isAutonomicOn();
     const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const prevWeekday = WEEKDAY_SHORT[new Date(date.getTime() - 86400000).getDay()];
+    // Calendar arithmetic, not 24 h: a spring-forward day is 23 h long.
+    const prevWeekday = WEEKDAY_SHORT[new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1).getDay()];
     const cardsHtml = dayFilesByStart(files).map(({ fn }) => {
       const s = sessionsIndex[fn];
       const meta = parseSessionFilename(fn);

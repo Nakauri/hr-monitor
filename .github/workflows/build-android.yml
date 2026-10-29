@@ -24,6 +24,11 @@ on:
       - 'relay-link.js'
       - 'recorder.js'
       - 'marks-drive.js'
+      - 'settings.js'
+      - 'auth.js'
+      - 'lifecycle-state.js'
+      - 'report.css'
+      - 'assets/fonts/**'
       - 'mobile/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:

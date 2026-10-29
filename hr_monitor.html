@@ -6210,7 +6210,8 @@ END SECTION MAP -->
       rows.push([t.toFixed(4), epochMs, hrMap.get(k) ?? '', rmssdMap.get(k)?.toFixed(2) ?? '', sdnnMatchMap.get(k)?.toFixed(2) ?? '', sdnn5minMap.get(k)?.toFixed(2) ?? '', sdnnFullMap.get(k)?.toFixed(2) ?? '', palpSet.has(k) ? '1' : '', csvCell(evMap.get(k) ?? ''), warnMap.get(k) ?? '', connMap.get(k) ?? '', postureMap.get(k) ?? '']);
     });
     const csv = rows.map(r => r.join(',')).join('\n');
-    const filename = 'hrv_session_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.csv';
+    // Named by session start, like the recorder's auto-save of the same session.
+    const filename = 'hrv_session_' + new Date(startEpoch).toISOString().slice(0,19).replace(/:/g,'-') + '.csv';
     return { csv, filename };
   }
 

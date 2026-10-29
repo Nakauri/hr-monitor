@@ -26,6 +26,7 @@ run node scripts/marks-store.test.cjs
 run node scripts/relay-link.test.cjs
 run node scripts/recorder.test.cjs
 run node scripts/day-gaps.test.cjs
+run node scripts/session-dedup.test.cjs
 run node scripts/row-epoch.test.cjs
 run node scripts/catch-floor.mjs
 run node scripts/coverage.mjs

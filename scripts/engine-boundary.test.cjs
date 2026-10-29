@@ -337,6 +337,22 @@ function step2Checks() {
     check('build-android.yml appends test-hooks.gradle unconditionally', at >= 0 && !conditional,
       at < 0 ? 'no append line' : (conditional ? 'the step has an if:' : ''));
   }
+  {
+    // Every repo file copy-web packs into the APK must trigger the APK build, or a push that
+    // changes only that file ships a stale APK.
+    const copyWeb = readRepo('mobile/scripts/copy-web.js') || '';
+    const block = (yml.match(/\n\s*paths:\s*\n((?:\s*-\s*'[^']*'\s*\n)+)/) || [])[1] || '';
+    const globs = [...block.matchAll(/'([^']*)'/g)].map(m => m[1]);
+    const toRe = g => new RegExp('^' + g.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '$');
+    const res = globs.map(toRe);
+    const packed = [...new Set([...copyWeb.matchAll(/'([\w./-]+\.(?:html|js|css|woff2|txt))'/g)].map(m => m[1]))]
+      .filter(rel => readRepo(rel) != null);
+    const missing = packed.filter(rel => !res.some(re => re.test(rel)));
+    check('build-android.yml paths cover every file copy-web packs', globs.length > 0 && packed.length > 10
+      && missing.length === 0, missing.length ? 'missing: ' + missing.join(', ')
+      : (packed.length <= 10 ? 'read only ' + packed.length + ' packed files' : ''));
+  }
   for (const [f, s] of [['NativeHrService.java', S], ['HrEngine.java', E]]) {
     if (s == null) continue;
     const at = codeView(s).indexOf('BuildConfig.DEBUG');

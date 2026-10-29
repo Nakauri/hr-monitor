@@ -84,6 +84,10 @@ public class NativeCsvWriter implements HrSink {
     @Override public int getConsecutiveFailures() { return consecutiveFailures; }
     @Override public int getTotalFailures() { return totalFailures; }
 
+    static String sdnnCell(double v) {
+        return Double.isNaN(v) ? "" : String.format(Locale.US, "%.2f", v);
+    }
+
     // Batched fsync: flush every FLUSH_EVERY_N_ROWS or FLUSH_AFTER_MS, whichever
     // comes first. Connection rows force a flush (they're rare + significant).
     // close() always flushes. Crash loss is bounded by FLUSH_AFTER_MS.
@@ -92,16 +96,16 @@ public class NativeCsvWriter implements HrSink {
     private int rowsSinceFlush = 0;
     private long lastFlushAtMs = 0;
 
-    // Null RMSSD (warm-up, too few clean beats) is an empty field, as in buildSessionCSV.
-    // Row shape is checked by scripts/csv-format.test.cjs.
+    // Null RMSSD (warm-up, too few clean beats) and NaN SDNN (not enough data yet) are empty fields,
+    // as in buildSessionCSV. Row shape is checked by scripts/csv-format.test.cjs.
     public synchronized void appendHrRow(int hr, Double rmssd, double sdnnMatch, double sdnn5min, double sdnnFull, long timestampMs) {
         if (writer == null) return;
         double tMin = Math.max(0, (timestampMs - sessionStartMs)) / 60_000.0;
         String rmssdField = rmssd == null ? "" : String.format(Locale.US, "%.2f", rmssd);
         try {
             writer.write(String.format(Locale.US,
-                "%.4f,%d,%d,%s,%.2f,%.2f,%.2f,,,,,",
-                tMin, timestampMs, hr, rmssdField, sdnnMatch, sdnn5min, sdnnFull));
+                "%.4f,%d,%d,%s,%s,%s,%s,,,,,",
+                tMin, timestampMs, hr, rmssdField, sdnnCell(sdnnMatch), sdnnCell(sdnn5min), sdnnCell(sdnnFull)));
             writer.newLine();
             rowsSinceFlush++;
             long now = System.currentTimeMillis();

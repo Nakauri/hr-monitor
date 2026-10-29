@@ -69,9 +69,20 @@ check('RMSSD param is a nullable Double', /appendHrRow\(\s*int\s+hr,\s*Double\s+
 check('null RMSSD maps to empty string',
   /rmssd\s*==\s*null\s*\?\s*""\s*:\s*String\.format\(Locale\.US,\s*"%\.2f",\s*rmssd\)/.test(hrBody || ''));
 
-function emulateHrRow(rmssd) {
+// SDNN is passed through sdnnCell, which writes NaN (not enough data yet) as an empty field.
+check('SDNN slots are %s', !!hrFmt && hrFmt.split(',').slice(4, 7).every((s) => s === '%s'), hrFmt || '');
+check('NaN SDNN maps to empty string',
+  /Double\.isNaN\(v\)\s*\?\s*""\s*:\s*String\.format\(Locale\.US,\s*"%\.2f",\s*v\)/.test(java)
+  && /sdnnCell\(sdnnMatch\),\s*sdnnCell\(sdnn5min\),\s*sdnnCell\(sdnnFull\)/.test(hrBody || ''));
+const engineSrc = fs.readFileSync(path.join(path.dirname(SRC), 'HrEngine.java'), 'utf8');
+check('HrEngine passes NaN, never 0.0, for a missing SDNN',
+  /sdnnMatch != null \? sdnnMatch : Double\.NaN/.test(engineSrc) && !/sdnn\w* != null \? sdnn\w* : 0\.0/.test(engineSrc));
+const sdnnCell = (v) => (Number.isNaN(v) ? '' : jformat('%.2f', [v]));
+
+function emulateHrRow(rmssd, sdnn) {
   const rmssdField = rmssd == null ? '' : jformat('%.2f', [rmssd]);
-  return jformat(hrFmt, [1.25, 1760000000000, 88, rmssdField, 41.5, 52.25, 60]);
+  const s = sdnn || [41.5, 52.25, 60];
+  return jformat(hrFmt, [1.25, 1760000000000, 88, rmssdField, ...s.map(sdnnCell)]);
 }
 
 if (hrFmt) {
@@ -83,6 +94,9 @@ if (hrFmt) {
   check('missing RMSSD written empty', missing[3] === '', 'got "' + missing[3] + '"');
   check('hr_bpm intact on missing RMSSD row', missing[2] === '88', 'got ' + missing[2]);
   check('SDNN columns unchanged', missing.slice(4, 7).join('|') === '41.50|52.25|60.00', missing.slice(4, 7).join('|'));
+  const noSdnn = emulateHrRow(42.123, [NaN, NaN, NaN]).split(',');
+  check('missing SDNN written empty, 12 fields kept', noSdnn.length === header.length && noSdnn.slice(4, 7).join('|') === '||',
+    noSdnn.slice(4, 7).join('|'));
 }
 if (connFmt) {
   const conn = jformat(connFmt, [1.25, 1760000000000, 'connected']).split(',');

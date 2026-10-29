@@ -2530,9 +2530,9 @@ public final class HrEngine implements HrDevice.Callback {
             writer.appendHr(
                 hr,
                 rmssd,
-                sdnnMatch != null ? sdnnMatch : 0.0,
-                sdnn5min != null ? sdnn5min : 0.0,
-                sdnnFull != null ? sdnnFull : 0.0,
+                sdnnMatch != null ? sdnnMatch : Double.NaN,
+                sdnn5min != null ? sdnn5min : Double.NaN,
+                sdnnFull != null ? sdnnFull : Double.NaN,
                 rrMs,
                 now);
             int consec = writer.getConsecutiveFailures();
