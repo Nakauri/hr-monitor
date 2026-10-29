@@ -239,6 +239,26 @@ if (cellSrc) {
   check('a text cell that starts like a formula is quoted', cctx.csvCell('=1+1') === "'=1+1" && cctx.csvCell('+a') === "'+a" && cctx.csvCell('-a') === "'-a" && cctx.csvCell('@a') === "'@a" && cctx.csvCell('sym:dizzy') === 'sym:dizzy');
 } else check('csvCell found', false);
 check('the event column goes through csvCell', /csvCell\(evMap\.get\(k\) \?\? ''\)/.test(monitor));
+// LOW1, LOW2 (security audit 2026-10-25): a note starting with " opened as a quoted cell that swallowed the row; the
+// viewer showed the guard's '. One rule each way: csvCell guards, the viewer's parseMark unguards at display only.
+const viewerSrc = fs.readFileSync(path.join(__dirname, '..', 'hrv_viewer.html'), 'utf8');
+const unSrc = jsFunction(viewerSrc, 'unguardCell'), pmSrc = jsFunction(viewerSrc, 'parseMark');
+check('viewer unguardCell and parseMark found', !!unSrc && !!pmSrc);
+if (cellSrc && pmSrc) {
+  const g = { unguardCell: (v) => v }; vm.createContext(g); vm.runInContext(cellSrc + '\n' + (unSrc || '') + '\n' + pmSrc, g);
+  const VECTORS = ["'tis", "'=x", "''=x", '-', '=' + 'a'.repeat(79), '', '"quoted', '5\'10" tall', '@x', '+1', 'plain note'];
+  for (const v of VECTORS) {
+    const cell = g.csvCell(v);
+    const shown = g.parseMark(cell).label;
+    check(`guard vector ${JSON.stringify(v)}: cell ${JSON.stringify(cell)} starts safe, shows as typed`,
+      !/^[=+\-@"]/.test(cell) && shown === v && g.unguardCell(cell) === v, 'shown ' + JSON.stringify(shown));
+  }
+  check('a " inside a note is kept in the cell', g.csvCell('5\'10" tall') === '5\'10" tall');
+  check('an unguarded phone label with a leading \' and a letter shows unchanged', g.parseMark("'tis").label === "'tis");
+  check('marks still key on the raw cell: the edit and delete rows carry e.label, not the shown label',
+    /raw: e\.label, ep: e\.ep/.test(viewerSrc) && /label: String\(item\.edit\.raw == null \? '' : item\.edit\.raw\)/.test(viewerSrc));
+  check('summarizeCSV and parseSegmentV2 never unguard', ['summarizeCSV', 'parseSegmentV2'].every((n) => { const s = jsFunction(viewerSrc, n); return s && !/unguardCell/.test(s); }));
+}
 Promise.resolve().then(() => {
   if (failures) {
     console.log(failures + ' check(s) failed');

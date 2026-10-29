@@ -21,6 +21,7 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 |--------|-----------|---------------|-----------|-------------|
 | CSV header order | `hr_monitor.html:buildSessionCSV`, written by `recorder.js` (the one web writer) | `NativeCsvWriter.java:HEADER` | `time_min,epoch_ms,hr_bpm,rmssd_ms,sdnn_match_ms,sdnn_5min_ms,sdnn_full_ms,palpitation,event,warning,connection,posture` | Viewer's `summarizeCSV` parses by column name, not position — normalizes across sources. `scripts/docs-truth.test.cjs` holds this cell to both writers |
 | `connection` value | `hr_monitor.html` writes `connect` / `disconnect` | native writes `connected` / `disconnected` | Viewer normalizes both to `connect` / `disconnect` at parse time (`hrv_viewer.html:~L3575`) | Normalization is itself load-bearing; if removed, viewer gap-rendering breaks on native CSVs |
+| `event` formula guard | `csvCell` prefixes one `'` to a cell starting `= + - @ " '` | `SegmentWriter` writes fact labels unguarded (Java `csvSafe` deferred: web and APK versions mix; if ever shipped, fact kinds `e` and `s` only, viewer first) | Viewer `unguardCell` (in `parseMark`) drops one such `'` at display only; marks key on the raw cell, so `summarizeCSV` and `parseSegmentV2` never unguard | `scripts/csv-format.test.cjs` guard vectors |
 
 ## Data output (schema v2 hourly segments)
 

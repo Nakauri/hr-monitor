@@ -6176,7 +6176,8 @@ END SECTION MAP -->
 
   // ===== Session CSV and Export =====
   // A free-text cell that would open as a formula in a spreadsheet gets a leading apostrophe (security audit L3).
-  function csvCell(s) { return /^[=+\-@]/.test(s) ? "'" + s : s; }
+  // A cell starting like a formula, a quote or the guard itself gets one leading '; hrv_viewer.html unguardCell drops it.
+  function csvCell(s) { return /^[=+\-@"']/.test(s) ? "'" + s : s; }
   function buildSessionCSV() {
     // epoch_ms: absolute Unix-ms timestamp per row. Makes the CSV self-describing
     // for cross-file analysis (e.g. sleep spanning midnight in daily-mode files)

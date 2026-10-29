@@ -3052,10 +3052,12 @@ END SECTION MAP -->
     return /^(sym|ctx):/i.test(v) ? v : 'sym:' + (v || 'symptom');
   }
   // An event cell starting sym: is a symptom mark and ctx: a context tick, from a web tap or a phone s row alike.
+  // Display only: undoes hr_monitor.html csvCell (one leading ' before = + - @ " or '). Marks key on the raw cell.
+  function unguardCell(v) { return String(v == null ? '' : v).replace(/^'(?=[=+\-@"'])/, ''); }
   function parseMark(raw) {
     const v = String(raw == null ? '' : raw).trim();
     const m = /^(sym|ctx):\s*(.*)$/i.exec(v);
-    if (!m) return { kind: 'note', label: v };
+    if (!m) return { kind: 'note', label: unguardCell(v) };
     const sym = m[1].toLowerCase() === 'sym';
     const word = (m[2] || (sym ? 'symptom' : 'context')).replace(/[_-]+/g, ' ').trim();
     return { kind: sym ? 'symptom' : 'context', label: word.charAt(0).toUpperCase() + word.slice(1) };
@@ -9512,7 +9514,7 @@ END SECTION MAP -->
     const raw = String(item.edit.raw == null ? '' : item.edit.raw);
     const pm = parseMark(raw);
     let cls = rec ? rec.cls : (pm.kind === 'symptom' ? 'sym' : pm.kind === 'context' ? 'ctx' : 'note');
-    const label = rec ? rec.label : (pm.kind === 'note' ? raw : pm.label);
+    const label = rec ? rec.label : pm.label;
     const box = editorShell(row);
     box.innerHTML = `
       <div class="segmented" role="group" aria-label="Kind">${MARK_CLASSES.map(([c, w]) => `<button type="button" data-cls="${c}" aria-pressed="${c === cls}">${w}</button>`).join('')}</div>
