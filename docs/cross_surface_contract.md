@@ -19,7 +19,7 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 
 | Column | JS writer | Native writer | Authority | Enforcement |
 |--------|-----------|---------------|-----------|-------------|
-| CSV header order | `hr_monitor.html:buildSessionCSV`, written by `recorder.js` (the one web writer) | `NativeCsvWriter.java:appendHrRow` | `time_min,epoch_ms,hr_bpm,rmssd_ms,palpitation,event,warning,connection,posture` | Viewer's `summarizeCSV` parses by column name, not position — normalizes across sources. Gap: no parity test |
+| CSV header order | `hr_monitor.html:buildSessionCSV`, written by `recorder.js` (the one web writer) | `NativeCsvWriter.java:HEADER` | `time_min,epoch_ms,hr_bpm,rmssd_ms,sdnn_match_ms,sdnn_5min_ms,sdnn_full_ms,palpitation,event,warning,connection,posture` | Viewer's `summarizeCSV` parses by column name, not position — normalizes across sources. `scripts/docs-truth.test.cjs` holds this cell to both writers |
 | `connection` value | `hr_monitor.html` writes `connect` / `disconnect` | native writes `connected` / `disconnected` | Viewer normalizes both to `connect` / `disconnect` at parse time (`hrv_viewer.html:~L3575`) | Normalization is itself load-bearing; if removed, viewer gap-rendering breaks on native CSVs |
 
 ## Data output (schema v2 hourly segments)
@@ -87,7 +87,7 @@ Before shipping a change to anything in the tables above:
 | HR stage | ⚠️ | Pushed from JS; no test |
 | RMSSD stage | ✅ | Table in `rmssd-parity.test.js` |
 | Relay tick schema | ❌ | Doc only |
-| CSV writer header | ❌ | Doc in RELAY_TICK.md |
+| CSV writer header | ✅ | `scripts/docs-truth.test.cjs` (both writers = the contract row), `scripts/csv-format.test.cjs` (native field counts) |
 | CSV `connection` values | ❌ | Normalization in viewer |
 | `widgetPrefs` schema | ❌ | Pushed from JS; no schema test |
 

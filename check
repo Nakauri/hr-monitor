@@ -20,6 +20,7 @@ run node scripts/relay-server.test.mjs
 run node scripts/bubble-tokens.test.cjs
 run node scripts/engine-boundary.test.cjs
 run node scripts/bundle-refs.test.cjs
+run node scripts/docs-truth.test.cjs
 run node scripts/lifecycle-state.test.cjs
 run node scripts/lifecycle-deadline.test.cjs
 run node scripts/demo-synthetic.test.cjs

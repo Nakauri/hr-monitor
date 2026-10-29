@@ -1,7 +1,8 @@
 # Relay publish secret
 
-Status: BUILT on branch grade-a (relay, `relay-link.js`, web monitor, native engine). Live once the relay is
-deployed; the site and APK work against the old relay too (it ignores the proof). Deploy the relay with the site.
+Status: MERGED 2026-10-25 (relay, `relay-link.js`, web monitor, native engine; last relay change 4445f9f). Relay
+deploy UNVERIFIED: `wrangler deploy` is manual and no probe has confirmed the live relay checks the proof. The site
+and APK work against the old relay too (it ignores the proof).
 
 ## The problem it closes
 

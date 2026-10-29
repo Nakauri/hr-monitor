@@ -29,6 +29,6 @@ Hosted at [aorti.ca](https://aorti.ca). Android APK for 24/7 background recordin
 
 ## Running it locally
 
-Open `index.html` in any Chromium browser. No build step, no install. The three HTML files (`hr_monitor.html`, `hrv_viewer.html`, `overlay.html`) are self-contained.
+Open `index.html` in any Chromium browser. No build step, no install. The pages (`hr_monitor.html`, `hrv_viewer.html`, `overlay.html`) load shared scripts and stylesheets from the repo root (`ui.js`, `widget.js`, `tokens.css` and others), so serve or open the whole folder.
 
 The relay is a small PartyServer (Cloudflare Workers) project under `relay/`. The mobile Capacitor wrapper under `mobile/` builds the APK.
