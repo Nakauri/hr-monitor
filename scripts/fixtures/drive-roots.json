@@ -1,0 +1,168 @@
+{
+  "about": "Drive root pick per web implementation as of 6554b5b (monitor driveLookUpFolder, viewer driveEnsureFolder). monitor null = it creates the folder; viewerOrder = driveRootIds. Read by scripts/drive-root.test.cjs.",
+  "cases": [
+    {
+      "name": "empty listing",
+      "files": [],
+      "monitor": null,
+      "viewer": null,
+      "viewerOrder": []
+    },
+    {
+      "name": "no files field",
+      "files": null,
+      "monitor": null,
+      "viewer": null,
+      "viewerOrder": []
+    },
+    {
+      "name": "one root",
+      "files": [
+        {
+          "id": "a1",
+          "createdTime": "2026-01-05T10:00:00.000Z"
+        }
+      ],
+      "monitor": "a1",
+      "viewer": "a1",
+      "viewerOrder": [
+        "a1"
+      ]
+    },
+    {
+      "name": "older root listed second",
+      "files": [
+        {
+          "id": "b2",
+          "createdTime": "2026-03-01T10:00:00.000Z"
+        },
+        {
+          "id": "a1",
+          "createdTime": "2026-01-05T10:00:00.000Z"
+        }
+      ],
+      "monitor": "a1",
+      "viewer": "a1",
+      "viewerOrder": [
+        "a1",
+        "b2"
+      ]
+    },
+    {
+      "name": "missing createdTime loses to a dated root",
+      "files": [
+        {
+          "id": "a0"
+        },
+        {
+          "id": "b1",
+          "createdTime": "2026-03-01T10:00:00.000Z"
+        }
+      ],
+      "monitor": "b1",
+      "viewer": "b1",
+      "viewerOrder": [
+        "b1",
+        "a0"
+      ]
+    },
+    {
+      "name": "every createdTime missing: id order",
+      "files": [
+        {
+          "id": "m2"
+        },
+        {
+          "id": "k9"
+        }
+      ],
+      "monitor": "k9",
+      "viewer": "k9",
+      "viewerOrder": [
+        "k9",
+        "m2"
+      ]
+    },
+    {
+      "name": "unparseable createdTime counts as missing",
+      "files": [
+        {
+          "id": "a0",
+          "createdTime": "not a date"
+        },
+        {
+          "id": "c3",
+          "createdTime": "2026-03-01T10:00:00.000Z"
+        }
+      ],
+      "monitor": "c3",
+      "viewer": "c3",
+      "viewerOrder": [
+        "c3",
+        "a0"
+      ]
+    },
+    {
+      "name": "epoch-zero createdTime counts as missing",
+      "files": [
+        {
+          "id": "a0",
+          "createdTime": "1970-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "c3",
+          "createdTime": "2026-03-01T10:00:00.000Z"
+        }
+      ],
+      "monitor": "c3",
+      "viewer": "c3",
+      "viewerOrder": [
+        "c3",
+        "a0"
+      ]
+    },
+    {
+      "name": "equal createdTime: lower id wins",
+      "files": [
+        {
+          "id": "z9",
+          "createdTime": "2026-01-05T10:00:00.000Z"
+        },
+        {
+          "id": "m4",
+          "createdTime": "2026-01-05T10:00:00.000Z"
+        },
+        {
+          "id": "q1",
+          "createdTime": "2026-03-01T10:00:00.000Z"
+        }
+      ],
+      "monitor": "m4",
+      "viewer": "m4",
+      "viewerOrder": [
+        "m4",
+        "z9",
+        "q1"
+      ]
+    },
+    {
+      "name": "ids compare as text, not numbers",
+      "files": [
+        {
+          "id": "9",
+          "createdTime": "2026-01-05T10:00:00.000Z"
+        },
+        {
+          "id": "10",
+          "createdTime": "2026-01-05T10:00:00.000Z"
+        }
+      ],
+      "monitor": "10",
+      "viewer": "10",
+      "viewerOrder": [
+        "10",
+        "9"
+      ]
+    }
+  ]
+}

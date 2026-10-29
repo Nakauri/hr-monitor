@@ -17,7 +17,7 @@ const LEDGER = path.join(ROOT, 'docs', 'coverage.md');
 // path: [node or JVM tests that run here, browser checks that also guard it (run by browser-tier.mjs)]
 const PATHS = [
   ['Web folder save', ['scripts/recorder.test.cjs'], ['recorder-page', 'monitor-log']],
-  ['Web Drive save', ['scripts/recorder.test.cjs'], ['monitor-sync', 'recorder-page']],
+  ['Web Drive save', ['scripts/recorder.test.cjs', 'scripts/drive-root.test.cjs'], ['monitor-sync', 'recorder-page']],
   ['Native segment write', ['scripts/jvm/run-segment-test.cjs', 'scripts/segment-format.test.cjs'], []],
   ['Native upload', ['scripts/jvm/run-upload-test.cjs'], []],
   ['Marks', ['scripts/marks-store.test.cjs', 'scripts/csv-format.test.cjs', 'scripts/recorder.test.cjs'], ['symptom-marks', 'recorder-page']],

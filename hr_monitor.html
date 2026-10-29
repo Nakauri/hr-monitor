@@ -6098,20 +6098,15 @@ END SECTION MAP -->
     // Pinned to the login it started under: a lookup that lands after another account signed in is dropped,
     // never kept as that account's folder.
     const login = relayLink.loginTag;
-    // Look for existing folder named DRIVE_FOLDER_NAME owned by this app (drive.file scope)
-    const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-    // Oldest root wins, id breaking ties: the same pick as the viewer and the phone's uploaders.
-    const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
+    // Oldest root wins, id breaking ties: marks-drive.js holds the query and the pick the viewer also uses.
+    const resp = await driveFetch(AortiMarksDrive.rootQuery(DRIVE_FOLDER_NAME));
     // A failed listing is not "no folder": read that way, it made a second root and a fresh config in it.
     if (!resp.ok) throw new Error('folder list ' + resp.status);
     const data = await resp.json();
     if (relayLink.loginTag !== login || !driveAccessToken) return;
-    if (data.files && data.files.length) {
-      const older = (a, b) => {
-        const ta = Date.parse(a.createdTime) || Infinity, tb = Date.parse(b.createdTime) || Infinity;
-        return ta !== tb ? ta < tb : String(a.id) < String(b.id);
-      };
-      driveFolderId = data.files.reduce((a, b) => (older(b, a) ? b : a)).id;
+    const roots = AortiMarksDrive.pickRoots(data.files);
+    if (roots.id) {
+      driveFolderId = roots.id;
     } else {
       const create = await driveFetch('files?fields=id', {
         method: 'POST',

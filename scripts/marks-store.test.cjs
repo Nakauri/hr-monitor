@@ -605,11 +605,11 @@ CHECKS.R3 = async (src) => {
     return fake;
   };
   const vf = fx();
-  const v = loadPage(src.viewer, ['driveEnsureFolder', 'driveFileIsOlder'], { driveFetch: (p, i) => vf.fetch(p, i), driveSyncConfig: async () => {}, DRIVE_FOLDER_NAME: 'HR Monitor Sessions' },
+  const v = loadPage(src.viewer, ['driveEnsureFolder', 'driveFileIsOlder'], { driveFetch: (p, i) => vf.fetch(p, i), driveSyncConfig: async () => {}, DRIVE_FOLDER_NAME: 'HR Monitor Sessions', AortiMarksDrive: loadMarks(src).D },
     function () { globalThis.__get = () => driveFolderId; });
   await v.driveEnsureFolder();
   const mf = fx();
-  const m = loadPage(src.monitor, ['driveEnsureFolder', 'driveLookUpFolder'], { driveFolderLookup: null, driveFolderLookupTag: null, driveFetch: (p, i) => mf.fetch(p, i), driveSyncConfig: async () => {}, startConfigPoll() {}, driveUpdateUI() {}, relayLink: { loginTag: null }, driveAccessToken: 'tok', DRIVE_FOLDER_NAME: 'HR Monitor Sessions' },
+  const m = loadPage(src.monitor, ['driveEnsureFolder', 'driveLookUpFolder'], { driveFolderLookup: null, driveFolderLookupTag: null, driveFetch: (p, i) => mf.fetch(p, i), driveSyncConfig: async () => {}, startConfigPoll() {}, driveUpdateUI() {}, relayLink: { loginTag: null }, driveAccessToken: 'tok', DRIVE_FOLDER_NAME: 'HR Monitor Sessions', AortiMarksDrive: loadMarks(src).D },
     function () { globalThis.__get = () => driveFolderId; });
   await m.driveEnsureFolder();
   out.push(['R3 viewer and monitor root pickers agree on the oldest root, id breaking the tie', v.__get() === 'r-a' && m.__get() === 'r-a', v.__get() + ' / ' + m.__get()]);
@@ -815,7 +815,7 @@ const MUTANTS = [
   ['P2', 'per-fetch deadline only', 'drive', '        await Promise.race([work, new Promise(r => { timer = setTimeout(r, ms); })]);', '        await work;', 'per-fetch-only'],
   ['R1', 'marks read only under the picked root', 'drive', '      const roots = (opts.rootIds && opts.rootIds()) || [];', '      const roots = [];'],
   ['R2', 'newest marks folder', 'drive', '      st.folderId = found.slice().sort(olderFirst)[0].id;', '      st.folderId = found.slice().sort(olderFirst).pop().id;'],
-  ['R3', 'viewer picker without the id tie-break', 'viewer', '    if (ta !== tb) return ta < tb;\n    return String(a.id) < String(b.id);', '    return ta < tb;'],
+  ['R3', 'root picker without the id tie-break', 'drive', '    if (ta !== tb) return ta - tb;\n    return String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;', '    return ta - tb;'],
   ['D1', 'newer copy rewritten as fresh tombstones', 'drive', '        const body = M.fileBody(store.deviceId, d.m, []);',
     '        const body = M.fileBody(store.deviceId, d.m, store.all().filter(r => r.m === d.m).map(r => Object.assign(M.tombstoneOf(r), { by: store.deviceId, updatedAt: r.updatedAt + 1, base: r.updatedAt })));'],
   ['L1', 'sync without the lock', 'drive', "      if (!locks) { st.lastError = 'nolocks'; return { changed: false, skipped: 'nolocks' }; }", "      if (!locks) st.lastError = 'nolocks';"],

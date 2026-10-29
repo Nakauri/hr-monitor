@@ -22,6 +22,16 @@
   const q = (s) => encodeURIComponent(s);
   const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
+  // The root folder listing both pages send; the Java uploaders keep their own (K_ROOT caches their pick).
+  function rootQuery(name) {
+    return 'files?q=' + q(`name='${esc(name)}' and mimeType='${FOLDER_MIME}' and trashed=false`) + '&orderBy=createdTime&fields=files(id,name,createdTime)';
+  }
+  // Oldest root wins, id breaking ties (scripts/fixtures/drive-roots.json pins the edge cases).
+  function pickRoots(files) {
+    const ids = (files || []).slice().sort(olderFirst).map((f) => f.id);
+    return { id: ids.length ? ids[0] : null, ids };
+  }
+
   function httpError(what, resp, body) {
     const e = new Error(what + ' ' + resp.status);
     e.status = resp.status;
@@ -331,7 +341,7 @@
     return page;
   }
 
-  const api = { create, attachPage, olderFirst, DEBOUNCE_MS, PURGE_DEADLINE_MS, MAX_FILE_BYTES };
+  const api = { create, attachPage, olderFirst, rootQuery, pickRoots, DEBOUNCE_MS, PURGE_DEADLINE_MS, MAX_FILE_BYTES };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AortiMarksDrive = api;
 })(typeof self !== 'undefined' ? self : this);

@@ -2126,20 +2126,15 @@ END SECTION MAP -->
   }
 
   async function driveEnsureFolder() {
-    const q = encodeURIComponent(`name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-    // Oldest root wins, id breaking ties: the same pick as the phone's uploaders.
-    const resp = await driveFetch('files?q=' + q + '&orderBy=createdTime&fields=files(id,name,createdTime)');
+    // Oldest root wins, id breaking ties: marks-drive.js holds the query and the pick the monitor also uses.
+    const resp = await driveFetch(AortiMarksDrive.rootQuery(DRIVE_FOLDER_NAME));
     // A failed listing is an error to show, not "no folder yet".
     if (!resp.ok) throw new Error('folder list ' + resp.status);
     const data = await resp.json();
-    if (data.files && data.files.length) {
-      driveFolderId = data.files.reduce((a, b) => (driveFileIsOlder(b, a) ? b : a)).id;
-      driveRootIds = data.files.slice().sort((a, b) => (driveFileIsOlder(a, b) ? -1 : driveFileIsOlder(b, a) ? 1 : 0)).map(f => f.id);
-    } else {
-      // Folder doesn't exist yet — viewer won't auto-create it (the live app does).
-      driveFolderId = null;
-      driveRootIds = [];
-    }
+    // No folder yet: the viewer never creates it (the live app does).
+    const roots = AortiMarksDrive.pickRoots(data.files);
+    driveFolderId = roots.id;
+    driveRootIds = roots.ids;
     // Pull the shared broadcast key so this device can subscribe to whatever
     // device is currently recording. Any signed-in device ends up on the same
     // relay room.
