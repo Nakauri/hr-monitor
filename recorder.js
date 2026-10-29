@@ -279,12 +279,19 @@
       if (!final && !routineOk()) return undefined;
       // 9: a routine 5xx waits for the next pace from the attempt.
       if (!final) rec.driveAt = now();
-      let refreshed = false, retried = false, recreated = false, created = false, looked = false;
+      let refreshed = false, retried = false, recreated = false, created = false, looked = false, repinned = false;
       for (;;) {
+        // 8: the header can belong to the login pinned before its await; a change re-pins once, then nothing is sent.
+        const pin = env.loginTag();
         const h = await header();
         if (!final && !routineOk()) return undefined;
         // 8: token, folder id and login tag read together after the last await before the request.
         const token = env.token(), folderId = env.folderId(), login = env.loginTag();
+        if (login != null && login !== pin) {
+          if (repinned) return undefined;
+          repinned = true;
+          continue;
+        }
         if (!token || !env.syncOn()) return undefined;
         if (login != null) {
           if (rec.login != null && login !== rec.login) { rec.driveFileId = null; rec.noStatus = false; }
@@ -369,10 +376,16 @@
       size = await readSize(rec);
       return size === bytes;
     }
+    // 8: a login other than the file's, or one that changed across the header await; its header never reaches the file.
+    function loginMoved(rec, pin) {
+      const now = env.loginTag();
+      return now != null && ((pin != null && now !== pin) || (rec.login != null && now !== rec.login));
+    }
     async function readSize(rec) {
       for (let i = 0; i < 2; i++) {
+        const pin = env.loginTag();
         const h = await header();
-        if (h == null || !driveOn()) return null;
+        if (h == null || !driveOn() || loginMoved(rec, pin)) return null;
         const resp = await send(API + '/files/' + encodeURIComponent(rec.driveFileId) + '?fields=size', { method: 'GET', headers: { 'Authorization': h } });
         if (resp == null) return null;
         if (resp.status === 401 && i === 0) { try { await env.refresh(); } catch (e) { warn('Drive refresh:', e); } continue; }
@@ -383,8 +396,9 @@
     }
     async function patchOnce(rec, text) {
       for (let i = 0; i < 2; i++) {
+        const pin = env.loginTag();
         const h = await header();
-        if (h == null || !driveOn()) return false;
+        if (h == null || !driveOn() || loginMoved(rec, pin)) return false;
         const resp = await send(UPLOAD + '/files/' + encodeURIComponent(rec.driveFileId) + '?uploadType=media', { method: 'PATCH', headers: { 'Authorization': h, 'Content-Type': 'text/csv' }, body: text });
         if (resp == null) return false;
         if (resp.status === 401 && i === 0) { try { await env.refresh(); } catch (e) { warn('Drive refresh:', e); } continue; }

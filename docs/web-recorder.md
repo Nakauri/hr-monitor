@@ -83,7 +83,10 @@ other module-level state.
    from the Recording's `login` clears `driveFileId` and takes the new login; a null tag (signed out) is never a
    change. A create whose login changed in flight is discarded; for the final, it then creates once under the
    new login and `result.drive` follows that create. A PATCH answered 403 or 404 clears `driveFileId`
-   once and creates. Limit: a login without an email gets a random tag, so a switch is seen only on sign-out.
+   once and creates. The login is pinned before the auth header's await (the header can belong to it): a change
+   across the await fetches a new header once, and a second change sends nothing (`undefined`). The size read and
+   its mismatch PATCH return null and false when the login changed across the await or differs from the file's.
+   Limit: a login without an email gets a random tag, so a switch is seen only on sign-out.
 9. A 401 refreshes once and retries once. A routine 5xx waits for the next pace (`driveAt` is set on the
    attempt); the final retries once.
 10. Three folder failures in a row drop `file` with status `write error (3/3)`; Drive continues.

@@ -110,6 +110,8 @@ function world(src, opts) {
     authHeader: () => {
       const mode = d.headerPlan.shift();
       if (mode === 'hang') { const x = defer(); d.hungHeaders.push(() => x.resolve(d.token ? 'Bearer ' + d.token : null)); return x.p; }
+      // hangStale: answers with the token of the login at the call, as a refresh begun before a switch does.
+      if (mode === 'hangStale') { const x = defer(), was = d.token; d.hungHeaders.push(() => x.resolve(was ? 'Bearer ' + was : null)); return x.p; }
       return Promise.resolve(d.token ? 'Bearer ' + d.token : null);
     },
     refresh: () => { d.refreshes++; return Promise.resolve(); },
@@ -144,6 +146,8 @@ function world(src, opts) {
   w.R = load(src).create(env);
   w.signIn = (a) => { d.token = 'tok-' + a; d.tag = 'email:' + a; };
   w.signOut = () => { d.token = null; d.tag = null; };
+  // Answers the oldest hung header; false when none is hung.
+  w.release = () => { const f = d.hungHeaders.shift(); if (f) f(); return !!f; };
   w.live = async (dir, id) => { const rec = w.R.start(id || w.page.id, w.t, dir || null); await flush(); return rec; };
   w.text = (s) => { w.page.text = 'time,hr\n' + s + '\n'; w.page.rows++; return w.page.text; };
   w.reqs = (kind) => d.log.filter((r) => !kind || r.kind === kind);
@@ -761,6 +765,67 @@ CHECKS.R = async (src) => {
   await w.advance(60000);
   row('R8 a null login tag is never a change: the same file throughout', w.reqs('create').length === 1 && w.reqs('patch').length === 2 && w.reqs('patch').every((r) => r.id === 'f1'),
     JSON.stringify(w.reqs().map((r) => [r.kind, r.id])));
+  // Rule 8: the header answers for the login pinned before its await: a switch re-pins and fetches a new header.
+  w = world(src); rec = await w.live();
+  await w.advance(10000);
+  w.drive.headerPlan.push('hangStale');
+  await w.advance(60000);
+  let n8 = w.reqs().length;
+  w.signIn('B');
+  w.release(); await flush();
+  row('R8 hangStale: a switch while the old login\'s header is fetched sends nothing with that header; one new file under B',
+    w.reqs().slice(n8).every((r) => r.owner === 'B') && w.reqs('create').length === 2 && w.drive.files[rec.driveFileId].owner === 'B' && rec.login === 'email:B',
+    JSON.stringify(w.reqs().map((r) => [r.kind, r.id, r.owner])));
+  // Rule 8: the login: tag becomes the email: tag of the same sign-in while the first create's header is fetched.
+  w = world(src); w.drive.tag = 'login:x1'; w.drive.headerPlan.push('hangStale');
+  rec = await w.live();
+  await w.advance(10000);
+  w.drive.tag = 'email:A';
+  w.release(); await flush();
+  const r8lm = w.reqs('create').length;
+  await w.advance(60000);
+  row('R8 login: to email: during the first header: exactly one file, then PATCHes into it',
+    r8lm === 1 && w.reqs('create').length === 1 && w.reqs('patch').length >= 1 && w.reqs('patch').every((r) => r.id === 'f1') && rec.login === 'email:A',
+    JSON.stringify([r8lm, w.reqs().map((r) => [r.kind, r.id, r.owner])]));
+  // Rule 8: a second switch across the re-pinned header: that upload sends nothing; the next one creates under C.
+  w = world(src); rec = await w.live();
+  await w.advance(10000);
+  w.drive.headerPlan.push('hangStale', 'hangStale');
+  await w.advance(60000);
+  n8 = w.reqs().length;
+  w.signIn('B'); w.release(); await flush();
+  w.signIn('C'); w.release(); await flush();
+  const r8g = w.reqs().length === n8 && !w.drive.hungHeaders.length;
+  await w.advance(60000);
+  row('R8 one re-pin: a second switch drops that upload; the next routine creates under C',
+    r8g && w.reqs().slice(n8).every((r) => r.owner === 'C') && w.drive.files[rec.driveFileId].owner === 'C',
+    JSON.stringify([r8g, w.reqs().map((r) => [r.kind, r.id, r.owner])]));
+  // Rule 8: a switch before the final's size read: no read of the old file with the new login's header.
+  w = world(src); rec = await w.live();
+  await w.advance(10000);
+  w.drive.plan.push({ kind: 'patch', act: 'drop' });
+  await w.advance(60000);
+  fin = track(w.R.stop()); await flush();
+  w.signIn('B');
+  await w.advance(5000);
+  row('R8 a switch before the size read: nothing read from the old file with the new header; result.drive failed',
+    fin.done && w.reqs('size').length === 0 && rec.result.drive === 'failed', JSON.stringify([rec.result, w.reqs().map((r) => [r.kind, r.id, r.owner])]));
+  // Rule 8: a switch while the size mismatch's PATCH fetches its header: the old file is never PATCHed with it.
+  w = world(src); rec = await w.live();
+  await w.advance(10000);
+  w.text('1,97,a-longer-routine-row-than-the-final-one');
+  w.drive.plan.push({ kind: 'patch', act: 'dropLate' });
+  await w.advance(60000);
+  w.text('1,98');
+  fin = track(w.R.stop()); await flush();
+  w.drive.late.shift()();
+  w.drive.headerPlan.push('ok', 'hang');
+  await w.advance(5000);
+  n8 = w.reqs().length;
+  const r8p = w.drive.hungHeaders.length === 1;
+  w.signIn('B'); w.release(); await flush();
+  row('R8 a switch during the mismatch PATCH\'s header: no PATCH into the old file with the new header; result.drive failed',
+    r8p && fin.done && w.reqs().slice(n8).length === 0 && rec.result.drive === 'failed', JSON.stringify([r8p, rec.result, w.reqs().map((r) => [r.kind, r.id, r.owner])]));
 
   // Rule 9: a 401 refreshes once and retries once.
   w = world(src); rec = await w.live();
