@@ -7,7 +7,7 @@
 import {
   setCors, isAllowedOrigin, requireEnv,
   parseCookies, serializeRefreshCookie, clearRefreshCookie,
-  REFRESH_COOKIE_NAME, GOOGLE_TOKEN_URL,
+  tooLong, REFRESH_COOKIE_NAME, GOOGLE_TOKEN_URL,
 } from '../../lib/oauth-helpers.js';
 
 export const config = { runtime: 'nodejs' };
@@ -34,6 +34,12 @@ export default async function handler(req, res) {
 
   if (!refreshToken) {
     return res.status(401).json({ error: 'no_refresh_token' });
+  }
+
+  // 401, not 400: auth.js clears its sign-in only on a 401, so an oversized cookie cannot stick.
+  if (tooLong(refreshToken)) {
+    if (!isNative) res.setHeader('Set-Cookie', clearRefreshCookie());
+    return res.status(401).json({ error: 'refresh_token_invalid' });
   }
 
   const params = new URLSearchParams({

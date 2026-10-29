@@ -5,7 +5,7 @@
 
 import {
   setCors, isAllowedOrigin,
-  parseCookies, clearRefreshCookie,
+  parseCookies, clearRefreshCookie, tooLong,
   REFRESH_COOKIE_NAME, GOOGLE_REVOKE_URL,
 } from '../../lib/oauth-helpers.js';
 
@@ -32,6 +32,9 @@ export default async function handler(req, res) {
 
   if (!token) {
     return res.status(200).json({ ok: true, note: 'no_token_to_revoke' });
+  }
+  if (tooLong(token)) {
+    return res.status(400).json({ ok: false, error: 'input_too_long' });
   }
 
   try {

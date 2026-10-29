@@ -98,6 +98,35 @@ async function suite(dir) {
   res = fakeRes();
   await rv(req({ headers: { origin: 'https://www.aorti.ca', cookie: '__Host-aorti_rt=old' } }), res);
   check('revoke clears the cookie even when Google is unreachable', /Max-Age=0/.test(res.headers['set-cookie'] || ''));
+
+  // 6. Oversized input (over 2,048 characters) is refused before Google is contacted.
+  globalThis.fetch = async () => { calls++; return { ok: google.ok, status: google.status, json: async () => google.json }; };
+  google = { ok: true, status: 200, json: { access_token: 'at', expires_in: 3600 } };
+  const big = 'x'.repeat(2049), edge = 'x'.repeat(2048);
+  for (const [field, body] of [['code', { code: big, redirect_uri: 'https://www.aorti.ca/' }], ['redirect_uri', { code: 'c', redirect_uri: big }],
+    ['code_verifier', { code: 'c', redirect_uri: 'https://www.aorti.ca/', code_verifier: big }], ['server_auth_code', { server_auth_code: big }]]) {
+    calls = 0; res = fakeRes();
+    await ex(req({ body }), res);
+    check(`exchange: an oversized ${field} is a 400 and never contacts Google`, res.code === 400 && calls === 0, `status ${res.code}, google calls ${calls}`);
+  }
+  calls = 0; res = fakeRes();
+  await ex(req({ body: { code: edge, redirect_uri: 'https://www.aorti.ca/' } }), res);
+  check('exchange: a 2,048 character code still reaches Google', res.code === 200 && calls === 1, `status ${res.code}, google calls ${calls}`);
+  calls = 0; res = fakeRes();
+  await rf(req({ headers: { origin: 'https://www.aorti.ca', cookie: '__Host-aorti_rt=' + big } }), res);
+  check('refresh: an oversized cookie is cleared and gets 401 without contacting Google',
+    res.code === 401 && /Max-Age=0/.test(res.headers['set-cookie'] || '') && calls === 0, `status ${res.code}, cookie ${res.headers['set-cookie']}, google calls ${calls}`);
+  calls = 0; res = fakeRes();
+  await rf(req({ body: { refresh_token: big } }), res);
+  check('refresh: an oversized native token gets 401, no cookie, without contacting Google',
+    res.code === 401 && !res.headers['set-cookie'] && calls === 0, `status ${res.code}, google calls ${calls}`);
+  calls = 0; res = fakeRes();
+  await rf(req({ headers: { origin: 'https://www.aorti.ca', cookie: '__Host-aorti_rt=' + edge } }), res);
+  check('refresh: a 2,048 character cookie still reaches Google', res.code === 200 && calls === 1, `status ${res.code}, google calls ${calls}`);
+  calls = 0; res = fakeRes();
+  await rv(req({ headers: { origin: 'https://www.aorti.ca', cookie: '__Host-aorti_rt=' + big } }), res);
+  check('revoke: an oversized cookie is cleared and Google is never contacted',
+    /Max-Age=0/.test(res.headers['set-cookie'] || '') && calls === 0 && res.code === 400, `status ${res.code}, google calls ${calls}`);
   return out;
 }
 
@@ -119,7 +148,12 @@ const MUTANTS = [
   ['dev origins allowed in production', 'lib/oauth-helpers.js', "process.env.VERCEL_ENV !== 'production' && DEV_ALLOWED_ORIGINS.has(origin)", 'DEV_ALLOWED_ORIGINS.has(origin)'],
   ['refresh drops its origin check', 'api/auth/refresh.js', "  if (!isAllowedOrigin(req.headers.origin)) {\n    return res.status(403).json({ error: 'forbidden_origin' });\n  }\n", ''],
   ['web exchange echoes the refresh token', 'api/auth/exchange.js', '    has_refresh: !!refresh_token,', '    has_refresh: !!refresh_token, refresh_token,'],
-  ['invalid_grant keeps the cookie', 'api/auth/refresh.js', 'if (!isNative) res.setHeader(\'Set-Cookie\', clearRefreshCookie());', ''],
+  ['invalid_grant keeps the cookie', 'api/auth/refresh.js', 'if (!isNative) res.setHeader(\'Set-Cookie\', clearRefreshCookie());\n      return', '\n      return'],
+  ['no input length limit', 'lib/oauth-helpers.js', 'return values.some(v => v != null && String(v).length > MAX_INPUT);', 'return false;'],
+  ['the limit refuses exactly 2,048', 'lib/oauth-helpers.js', 'String(v).length > MAX_INPUT', 'String(v).length >= MAX_INPUT'],
+  ['exchange ignores code_verifier length', 'api/auth/exchange.js', 'tooLong(code, code_verifier, redirect_uri, server_auth_code)', 'tooLong(code, redirect_uri, server_auth_code)'],
+  ['an oversized cookie is refused with 400', 'api/auth/refresh.js', "    if (!isNative) res.setHeader('Set-Cookie', clearRefreshCookie());\n    return res.status(401).json({ error: 'refresh_token_invalid' });\n  }\n\n  const params", "    return res.status(400).json({ error: 'input_too_long' });\n  }\n\n  const params"],
+  ['revoke checks the length before clearing the cookie', 'api/auth/revoke.js', "  res.setHeader('Set-Cookie', clearRefreshCookie());\n\n  if (!token) {", "  if (tooLong(token)) return res.status(400).json({ ok: false, error: 'input_too_long' });\n  res.setHeader('Set-Cookie', clearRefreshCookie());\n\n  if (!token) {"],
 ];
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-api-'));

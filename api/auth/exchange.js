@@ -6,7 +6,7 @@
 
 import {
   setCors, isAllowedOrigin, requireEnv,
-  serializeRefreshCookie, emailFromIdToken, GOOGLE_TOKEN_URL,
+  serializeRefreshCookie, emailFromIdToken, tooLong, GOOGLE_TOKEN_URL,
 } from '../../lib/oauth-helpers.js';
 
 export const config = { runtime: 'nodejs' };
@@ -24,6 +24,9 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const { code, code_verifier, redirect_uri, server_auth_code } = body;
+  if (tooLong(code, code_verifier, redirect_uri, server_auth_code)) {
+    return res.status(400).json({ error: 'input_too_long' });
+  }
 
   let params;
   let isNative = false;
