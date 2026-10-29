@@ -5,11 +5,11 @@ listed test changed since it was written. Controls = negative controls (mutants)
 
 | health-data path | tests (controls) | browser checks |
 |---|---|---|
-| Web folder save | `recorder.test.cjs` (86) | `recorder-page`, `monitor-log` |
-| Web Drive save | `recorder.test.cjs` (86) | `monitor-sync`, `recorder-page` |
+| Web folder save | `recorder.test.cjs` (92) | `recorder-page`, `monitor-log` |
+| Web Drive save | `recorder.test.cjs` (92) | `monitor-sync`, `recorder-page` |
 | Native segment write | `run-segment-test.cjs` (16), `segment-format.test.cjs` (0) | none |
 | Native upload | `run-upload-test.cjs` (43) | none |
-| Marks | `marks-store.test.cjs` (35), `csv-format.test.cjs` (0), `recorder.test.cjs` (86) | `symptom-marks`, `recorder-page` |
+| Marks | `marks-store.test.cjs` (35), `csv-format.test.cjs` (0), `recorder.test.cjs` (92) | `symptom-marks`, `recorder-page` |
 | Viewer parse | `segment-format.test.cjs` (0), `day-boundary.test.cjs` (0), `day-gaps.test.cjs` (1), `row-epoch.test.cjs` (3) | `parse-worker`, `v2-series`, `session-time` |
 | Native reconnect (no gap in the recording) | `run-reconnect-test.cjs` (22), `engine-boundary.test.cjs` (0) | `strap-switch` |
 | HR and HRV numbers (JS and native) | `rmssd-parity.test.js` (6), `avg-stats.test.cjs` (0) | `native-rmssd` |
@@ -17,4 +17,4 @@ listed test changed since it was written. Controls = negative controls (mutants)
 | Phone marks and service start | `run-engine2-test.cjs` (26), `marks-store.test.cjs` (35) | `symptom-marks` |
 | Relay broadcast of the live numbers | `relay-link.test.cjs` (72), `relay-server.test.mjs` (19) | `overlay-behaviour` |
 
-<!-- hashes {"scripts/recorder.test.cjs":"ef97846b96fd","scripts/jvm/run-segment-test.cjs":"aba393c87684","scripts/segment-format.test.cjs":"d3236d4b533a","scripts/jvm/run-upload-test.cjs":"68a9b2b7a949","scripts/marks-store.test.cjs":"b866c71e0b5a","scripts/csv-format.test.cjs":"5cebeb972a00","scripts/day-boundary.test.cjs":"7d0222c3c6f0","scripts/day-gaps.test.cjs":"f1b069a90f4f","scripts/row-epoch.test.cjs":"9083f2f56154","scripts/jvm/run-reconnect-test.cjs":"e23df2aefaf1","scripts/engine-boundary.test.cjs":"fa7b051b8b11","scripts/rmssd-parity.test.js":"2dbf6aec9563","scripts/avg-stats.test.cjs":"94b4cb0f8520","scripts/jvm/run-engine2-test.cjs":"9e2ab33aacfd","scripts/relay-link.test.cjs":"8029a3895d23","scripts/relay-server.test.mjs":"a669f30fc5ab"} -->
+<!-- hashes {"scripts/recorder.test.cjs":"b4ef740b15ab","scripts/jvm/run-segment-test.cjs":"aba393c87684","scripts/segment-format.test.cjs":"d3236d4b533a","scripts/jvm/run-upload-test.cjs":"68a9b2b7a949","scripts/marks-store.test.cjs":"b866c71e0b5a","scripts/csv-format.test.cjs":"b65e20e32eb2","scripts/day-boundary.test.cjs":"7d0222c3c6f0","scripts/day-gaps.test.cjs":"f1b069a90f4f","scripts/row-epoch.test.cjs":"9083f2f56154","scripts/jvm/run-reconnect-test.cjs":"e23df2aefaf1","scripts/engine-boundary.test.cjs":"fa7b051b8b11","scripts/rmssd-parity.test.js":"2dbf6aec9563","scripts/avg-stats.test.cjs":"94b4cb0f8520","scripts/jvm/run-engine2-test.cjs":"9e2ab33aacfd","scripts/relay-link.test.cjs":"8029a3895d23","scripts/relay-server.test.mjs":"a669f30fc5ab"} -->
