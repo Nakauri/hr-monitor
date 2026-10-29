@@ -24,10 +24,22 @@ const PATHS = [
   ['Viewer parse', ['scripts/segment-format.test.cjs', 'scripts/day-boundary.test.cjs', 'scripts/day-gaps.test.cjs', 'scripts/row-epoch.test.cjs'], ['parse-worker', 'v2-series', 'session-time']],
   ['Native reconnect (no gap in the recording)', ['scripts/jvm/run-reconnect-test.cjs', 'scripts/engine-boundary.test.cjs'], ['strap-switch']],
   ['HR and HRV numbers (JS and native)', ['scripts/rmssd-parity.test.js', 'scripts/avg-stats.test.cjs'], ['native-rmssd']],
+  ['Native CSV writer (legacy file)', ['scripts/csv-format.test.cjs', 'scripts/segment-format.test.cjs'], []],
+  ['Phone marks and service start', ['scripts/jvm/run-engine2-test.cjs', 'scripts/marks-store.test.cjs'], ['symptom-marks']],
+  ['Relay broadcast of the live numbers', ['scripts/relay-link.test.cjs', 'scripts/relay-server.test.mjs'], ['overlay-behaviour']],
 ];
 
-const hash = (f) => crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n')).digest('hex').slice(0, 12);
+const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
+// A JVM runner's checks live in the Java tests it compiles: they are hashed with it.
+function sources(f) {
+  if (!/^scripts\/jvm\/run-.*\.cjs$/.test(f)) return [f];
+  const tests = [...new Set(read(f).match(/\b[A-Z][A-Za-z]+Test\b/g) || [])].map((n) => `scripts/jvm/${n}.java`);
+  return [f, ...tests.filter((t) => fs.existsSync(path.join(ROOT, t)))];
+}
+const hash = (f) => crypto.createHash('sha256').update(sources(f).map(read).join('\n')).digest('hex').slice(0, 12);
 const tests = [...new Set(PATHS.flatMap((p) => p[1]))];
+const missing = tests.filter((t) => !fs.existsSync(path.join(ROOT, t)));
+if (missing.length) { console.log('coverage: FAIL listed test missing (renamed or deleted?): ' + missing.join(', ')); process.exit(1); }
 
 // A test's negative controls: its own total ("all N negative controls fail") when it prints one, else the lines
 // that each report one control caught, counted once per line.

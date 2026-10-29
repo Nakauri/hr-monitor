@@ -17,8 +17,11 @@ function titles(src) {
   return [...src.matchAll(/^\s*\/\/ (?:=====|-----) (.+?)(?: (?:=====|-----))?\s*$/gm)].map((m) => m[1].replace(/\s+/g, ' ').trim());
 }
 function block(ts) {
-  return [BEGIN, 'Search for a title to jump to its section.', ...ts.map((t, i) => String(i + 1).padStart(2, ' ') + '. ' + t), END].join('\n');
+  // `--` in a title would end the HTML comment early.
+  return [BEGIN, 'Search for a title to jump to its section.', ...ts.map((t, i) => String(i + 1).padStart(2, ' ') + '. ' + t.replace(/--/g, '- -')), END].join('\n');
 }
+// The map sits after <meta charset>, which the HTML spec wants within the first 1024 bytes.
+const CHARSET = /<meta charset=[^>]*>\n/i;
 
 const write = process.argv.includes('--write');
 let bad = 0;
@@ -30,18 +33,21 @@ for (const f of FILES) {
   const want = block(titles(src));
   const b = src.indexOf(BEGIN), e = src.indexOf(END);
   const have = b >= 0 && e > b ? src.slice(b, e + END.length) : null;
+  const cs = src.match(CHARSET);
+  if (!cs) { console.log(`FAIL ${f}: no <meta charset> line`); bad++; continue; }
+  const csEnd = cs.index + cs[0].length;
   if (write) {
-    let out;
-    if (have) out = src.slice(0, b) + want + src.slice(e + END.length);
-    else {
-      // After the doctype line, before <html>, so it is the first thing a reader of the file sees.
-      const nl = src.indexOf('\n');
-      out = src.slice(0, nl + 1) + want + '\n' + src.slice(nl + 1);
-    }
+    const bare = have ? src.slice(0, b) + src.slice(e + END.length + (src[e + END.length] === '\n' ? 1 : 0)) : src;
+    const at = bare.match(CHARSET);
+    const end = at.index + at[0].length;
+    const out = bare.slice(0, end) + want + '\n' + bare.slice(end);
     fs.writeFileSync(p, crlf ? out.replace(/\n/g, '\r\n') : out);
     console.log(`section-map: wrote ${f} (${titles(src).length} sections)`);
   } else if (have !== want) {
     console.log(`FAIL ${f}: section map ${have ? 'is stale' : 'is missing'}; run node scripts/section-map.mjs --write`);
+    bad++;
+  } else if (Buffer.byteLength(src.slice(0, csEnd)) > 1024 || b < csEnd) {
+    console.log(`FAIL ${f}: <meta charset> must come first, within 1024 bytes, and the map after it; run --write`);
     bad++;
   } else console.log(`ok   ${f}: ${titles(src).length} sections`);
 }
