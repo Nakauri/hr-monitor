@@ -266,7 +266,7 @@ public final class HrEngine implements HrDevice.Callback {
         RrEntry(int rrMs, long ts) { this.rrMs = rrMs; this.timestampMs = ts; }
     }
 
-    // PARITY CRITICAL — MUST MATCH hr_monitor.html computeRMSSD; scripts/rmssd-parity.test.js compiles this method and compares.
+    // PARITY CRITICAL — MUST MATCH hr-math.js computeRMSSD; scripts/rmssd-parity.test.js compiles this method and compares.
     // Filters: RR 300..2000 ms drops artefacts; |successive diff| >= 200 ms drops ectopic jumps.
     private static Double computeRmssd(Deque<RrEntry> window) {
         if (window.size() < 2) return null;
@@ -288,7 +288,7 @@ public final class HrEngine implements HrDevice.Callback {
         return Math.sqrt(sumSq / count);
     }
 
-    // PARITY CRITICAL — must match hr_monitor.html computeSDNN.
+    // PARITY CRITICAL — must match hr-math.js computeSDNN.
     // Sample stddev (n-1) of in-range RR intervals. No diff filter so the
     // formula stays simple and parity-testable; ectopics inflate SDNN, which
     // is the standard clinical behaviour.
@@ -2646,6 +2646,7 @@ public final class HrEngine implements HrDevice.Callback {
         } catch (NumberFormatException ignored) {}
     }
 
+    // PARITY CRITICAL — MUST MATCH hr-math.js hrStage.
     private String hrStage(int hr) {
         if (hr <= stageLow) return "stage-low";
         if (hr < stageNormal) return "stage-normal";
@@ -2654,7 +2655,7 @@ public final class HrEngine implements HrDevice.Callback {
         return "stage-critical";
     }
 
-    // PARITY CRITICAL — MUST MATCH hr_monitor.html:getRMSSDStage.
+    // PARITY CRITICAL — MUST MATCH hr-math.js rmssdStage.
     private volatile int stageRmssdCritical = 15;
     private String rmssdStage(double rmssd) {
         if (rmssd < stageRmssdCritical) return "stage-critical";

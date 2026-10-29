@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Parity of the numbers both engines compute: RMSSD, SDNN, raw RR to ms, HR and RMSSD stage.
-// Reads the REAL functions from hr_monitor.html and HrEngine.java / GattHrDevice.java (the Java is
-// compiled into a small harness with javac), runs both on a golden vector plus 300 seeded random
-// vectors, then proves itself: a mutated JS copy and a mutated Java copy must each fail.
+// Reads the REAL functions from hr-math.js (through hr_monitor.html's own bindings and stage wrappers) and
+// HrEngine.java / GattHrDevice.java (the Java is compiled into a small harness with javac), runs both on a
+// golden vector plus 300 seeded random vectors, then proves itself: mutated JS and Java copies must each fail.
 // Guards the April 2026 bug (relay 133, monitor 86 on the same strap) and RMSSD=36 / HR=93 stage
 // colours that differed between the monitor and the overlay.
 // Run: node scripts/rmssd-parity.test.js   (exit 0 = parity holds AND every mutant fails; about 3 s)
@@ -32,15 +32,22 @@ function block(src, head, what) {
   throw new Error('unbalanced: ' + what);
 }
 
-function jsEngine(html) {
-  const conv = /rrs\.push\((Math\.round\(raw[^;]*)\);/.exec(html);
+// The page's maths: hr-math.js run as the page loads it, then the page's own bindings and stage wrappers.
+function jsEngine(html, math) {
+  if (!/<script src="\.\/hr-math\.js"><\/script>/.test(html)) throw new Error('not found: hr_monitor.html loading ./hr-math.js');
+  if (/^[ \t]*function (computeRMSSD|computeSDNN)\(/m.test(html)) throw new Error('hr_monitor.html defines its own RMSSD or SDNN; it must use hr-math.js');
+  const conv = /rrs\.push\(([^;]*)\);/.exec(block(html, 'function parseHR\\(', 'parseHR'));
   if (!conv) throw new Error('not found: JS raw RR conversion');
-  const code = ['computeRMSSD', 'computeSDNN', 'getHRStage', 'getRMSSDStage'].map((n) => block(html, 'function ' + n + '\\(', n)).join('\n') +
-    '\nfunction rrConv(raw) { return ' + conv[1] + '; }';
+  const bind = /^[ \t]*const \{ computeRMSSD, computeSDNN \} = HRMath;$/m.exec(html);
+  if (!bind) throw new Error('not found: hr_monitor.html binding computeRMSSD and computeSDNN from HRMath');
   const ctx = { Math, colorThresholds: {}, thresholds: {} };
+  vm.runInNewContext(math, ctx);
+  const code = bind[0] + '\nglobalThis.__rr = [computeRMSSD, computeSDNN];\n' +
+    ['getHRStage', 'getRMSSDStage'].map((n) => block(html, 'function ' + n + '\\(', n)).join('\n') +
+    '\nfunction rrConv(raw) { return ' + conv[1] + '; }';
   vm.runInNewContext(code, ctx);
   return {
-    rr: (rrs) => [ctx.computeRMSSD(rrs), ctx.computeSDNN(rrs)],
+    rr: (rrs) => [ctx.__rr[0](rrs), ctx.__rr[1](rrs)],
     conv: (raw) => ctx.rrConv(raw),
     hrStage: (hr, t) => { Object.assign(ctx.colorThresholds, { low: t.low, normal: t.normal, elevated: t.elevated }); ctx.thresholds.high = t.high; return ctx.getHRStage(hr); },
     rmStage: (v, crit) => { ctx.thresholds.rmssd = crit; return ctx.getRMSSDStage(v); },
@@ -128,8 +135,8 @@ function compare(js, javaOut) {
   return bad;
 }
 
-function run(html, engine, gatt) {
-  const js = jsEngine(html);
+function run(html, math, engine, gatt) {
+  const js = jsEngine(html, math);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rmssd-parity-'));
   try {
     fs.writeFileSync(path.join(dir, 'ParityHarness.java'), javaHarness(engine, gatt));
@@ -150,11 +157,12 @@ function run(html, engine, gatt) {
 }
 
 const html = read(path.join(ROOT, 'hr_monitor.html'));
+const math = read(path.join(ROOT, 'hr-math.js'));
 const engine = read(path.join(JAVA_DIR, 'HrEngine.java'));
 const gatt = read(path.join(JAVA_DIR, 'GattHrDevice.java'));
 let failed = 0;
 
-const real = run(html, engine, gatt);
+const real = run(html, math, engine, gatt);
 const golden = real.js.rr(GOLDEN)[0];
 const goldenOk = Math.abs(golden - EXPECTED_RMSSD) < 1e-6;
 console.log((goldenOk ? 'OK    ' : 'FAIL  ') + `golden RMSSD ${golden} (expected ${EXPECTED_RMSSD})`);
@@ -167,16 +175,19 @@ if (real.bad.length) failed++;
 
 // Negative controls: each mutated source must make parity FAIL.
 const MUTANTS = [
-  ['Java RR floor 300 -> 250', html, engine.replace('e.rrMs >= 300 && e.rrMs <= 2000) clean.add(e.rrMs);', 'e.rrMs >= 250 && e.rrMs <= 2000) clean.add(e.rrMs);'), gatt],
-  ['JS ectopic gate 200 -> 250', html.replace('if (Math.abs(d) < 200) {', 'if (Math.abs(d) < 250) {'), engine, gatt],
-  ['Java SDNN population (n)', html, engine.replace('return Math.sqrt(sumSq / (clean.size() - 1));', 'return Math.sqrt(sumSq / clean.size());'), gatt],
-  ['Java raw RR truncates', html, engine, gatt.replace('(int) Math.round(raw * 1000.0 / 1024.0)', '(int) (raw * 1000 / 1024)')],
-  ['JS HR low boundary exclusive', html.replace('if (hr <= colorThresholds.low)', 'if (hr < colorThresholds.low)'), engine, gatt],
-  ['Java RMSSD stage 35 -> 36', html, engine.replace('if (rmssd < 35) return "stage-elevated";', 'if (rmssd < 36) return "stage-elevated";'), gatt],
+  ['Java RR floor 300 -> 250', html, math, engine.replace('e.rrMs >= 300 && e.rrMs <= 2000) clean.add(e.rrMs);', 'e.rrMs >= 250 && e.rrMs <= 2000) clean.add(e.rrMs);'), gatt],
+  ['JS ectopic gate 200 -> 250', html, math.replace('if (Math.abs(d) < 200) {', 'if (Math.abs(d) < 250) {'), engine, gatt],
+  ['Java SDNN population (n)', html, math, engine.replace('return Math.sqrt(sumSq / (clean.size() - 1));', 'return Math.sqrt(sumSq / clean.size());'), gatt],
+  ['Java raw RR truncates', html, math, engine, gatt.replace('(int) Math.round(raw * 1000.0 / 1024.0)', '(int) (raw * 1000 / 1024)')],
+  ['JS raw RR truncates', html, math.replace('return Math.round(raw * 1000 / 1024);', 'return Math.trunc(raw * 1000 / 1024);'), engine, gatt],
+  ['JS HR low boundary exclusive', html, math.replace('if (hr <= bands.low)', 'if (hr < bands.low)'), engine, gatt],
+  ['JS page passes elevated as High HR', html.replace('high: thresholds.high });', 'high: colorThresholds.elevated });'), math, engine, gatt],
+  ['JS page RMSSD wrapper ignores the alert value', html.replace('{ critical: thresholds.rmssd }', '{ critical: 15 }'), math, engine, gatt],
+  ['Java RMSSD stage 35 -> 36', html, math, engine.replace('if (rmssd < 35) return "stage-elevated";', 'if (rmssd < 36) return "stage-elevated";'), gatt],
 ];
-for (const [name, h, e, g] of MUTANTS) {
-  if (h === html && e === engine && g === gatt) { console.log(`FAIL  mutant "${name}" did not apply (source changed; update the mutant)`); failed++; continue; }
-  const { bad } = run(h, e, g);
+for (const [name, h, m, e, g] of MUTANTS) {
+  if (h === html && m === math && e === engine && g === gatt) { console.log(`FAIL  mutant "${name}" did not apply (source changed; update the mutant)`); failed++; continue; }
+  const { bad } = run(h, m, e, g);
   console.log((bad.length ? 'OK    ' : 'FAIL  ') + `mutant "${name}" ${bad.length ? 'caught' : 'NOT caught'}`);
   if (!bad.length) failed++;
 }

@@ -68,6 +68,7 @@ END SECTION MAP -->
 <script src="./relay-link.js"></script>
 <script src="./recorder.js"></script>
 <script src="./marks-drive.js"></script>
+<script src="./hr-math.js"></script>
 <link rel="stylesheet" href="./tokens.css">
 <script src="./widget.js"></script>
 <script>HRWidget.watchPhoneLayout();</script>
@@ -1920,7 +1921,7 @@ END SECTION MAP -->
     if (rrPresent) {
       while (offset + 1 < value.byteLength) {
         const raw = value.getUint16(offset, true);
-        rrs.push(Math.round(raw * 1000 / 1024));
+        rrs.push(HRMath.rrMsFromRaw(raw));
         offset += 2;
       }
     }
@@ -1939,42 +1940,8 @@ END SECTION MAP -->
   const debugBLE = new URLSearchParams(location.search).get('debug') === '1';
   if (debugBLE) console.log('[HR] debug=1 — each BLE notification will be logged with raw hex.');
 
-  // PARITY CRITICAL — MUST MATCH HrEngine.java:computeRmssd.
-  // The native plugin also ships RMSSD (to relay + CSV). If these drift,
-  // the same recording shows different HRV numbers on different surfaces.
-  // Change one, update the other, run `node scripts/rmssd-parity.test.js`.
-  function computeRMSSD(rrs) {
-    if (rrs.length < 2) return null;
-    const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
-    if (clean.length < 2) return null;
-    let sumSq = 0, count = 0;
-    for (let i = 1; i < clean.length; i++) {
-      const d = clean[i] - clean[i-1];
-      if (Math.abs(d) < 200) {
-        sumSq += d * d;
-        count++;
-      }
-    }
-    if (count < 1) return null;
-    return Math.sqrt(sumSq / count);
-  }
-
-  // PARITY CRITICAL — MUST MATCH HrEngine.java:computeSdnn.
-  // Sample stddev (n-1) of in-range RR intervals. No successive-diff filter.
-  function computeSDNN(rrs) {
-    if (rrs.length < 2) return null;
-    const clean = rrs.filter(rr => rr >= 300 && rr <= 2000);
-    if (clean.length < 2) return null;
-    let sum = 0;
-    for (const rr of clean) sum += rr;
-    const mean = sum / clean.length;
-    let sumSq = 0;
-    for (const rr of clean) {
-      const d = rr - mean;
-      sumSq += d * d;
-    }
-    return Math.sqrt(sumSq / (clean.length - 1));
-  }
+  // PARITY CRITICAL — hr-math.js holds the maths HrEngine.java must match (rmssd-parity.test.js).
+  const { computeRMSSD, computeSDNN } = HRMath;
 
   let mainChart = null, compactChart = null, rsaChart = null, hrInlineChart = null, rmssdInlineChart = null, hrLiveTraceChart = null;
 
@@ -2472,21 +2439,11 @@ END SECTION MAP -->
 
   // ===== Stages, widget and warnings =====
   function getHRStage(hr) {
-    if (hr == null) return 'stage-normal';
-    if (hr <= colorThresholds.low) return 'stage-low';
-    if (hr < colorThresholds.normal) return 'stage-normal';
-    if (hr < colorThresholds.elevated) return 'stage-elevated';
-    if (hr < thresholds.high) return 'stage-high';
-    return 'stage-critical';
+    return HRMath.hrStage(hr, { low: colorThresholds.low, normal: colorThresholds.normal, elevated: colorThresholds.elevated, high: thresholds.high });
   }
 
   function getRMSSDStage(rmssd) {
-    if (rmssd == null) return 'stage-normal';
-    if (rmssd < thresholds.rmssd) return 'stage-critical';   // red - crashed
-    if (rmssd < 20) return 'stage-high';                      // orange - low
-    if (rmssd < 35) return 'stage-elevated';                  // yellow - below avg
-    if (rmssd < 60) return 'stage-normal';                    // green - good
-    return 'stage-low';                                       // light blue - excellent (rare)
+    return HRMath.rmssdStage(rmssd, { critical: thresholds.rmssd });
   }
 
   const STAGE_PIPS = HRWidget.STAGE_PIPS;
@@ -6662,7 +6619,7 @@ END SECTION MAP -->
           high: thresholds.high,
           // rmssdCritical is the "HRV crash" alert threshold. Other RMSSD
           // stage cutoffs (20/35/60) are hard-coded in both native and JS
-          // and must not drift — see getRMSSDStage / rmssdStage.
+          // and must not drift — see hr-math.js rmssdStage.
           rmssdCritical: thresholds.rmssd,
         });
       }

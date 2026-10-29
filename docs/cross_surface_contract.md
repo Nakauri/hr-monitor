@@ -10,10 +10,10 @@ Anywhere the same logical value is computed or transmitted by more than one impl
 
 | Value | JS location | Native location | Authority | Enforcement |
 |-------|-------------|-----------------|-----------|-------------|
-| RMSSD | `hr_monitor.html:computeRMSSD` (~L1857) | `HrEngine.java:computeRmssd` | Filter RR∈[300, 2000] ms; drop successive diffs ≥200 ms; `sqrt(mean(diff²))` | `scripts/rmssd-parity.test.js` — golden vector |
+| RMSSD | `hr-math.js:computeRMSSD` | `HrEngine.java:computeRmssd` | Filter RR∈[300, 2000] ms; drop successive diffs ≥200 ms; `sqrt(mean(diff²))` | `scripts/rmssd-parity.test.js` — golden vector |
 | RMSSD window size | `hr_monitor.html:~L2634` (`cutoff = now - 0.5` min) | `HrEngine.java:RR_WINDOW_MS` | **30 seconds** | No test — single constant on each side, parity-critical comment tags both |
-| HR stage classification | `hr_monitor.html:getHRStage` (~L2294) | `HrEngine.java:hrStage` + `setStageThresholds` | User-configurable thresholds pushed from JS via `HRMNativeHrSession.setStageThresholds({low,normal,elevated,high})` on init + every save | Single-source (JS pushes). Missing a test — TODO |
-| RMSSD stage classification | `hr_monitor.html:getRMSSDStage` (~L2319) | `HrEngine.java:rmssdStage` | `<critical = stage-critical`, `<20 = stage-high`, `<35 = stage-elevated`, `<60 = stage-normal`, else `stage-low`. `critical` is user-configurable, pushed from JS via `setStageThresholds({rmssdCritical})`. Other cutoffs hard-coded in both | `scripts/rmssd-parity.test.js` — table of input rmssd + expected stage |
+| HR stage classification | `hr-math.js:hrStage` (bands from `hr_monitor.html:getHRStage`) | `HrEngine.java:hrStage` + `setStageThresholds` | User-configurable thresholds pushed from JS via `HRMNativeHrSession.setStageThresholds({low,normal,elevated,high})` on init + every save | Single-source (JS pushes). `scripts/rmssd-parity.test.js` stage table |
+| RMSSD stage classification | `hr-math.js:rmssdStage` (alert value from `hr_monitor.html:getRMSSDStage`) | `HrEngine.java:rmssdStage` | `<critical = stage-critical`, `<20 = stage-high`, `<35 = stage-elevated`, `<60 = stage-normal`, else `stage-low`. `critical` is user-configurable, pushed from JS via `setStageThresholds({rmssdCritical})`. Other cutoffs hard-coded in both | `scripts/rmssd-parity.test.js` — table of input rmssd + expected stage |
 
 ## Data output (CSV)
 

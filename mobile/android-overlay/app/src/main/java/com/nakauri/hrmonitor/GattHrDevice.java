@@ -299,7 +299,7 @@ public class GattHrDevice implements HrDevice {
         boolean contactOff;
     }
 
-    /** Matches hr_monitor.html parseHR offsets. */
+    /** Matches hr_monitor.html parseHR offsets; RR conversion matches hr-math.js rrMsFromRaw. */
     private static HrParse parseHrPacket(byte[] b) {
         HrParse out = new HrParse();
         int flags = b[0] & 0xff;
