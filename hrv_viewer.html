@@ -207,6 +207,7 @@ END SECTION MAP -->
     color: #d8d8d8;
   }
   .viewer-loading.shown { display: flex; }
+  .viewer-loading.note .viewer-loading-bar { display: none; }
   .viewer-loading-bar {
     flex: 1 1 auto;
     max-width: 240px;
@@ -1975,7 +1976,15 @@ END SECTION MAP -->
     try {
       await driveEnsureFolder();
       driveUpdateUI();
-      const res = await driveSync({ onProgress: showSyncLoader, deferReload: true });
+      // onRecent: a split first sync paints here, keeping the reader's place, before the backfill starts.
+      const onRecent = async () => {
+        drivePersistMeta();
+        persistIndex();
+        await loadSessions();
+        await routeKeepScroll();
+        sessionsPainted = Object.keys(sessionsIndex).length > 0;
+      };
+      const res = await driveSync({ onProgress: showSyncLoader, deferReload: true, onRecent });
       if (sessionsPainted) {
         if (res && res.changed) { await loadSessions(); await routeKeepScroll(); }
       } else {
@@ -2039,6 +2048,7 @@ END SECTION MAP -->
         }
       } else {
         driveFolderId = null;
+        backfillStop('auth');
         driveFilesByName = new Map();
         setDriveProgress('');
         if (cloud.signin) { cloud.signin = false; hideLoader(); paintCloud(); }
@@ -2244,7 +2254,14 @@ END SECTION MAP -->
 
   async function driveDownloadSession(fileId) {
     const resp = await driveFetch('files/' + fileId + '?alt=media');
-    if (!resp.ok) throw new Error('Drive download ' + resp.status);
+    if (!resp.ok) {
+      const err = new Error('Drive download ' + resp.status);
+      err.status = resp.status;
+      try { const j = await resp.json(); err.reason = j && j.error && j.error.errors && j.error.errors[0] && j.error.errors[0].reason; } catch (e) { err.reason = null; }
+      const raw = resp.headers && resp.headers.get ? resp.headers.get('Retry-After') : null;
+      if (raw != null && raw !== '' && Number.isFinite(Number(raw)) && Number(raw) >= 0) err.retryAfter = Number(raw) * 1000;
+      throw err;
+    }
     return await resp.text();
   }
 
@@ -2270,6 +2287,203 @@ END SECTION MAP -->
     return await resp.json();
   }
 
+  // First sync, newest first: a pool of pulls; a large one paints the newest two days, then backfills the rest.
+  const DRIVE_POOL = 4, DRIVE_BACKFILL_MIN = 24, DRIVE_BACKFILL_STEP_DAYS = 7;
+  // active owns the banner note; run is the running backfill's state; backfillStop is the only way out.
+  const driveBackfill = { active: false, run: null };
+
+  // Order by the recording hour in the name, never Drive's dates: a late upload stamps an old hour with today.
+  function drivePullKey(name, meta) {
+    const m = /^hrm_(\d{4})(\d{2})(\d{2})T(\d{2})Z_/.exec(name);
+    let key = m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) : NaN;
+    if (!m && typeof parseSessionFilename === 'function') {
+      const p = parseSessionFilename(name);
+      key = p && p.date ? +p.date : NaN;
+    }
+    if (Number.isFinite(key) && key <= Date.now() + 3600000) return { key, parsed: true, seg: !!m };
+    const t = Date.parse(meta && meta.modifiedTime);
+    return { key: Number.isFinite(t) ? t : 0, parsed: false, seg: !!m };
+  }
+
+  // Newest first. Split into recent (the newest file's day and the day before) and older only when older is big.
+  function drivePullPlan(toPull, now) {
+    const items = toPull.map(([name, meta]) => Object.assign({ name, meta }, drivePullKey(name, meta)));
+    items.sort((a, b) => (b.parsed - a.parsed) || (b.key - a.key) || (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
+    const one = { items, recent: items, older: [] };
+    const top = items.find((x) => x.parsed);
+    if (!top || typeof dayWindow !== 'function') return one;
+    const cut = dayWindow(isoAddDays(dayKeyOf(Math.min(top.key, now)), -1)).start;
+    const recent = [], older = [];
+    for (const x of items) (x.parsed && x.key + (x.seg ? 3600000 : 86400000) > cut ? recent : older).push(x);
+    return older.length >= DRIVE_BACKFILL_MIN ? { items, recent, older } : one;
+  }
+
+  // The viewer days a file can hold: a segment's hour, a legacy file's start day and the next.
+  function drivePullDays(x) {
+    if (!x.parsed || typeof dayKeyOf !== 'function') return [];
+    const a = dayKeyOf(x.key);
+    const b = x.seg ? dayKeyOf(x.key + 3599999) : isoAddDays(a, 1);
+    return a === b ? [a] : [a, b];
+  }
+
+  // retry: rate limit, server or network. auth: the token is gone. fail: the next sync tries again.
+  function driveErrorClass(e) {
+    const s = e && e.status;
+    if (s === 401) return 'auth';
+    if (s === 429 || (s >= 500 && s < 600)) return 'retry';
+    if (s === 403) return e.reason === 'rateLimitExceeded' || e.reason === 'userRateLimitExceeded' ? 'retry' : 'fail';
+    if (s) return 'fail';
+    return e && e.name === 'TypeError' ? 'retry' : 'fail';
+  }
+
+  // o: { front, back, backGate, max, pull(x), settle(x, ok), isAborted(), abortWait, onAuth() }.
+  // The back lane opens when backGate resolves. A retry holds every worker and puts the file back at the head of its lane.
+  function drivePullPool(o) {
+    const lanes = { front: o.front.slice(), back: o.back.slice() };
+    for (const x of lanes.front) x.lane = 'front';
+    for (const x of lanes.back) x.lane = 'back';
+    const inFlight = new Map(), waits = new Map(), tries = new Map();
+    const stats = { peak: 0, starts: 0, holdStarts: 0 };
+    let backOpen = !o.backGate, holdUntil = 0, wakers = [], alive = 0, drained = null;
+    const done = new Promise((r) => { drained = r; });
+    const wake = () => { const w = wakers; wakers = []; w.forEach((f) => f()); };
+    const nap = () => new Promise((r) => wakers.push(r));
+    const hold = (ms) => new Promise((r) => {
+      const t = setTimeout(r, ms);
+      if (o.abortWait) o.abortWait.then(() => { clearTimeout(t); r(); });
+    });
+    if (o.backGate) o.backGate.then(() => { backOpen = true; wake(); }, () => { backOpen = true; wake(); });
+    if (o.abortWait) o.abortWait.then(wake);
+    const release = (x) => { const w = waits.get(x); if (w) { waits.delete(x); w.forEach((f) => f()); } };
+    const waitFor = (x) => new Promise((r) => { const w = waits.get(x) || []; w.push(r); waits.set(x, w); });
+    function take() {
+      for (const lane of backOpen ? [lanes.front, lanes.back] : [lanes.front]) {
+        const i = lane.findIndex((x) => !inFlight.has(x.name));
+        if (i >= 0) return lane.splice(i, 1)[0];
+      }
+      return null;
+    }
+    async function worker() {
+      alive++;
+      try {
+        for (;;) {
+          if (o.isAborted()) return;
+          const wait = holdUntil - Date.now();
+          if (wait > 0) { await hold(wait); continue; }
+          const x = take();
+          if (!x) {
+            if (!inFlight.size && !lanes.front.length && !lanes.back.length) return;
+            await nap();
+            continue;
+          }
+          inFlight.set(x.name, x);
+          stats.starts++;
+          if (Date.now() < holdUntil) stats.holdStarts++;
+          stats.peak = Math.max(stats.peak, inFlight.size);
+          let err = null;
+          try { await o.pull(x); } catch (e) { err = e || new Error('pull failed'); }
+          inFlight.delete(x.name);
+          if (!err) { o.settle(x, true); release(x); }
+          else {
+            const cls = driveErrorClass(err);
+            const n = (tries.get(x) || 0) + 1;
+            tries.set(x, n);
+            if (cls === 'retry' && n < 6 && !o.isAborted()) {
+              const ms = err.retryAfter != null ? err.retryAfter : Math.min(32000, 1000 * 2 ** (n - 1)) * (1 + Math.random() * 0.3);
+              holdUntil = Math.max(holdUntil, Date.now() + ms);
+              lanes[x.lane === 'back' ? 'back' : 'front'].unshift(x);
+            } else {
+              console.warn('Drive download failed for', x.name, err);
+              if (cls === 'auth') o.onAuth();
+              o.settle(x, false);
+              release(x);
+            }
+          }
+          wake();
+        }
+      } finally {
+        alive--;
+        if (!alive) { drained(); wake(); }
+      }
+    }
+    function spawn() { for (let n = o.max - alive; n > 0 && !o.isAborted(); n--) worker(); }
+    // To the front lane (a poll's new files): resolves once each has settled.
+    function add(items) {
+      for (const x of items) {
+        for (const lane of [lanes.front, lanes.back]) { const i = lane.findIndex((y) => y.name === x.name); if (i >= 0) lane.splice(i, 1); }
+        x.lane = 'front';
+        lanes.front.push(x);
+      }
+      const p = Promise.all(items.map(waitFor));
+      spawn();
+      wake();
+      return p;
+    }
+    // Back-lane files to the front (a pending day someone opened): resolves once each has settled.
+    function promote(names) {
+      const ps = [];
+      for (const name of names) {
+        const i = lanes.back.findIndex((y) => y.name === name);
+        if (i >= 0) { const x = lanes.back.splice(i, 1)[0]; x.lane = 'front'; lanes.front.push(x); ps.push(waitFor(x)); continue; }
+        const q = lanes.front.find((y) => y.name === name) || inFlight.get(name);
+        if (q) ps.push(waitFor(q));
+      }
+      wake();
+      return Promise.all(ps);
+    }
+    spawn();
+    if (!alive) drained();
+    return { done, add, promote, stats };
+  }
+
+  // A day not pulled yet in a running backfill.
+  function dayPending(iso) {
+    const st = driveBackfill.active && driveBackfill.run;
+    return !!(st && st.dayFiles.has(iso));
+  }
+  // Moves the pending days' files to the front of the pull queue.
+  function backfillPromote(isos) {
+    const st = driveBackfill.active && driveBackfill.run;
+    if (!st || !st.promote) return;
+    const days = isos.filter(dayPending);
+    if (days.length) st.promote(days).catch((e) => console.warn('[driveSync] promote failed', e));
+  }
+  // Ends the backfill on finish, abort, sign-out or a 401: drops the note and the pending days.
+  function backfillStop(reason) {
+    const st = driveBackfill.run;
+    if (!driveBackfill.active || !st) return;
+    if (reason !== 'done') { st.aborted = true; driveSyncFolderId = null; }
+    driveBackfill.active = false;
+    st.dayFiles = new Map();
+    if (st.wake) st.wake();
+    hideLoader();
+    if (st.failed.length && reason !== 'auth') UI.notice({ kind: 'info', text: 'Some older days did not load from Drive. The next sync tries again.', timeout: 0 });
+  }
+  // The only reload while the backfill runs: one at a time; waiting calls fold into one.
+  let bfMergeTail = Promise.resolve(), bfMergeWait = null;
+  function backfillMerge(reason, iso) {
+    if (!bfMergeWait) {
+      const n = bfMergeWait = { poll: false, batch: false, days: new Set() };
+      n.p = bfMergeTail = bfMergeTail.catch((e) => console.warn('[driveSync] merge failed', e)).then(() => {
+        if (bfMergeWait === n) bfMergeWait = null;
+        return backfillMergeRun(n);
+      });
+    }
+    const w = bfMergeWait;
+    if (reason === 'poll') w.poll = true;
+    else if (reason === 'batch') w.batch = true;
+    else if (reason === 'day' && iso) w.days.add(iso);
+    return w.p;
+  }
+  async function backfillMergeRun(w) {
+    drivePersistMeta();
+    persistIndex();
+    await loadSessions({ reusePhone: true });
+    const { view, arg } = parseHash();
+    const day = view === 'day' ? (arg || shownDay) : null;
+    if (w.poll || (day && w.days.has(day)) || (w.batch && ['month', 'week', 'all', 'index'].includes(view))) await routeKeepScroll();
+  }
+
   // Two-way sync. Reconciles Drive + local folder in both directions:
   //   Drive → IDB: pull new/updated Drive files into the in-browser cache
   //   Local → Drive: upload any local files that aren't already in Drive
@@ -2280,10 +2494,16 @@ END SECTION MAP -->
   // Single-flight per folder: same folder joins the running sync; a new folder queues a fresh one behind it.
   let driveSyncInFlight = null, driveSyncFolderId = null;
   function driveSync(opts) {
+    // A poll during the backfill pulls only its new and grown files, ahead of the backfill.
+    if (opts && opts.poll && driveBackfill.active && driveBackfill.run && driveBackfill.run.poll) return driveBackfill.run.poll();
     if (driveSyncInFlight && driveSyncFolderId === driveFolderId) return driveSyncInFlight;
     const prior = driveSyncInFlight;
     const run = prior ? prior.catch(() => {}).then(() => driveSyncRun(opts)) : driveSyncRun(opts);
-    const p = run.finally(() => { syncPhase('sync done'); if (driveSyncInFlight === p) driveSyncInFlight = null; });
+    const p = run.finally(() => {
+      syncPhase('sync done');
+      if (driveSyncInFlight === p) driveSyncInFlight = null;
+      if (driveBackfill.active) backfillStop('error');
+    });
     driveSyncInFlight = p;
     driveSyncFolderId = driveFolderId;
     return p;
@@ -2333,23 +2553,107 @@ END SECTION MAP -->
       } else missingStore++;
       toPull.push([name, meta]);
     }
-    for (let i = 0; i < toPull.length; i++) {
-      const [name, meta] = toPull[i];
-      try {
-        const text = await driveDownloadSession(meta.id);
-        await idbSet(name, text, IDB_DRIVE_STORE);
-        driveMetaCache[name] = { id: meta.id, modifiedTime: meta.modifiedTime, size: meta.size };
-        // Flush meta to localStorage every 10 pulls so a mid-sync close
-        // doesn't waste the work we already did.
-        if (pulled % 10 === 9) drivePersistMeta();
-        if (sessionsIndex[name]) delete sessionsIndex[name];
-        // A pulled update to a hidden or trimmed native file must be re-read, not re-persisted from its old summary.
-        // typeof: harness-V/sync.test.cjs runs this function without the v2 globals.
-        if (typeof legacyShadow === 'object') delete legacyShadow[name];
+    // Newest first through the pool. A split run paints once the recent set lands (opts.onRecent), then backfills.
+    const plan = drivePullPlan(toPull, Date.now());
+    const split = !!(opts && opts.onRecent) && plan.older.length > 0;
+    const recent = split ? plan.recent : plan.items;
+    const recentSet = new Set(recent);
+    const total = toPull.length;
+    let settled = 0, recentDone = 0, sinceFlush = 0, openBack = null, gate = null;
+    for (const x of plan.items) x.counted = true;
+    const st = split ? { aborted: false, failed: [], dayFiles: new Map(), promoted: new Set(), mark: null, wake: null, poll: null, promote: null } : null;
+    const abortWait = st ? new Promise((r) => { st.wake = r; }) : null;
+    if (st) {
+      for (const x of plan.older) for (const d of drivePullDays(x)) {
+        if (!st.dayFiles.has(d)) st.dayFiles.set(d, new Set());
+        st.dayFiles.get(d).add(x.name);
+      }
+      st.mark = plan.older[0].key;
+      driveBackfill.run = st;
+      driveBackfill.active = true;
+    }
+    const aborted = () => !!(st && st.aborted);
+    const pull = async (x) => {
+      const text = await driveDownloadSession(x.meta.id);
+      await idbSet(x.name, text, IDB_DRIVE_STORE);
+      driveMetaCache[x.name] = { id: x.meta.id, modifiedTime: x.meta.modifiedTime, size: x.meta.size };
+      if (sessionsIndex[x.name]) delete sessionsIndex[x.name];
+      // A pulled update to a hidden or trimmed native file must be re-read, not re-persisted from its old summary.
+      // typeof: harness-V/sync.test.cjs runs this function without the v2 globals.
+      if (typeof legacyShadow === 'object') delete legacyShadow[x.name];
+    };
+    // A file that lands after a stop is kept but counts toward nothing.
+    const settle = (x, ok) => {
+      if (x.onDone) x.onDone(ok);
+      if (aborted()) return;
+      if (ok) {
         pulled++;
-      } catch (e) { console.warn('Drive download failed for', name, e); }
-      setDriveProgress(`pulling ${i + 1}/${toPull.length}`);
-      if (onProgress) onProgress(i + 1, toPull.length);
+        // Meta to localStorage every 10 pulls so a mid-sync close keeps the work done.
+        if (++sinceFlush >= 10) { sinceFlush = 0; drivePersistMeta(); }
+      } else if (st) st.failed.push(x.name);
+      if (st && ok && !recentSet.has(x)) {
+        for (const d of drivePullDays(x)) {
+          const names = st.dayFiles.get(d);
+          if (!names || !names.delete(x.name) || names.size) continue;
+          st.dayFiles.delete(d);
+          if (st.promoted.has(d) && typeof backfillMerge === 'function') backfillMerge('day', d);
+        }
+        if (x.parsed && x.counted && st.mark - x.key >= DRIVE_BACKFILL_STEP_DAYS * 86400000) {
+          st.mark = x.key;
+          if (typeof backfillMerge === 'function') backfillMerge('batch');
+        }
+      }
+      if (!x.counted) return;
+      settled++;
+      if (recentSet.has(x)) recentDone++;
+      setDriveProgress(`pulling ${settled}/${total}`);
+      if (onProgress) { if (split) onProgress(settled, total, recentDone, recent.length); else onProgress(settled, total); }
+      if (split && recentDone === recent.length && !gate) openGate();
+    };
+    const backGate = split ? new Promise((r) => { openBack = r; }) : null;
+    const openGate = () => {
+      drivePersistMeta();
+      gate = Promise.resolve().then(() => opts.onRecent())
+        .catch((e) => console.warn('[driveSync] early paint failed', e))
+        .then(() => openBack());
+    };
+    const pool = drivePullPool({
+      front: recent, back: split ? plan.older : [], backGate, max: DRIVE_POOL,
+      pull, settle, isAborted: aborted, abortWait,
+      onAuth: () => { if (typeof backfillStop === 'function') backfillStop('auth'); },
+    });
+    if (split && !recent.length) openGate();
+    if (st) {
+      st.promote = (days) => {
+        const names = [];
+        for (const d of days) { st.promoted.add(d); for (const n of st.dayFiles.get(d) || []) names.push(n); }
+        return pool.promote(names);
+      };
+      // A poll lists again and pulls only new and grown files; the merged listing keeps them through eviction.
+      st.poll = async () => {
+        const fresh = await driveListSessions({ poll: true });
+        const add = [];
+        for (const [name, meta] of fresh) {
+          const prev = driveFiles.get(name);
+          if (prev && prev.id === meta.id && prev.modifiedTime === meta.modifiedTime && prev.size === meta.size) continue;
+          driveFiles.set(name, meta);
+          const c = driveMetaCache[name];
+          if (c && c.id === meta.id && c.modifiedTime === meta.modifiedTime && c.size === meta.size) continue;
+          add.push(Object.assign({ name, meta }, drivePullKey(name, meta)));
+        }
+        driveFilesByName = driveFiles;
+        if (!add.length || st.aborted) return { changed: false };
+        let got = 0;
+        for (const x of add) x.onDone = (ok) => { if (ok) got++; };
+        await pool.add(add);
+        return { changed: got > 0 };
+      };
+    }
+    await pool.done;
+    if (gate) await gate;
+    if (aborted()) {
+      drivePersistMeta();
+      return { pulled, uploaded: 0, written: 0, skipped, changed: false, aborted: true };
     }
     console.info('[driveSync] phase1 done: skipped=' + skipped + ' pulled=' + pulled +
       ' missingMeta=' + missingMeta + ' staleMeta=' + staleMeta + ' missingStore=' + missingStore);
@@ -2359,7 +2663,7 @@ END SECTION MAP -->
     // doesn't know about.
     let uploaded = 0;
     const localNames = new Set();
-    if (dirHandle) {
+    if (dirHandle && !aborted()) {
       const canRead = await ensureReadPermission();
       if (canRead) {
         try {
@@ -2390,7 +2694,7 @@ END SECTION MAP -->
     // Phase 3: Drive → local folder. Only if the user lets us write; if they
     // deny we still have the files in IDB so the viewer renders them.
     let written = 0;
-    if (dirHandle) {
+    if (dirHandle && !aborted()) {
       const driveOnly = [];
       for (const name of driveFiles.keys()) {
         // Segments stay in the Drive cache only: a folder copy is read first and would freeze a growing hour.
@@ -2426,8 +2730,9 @@ END SECTION MAP -->
     // typically 1-3 MB each; 100 orphans = 100-300 MB unnecessary IDB.
     let evicted = 0;
     try {
-      const cachedKeys = await idbKeys(IDB_DRIVE_STORE);
+      const cachedKeys = aborted() ? [] : await idbKeys(IDB_DRIVE_STORE);
       for (const key of cachedKeys) {
+        if (aborted()) break;
         if (typeof key !== 'string') continue;
         if (driveFiles.has(key)) continue;
         if (localNames.has(key)) continue;
@@ -2450,6 +2755,8 @@ END SECTION MAP -->
 
     const changed = pulled + uploaded + written + evicted > 0;
     if (changed) persistIndex();
+    // The backfill's one final render is the caller's (ensureFolderSyncAndRender).
+    if (st && !st.aborted) backfillStop('done');
     // The poll tick reloads once for Drive and the phone together.
     if (changed && opts && opts.deferReload) return { pulled, uploaded, written, skipped, changed };
     if (changed) {
@@ -4617,6 +4924,7 @@ END SECTION MAP -->
 
     const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     let cells = '';
+    const pendingDays = [];
     for (const d of dowNames) cells += `<div class="cal-dow">${d}</div>`;
     // Pad leading empty days
     for (let i = 0; i < dowStart; i++) cells += `<div class="cal-cell empty-month"></div>`;
@@ -4625,7 +4933,9 @@ END SECTION MAP -->
       const stats = dayStats[iso];
       const isToday = iso === todayStr;
       if (!stats) {
-        cells += `<div class="cal-cell ${isToday ? 'today' : ''}"><div class="cal-day-num">${d}</div></div>`;
+        const pend = dayPending(iso);
+        if (pend) pendingDays.push(iso);
+        cells += `<div class="cal-cell ${isToday ? 'today' : ''}${pend ? ' pending' : ''}"${pend ? ` data-date="${iso}"` : ''}><div class="cal-day-num">${d}</div></div>`;
         continue;
       }
       const headline = computeHeadline(headlineMetric, sessionsByDate[iso], iso);
@@ -4692,7 +5002,8 @@ END SECTION MAP -->
     // 24-hour window (00:00 → 23:59) instead of opening the raw 39-hour
     // file. User can still drill into the underlying session from the
     // day view's session list.
-    el.querySelectorAll('.cal-cell.has-sessions').forEach(cell => {
+    backfillPromote(pendingDays);
+    el.querySelectorAll('.cal-cell.has-sessions, .cal-cell.pending').forEach(cell => {
       cell.addEventListener('click', () => {
         setHash('day/' + cell.dataset.date);
       });
@@ -4714,8 +5025,12 @@ END SECTION MAP -->
     const title = date.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const titleShort = date.toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
     const files = sessionsByDate[iso] || [];
-    // Arrows stop only on dates with recordings.
-    const dateKeys = Object.keys(sessionsByDate).sort();
+    const pending = dayPending(iso);
+    if (pending) backfillPromote([iso]);
+    // Arrows stop only on dates with recordings, or still loading from Drive.
+    const dateKeys = driveBackfill.active
+      ? Array.from(new Set(Object.keys(sessionsByDate).concat(Array.from(driveBackfill.run.dayFiles.keys())))).sort()
+      : Object.keys(sessionsByDate).sort();
     let prevDate = null, nextDate = null;
     for (const k of dateKeys) {
       if (k < iso) prevDate = k;
@@ -4752,7 +5067,7 @@ END SECTION MAP -->
       if (markersSheet && !markersSheet.closed) markersSheet.close('route');
       if (layersSheet && !layersSheet.closed) layersSheet.close('route');
       clearExplorer();
-      el.innerHTML = head + `<div class="stub-panel">No recordings on this day</div>`;
+      el.innerHTML = head + `<div class="stub-panel">${pending ? 'This day is still loading from Drive.' : 'No recordings on this day'}</div>`;
       wireNav();
       return;
     }
@@ -4903,8 +5218,9 @@ END SECTION MAP -->
           const hasData = c.files.length > 0;
           const headline = computeHeadline(headlineMetric, c.files, c.iso);
           const isToday = c.iso === todayStr;
+          const pend = dayPending(c.iso);
           return `
-            <div class="week-col ${hasData ? 'has-sessions strip' : 'empty'} ${isToday ? 'today' : ''}" data-date="${c.iso}" style="${hasData ? `--strip-c: ${headline.color};` : ''}">
+            <div class="week-col ${hasData ? 'has-sessions strip' : 'empty'} ${isToday ? 'today' : ''}${pend ? ' pending' : ''}" data-date="${c.iso}" style="${hasData ? `--strip-c: ${headline.color};` : ''}">
               <div class="week-col-head">
                 <span class="week-dow">${c.dow}</span>
                 <span class="week-date">${c.date.getDate()}</span>
@@ -4921,7 +5237,7 @@ END SECTION MAP -->
                   <div class="week-col-stat"><dt class="week-col-stat-label">Flush</dt><dd>${c.totalFlush}</dd></div>
                   <div class="week-col-stat"><dt class="week-col-stat-label">Chills</dt><dd>${c.totalChills}</dd></div>
                 </dl>
-              ` : `<div class="week-col-empty">no sessions</div>`}
+              ` : pend ? '' : `<div class="week-col-empty">no sessions</div>`}
             </div>`;
         }).join('')}
       </div>
@@ -4935,7 +5251,8 @@ END SECTION MAP -->
     document.getElementById('week-today').addEventListener('click', () => {
       setHash('week/' + todayStr);
     });
-    el.querySelectorAll('.week-col.has-sessions').forEach(col => {
+    backfillPromote(cols.map((c) => c.iso));
+    el.querySelectorAll('.week-col.has-sessions, .week-col.pending').forEach(col => {
       col.addEventListener('click', () => {
         setHash('day/' + col.dataset.date);
       });
@@ -6003,8 +6320,11 @@ END SECTION MAP -->
       }
       if (await phonePollUpdate()) reload = true;
       if (reload) {
-        await loadSessions({ reusePhone: true });
-        routeUnlessEditing();
+        if (driveBackfill.active) await backfillMerge('poll');
+        else {
+          await loadSessions({ reusePhone: true });
+          routeUnlessEditing();
+        }
       }
       marksSyncPass().then((moved) => { if (moved) routeUnlessEditing(); });
     } finally {
@@ -7658,6 +7978,18 @@ END SECTION MAP -->
     if (rptMenuState) { rptCloseMenu(true); return; }
     if (rptBusy) { UI.toast('Making the report'); return; }
     if (rptOpening) return;
+    // The report reads a week back and the next day; any of them still loading from Drive moves to the front instead.
+    if (driveBackfill.active) {
+      const h = parseHash();
+      const day = h.view === 'day' && h.arg ? h.arg : rptDayIso();
+      const need = [];
+      for (let k = -7; day && k <= 1; k++) { const d = isoAddDays(day, k); if (dayPending(d)) need.push(d); }
+      if (need.length) {
+        backfillPromote(need);
+        UI.notice({ kind: 'info', text: 'This report needs days that are still loading from Drive.' });
+        return;
+      }
+    }
     const iso = rptDayIso();
     if (!iso) return;
     let count = 1;
@@ -11027,15 +11359,35 @@ END SECTION MAP -->
     const lab = label || 'Parsing sessions';
     if (text) text.textContent = current >= total ? 'Done' : `${lab}… ${current} of ${total}`;
   }
-  function showSyncLoader(current, total) {
-    if (!Object.keys(sessionsIndex).length) showLoader(current, total, 'Syncing with Drive');
+  // A split first sync passes the recent pair too: the bar counts the recent set, then the banner turns into the note.
+  function showSyncLoader(current, total, recentDone, recentTotal) {
+    const split = driveBackfill.active && recentTotal != null;
+    if (split && recentDone >= recentTotal) showBackfillNote();
+    else if (!Object.keys(sessionsIndex).length) showLoader(split ? recentDone : current, split ? recentTotal : total, 'Syncing with Drive');
     cloud.loader = total > 0 && current < total;
     if (total > 0) cloud.frac = current / total;
     paintCloud();
   }
-  function hideLoader() {
+  function showBackfillNote() {
     const banner = document.getElementById('viewer-loading');
-    if (banner) banner.classList.remove('shown');
+    const text = document.getElementById('viewer-loading-text');
+    if (!banner || banner.classList.contains('note')) return;
+    banner.classList.add('shown', 'note');
+    banner.setAttribute('aria-busy', 'false');
+    if (text) text.textContent = 'Older days are still loading from Drive.';
+  }
+  function hideLoader() {
+    if (driveBackfill.active) return;
+    const banner = document.getElementById('viewer-loading');
+    if (banner) {
+      // The note sits above the page: when it goes while the reader is below it, keep their place.
+      const after = banner.classList.contains('shown') && banner.classList.contains('note') ? banner.nextElementSibling : null;
+      const h = after ? banner.offsetHeight : 0;
+      const past = after && window.scrollY > after.getBoundingClientRect().top + window.scrollY - h;
+      banner.classList.remove('shown', 'note');
+      banner.setAttribute('aria-busy', 'true');
+      if (past && h) window.scrollBy(0, -h);
+    }
     if (cloud.loader) { cloud.loader = false; paintCloud(); }
   }
 
@@ -11106,7 +11458,7 @@ END SECTION MAP -->
       hideLoader();
     }
     // Re-render now that data is in.
-    if (!painted) route();
+    if (!painted && !sessionsPainted) route();
   }
   init();
 })();
