@@ -33,6 +33,7 @@ const TIER = {
   'day-report': [VIEWER, [], false],
   'parse-worker': [VIEWER, [], false],
   'open-cache': [VIEWER, [], false],
+  'first-sync': [VIEWER, [], false],
   'session-time': [/^(hrv_viewer|hr_monitor)\.html$/, [], false],
   'sleep-split': [VIEWER, [], false],
   'v2-series': [VIEWER, [], false],

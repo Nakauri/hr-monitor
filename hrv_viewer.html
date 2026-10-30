@@ -11363,7 +11363,12 @@ END SECTION MAP -->
   function showSyncLoader(current, total, recentDone, recentTotal) {
     const split = driveBackfill.active && recentTotal != null;
     if (split && recentDone >= recentTotal) showBackfillNote();
-    else if (!Object.keys(sessionsIndex).length) showLoader(split ? recentDone : current, split ? recentTotal : total, 'Syncing with Drive');
+    else if (!Object.keys(sessionsIndex).length) {
+      showLoader(split ? recentDone : current, split ? recentTotal : total, 'Syncing with Drive');
+      // "No sessions yet" under a running count is not true; the paint replaces the blank.
+      const es = document.getElementById('empty-state');
+      if (es && total > 0) es.style.display = 'none';
+    }
     cloud.loader = total > 0 && current < total;
     if (total > 0) cloud.frac = current / total;
     paintCloud();
@@ -11372,21 +11377,32 @@ END SECTION MAP -->
     const banner = document.getElementById('viewer-loading');
     const text = document.getElementById('viewer-loading-text');
     if (!banner || banner.classList.contains('note')) return;
+    // A note that appears above a scrolled page pushes it down; keep the reader's place.
+    const main = banner.parentElement;
+    const after = banner.classList.contains('shown') ? null : banner.nextElementSibling;
+    const inMain = !!(after && main && main.scrollTop > 0);
+    const past = after && !inMain && window.scrollY > after.getBoundingClientRect().top + window.scrollY;
     banner.classList.add('shown', 'note');
     banner.setAttribute('aria-busy', 'false');
     if (text) text.textContent = 'Older days are still loading from Drive.';
+    if (inMain) main.scrollTop += banner.offsetHeight;
+    else if (past) window.scrollBy(0, banner.offsetHeight);
   }
   function hideLoader() {
     if (driveBackfill.active) return;
     const banner = document.getElementById('viewer-loading');
     if (banner) {
       // The note sits above the page: when it goes while the reader is below it, keep their place.
+      // Desktop scrolls <main>, where the note is the first child; a phone scrolls the window.
       const after = banner.classList.contains('shown') && banner.classList.contains('note') ? banner.nextElementSibling : null;
       const h = after ? banner.offsetHeight : 0;
-      const past = after && window.scrollY > after.getBoundingClientRect().top + window.scrollY - h;
+      const main = banner.parentElement;
+      const inMain = !!(main && main.scrollTop > 0);
+      const past = after && !inMain && window.scrollY > after.getBoundingClientRect().top + window.scrollY - h;
       banner.classList.remove('shown', 'note');
       banner.setAttribute('aria-busy', 'true');
-      if (past && h) window.scrollBy(0, -h);
+      if (h && inMain) main.scrollTop = Math.max(0, main.scrollTop - h);
+      else if (past && h) window.scrollBy(0, -h);
     }
     if (cloud.loader) { cloud.loader = false; paintCloud(); }
   }

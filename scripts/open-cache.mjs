@@ -8,12 +8,15 @@
 //   C. Month, Drive answering at once, nothing changed: no syncing state, no re-render, no banner.
 //   D. Month, one file grown on Drive (size bump): exactly one re-render, and the new data shows.
 // --mutants serves the old order (cache only loaded after the sync) and A must FAIL.
+// C and D also hold the Drive list and download counts to the c0e5d9b counts (before newest-first, Block 4) and see no
+// backfill note; --mutant split forces a backfill split on any pull and C or D must FAIL. --base serves c0e5d9b.
 //
-// Usage: node scripts/open-cache.mjs [--mutants] [--ux <ux-audit dir>]
+// Usage: node scripts/open-cache.mjs [--mutants | --mutant split | --base] [--ux <ux-audit dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { uxDir } from './ux-dir.mjs';
 
@@ -28,7 +31,12 @@ const { FakeDrive } = createRequire(import.meta.url)('./marks-store.test.cjs');
 const MUTANTS = args.includes('--mutants');
 
 // The negative control: init goes straight to the Drive sync, as before S38.
-const MUTANT = ['      if (!dirHandle && await paintFromCache()) painted = true;', ''];
+const MUTANT = args.includes('--mutant')
+  ? ['    return older.length >= DRIVE_BACKFILL_MIN ? { items, recent, older } : one;', '    return items.length ? { items, recent: [], older: items } : one;']
+  : ['      if (!dirHandle && await paintFromCache()) painted = true;', ''];
+const MUTATE = MUTANTS || args.includes('--mutant');
+// Drive calls on a warm reopen as c0e5d9b makes them: [listings, downloads].
+const BASE_CALLS = { C: [5, 0], D: [5, 1] };
 let anchorMissing = false;
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.csv': 'text/csv' };
@@ -37,7 +45,8 @@ const server = http.createServer((req, res) => {
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
   let body = fs.readFileSync(file);
-  if (MUTANTS && rel === '/hrv_viewer.html') {
+  if (args.includes('--base') && rel === '/hrv_viewer.html') body = execFileSync('git', ['-C', ROOT, 'show', 'c0e5d9b:hrv_viewer.html'], { maxBuffer: 64 << 20 });
+  if (MUTATE && rel === '/hrv_viewer.html') {
     const text = body.toString('utf8').replace(/\r\n/g, '\n');
     if (!text.includes(MUTANT[0])) { anchorMissing = true; console.log('MUTANT ANCHOR MISSING: ' + MUTANT[0]); }
     body = text.replace(MUTANT[0], MUTANT[1]);
@@ -104,6 +113,7 @@ await ctx.addInitScript(() => {
       if (!t.dayAt && day && day.offsetParent && day.querySelector('canvas, .day-loading') && !/No recordings/.test(day.textContent)) t.dayAt = Date.now();
       const banner = document.getElementById('viewer-loading');
       if (banner && banner.classList.contains('shown')) t.banner = true;
+      if (banner && banner.classList.contains('note')) t.note = true;
       if (document.getElementById('app-bar').classList.contains('syncing')) t.syncing = true;
     }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   });
@@ -121,7 +131,10 @@ async function reopen(hash, holdMs, settleMs) {
   await page.close();
   const mine = drive.log.slice(from);
   const done = mine.filter((x) => x.done).map((x) => x.at);
-  return { t, calls: mine.filter((x) => !x.done).length, firstDone: done.length ? Math.min(...done) : Infinity };
+  const asked = mine.filter((x) => !x.done);
+  const media = asked.filter((x) => /alt=media/.test(x.url)).length;
+  const lists = asked.filter((x) => /\/drive\/v3\/files\?/.test(x.url) && !/alt=media/.test(x.url)).length;
+  return { t, calls: asked.length, lists, media, firstDone: done.length ? Math.min(...done) : Infinity };
 }
 
 // Seed: the first open of the app syncs every demo file and saves the index.
@@ -178,15 +191,17 @@ if (!MUTANTS) {
   ok(before.length > 0 && !before.some((g) => g.d27) && after2.length > 0 && after2[after2.length - 1].d27,
     'D Month: 04-27 gains the grown session only after the sync');
   ok(!d.t.banner, 'D Month: no loader banner');
+  ok(c.lists === BASE_CALLS.C[0] && c.media === BASE_CALLS.C[1] && !c.t.note, `C Drive calls as c0e5d9b: ${c.lists} listings, ${c.media} downloads (want ${BASE_CALLS.C.join(', ')}), backfill note ${!!c.t.note}`);
+  ok(d.lists === BASE_CALLS.D[0] && d.media === BASE_CALLS.D[1] && !d.t.note, `D Drive calls as c0e5d9b: ${d.lists} listings, ${d.media} downloads (want ${BASE_CALLS.D.join(', ')}), backfill note ${!!d.t.note}`);
 }
 ok(errors.length === 0, 'no page errors: ' + errors.join(' | '));
 
 await ctx.close();
 await browser.close();
 server.close();
-if (MUTANTS) {
+if (MUTATE) {
   const killed = fails > 0 && !anchorMissing;
-  console.log(killed ? 'MUTANT FAILED as it should (old order caught)' : 'MUTANT SURVIVED or anchor missing');
+  console.log(killed ? 'MUTANT FAILED as it should (' + (MUTANTS ? 'old order' : 'forced split') + ' caught)' : 'MUTANT SURVIVED or anchor missing');
   process.exit(killed ? 0 : 1);
 }
 console.log(`\n${passes} passed, ${fails} failed`);
