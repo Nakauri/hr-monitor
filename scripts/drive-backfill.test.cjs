@@ -9,7 +9,7 @@
 // --mutants runs each named mutant and requires it to fail. --src <html> runs another copy (c0e5d9b must fail).
 // Runtime: about 4 s; --mutants about 30 s.
 // Usage: node scripts/drive-backfill.test.cjs [--src <viewer html>] [--mutants]
-process.env.TZ = 'America/Edmonton';
+process.env.TZ = 'America/Denver';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { uxDir } from './ux-dir.mjs';
 
-process.env.TZ = 'America/Edmonton';
+process.env.TZ = 'America/Denver';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const argVal = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -168,7 +168,7 @@ async function device(opts) {
   const { fake, files } = opts.drive || makeDrive();
   const drive = { fake, files, media: [], lists: [], hold: new Set(), waiters: [], delay: opts.delay == null ? 8 : opts.delay, script: {} };
   drive.release = () => { const w = drive.waiters; drive.waiters = []; drive.hold.clear(); w.forEach((f) => f()); };
-  const ctx = await browser.newContext({ viewport: opts.viewport || { width: 1440, height: 900 }, deviceScaleFactor: 1, timezoneId: 'America/Edmonton' });
+  const ctx = await browser.newContext({ viewport: opts.viewport || { width: 1440, height: 900 }, deviceScaleFactor: 1, timezoneId: 'America/Denver' });
   await ctx.route('**/*', async (route) => {
     const u = route.request().url();
     if (u.startsWith(ORIGIN) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
@@ -373,7 +373,9 @@ async function partView() {
       }
       await page.waitForTimeout(250);
     }
-    const end = Date.now();
+    // The end is the run's own "sync done" line, not when this loop saw it.
+    const doneLine = dev.log.find((l) => l.at > t0 && /sync done/.test(l.text));
+    const end = doneLine ? doneLine.at : Date.now();
     await page.waitForTimeout(2500);
     const s = await t(page);
     const moved = samples.filter((x) => x.hash !== v0.hash || x.min !== v0.min || x.max !== v0.max || Math.abs(x.y - v0.y) > 1);
@@ -383,9 +385,9 @@ async function partView() {
     const pollAt = drive.lists.filter((l) => l.at > t0 && /hrv_session/.test(l.q || '')).map((l) => l.at);
     const groups = [];
     for (const u of s.updates.filter((u) => u > t0)) if (!groups.length || u - groups[groups.length - 1].last > 400) groups.push({ first: u, last: u }); else groups[groups.length - 1].last = u;
-    const stray = groups.filter((g) => !pollAt.some((p) => g.first >= p && g.first - p < 3000) && g.first < end - 200);
+    const stray = groups.filter((g) => !pollAt.some((p) => g.first >= p && g.first - p < 3000) && g.first < end);
     ok(polls >= 1 && stray.length === 0, `T9 interactive: today re-renders only on polls and at the end (${groups.length} renders, ${stray.length} outside a poll, ${polls} polls)`);
-    const after = groups.filter((g) => g.first >= end - 200).length;
+    const after = groups.filter((g) => g.first >= end && !pollAt.some((p) => p >= end && g.first >= p && g.first - p < 3000)).length;
     ok(after === 1, `T9 interactive: one render after the end (${after})`);
     ok(durAfterPoll != null && durAfterPoll >= 90, `T9 interactive: a legacy file grown during the backfill reads ${durAfterPoll} min after the poll merge (100 on Drive)`);
     ok(!!noteAt && dev.errors.length === 0, 'T9 interactive: no page errors: ' + dev.errors.join(' | '));

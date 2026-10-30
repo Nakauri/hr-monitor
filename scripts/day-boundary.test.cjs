@@ -89,13 +89,13 @@ const sameSet = (got, want) => {
 };
 
 // Data epochs (a sample, a session start, now) take dayKeyOf.
-let r = sameSet(callers('dayKeyOf'), ['sessionLocalDateKey', 'localDateKeyToday', 'summarizeCSV', 'loadSessionsRun', 'rebuildSessionsByDate']);
+let r = sameSet(callers('dayKeyOf'), ['sessionLocalDateKey', 'localDateKeyToday', 'summarizeCSV', 'loadSessionsRun', 'rebuildSessionsByDate', 'drivePullPlan', 'drivePullDays']);
 check('dayKeyOf only at the data-epoch sites', r.ok, r.detail);
 // Calendar cursors and week bounds take localDateLabel.
 r = sameSet(callers('localDateLabel'), ['rangeCutoffISO', 'renderWeek', 'bucketKey']);
 check('localDateLabel only at the label sites', r.ok, r.detail);
 // Every day window comes from dayWindow, including the virtual day: key [L3].
-r = sameSet(callers('dayWindow'), ['parseSessionFilename', 'sessionDayPortion', 'buildDaySession', 'eventsInDayRange', 'renderWeek', 'bucketKey', 'dayUnionDuration', 'marksScope', 'drawDaySparkline', 's63DayDigest', 's63Sleep', 's64Run']);
+r = sameSet(callers('dayWindow'), ['parseSessionFilename', 'sessionDayPortion', 'buildDaySession', 'eventsInDayRange', 'renderWeek', 'bucketKey', 'dayUnionDuration', 'marksScope', 'drawDaySparkline', 's63DayDigest', 's63Sleep', 's64Run', 'drivePullPlan']);
 check('dayWindow at every window site', r.ok, r.detail);
 const leftover = callers('localDateKeyFromEpoch');
 check('localDateKeyFromEpoch has no caller outside the module', hasModule && leftover.length === 0, leftover.join(', '));
