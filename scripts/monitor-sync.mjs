@@ -419,6 +419,8 @@ try {
         drive: document.getElementById('drive-status').textContent,
         calls: window.__fake.calls.filter((c) => /setDrivePaused/.test(c)),
       }));
+      await page.click('[aria-controls="sec-connection-body"]');
+      await page.waitForTimeout(300);
       await page.click('#drive-sync-toggle');
       await page.waitForTimeout(400);
       const off = await view();
