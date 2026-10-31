@@ -27,6 +27,8 @@ public class NativeDriveUploader {
     private static final String TAG = "NativeDriveUploader";
     private static final String DRIVE_FOLDER_NAME = "HR Monitor Sessions";
     private static final String FOLDER_MIME = "application/vnd.google-apps.folder";
+    // List-then-create is one step across every instance, so two passes never create a same-name twin.
+    private static final Object SEND_LOCK = new Object();
 
     private final Context context;
     private final OkHttpClient client;
@@ -58,6 +60,11 @@ public class NativeDriveUploader {
         sessionFilenameRef.set(name);
     }
 
+    // After Stop the file is no longer the active one, unless a newer session already took the slot.
+    public void clearActiveSessionFilename(String name) {
+        if (name != null) sessionFilenameRef.compareAndSet(name, null);
+    }
+
     /** Folder lookup, cached per process. */
     public String getOrFetchFolderIdSync(String token) throws IOException {
         String fid = folderIdRef.get();
@@ -80,6 +87,7 @@ public class NativeDriveUploader {
     private static final int  KEEP_RECENT_FLOOR     = 3;
 
     // Three-tier cleanup: 1) Drive-verified delete, 2) age fallback, 3) byte cap.
+    // Signed in, a CSV goes only once Drive holds it in full; an unknown Drive state deletes nothing.
     // KEEP_RECENT_FLOOR + active session are protected at every tier.
     public void cleanupLocalCachedAsync(File sessionsDir, long minAgeMs) {
         if (sessionsDir == null || !sessionsDir.isDirectory()) return;
@@ -98,23 +106,26 @@ public class NativeDriveUploader {
         String activeName = sessionFilenameRef.get();
         long now = System.currentTimeMillis();
 
-        java.util.Set<String> driveNames = null;
-        boolean driveActive = false;
+        boolean signedIn = AuthStorage.isSignedIn(context);
+        if (signedIn && DriveGate.paused(context)) return;
+        java.util.Map<String, DriveFileInfo> driveFiles = null;
         try {
             String token = AuthStorage.getValidAccessToken(context);
             if (token != null) {
-                String folderId = folderIdRef.get();
-                if (folderId == null) {
-                    folderId = ensureFolder(token);
-                    if (folderId != null) folderIdRef.set(folderId);
-                }
-                if (folderId != null) {
-                    driveNames = listDriveFilenames(token, folderId);
-                    driveActive = (driveNames != null);
-                }
+                String folderId = getOrFetchFolderIdSync(token);
+                if (folderId != null) driveFiles = listDriveFiles(token, folderId);
             }
         } catch (Throwable t) {
-            Log.w(TAG, "cleanup: Drive lookup failed, treating as no-Drive: " + t.getMessage());
+            Log.w(TAG, "cleanup: Drive lookup failed: " + t.getMessage());
+        }
+        if (signedIn && driveFiles == null) {
+            Log.i(TAG, "cleanup skipped: Drive state unknown");
+            return;
+        }
+        boolean driveActive = driveFiles != null;
+        java.util.Map<String, Long> driveSizes = new java.util.HashMap<>();
+        if (driveFiles != null) {
+            for (java.util.Map.Entry<String, DriveFileInfo> e : driveFiles.entrySet()) driveSizes.put(e.getKey(), e.getValue().size);
         }
 
         long capBytes      = driveActive ? CAP_BYTES_DRIVE      : CAP_BYTES_NO_DRIVE;
@@ -138,9 +149,9 @@ public class NativeDriveUploader {
 
         for (File f : csvList) {
             if (keepFloor.contains(f.getName())) continue;
-            if (driveNames != null
-                && f.lastModified() <= ageCutoff
-                && driveNames.contains(f.getName())) {
+            boolean onDrive = SegmentUploadPlan.legacyOnDrive(f.length(), driveSizes.get(f.getName()));
+            if (signedIn && !onDrive) continue;
+            if (onDrive && f.lastModified() <= ageCutoff) {
                 long len = f.length();
                 if (f.delete()) { tier1++; freedT1 += len; }
                 continue;
@@ -161,6 +172,7 @@ public class NativeDriveUploader {
             for (File f : survivors) {
                 if (total <= capBytes) break;
                 if (keepFloor.contains(f.getName())) continue;
+                if (signedIn && !SegmentUploadPlan.legacyOnDrive(f.length(), driveSizes.get(f.getName()))) continue;
                 long len = f.length();
                 if (f.delete()) { tier3++; freedT3 += len; total -= len; }
             }
@@ -288,12 +300,6 @@ public class NativeDriveUploader {
         return out;
     }
 
-    // Thin wrapper for the cleanup path which only needs filenames.
-    private java.util.Set<String> listDriveFilenames(String token, String folderId) throws IOException {
-        java.util.Map<String, DriveFileInfo> files = listDriveFiles(token, folderId);
-        return files == null ? null : files.keySet();
-    }
-
     /**
      * Crash-recovery: scan the sessions dir, find any CSV that doesn't have
      * a Drive counterpart, and upload it. Skips the active session. Used
@@ -316,6 +322,10 @@ public class NativeDriveUploader {
     }
 
     private boolean runOrphanScan(File sessionsDir) {
+        synchronized (SEND_LOCK) { return runOrphanScanLocked(sessionsDir); }
+    }
+
+    private boolean runOrphanScanLocked(File sessionsDir) {
         try {
             if (DriveGate.paused(context)) return true;
             File[] files = sessionsDir.listFiles();
@@ -371,7 +381,7 @@ public class NativeDriveUploader {
     public void uploadOrphanIfNeededAsync(File sessionsDir, String filename) {
         if (sessionsDir == null || filename == null || filename.isEmpty()) return;
         executor.submit(() -> {
-            try {
+            synchronized (SEND_LOCK) { try {
                 if (FINALIZING.contains(filename)) return;
                 File f = new File(sessionsDir, filename);
                 if (!f.exists() || f.length() == 0 || !fullFileAllowed(f)) return;
@@ -399,7 +409,7 @@ public class NativeDriveUploader {
                 Log.w(TAG, "uploadOrphanIfNeeded: " + io.getMessage());
             } catch (Throwable t) {
                 Log.w(TAG, "uploadOrphanIfNeeded threw: " + t.getMessage());
-            }
+            } }
         });
     }
 
@@ -410,7 +420,7 @@ public class NativeDriveUploader {
             Log.i(TAG, "uploadFinishedSync: deferred " + f.getName() + " (" + f.length() + " bytes)");
             return false;
         }
-        try {
+        synchronized (SEND_LOCK) { try {
             String token = AuthStorage.getValidAccessToken(context);
             if (token == null) return false;
             String folderId = getOrFetchFolderIdSync(token);
@@ -423,7 +433,7 @@ public class NativeDriveUploader {
         } catch (Throwable t) {
             Log.w(TAG, "uploadFinishedSync failed: " + t.getMessage());
             return false;
-        }
+        } }
     }
 
     // Orphan create, with the 401 refresh and one retry.

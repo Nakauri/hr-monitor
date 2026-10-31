@@ -105,6 +105,7 @@ public final class SegmentUploader {
     private Set<String> validated = new HashSet<>();
     // When the cached open-segment id was last seen alive (not trashed); under LOCK.
     private String openCheckedId;
+    private volatile boolean lastRunLeftFiles;
     private long openCheckedAt;
 
     public SegmentUploader(File dir, File legacyDir, Http http, Tokens tokens, Store store, LifecycleLog log) {
@@ -166,7 +167,11 @@ public final class SegmentUploader {
 
     private boolean paused() { return "1".equals(store.get(K_PAUSED)); }
 
+    // True when the last run ended with a file Drive refused or that was left for later; its Result can still be OK.
+    public boolean lastRunLeftFiles() { return lastRunLeftFiles; }
+
     private Result runLocked(Mode mode, SegmentReader.OpenSegment open, boolean countLegacy) {
+        lastRunLeftFiles = false;
         if (paused()) {
             log.log("upload_skip reason=paused");
             return Result.PAUSED;
@@ -237,6 +242,7 @@ public final class SegmentUploader {
                     return Result.RETRY;
                 }
             }
+            lastRunLeftFiles = !failed.isEmpty();
             if (st.relist) {
                 st.relist = false;
                 st.save(log);

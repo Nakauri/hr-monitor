@@ -294,14 +294,41 @@ public final class HrEngine implements HrDevice.Callback {
     private volatile boolean networkWasLost = false;
     private static final long NETWORK_SWEEP_GAP_MS = 60_000L;
     private volatile long lastNetworkSweepMs = 0L;
+    private static final long NETWORK_CSV_GAP_MS = 10L * 60_000L;
+    private volatile long lastNetworkCsvMs = 0L;
 
-    // Segments that waited on the network go now: WorkManager's retry backoff can run to hours.
+    // Runs here, not through the unique work: KEEP drops a request while the worker sits in retry backoff.
     private void onNetworkReturned() {
         long now = System.currentTimeMillis();
-        if (now - lastNetworkSweepMs < NETWORK_SWEEP_GAP_MS) return;
-        lastNetworkSweepMs = now;
-        SegmentUploadWorker.enqueue(appCtx, "network", null);
-        if (openUploadOwed) forceOpenUploadCheck();
+        if (now - lastNetworkSweepMs >= NETWORK_SWEEP_GAP_MS) {
+            lastNetworkSweepMs = now;
+            sweepSegmentsNow();
+            if (openUploadOwed) forceOpenUploadCheck();
+        }
+        // Its own gap: a cell flap must not swallow the move to Wi-Fi.
+        if (!DriveGate.metered(appCtx) && now - lastNetworkCsvMs >= NETWORK_CSV_GAP_MS) {
+            lastNetworkCsvMs = now;
+            sendFinishedCsvs();
+        }
+    }
+
+    // Finished CSVs waiting on the pause, the metered cap or sign-in.
+    public void sendFinishedCsvs() {
+        uploader.uploadOrphansAsync(new java.io.File(appCtx.getFilesDir(), "sessions"));
+    }
+
+    private void sweepSegmentsNow() {
+        try {
+            segmentUploadExecutor.execute(() -> {
+                try {
+                    SegmentUploadWorker.uploader(appCtx).run(SegmentUploader.Mode.CLOSED, openSegmentView(), false, 5_000L);
+                } catch (Throwable t) {
+                    Log.w(TAG, "segment sweep threw: " + t);
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "segment sweep not queued: " + t);
+        }
     }
 
     private void registerNetworkCallback() {
@@ -1270,9 +1297,9 @@ public final class HrEngine implements HrDevice.Callback {
                     boolean ok = false;
                     try {
                         SegmentUploader.Result r = syncSegmentsNow();
-                        ok = r == SegmentUploader.Result.OK;
+                        ok = r == SegmentUploader.Result.OK && !SegmentUploadWorker.uploader(appCtx).lastRunLeftFiles();
                         reason = "segments_" + r;
-                        uploader.uploadOrphansAsync(new java.io.File(appCtx.getFilesDir(), "sessions"));
+                        sendFinishedCsvs();
                     } catch (Throwable t) {
                         Log.w(TAG, "forceSyncNow threw: " + t.getMessage());
                         reason = t.getMessage();
@@ -1304,15 +1331,15 @@ public final class HrEngine implements HrDevice.Callback {
         return r;
     }
 
-    /** Stops or resumes every Drive send. Resuming sends the backlog under the metered rules. */
+    /** Stops or resumes every recording upload. Resuming sends the backlog under the metered rules. */
     public void setDrivePaused(boolean paused) {
         DriveGate.setPaused(appCtx, paused);
         NativeHrService.logLifecycle(appCtx, "drive_paused value=" + paused);
         if (paused) {
             driveBehind = false;
         } else {
-            SegmentUploadWorker.enqueue(appCtx, "resume", null);
-            uploader.uploadOrphansAsync(new java.io.File(appCtx.getFilesDir(), "sessions"));
+            sweepSegmentsNow();
+            sendFinishedCsvs();
             forceOpenUploadCheck();
         }
         emitState();
@@ -2211,6 +2238,7 @@ public final class HrEngine implements HrDevice.Callback {
                     up.cleanupLocalCachedAsync(sessionsDir, 7L * 24L * 60L * 60L * 1000L);
                 }
             } catch (Throwable ignored) {}
+            if (up != null) up.clearActiveSessionFilename(name);
             NativeDriveUploader.clearFinalizing(name);
             stopWorkersRunning.decrementAndGet();
             NativeHrService.logLifecycle(appCtx, "stop_worker_end " + outcome + " fgsStopped=" + fgsStopped);

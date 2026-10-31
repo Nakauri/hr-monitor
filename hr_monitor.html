@@ -5376,7 +5376,7 @@ END SECTION MAP -->
     // Posture bar becomes a "Download CSV" button until the user taps it
     // (or starts a new session).
     if (isMobileShell()) {
-      if (driveActive && driveSyncOn()) showToast('Uploading session to Drive…');
+      if (driveActive && driveSyncOn()) showToast('Session queued for Drive');
       showDownloadCsvInsteadOfPosture();
     }
   }
@@ -5918,6 +5918,8 @@ END SECTION MAP -->
     const paused = !!(snap && snap.drivePaused);
     if (paused === drivePausedSeen) return;
     drivePausedSeen = paused;
+    // The app's viewer page reads this for its marks.
+    try { localStorage.setItem('hr_monitor_drive_paused', paused ? '1' : '0'); } catch (e) {}
     renderDriveSyncToggle();
     driveUpdateUI();
   }

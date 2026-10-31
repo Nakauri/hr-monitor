@@ -642,8 +642,10 @@ public class NativeHrSessionPlugin extends Plugin {
                     AuthStorage.store(getContext(), accessToken, refreshToken,
                         expiresAt != null ? expiresAt : 0L, email);
                     call.resolve();
-                    // Segments recorded while signed out wait for this.
+                    // Segments and finished CSVs recorded while signed out wait for this.
                     SegmentUploadWorker.enqueue(getContext(), "sweep", null);
+                    HrEngine e = HrEngine.peek();
+                    if (e != null) e.sendFinishedCsvs();
                 } catch (Throwable t) {
                     call.reject("storeAuthTokens failed: " + t.getMessage());
                 }

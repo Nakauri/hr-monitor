@@ -6246,10 +6246,12 @@ END SECTION MAP -->
       if (driveAccessToken && driveFolderId) marksSyncPass().then((moved) => { if (moved) routeUnlessEditing(); });
     } catch (e) { console.warn('[marks] init failed', e && e.message); }
   }
-  // The monitor's Drive sync setting holds for marks on the web too (driveSyncOn there); the app always syncs.
+  // The monitor's Drive sync setting holds for marks here too: its web switch, and the app's Drive pause.
   function marksCanSync() {
     if (!(driveAccessToken && driveFolderId)) return false;
-    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) return true;
+    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) {
+      try { return localStorage.getItem('hr_monitor_drive_paused') !== '1'; } catch (e) { return true; }
+    }
     try { return localStorage.getItem('hr_monitor_drive_sync') !== '0'; } catch (e) { return true; }
   }
   function marksChanged() {

@@ -38,22 +38,12 @@ public class OrphanRecoveryWorker extends Worker {
             File sessionsDir = new File(ctx.getFilesDir(), "sessions");
             if (!sessionsDir.exists()) return Result.success();
 
-            // Never scan while a session is recording (or died mid-record and
-            // hasn't been cleanly stopped): the CSV is still growing and the
-            // uploader owns it. Wait for the next 6 h pass.
+            // The recording file is skipped by name; every finished CSV may go while a session records.
             android.content.SharedPreferences prefs =
                 ctx.getSharedPreferences("hr_monitor_session", Context.MODE_PRIVATE);
-            boolean sessionActive = prefs.getBoolean("sessionActive", false);
-            boolean cleanlyStopped = prefs.getBoolean("cleanlyStopped", true);
-            if (sessionActive && !cleanlyStopped) {
-                Log.i(TAG, "Orphan recovery skipped — session active/unclean.");
-                return Result.success();
-            }
             String activeCsv = prefs.getString("activeCsvFilename", null);
 
             NativeDriveUploader uploader = new NativeDriveUploader(ctx);
-            // Mark the active filename so it's always skipped even if the flags
-            // above are mid-transition.
             if (activeCsv != null && !activeCsv.isEmpty()) {
                 uploader.markActiveSessionFilename(activeCsv);
             }

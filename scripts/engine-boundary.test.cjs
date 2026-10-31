@@ -693,9 +693,19 @@ function step2Checks() {
       && /NETWORK_SWEEP_GAP_MS/.test(ec));
     const du = readSource('NativeDriveUploader.java');
     const duc = du ? codeView(du) : '';
-    const orphanScan = methodSpans(duc, 'private\\s+boolean\\s+runOrphanScan')[0];
+    const orphanScan = methodSpans(duc, 'private\\s+boolean\\s+runOrphanScanLocked')[0];
     const finishedBody = methodSpans(duc, 'public\\s+boolean\\s+uploadFinishedSync')[0];
     const oneOrphan = methodSpans(duc, 'public\\s+void\\s+uploadOrphanIfNeededAsync')[0];
+    const cleanup = methodSpans(duc, 'private\\s+void\\s+runCleanup')[0];
+    const cleanupBody = cleanup ? duc.slice(cleanup[0], cleanup[1]) : '';
+    check('[drive] cleanup never deletes a CSV Drive lacks: unknown Drive state deletes nothing, every tier checks the size',
+      /signedIn\s*&&\s*driveFiles\s*==\s*null/.test(cleanupBody) && /signedIn\s*&&\s*DriveGate\.paused/.test(cleanupBody)
+      && /if\s*\(\s*signedIn\s*&&\s*!onDrive\s*\)\s*continue/.test(cleanupBody)
+      && /signedIn\s*&&\s*!SegmentUploadPlan\.legacyOnDrive/.test(cleanupBody));
+    check('[drive] a held-back CSV has triggers: Wi-Fi return, pause off, sign-in; the worker scans during a session',
+      /!DriveGate\.metered\(appCtx\)[\s\S]{0,120}sendFinishedCsvs\s*\(/.test(ec) && !/cleanlyStopped/.test(codeView(readSource('OrphanRecoveryWorker.java')))
+      && /\.sendFinishedCsvs\s*\(/.test(codeView(readSource('NativeHrSessionPlugin.java'))));
+    check('[drive] Stop clears the active name so a resume or scan reaches the stopped CSV', !!stopUp && /clearActiveSessionFilename\s*\(/.test(ec.slice(stopUp[0], stopUp[1])));
     check('[drive] every full-file send passes the pause and metered gate',
       [orphanScan, finishedBody, oneOrphan].every((b) => b && /fullFileAllowed\s*\(/.test(duc.slice(b[0], b[1])))
       && !/\bpublic\s+\w+\s+upload(Async|Sync)\s*\(/.test(duc));

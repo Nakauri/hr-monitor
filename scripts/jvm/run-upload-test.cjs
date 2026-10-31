@@ -28,6 +28,8 @@ const MUTANTS = {
   'metered-cap-gone': ['DrivePolicy.java', 'return !metered || bytes <= METERED_FULL_FILE_MAX;', 'return true;'],
   // Drive pause: finished files still upload while paused.
   'full-file-ignores-pause': ['DrivePolicy.java', 'if (paused) return false;', ''],
+  // Drive full: a tap on sync says Synced while the segment was refused.
+  'left-files-silent': ['SegmentUploader.java', 'lastRunLeftFiles = !failed.isEmpty();', 'lastRunLeftFiles = false;'],
   // A stalled backup stays silent.
   'behind-never': ['DrivePolicy.java', 'return oldestPendingMs > 0L && nowMs - oldestPendingMs >= BEHIND_MS;', 'return false;'],
   // The growing open hour reads as a stalled backup on every recording.

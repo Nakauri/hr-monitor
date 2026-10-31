@@ -417,6 +417,7 @@ try {
         aria: document.getElementById('drive-sync-toggle').getAttribute('aria-checked'),
         sub: document.querySelector('#status-line .sub').textContent,
         drive: document.getElementById('drive-status').textContent,
+        flag: localStorage.getItem('hr_monitor_drive_paused'),
         calls: window.__fake.calls.filter((c) => /setDrivePaused/.test(c)),
       }));
       await page.click('[aria-controls="sec-connection-body"]');
@@ -424,7 +425,7 @@ try {
       await page.click('#drive-sync-toggle');
       await page.waitForTimeout(400);
       const off = await view();
-      check(off.aria === 'false' && /Drive paused/.test(off.sub) && off.drive === 'Sync off' && off.calls.join() === 'setDrivePaused:true',
+      check(off.flag === '1' && off.aria === 'false' && /Drive paused/.test(off.sub) && off.drive === 'Sync off' && off.calls.join() === 'setDrivePaused:true',
         'native: tapping Drive sync pauses the engine and the status line says so', JSON.stringify(off));
       await page.click('#drive-sync-toggle');
       await page.waitForTimeout(400);

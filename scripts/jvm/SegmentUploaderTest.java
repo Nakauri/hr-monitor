@@ -369,6 +369,7 @@ public class SegmentUploaderTest {
         testTrashedFolders();
         testRelistThrottle();
         testPause();
+        testLeftFiles();
         testOldestPending();
         testDrivePolicy();
         System.out.println("SegmentUploaderTest: " + passes + " passed, " + failures + " failed");
@@ -605,6 +606,23 @@ public class SegmentUploaderTest {
         r = mid.closed();
         check("paused mid-run: the run stops at the next item",
             r == Result.PAUSED && mid.drive.named(SEG_A).size() == 1 && mid.drive.named(SEG_B).isEmpty(), String.valueOf(r));
+    }
+
+    static void testLeftFiles() throws Exception {
+        final Env[] box = new Env[1];
+        SegmentUploader.Http full = (m, u, t, c, b) -> {
+            if ("POST".equals(m) && u.contains("uploadType=multipart")) return new SegmentUploader.Resp(403, "storageQuotaExceeded");
+            return box[0].drive.send(m, u, t, c, b);
+        };
+        Env e = new Env("leftfiles", full);
+        box[0] = e;
+        e.write(SEG_A, header("") + rows(0, 2));
+        Result r = e.closed();
+        check("Drive full: the run reports files left, so a sync never reads as done", e.up.lastRunLeftFiles(), String.valueOf(r));
+        Env ok = new Env("leftnone");
+        ok.write(SEG_A, header("") + rows(0, 2));
+        ok.closed();
+        check("all sent: no files left", !ok.up.lastRunLeftFiles());
     }
 
     static void testOldestPending() throws Exception {
