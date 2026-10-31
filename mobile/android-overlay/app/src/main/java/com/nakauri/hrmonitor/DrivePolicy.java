@@ -1,7 +1,7 @@
 package com.nakauri.hrmonitor;
 
 // Rules for what may reach Drive. Pure Java: the device reads live in DriveGate.
-// Behaviour: scripts/jvm/DrivePolicyTest.java.
+// Behaviour: testDrivePolicy in scripts/jvm/SegmentUploaderTest.java.
 public final class DrivePolicy {
     // A finished session CSV over this size waits for an unmetered network.
     public static final long METERED_FULL_FILE_MAX = 2L * 1024L * 1024L;

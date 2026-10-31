@@ -65,6 +65,9 @@ public class NativeDriveUploader {
         if (name != null) sessionFilenameRef.compareAndSet(name, null);
     }
 
+    // A new sign-in may be another account, whose folder id differs.
+    public void forgetFolder() { folderIdRef.set(null); }
+
     /** Folder lookup, cached per process. */
     public String getOrFetchFolderIdSync(String token) throws IOException {
         String fid = folderIdRef.get();
@@ -88,6 +91,7 @@ public class NativeDriveUploader {
 
     // Three-tier cleanup: 1) Drive-verified delete, 2) age fallback, 3) byte cap.
     // Signed in, a CSV goes only once Drive holds it in full; an unknown Drive state deletes nothing.
+    // Signed out, only the byte cap deletes: age proves nothing about a file that may never have uploaded.
     // KEEP_RECENT_FLOOR + active session are protected at every tier.
     public void cleanupLocalCachedAsync(File sessionsDir, long minAgeMs) {
         if (sessionsDir == null || !sessionsDir.isDirectory()) return;
@@ -158,7 +162,7 @@ public class NativeDriveUploader {
                 if (f.delete()) { tier1++; freedT1 += len; }
                 continue;
             }
-            if (f.lastModified() <= fallbackCutoff) {
+            if (signedIn && f.lastModified() <= fallbackCutoff) {
                 long len = f.length();
                 if (f.delete()) { tier2++; freedT2 += len; }
             }
@@ -430,7 +434,7 @@ public class NativeDriveUploader {
             java.util.Map<String, DriveFileInfo> driveFiles = listDriveFiles(token, folderId);
             if (driveFiles == null) return false;
             DriveFileInfo info = driveFiles.get(f.getName());
-            if (info != null) return f.length() == info.size || patchOrphan(token, info.id, f);
+            if (info != null) return f.length() <= info.size || patchOrphan(token, info.id, f);
             return createOrphan(token, folderId, f);
         } catch (Throwable t) {
             Log.w(TAG, "uploadFinishedSync failed: " + t.getMessage());

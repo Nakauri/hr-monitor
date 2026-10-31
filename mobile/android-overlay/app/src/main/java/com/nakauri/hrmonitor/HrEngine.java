@@ -296,6 +296,9 @@ public final class HrEngine implements HrDevice.Callback {
     private volatile long lastNetworkSweepMs = 0L;
     private static final long NETWORK_CSV_GAP_MS = 10L * 60_000L;
     private volatile long lastNetworkCsvMs = 0L;
+    // A flapping signal never re-sends the open hour faster than the tick does.
+    private static final long FORCED_OPEN_GAP_MS = 5L * 60_000L;
+    private volatile long lastForcedOpenMs = 0L;
 
     // Runs here, not through the unique work: KEEP drops a request while the worker sits in retry backoff.
     private void onNetworkReturned() {
@@ -303,7 +306,10 @@ public final class HrEngine implements HrDevice.Callback {
         if (now - lastNetworkSweepMs >= NETWORK_SWEEP_GAP_MS) {
             lastNetworkSweepMs = now;
             sweepSegmentsNow();
-            if (openUploadOwed) forceOpenUploadCheck();
+            if (openUploadOwed && now - lastForcedOpenMs >= FORCED_OPEN_GAP_MS) {
+                lastForcedOpenMs = now;
+                forceOpenUploadCheck();
+            }
         }
         // Its own gap: a cell flap must not swallow the move to Wi-Fi.
         if (!DriveGate.metered(appCtx) && now - lastNetworkCsvMs >= NETWORK_CSV_GAP_MS) {
@@ -315,6 +321,11 @@ public final class HrEngine implements HrDevice.Callback {
     // Finished CSVs waiting on the pause, the metered cap or sign-in.
     public void sendFinishedCsvs() {
         uploader.uploadOrphansAsync(new java.io.File(appCtx.getFilesDir(), "sessions"));
+    }
+
+    public void onSignedIn() {
+        uploader.forgetFolder();
+        sendFinishedCsvs();
     }
 
     private void sweepSegmentsNow() {

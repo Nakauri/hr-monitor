@@ -5376,7 +5376,7 @@ END SECTION MAP -->
     // Posture bar becomes a "Download CSV" button until the user taps it
     // (or starts a new session).
     if (isMobileShell()) {
-      if (driveActive && driveSyncOn()) showToast('Session queued for Drive');
+      if (driveActive && driveSyncOn() && window.aortiAuth && window.aortiAuth.isSignedIn && window.aortiAuth.isSignedIn()) showToast('Session queued for Drive');
       showDownloadCsvInsteadOfPosture();
     }
   }
@@ -7029,6 +7029,8 @@ END SECTION MAP -->
           // The technical reason goes to the events log above.
           if (res && res.ok) {
             sub.textContent = 'Synced (' + dt + 's)';
+          } else if (res && res.reason === 'segments_BUSY') {
+            sub.textContent = 'Already syncing';
           } else {
             sub.textContent = 'Sync failed';
           }
@@ -7038,7 +7040,7 @@ END SECTION MAP -->
         if (sub) sub.textContent = 'Sync failed';
       } finally {
         setTimeout(() => {
-          if (sub && sub.textContent && (sub.textContent.startsWith('Synced') || sub.textContent.startsWith('Sync failed'))) {
+          if (sub && sub.textContent && /^(Synced|Sync failed|Already syncing)/.test(sub.textContent)) {
             sub.textContent = orig;
           }
         }, 5000);
