@@ -701,7 +701,7 @@ function step2Checks() {
     check('[drive] cleanup never deletes a CSV Drive lacks: unknown Drive state deletes nothing, every tier checks the size',
       /signedIn\s*&&\s*driveFiles\s*==\s*null/.test(cleanupBody) && /signedIn\s*&&\s*DriveGate\.paused/.test(cleanupBody)
       && /if\s*\(\s*signedIn\s*&&\s*!onDrive\s*\)\s*continue/.test(cleanupBody)
-      && /signedIn\s*&&\s*!SegmentUploadPlan\.legacyOnDrive/.test(cleanupBody));
+      && /signedIn\s*&&\s*!heldInFull/.test(cleanupBody));
     check('[drive] a held-back CSV has triggers: Wi-Fi return, pause off, sign-in; the worker scans during a session',
       /!DriveGate\.metered\(appCtx\)[\s\S]{0,120}sendFinishedCsvs\s*\(/.test(ec) && !/cleanlyStopped/.test(codeView(readSource('OrphanRecoveryWorker.java')))
       && /\.sendFinishedCsvs\s*\(/.test(codeView(readSource('NativeHrSessionPlugin.java'))));

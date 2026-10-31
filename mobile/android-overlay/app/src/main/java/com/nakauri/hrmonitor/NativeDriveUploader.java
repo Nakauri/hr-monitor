@@ -100,6 +100,12 @@ public class NativeDriveUploader {
         });
     }
 
+    private static boolean heldInFull(java.util.Map<String, DriveFileInfo> driveFiles, File f) {
+        if (driveFiles == null) return false;
+        DriveFileInfo info = driveFiles.get(f.getName());
+        return SegmentUploadPlan.legacyOnDrive(f.length(), info != null ? info.size : null);
+    }
+
     private void runCleanup(File sessionsDir, long minAgeMs) {
         File[] localFiles = sessionsDir.listFiles();
         if (localFiles == null) return;
@@ -123,10 +129,6 @@ public class NativeDriveUploader {
             return;
         }
         boolean driveActive = driveFiles != null;
-        java.util.Map<String, Long> driveSizes = new java.util.HashMap<>();
-        if (driveFiles != null) {
-            for (java.util.Map.Entry<String, DriveFileInfo> e : driveFiles.entrySet()) driveSizes.put(e.getKey(), e.getValue().size);
-        }
 
         long capBytes      = driveActive ? CAP_BYTES_DRIVE      : CAP_BYTES_NO_DRIVE;
         long fallbackMs    = driveActive ? AGE_FALLBACK_DRIVE   : AGE_FALLBACK_NO_DRIVE;
@@ -149,7 +151,7 @@ public class NativeDriveUploader {
 
         for (File f : csvList) {
             if (keepFloor.contains(f.getName())) continue;
-            boolean onDrive = SegmentUploadPlan.legacyOnDrive(f.length(), driveSizes.get(f.getName()));
+            boolean onDrive = heldInFull(driveFiles, f);
             if (signedIn && !onDrive) continue;
             if (onDrive && f.lastModified() <= ageCutoff) {
                 long len = f.length();
@@ -172,7 +174,7 @@ public class NativeDriveUploader {
             for (File f : survivors) {
                 if (total <= capBytes) break;
                 if (keepFloor.contains(f.getName())) continue;
-                if (signedIn && !SegmentUploadPlan.legacyOnDrive(f.length(), driveSizes.get(f.getName()))) continue;
+                if (signedIn && !heldInFull(driveFiles, f)) continue;
                 long len = f.length();
                 if (f.delete()) { tier3++; freedT3 += len; total -= len; }
             }

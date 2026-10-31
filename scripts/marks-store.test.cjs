@@ -351,7 +351,7 @@ CHECKS.M5 = async (src) => {
   const U = readJava('NativeDriveUploader.java');
   const gets = U.match(/driveFiles\.get\([^;]*?\);/g) || [];
   out.push(['M5 NativeDriveUploader looks Drive names up only by local file names', gets.length >= 3 && gets.every(g => /^driveFiles\.get\((f\.getName\(\)|filename)\);$/.test(g)), gets.join(' ')]);
-  out.push(['M5 NativeDriveUploader never iterates the Drive listing', !/for\s*\([^)]*:\s*driveFiles\b/.test(U) && (U.match(/\.keySet\(\)/g) || []).length === 1]);
+  out.push(['M5 NativeDriveUploader never iterates the Drive listing', !/for\s*\([^)]*:\s*driveFiles\b/.test(U) && !/\.keySet\(\)/.test(U)]);
   // The Clear cache loop moved into CacheClear.java (10-15); each file keeps its own filters.
   const csvIn = (t) => (t.match(/getName\(\)\.endsWith\("\.csv"\)/g) || []).length;
   out.push(['M5 NativeDriveUploader local loops keep .csv names only', csvIn(U) >= 4 && csvIn(readJava('CacheClear.java')) >= 1]);
@@ -700,9 +700,9 @@ CHECKS.A1 = async (src) => {
 
 // Security L1 (S23): viewer marks sync honours the web Drive sync setting, as the monitor's driveSyncOn; the app always syncs.
 CHECKS.SL1 = async (src) => {
-  const can = (stored, native, signedIn = true) => loadPage(src.viewer, ['marksCanSync'], {
+  const can = (stored, native, signedIn = true, paused = null) => loadPage(src.viewer, ['marksCanSync'], {
     driveAccessToken: signedIn ? 'tok' : null, driveFolderId: 'root1',
-    localStorage: { getItem: (k) => (k === 'hr_monitor_drive_sync' ? stored : null) },
+    localStorage: { getItem: (k) => (k === 'hr_monitor_drive_sync' ? stored : k === 'hr_monitor_drive_paused' ? paused : null) },
     window: native ? { Capacitor: { isNativePlatform: () => true } } : {},
     Capacitor: native ? { isNativePlatform: () => true } : undefined,
   }).marksCanSync();
@@ -719,6 +719,7 @@ CHECKS.SL1 = async (src) => {
     ['SL1 web, Drive sync off: no marks sync', can('0', false) === false],
     ['SL1 web, Drive sync on or never set: marks sync', can('1', false) === true && can(null, false) === true],
     ['SL1 app, the setting is ignored: marks sync', can('0', true) === true],
+    ['SL1 app, Drive paused: no marks sync', can('1', true, true, '1') === false && can('1', true, true, '0') === true],
     ['SL1 signed out: no marks sync', can('1', false, false) === false],
     ['SL1 web, Drive sync off, a mark waiting: the cloud does not count it as sync work', waiting('0') === false && waiting('1') === true],
   ];
@@ -822,7 +823,8 @@ const MUTANTS = [
   ['A1', 'any account syncs', 'drive', '      st.blocked = bound !== key;', '      st.blocked = false;'],
   ['U1', 'no time limit on Undo', 'monitor', ' && Date.now() - m.at <= window.AortiMarks.UNDO_LIMIT_MS);', ');'],
   ['SL1', 'viewer marks ignore the Drive sync setting', 'viewer', "    try { return localStorage.getItem('hr_monitor_drive_sync') !== '0'; } catch (e) { return true; }", '    return true;'],
-  ['SL1', 'the app obeys the web setting', 'viewer', '    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) return true;\n', ''],
+  ['SL1', 'the app obeys the web setting', 'viewer', '    if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) {\n', '    if (false) {\n'],
+  ['SL1', 'the app ignores the Drive pause', 'viewer', "      try { return localStorage.getItem('hr_monitor_drive_paused') !== '1'; } catch (e) { return true; }", '      return true;'],
   ['SL1', 'waiting marks count as sync work with sync off', 'viewer', ' && !st.blocked && marksCanSync());', ' && !st.blocked);'],
   ['SL2', 'records() ignores the account guard', 'drive', '      records() { return st.blocked ? [] : store.all(); },', '      records() { return store.all(); },'],
   ['SL2', 'the viewer applies the raw store', 'viewer', 'AortiMarks.applyMarks(raw, marksPage.drive.records(), marksScope(s))', 'AortiMarks.applyMarks(raw, marksPage.store.all(), marksScope(s))'],
