@@ -5919,7 +5919,7 @@ END SECTION MAP -->
     if (paused === drivePausedSeen) return;
     drivePausedSeen = paused;
     // The app's viewer page reads this for its marks.
-    try { localStorage.setItem('hr_monitor_drive_paused', paused ? '1' : '0'); } catch (e) {}
+    try { localStorage.setItem('hr_monitor_drive_paused', paused ? '1' : '0'); } catch (e) { console.warn('[drive] pause flag not saved', e && e.message); }
     renderDriveSyncToggle();
     driveUpdateUI();
   }
