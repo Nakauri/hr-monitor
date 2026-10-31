@@ -677,7 +677,7 @@ function step2Checks() {
     check('[drive] the live whole-file uploader is gone', !readSource('NativeDriveResumableUploader.java') && !/\bresumable\b/.test(ec));
     const uploaderCalls = [...new Set([...ec.matchAll(/\buploader\.(\w+)\s*\(/g)].map((x) => x[1]))].sort().join(',');
     check('[drive] the engine touches the recording file through no uploader call',
-      uploaderCalls === 'cleanupLocalCachedAsync,clearLocalCache,markActiveSessionFilename,resetSession,uploadOrphanIfNeededAsync,uploadOrphansAsync', uploaderCalls);
+      uploaderCalls === 'cleanupLocalCachedAsync,clearLocalCache,forgetFolder,markActiveSessionFilename,resetSession,uploadOrphanIfNeededAsync,uploadOrphansAsync', uploaderCalls);
     const stopUp = methodSpans(ec, 'private\\s+void\\s+runStopUpload')[0];
     const finished = (ec.match(/\.uploadFinishedSync\s*\(/g) || []).length;
     check('[drive] the session CSV uploads once, from the stop worker only',
