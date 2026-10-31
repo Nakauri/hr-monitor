@@ -40,7 +40,8 @@ public final class SegmentUploader {
     static final String K_PAUSED = "drive_paused";
     static final String K_LAST_CLEAN = "seg_last_clean";
     static final long CLEAN_EVERY_MS = 24L * 3_600_000L;
-    // Each candidate costs one Drive lookup; a backlog drains over later runs.
+    // Each candidate costs one Drive lookup. One batch a day; the cursor moves on past names Drive cannot confirm.
+    static final String K_CLEAN_AFTER = "seg_clean_after";
     static final int CLEAN_MAX_PER_RUN = 48;
     // A run rescans until a pass finds nothing new and no segment closed meanwhile (CLOSE_SEQ unchanged).
     static final int MAX_ROUNDS = 6;
@@ -278,11 +279,12 @@ public final class SegmentUploader {
             String[] names = dir.list();
             if (names == null) return;
             Arrays.sort(names);
+            String after = store.get(K_CLEAN_AFTER);
             List<SegmentUploadPlan.LocalSeg> old = new ArrayList<>();
             Map<String, long[]> driveSizes = new HashMap<>();
             boolean more = false;
             for (String n : names) {
-                if (!SegmentReader.validName(n)) continue;
+                if (!SegmentReader.validName(n) || (after != null && n.compareTo(after) <= 0)) continue;
                 long base = SegmentReader.baseOf(n);
                 if (base + 3_600_000L > now - SegmentUploadPlan.CLEANUP_MIN_AGE_MS) continue;
                 if (old.size() >= CLEAN_MAX_PER_RUN) { more = true; break; }
@@ -299,7 +301,9 @@ public final class SegmentUploader {
                 if (new File(dir, n).delete()) deleted++;
             }
             if (!old.isEmpty()) log.log("upload_cleanup deleted=" + deleted + " checked=" + old.size());
-            if (!more) store.put(K_LAST_CLEAN, Long.toString(now));
+            if (more) store.put(K_CLEAN_AFTER, old.get(old.size() - 1).name);
+            else store.remove(K_CLEAN_AFTER);
+            store.put(K_LAST_CLEAN, Long.toString(now));
         } catch (Exception e) {
             log.log("upload_cleanup_skip reason=" + e);
         }

@@ -625,6 +625,23 @@ public class SegmentUploaderTest {
         int lookups = e.drive.calls.size();
         e.up.run(Mode.CLOSED, null, true, 1000L);
         check("cleanup runs at most once a day", e.drive.calls.size() - lookups <= 1, String.valueOf(e.drive.calls.size() - lookups));
+        Env stuck = new Env("cleancursor");
+        List<String> names = new ArrayList<>();
+        for (int d = 1; d <= 3; d++) for (int h = 0; h < 24; h++) names.add(String.format(Locale.US, "hrm_202610%02dT%02dZ_abc123.csv", d, h));
+        names.add("hrm_20261005T00Z_abc123.csv");
+        for (String n : names) stuck.write(n, header("") + rows(0, 1));
+        stuck.now[0] = 1_791_500_000_000L;
+        stuck.up.run(Mode.CLOSED, null, true, 5000L);
+        for (String n : names) if (!n.startsWith("hrm_20261005")) stuck.drive.named(n).get(0).trashed = true;
+        stuck.now[0] += 40L * 24L * 3_600_000L;
+        stuck.up.run(Mode.CLOSED, null, true, 5000L);
+        check("cleanup: one day checks one batch", new File(stuck.dir, "hrm_20261005T00Z_abc123.csv").exists());
+        stuck.now[0] += 25L * 3_600_000L;
+        stuck.up.run(Mode.CLOSED, null, true, 5000L);
+        stuck.now[0] += 25L * 3_600_000L;
+        stuck.up.run(Mode.CLOSED, null, true, 5000L);
+        check("cleanup: names Drive cannot confirm never block the ones after them",
+            !new File(stuck.dir, "hrm_20261005T00Z_abc123.csv").exists() && new File(stuck.dir, names.get(0)).exists());
         Env open = new Env("cleanopen");
         open.tokens.current = null;
         open.write(SEG_A, header("") + rows(0, 2));

@@ -34,6 +34,8 @@ const MUTANTS = {
   'cleanup-unwired': ['SegmentUploader.java', 'if (countLegacy) cleanupConfirmed(open);', ''],
   // 3 GB on a dropped line: the relay ignores the user's mobile data choice.
   'relay-ignores-choice': ['DrivePolicy.java', 'return allowMobile || !metered;', 'return true;'],
+  // Cleanup re-checks the same oldest batch for ever and never reaches newer files.
+  'cleanup-no-cursor': ['SegmentUploader.java', 'if (more) store.put(K_CLEAN_AFTER, old.get(old.size() - 1).name);', 'if (more) store.remove(K_CLEAN_AFTER);'],
   // A stalled backup stays silent.
   'behind-never': ['DrivePolicy.java', 'return oldestPendingMs > 0L && nowMs - oldestPendingMs >= BEHIND_MS;', 'return false;'],
   // The growing open hour reads as a stalled backup on every recording.

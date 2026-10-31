@@ -2663,7 +2663,8 @@ END SECTION MAP -->
     // doesn't know about.
     let uploaded = 0;
     const localNames = new Set();
-    if (dirHandle && !aborted()) {
+    // The Drive sync setting holds here too: with it off, a picked folder is never uploaded.
+    if (dirHandle && !aborted() && marksCanSync()) {
       const canRead = await ensureReadPermission();
       if (canRead) {
         try {
