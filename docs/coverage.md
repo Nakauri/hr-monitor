@@ -9,12 +9,12 @@ listed test changed since it was written. Controls = negative controls (mutants)
 | Web Drive save | `recorder.test.cjs` (92), `drive-root.test.cjs` (5) | `monitor-sync`, `recorder-page` |
 | Native segment write | `run-segment-test.cjs` (16), `segment-format.test.cjs` (0) | none |
 | Native upload | `run-upload-test.cjs` (53) | none |
-| Marks | `marks-store.test.cjs` (FAILING), `csv-format.test.cjs` (0), `recorder.test.cjs` (92) | `symptom-marks`, `recorder-page` |
+| Marks | `marks-store.test.cjs` (36), `csv-format.test.cjs` (0), `recorder.test.cjs` (92) | `symptom-marks`, `recorder-page` |
 | Viewer parse | `viewer-parse.test.cjs` (5), `segment-format.test.cjs` (0), `day-boundary.test.cjs` (0), `day-gaps.test.cjs` (1), `row-epoch.test.cjs` (3) | `parse-worker`, `v2-series`, `session-time` |
 | Native reconnect (no gap in the recording) | `run-reconnect-test.cjs` (22), `engine-boundary.test.cjs` (0) | `strap-switch` |
 | HR and HRV numbers (JS and native) | `rmssd-parity.test.js` (9), `avg-stats.test.cjs` (0) | `native-rmssd` |
 | Native CSV writer (legacy file) | `csv-format.test.cjs` (0), `segment-format.test.cjs` (0) | none |
-| Phone marks and service start | `run-engine2-test.cjs` (26), `marks-store.test.cjs` (FAILING) | `symptom-marks` |
+| Phone marks and service start | `run-engine2-test.cjs` (26), `marks-store.test.cjs` (36) | `symptom-marks` |
 | Relay broadcast of the live numbers | `relay-link.test.cjs` (72), `relay-server.test.mjs` (19) | `overlay-behaviour` |
 
 <!-- hashes {"scripts/recorder.test.cjs":"b4ef740b15ab","scripts/drive-root.test.cjs":"e82099e1466b","scripts/jvm/run-segment-test.cjs":"aba393c87684","scripts/segment-format.test.cjs":"5242b77df767","scripts/jvm/run-upload-test.cjs":"6d4a2cc55019","scripts/marks-store.test.cjs":"8925b5f1b451","scripts/csv-format.test.cjs":"ffcad33f5120","scripts/viewer-parse.test.cjs":"e67eefd08ab4","scripts/day-boundary.test.cjs":"d94765b781c9","scripts/day-gaps.test.cjs":"43748cb4643f","scripts/row-epoch.test.cjs":"36a0681e5849","scripts/jvm/run-reconnect-test.cjs":"e23df2aefaf1","scripts/engine-boundary.test.cjs":"de410a76524e","scripts/rmssd-parity.test.js":"cf0f466921dd","scripts/avg-stats.test.cjs":"94b4cb0f8520","scripts/jvm/run-engine2-test.cjs":"9e2ab33aacfd","scripts/relay-link.test.cjs":"8029a3895d23","scripts/relay-server.test.mjs":"a669f30fc5ab"} -->
