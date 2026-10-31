@@ -1670,6 +1670,8 @@ public final class HrEngine implements HrDevice.Callback {
     private void startSegmentUploadTick() {
         synchronized (segmentUploadTickLock) {
             stopSegmentUploadTickLocked();
+            driveBehind = false;
+            openUploadOwed = false;
             if (SegmentUploader.OPEN_PATCH_MS <= 0L) return;
             lastOpenUploadWallMs = System.currentTimeMillis();
             try {
@@ -1776,7 +1778,7 @@ public final class HrEngine implements HrDevice.Callback {
     public void segmentTickFromAlarm() {
         if (!sessionActive.get()) return;
         postSegmentTick();
-        try { segmentUploadExecutor.execute(this::segmentUploadCheck); } catch (Throwable t) { Log.w(TAG, "upload check not queued: " + t); }
+        try { segmentUploadExecutor.execute(() -> segmentUploadCheck(false)); } catch (Throwable t) { Log.w(TAG, "upload check not queued: " + t); }
     }
 
     // Fact row from the WebView. {status: written | not_written | no_session | bad_kind}, plus the stored ts and label once it reaches the sink.
