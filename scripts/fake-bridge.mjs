@@ -45,6 +45,7 @@ export function fakeBridge(cfg) {
     } });
     const hr = {
       addListener: (n, cb) => { F.listeners[n] = cb; return Promise.resolve({ remove() {} }); },
+      setRelayOnMobile: (o) => { F.calls.push('setRelayOnMobile:' + o.allow); F.snapshot.relayOnMobile = !!o.allow; return Promise.resolve({ allow: !!o.allow }); },
       setDrivePaused: (o) => { F.calls.push('setDrivePaused:' + o.paused); F.snapshot.drivePaused = !!o.paused; return Promise.resolve({ paused: !!o.paused }); },
       status: () => { F.statusCalls++; return Promise.resolve(JSON.parse(JSON.stringify(F.snapshot))); },
       ping: () => Promise.resolve({ ok: true }),

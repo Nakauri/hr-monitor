@@ -496,7 +496,7 @@ function step2Checks() {
       const hb = E.slice(E.indexOf('private final Runnable heartbeatRunnable'), E.indexOf('private final Runnable heartbeatRunnable') + 2500);
       const RP = readSource('ReconnectPolicy.java') || '';
       check('the heartbeat reopens a relay left down, no retry queued, no attempt for 2 min',
-        /if \(ReconnectPolicy\.relayWatchdogDue\(broadcastEnabled, hasBroadcastKey\(\), relayLive\.get\(\), relayRetryPending, up, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocketSafely\(\)/.test(hb)
+        /if \(ReconnectPolicy\.relayWatchdogDue\(broadcastEnabled && relayNetworkAllowed\(\), hasBroadcastKey\(\), relayLive\.get\(\), relayRetryPending, up, relayLastOpenAtMs\)\) \{[\s\S]{0,300}openRelaySocketSafely\(\)/.test(hb)
         && !/if \(ReconnectPolicy\.relayWatchdogDue\([^{]*\{[^}]*relayReset\(\)/.test(hb)
         && /RELAY_WATCHDOG_MS = 120_000L/.test(RP) && /return broadcast && hasKey && !live && !retryPending && now - lastOpenAtMs >= RELAY_WATCHDOG_MS;/.test(RP)
         && /relayLastOpenAtMs = android\.os\.SystemClock\.elapsedRealtime\(\);/.test(relayOpen)
@@ -691,6 +691,10 @@ function step2Checks() {
       !!noteOpen && /Result\.RETRY/.test(ec.slice(noteOpen[0], noteOpen[1])) && /if\s*\(\s*!failed\s*\)\s*lastOpenUploadWallMs/.test(ec.slice(noteOpen[0], noteOpen[1])));
     check('[drive] the network coming back sends what waited', /if\s*\(\s*changed\s*\|\|\s*back\s*\)\s*onNetworkReturned\s*\(\s*\)/.test(ec)
       && /NETWORK_SWEEP_GAP_MS/.test(ec));
+    const openRelay = methodSpans(ec, 'private\\s+void\\s+openRelaySocket')[0];
+    check('[drive] the relay checks the network before it opens, and the watchdog respects the hold',
+      !!openRelay && /if\s*\(\s*!relayNetworkAllowed\(\)\s*\)/.test(ec.slice(openRelay[0], openRelay[1]))
+      && /relayWatchdogDue\(\s*broadcastEnabled\s*&&\s*relayNetworkAllowed\(\)/.test(ec));
     const du = readSource('NativeDriveUploader.java');
     const duc = du ? codeView(du) : '';
     const orphanScan = methodSpans(duc, 'private\\s+boolean\\s+runOrphanScanLocked')[0];

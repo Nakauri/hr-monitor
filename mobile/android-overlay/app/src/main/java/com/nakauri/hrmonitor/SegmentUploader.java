@@ -38,6 +38,10 @@ public final class SegmentUploader {
     static final int MAX_PAGES = 100;
     static final String K_ACCOUNT = "seg_account";
     static final String K_PAUSED = "drive_paused";
+    static final String K_LAST_CLEAN = "seg_last_clean";
+    static final long CLEAN_EVERY_MS = 24L * 3_600_000L;
+    // Each candidate costs one Drive lookup; a backlog drains over later runs.
+    static final int CLEAN_MAX_PER_RUN = 48;
     // A run rescans until a pass finds nothing new and no segment closed meanwhile (CLOSE_SEQ unchanged).
     static final int MAX_ROUNDS = 6;
     // After a state reset or an account switch, at most this many segments are looked up per run.
@@ -258,7 +262,47 @@ public final class SegmentUploader {
             log.log("upload_skip reason=account_changed");
             return Result.RETRY;
         }
+        if (countLegacy) cleanupConfirmed(open);
         return Result.OK;
+    }
+
+    // Local copies over 30 days old whose exact size a fresh Drive lookup confirms. Never fails the run.
+    private void cleanupConfirmed(SegmentReader.OpenSegment open) {
+        try {
+            long now = clock.wallMs();
+            String last = store.get(K_LAST_CLEAN);
+            if (last != null) {
+                long t = Long.parseLong(last);
+                if (now >= t && now - t < CLEAN_EVERY_MS) return;
+            }
+            String[] names = dir.list();
+            if (names == null) return;
+            Arrays.sort(names);
+            List<SegmentUploadPlan.LocalSeg> old = new ArrayList<>();
+            Map<String, long[]> driveSizes = new HashMap<>();
+            boolean more = false;
+            for (String n : names) {
+                if (!SegmentReader.validName(n)) continue;
+                long base = SegmentReader.baseOf(n);
+                if (base + 3_600_000L > now - SegmentUploadPlan.CLEANUP_MIN_AGE_MS) continue;
+                if (old.size() >= CLEAN_MAX_PER_RUN) { more = true; break; }
+                File f = new File(dir, n);
+                old.add(new SegmentUploadPlan.LocalSeg(n, base, lastLf(f, f.length())));
+                SegmentUploadPlan.Remote[] found = listByName(n);
+                long[] sizes = new long[found.length];
+                for (int i = 0; i < found.length; i++) sizes[i] = found[i].size;
+                driveSizes.put(n, sizes);
+            }
+            String openName = open != null ? open.openName() : null;
+            int deleted = 0;
+            for (String n : SegmentUploadPlan.planCleanup(old, driveSizes, openName, null, now, 0L, 0L, false)) {
+                if (new File(dir, n).delete()) deleted++;
+            }
+            if (!old.isEmpty()) log.log("upload_cleanup deleted=" + deleted + " checked=" + old.size());
+            if (!more) store.put(K_LAST_CLEAN, Long.toString(now));
+        } catch (Exception e) {
+            log.log("upload_cleanup_skip reason=" + e);
+        }
     }
 
     // While relisting: the open segment first, then the newest hours, each .bad file just before its segment,

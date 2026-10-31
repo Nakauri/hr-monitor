@@ -370,6 +370,7 @@ public class SegmentUploaderTest {
         testRelistThrottle();
         testPause();
         testLeftFiles();
+        testCleanupConfirmed();
         testOldestPending();
         testDrivePolicy();
         System.out.println("SegmentUploaderTest: " + passes + " passed, " + failures + " failed");
@@ -608,6 +609,30 @@ public class SegmentUploaderTest {
             r == Result.PAUSED && mid.drive.named(SEG_A).size() == 1 && mid.drive.named(SEG_B).isEmpty(), String.valueOf(r));
     }
 
+    static void testCleanupConfirmed() throws Exception {
+        Env e = new Env("clean");
+        e.write(SEG_A, header("") + rows(0, 2));
+        e.write(SEG_B, header("") + rows(0, 2));
+        e.now[0] = 1_791_500_000_000L;
+        e.up.run(Mode.CLOSED, null, true, 1000L);
+        check("under 30 days: the sent segments stay on the phone", new File(e.dir, SEG_A).exists() && new File(e.dir, SEG_B).exists());
+        e.now[0] += 40L * 24L * 3_600_000L;
+        e.drive.named(SEG_B).get(0).trashed = true;
+        e.up.run(Mode.CLOSED, null, true, 1000L);
+        check("over 30 days and on Drive: the phone copy goes, Drive keeps it",
+            !new File(e.dir, SEG_A).exists() && e.drive.named(SEG_A).size() == 1, e.log.toString());
+        check("over 30 days but gone from Drive: the phone copy stays", new File(e.dir, SEG_B).exists());
+        int lookups = e.drive.calls.size();
+        e.up.run(Mode.CLOSED, null, true, 1000L);
+        check("cleanup runs at most once a day", e.drive.calls.size() - lookups <= 1, String.valueOf(e.drive.calls.size() - lookups));
+        Env open = new Env("cleanopen");
+        open.tokens.current = null;
+        open.write(SEG_A, header("") + rows(0, 2));
+        open.now[0] = 1_795_000_000_000L;
+        open.up.run(Mode.CLOSED, null, true, 1000L);
+        check("signed out: nothing is cleaned", new File(open.dir, SEG_A).exists());
+    }
+
     static void testLeftFiles() throws Exception {
         final Env[] box = new Env[1];
         SegmentUploader.Http full = (m, u, t, c, b) -> {
@@ -648,6 +673,7 @@ public class SegmentUploaderTest {
         check("metered: over the cap waits", !DrivePolicy.allowFullFile(max + 1L, true, false));
         check("paused: nothing goes, even small on Wi-Fi", !DrivePolicy.allowFullFile(1L, false, true));
         long t = 1_790_000_000_000L;
+        check("relay: Wi-Fi always, mobile only by choice", DrivePolicy.relayAllowed(false, false) && DrivePolicy.relayAllowed(true, true) && !DrivePolicy.relayAllowed(false, true));
         check("no pending: never behind", !DrivePolicy.behind(0L, t));
         check("just under 30 min: not behind", !DrivePolicy.behind(t - DrivePolicy.BEHIND_MS + 1L, t));
         check("30 min: behind", DrivePolicy.behind(t - DrivePolicy.BEHIND_MS, t));

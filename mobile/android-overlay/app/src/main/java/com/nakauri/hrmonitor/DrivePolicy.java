@@ -15,6 +15,11 @@ public final class DrivePolicy {
         return !metered || bytes <= METERED_FULL_FILE_MAX;
     }
 
+    // Sharing live HR on mobile data is the user's choice; Wi-Fi is always allowed.
+    public static boolean relayAllowed(boolean allowMobile, boolean metered) {
+        return allowMobile || !metered;
+    }
+
     // oldestPendingMs is 0 when nothing is pending.
     public static boolean behind(long oldestPendingMs, long nowMs) {
         return oldestPendingMs > 0L && nowMs - oldestPendingMs >= BEHIND_MS;

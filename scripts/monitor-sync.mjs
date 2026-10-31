@@ -432,6 +432,33 @@ try {
       const on = await view();
       check(on.aria === 'true' && !/Drive paused/.test(on.sub) && on.calls.join() === 'setDrivePaused:true,setDrivePaused:false',
         'native: tapping it again resumes', JSON.stringify(on));
+      const rel = () => page.evaluate(() => ({
+        hidden: document.getElementById('broadcast-mobile-row').hidden,
+        aria: document.getElementById('toggle-broadcast-mobile').getAttribute('aria-checked'),
+        sub: document.querySelector('#status-line .sub').textContent,
+        calls: window.__fake.calls.filter((c) => /setRelayOnMobile/.test(c)),
+      }));
+      const r0 = await rel();
+      check(!r0.hidden && r0.aria === 'true', 'native: Share on mobile data shows, on by default', JSON.stringify(r0));
+      await page.click('[aria-controls="sec-controls-body"]');
+      await page.waitForTimeout(300);
+      await page.click('#toggle-broadcast-mobile');
+      await page.waitForTimeout(400);
+      const r1 = await rel();
+      check(r1.aria === 'false' && r1.calls.join() === 'setRelayOnMobile:false', 'native: one tap turns sharing on mobile data off', JSON.stringify(r1));
+      await page.evaluate(() => { window.__fake.snapshot.relayHeldMobile = true; document.dispatchEvent(new Event('visibilitychange')); });
+      await page.waitForTimeout(800);
+      const r2 = await rel();
+      check(/Sharing waits for Wi-Fi/.test(r2.sub), 'native: a held broadcast says so on the status line', JSON.stringify(r2));
+      await page.evaluate(() => { const f = window.__fake.snapshot; f.relayHeldMobile = false; f.relayOnMetered = true; document.dispatchEvent(new Event('visibilitychange')); });
+      await page.waitForTimeout(800);
+      const r3 = await rel();
+      check(/Sharing on mobile data/.test(r3.sub), 'native: sharing over mobile data says so on the status line', JSON.stringify(r3));
+      await page.click('#toggle-broadcast-mobile');
+      await page.waitForTimeout(400);
+      const r4 = await rel();
+      check(r4.aria === 'true' && r4.calls.join() === 'setRelayOnMobile:false,setRelayOnMobile:true', 'native: tapping it again allows mobile data', JSON.stringify(r4));
+      await page.evaluate(() => { window.__fake.snapshot.relayOnMetered = false; document.dispatchEvent(new Event('visibilitychange')); });
       await page.evaluate(() => { window.__fake.snapshot.driveBehind = true; document.dispatchEvent(new Event('visibilitychange')); });
       await page.waitForTimeout(800);
       const behind = await view();

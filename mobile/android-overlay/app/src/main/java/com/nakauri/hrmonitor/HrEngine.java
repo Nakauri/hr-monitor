@@ -125,6 +125,9 @@ public final class HrEngine implements HrDevice.Callback {
     private final AtomicBoolean relayLive = new AtomicBoolean(false);
     // User toggle. When false, no relay socket is opened and publishTick is a no-op.
     private volatile boolean broadcastEnabled = true;
+    // Off: the relay waits for an unmetered network. Survives restarts in hr_monitor_session.
+    private volatile boolean relayOnMobile = true;
+    private volatile boolean relayHeldMobile = false;
     private volatile String prefsJson = null;
 
     private long lastNotifUpdateMs = 0;
@@ -197,6 +200,7 @@ public final class HrEngine implements HrDevice.Callback {
             boolean prefsActive = prefs.getBoolean("sessionActive", false);
             boolean cleanly = prefs.getBoolean("cleanlyStopped", true);
             interrupted = prefsActive && !cleanly;
+            relayOnMobile = prefs.getBoolean("relayOnMobile", true);
         } catch (Throwable t) {
             Log.w(TAG, "interrupted-session check failed: " + t.getMessage());
         }
@@ -420,9 +424,27 @@ public final class HrEngine implements HrDevice.Callback {
         });
     }
 
+    private boolean relayNetworkAllowed() {
+        return DrivePolicy.relayAllowed(relayOnMobile, DriveGate.metered(appCtx));
+    }
+
+    public void setRelayOnMobile(boolean allow) {
+        relayOnMobile = allow;
+        appCtx.getSharedPreferences("hr_monitor_session", 0).edit().putBoolean("relayOnMobile", allow).apply();
+        NativeHrService.logLifecycle(appCtx, "relay_on_mobile value=" + allow);
+        mainHandler.post(() -> {
+            if (sessionActive.get() && broadcastEnabled && (!relayLive.get() || !relayNetworkAllowed())) {
+                reconnect.relayReset();
+                openRelaySocketSafely();
+            }
+            emitState();
+        });
+    }
+
     public void setBroadcast(boolean enabled) {
         boolean prev = broadcastEnabled;
         broadcastEnabled = enabled;
+        if (!enabled) relayHeldMobile = false;
         // Cancel any pending reconnect immediately so a stale onClosed→
         // scheduleRelayReconnect callback can't open a socket we just turned off.
         mainHandler.removeCallbacks(relayReconnectRunnable);
@@ -489,6 +511,16 @@ public final class HrEngine implements HrDevice.Callback {
         if (!broadcastEnabled) return;
         mainHandler.removeCallbacks(relayReconnectRunnable);
         closeRelaySocket();
+        if (!relayNetworkAllowed()) {
+            relayLive.set(false);
+            if (!relayHeldMobile) {
+                relayHeldMobile = true;
+                NativeHrService.logLifecycle(appCtx, "relay_held_mobile");
+                emitState();
+            }
+            return;
+        }
+        relayHeldMobile = false;
         relayRefused = false;
         relayLastOpenAtMs = android.os.SystemClock.elapsedRealtime();
         Request req = new Request.Builder()
@@ -888,7 +920,7 @@ public final class HrEngine implements HrDevice.Callback {
             }
             postSegmentTick();
             long up = android.os.SystemClock.elapsedRealtime();
-            if (ReconnectPolicy.relayWatchdogDue(broadcastEnabled, hasBroadcastKey(), relayLive.get(), relayRetryPending, up, relayLastOpenAtMs)) {
+            if (ReconnectPolicy.relayWatchdogDue(broadcastEnabled && relayNetworkAllowed(), hasBroadcastKey(), relayLive.get(), relayRetryPending, up, relayLastOpenAtMs)) {
                 Log.w(TAG, "Relay watchdog: down with no attempt for " + (up - relayLastOpenAtMs) + "ms, reopening");
                 NativeHrService.logLifecycle(appCtx, "relay_watchdog_reopen");
                 openRelaySocketSafely();
@@ -2295,6 +2327,9 @@ public final class HrEngine implements HrDevice.Callback {
         putSafe(ret, "relayRefused", relayRefused);
         putSafe(ret, "drivePaused", DriveGate.paused(appCtx));
         putSafe(ret, "driveBehind", driveBehind);
+        putSafe(ret, "relayOnMobile", relayOnMobile);
+        putSafe(ret, "relayHeldMobile", active && relayHeldMobile);
+        putSafe(ret, "relayOnMetered", active && relayLive.get() && DriveGate.metered(appCtx));
         putSafe(ret, "linkState", LinkStatePolicy.wireName(active, link.state()));
         putSafe(ret, "generation", sessionGeneration.get());
         if (active) {

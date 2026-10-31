@@ -66,7 +66,7 @@
       sessionActive: false, linkState: 'none', linkUp: false, bleConnected: false, relayLive: false, relayRefused: false,
       senderId: null, senderLabel: null, sessionStartMs: 0, csvFile: null, posture: null, generation: 0,
       targetMac: null, strapName: null, lastHrAtMs: 0, interruptedRecovery: false, recoveryContext: null,
-      drivePaused: false, driveBehind: false,
+      drivePaused: false, driveBehind: false, relayOnMobile: true, relayHeldMobile: false, relayOnMetered: false,
     };
     const STATUS_ATTEMPT_MS = 5000;
     const STATUS_BACKOFF_MS = [1000, 2000, 4000, 8000];
@@ -145,6 +145,9 @@
       snapshot.relayRefused = !!s.relayRefused;
       snapshot.drivePaused = !!s.drivePaused;
       snapshot.driveBehind = !!s.driveBehind;
+      snapshot.relayOnMobile = s.relayOnMobile !== false;
+      snapshot.relayHeldMobile = !!s.relayHeldMobile;
+      snapshot.relayOnMetered = !!s.relayOnMetered;
       // An older APK sends no linkState: a handle means recording, else reconnecting.
       snapshot.linkState = typeof s.linkState === 'string' ? s.linkState
         : (active ? (s.bleConnected ? 'recording' : 'reconnecting') : 'none');
@@ -407,6 +410,13 @@
       forceSyncNow: function () {
         if (typeof plugin.forceSyncNow !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
         return plugin.forceSyncNow().catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
+      },
+      setRelayOnMobile: function (allow) {
+        if (typeof plugin.setRelayOnMobile !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
+        return plugin.setRelayOnMobile({ allow: !!allow }).then(function () {
+          merge({ relayOnMobile: !!allow }, 'relayOnMobile');
+          return { ok: true };
+        }).catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
       },
       setDrivePaused: function (paused) {
         if (typeof plugin.setDrivePaused !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });

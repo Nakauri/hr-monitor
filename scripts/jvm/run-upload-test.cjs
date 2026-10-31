@@ -30,6 +30,10 @@ const MUTANTS = {
   'full-file-ignores-pause': ['DrivePolicy.java', 'if (paused) return false;', ''],
   // Drive full: a tap on sync says Synced while the segment was refused.
   'left-files-silent': ['SegmentUploader.java', 'lastRunLeftFiles = !failed.isEmpty();', 'lastRunLeftFiles = false;'],
+  // Phone storage: confirmed old segments are never removed.
+  'cleanup-unwired': ['SegmentUploader.java', 'if (countLegacy) cleanupConfirmed(open);', ''],
+  // 3 GB on a dropped line: the relay ignores the user's mobile data choice.
+  'relay-ignores-choice': ['DrivePolicy.java', 'return allowMobile || !metered;', 'return true;'],
   // A stalled backup stays silent.
   'behind-never': ['DrivePolicy.java', 'return oldestPendingMs > 0L && nowMs - oldestPendingMs >= BEHIND_MS;', 'return false;'],
   // The growing open hour reads as a stalled backup on every recording.

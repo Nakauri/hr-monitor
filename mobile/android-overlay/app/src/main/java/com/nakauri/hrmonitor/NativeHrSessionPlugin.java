@@ -315,6 +315,19 @@ public class NativeHrSessionPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setRelayOnMobile(PluginCall call) {
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) return;
+            boolean allow = Boolean.TRUE.equals(call.getBoolean("allow", true));
+            e.setRelayOnMobile(allow);
+            call.resolve(new JSObject().put("allow", allow));
+        } catch (Throwable t) {
+            call.reject("set_relay_on_mobile_failed");
+        }
+    }
+
+    @PluginMethod
     public void setDrivePaused(PluginCall call) {
         try {
             HrEngine e = engineOrReject(call);
