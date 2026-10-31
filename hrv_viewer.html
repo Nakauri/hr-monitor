@@ -2664,7 +2664,7 @@ END SECTION MAP -->
     let uploaded = 0;
     const localNames = new Set();
     // The Drive sync setting holds here too: with it off, a picked folder is never uploaded.
-    if (dirHandle && !aborted() && marksCanSync()) {
+    if (dirHandle && !aborted() && driveUploadsOn()) {
       const canRead = await ensureReadPermission();
       if (canRead) {
         try {
@@ -6255,6 +6255,7 @@ END SECTION MAP -->
     }
     try { return localStorage.getItem('hr_monitor_drive_sync') !== '0'; } catch (e) { return true; }
   }
+  function driveUploadsOn() { return marksCanSync(); }
   function marksChanged() {
     marksVersion++;
     const st = marksPage ? marksPage.drive.status() : null;
