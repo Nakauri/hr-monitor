@@ -201,7 +201,7 @@ public class NativeHrService extends Service {
                 HrEngine.Obtained o = HrEngine.obtain(this);
                 if (o.created) {
                     logLifecycle(this, "engine_create by=service pid=" + android.os.Process.myPid()
-                        + " interrupted=" + o.engine.wasInterruptedAtCreate() + " markedBroken=" + o.engine.wasMarkedBrokenAtCreate());
+                        + " interrupted=" + o.engine.wasInterruptedAtCreate());
                 }
                 JSONObject r = o.engine.resumeFromPrefs(origin);
                 if (r.optBoolean("resumed", false) || r.optBoolean("alreadyRunning", false)) {

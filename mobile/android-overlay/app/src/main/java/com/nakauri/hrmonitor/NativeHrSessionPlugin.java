@@ -123,7 +123,7 @@ public class NativeHrSessionPlugin extends Plugin {
         engine = e;
         if (o.created) {
             NativeHrService.logLifecycle(getContext(), "engine_create pid=" + android.os.Process.myPid()
-                + " interrupted=" + e.wasInterruptedAtCreate() + " markedBroken=" + e.wasMarkedBrokenAtCreate());
+                + " interrupted=" + e.wasInterruptedAtCreate());
         } else {
             NativeHrService.logLifecycle(getContext(), "engine_attach active=" + e.isSessionActive()
                 + " gen=" + e.getSessionGeneration() + " gatt=" + e.isStrapLinked() + " relay=" + e.isRelayLive());
@@ -311,6 +311,19 @@ public class NativeHrSessionPlugin extends Plugin {
             e.forceSyncNow(jsDone(call));
         } catch (Throwable t) {
             call.reject("force_sync_failed: " + t.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void setDrivePaused(PluginCall call) {
+        try {
+            HrEngine e = engineOrReject(call);
+            if (e == null) return;
+            boolean paused = Boolean.TRUE.equals(call.getBoolean("paused", false));
+            e.setDrivePaused(paused);
+            call.resolve(new JSObject().put("paused", paused));
+        } catch (Throwable t) {
+            call.reject("set_drive_paused_failed: " + t.getMessage());
         }
     }
 

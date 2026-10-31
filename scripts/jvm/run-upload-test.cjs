@@ -13,13 +13,25 @@ const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..', '..');
 const SRC = path.join(ROOT, 'mobile', 'android-overlay', 'app', 'src', 'main', 'java', 'com', 'nakauri', 'hrmonitor');
 const FILES = ['HrSink.java', 'Clock.java', 'TzSource.java', 'LifecycleLog.java', 'SegmentWriter.java', 'TeeSink.java',
-  'SegmentReader.java', 'SegmentUploadPlan.java', 'MiniJson.java', 'SegmentUploader.java'];
+  'SegmentReader.java', 'SegmentUploadPlan.java', 'MiniJson.java', 'SegmentUploader.java', 'DrivePolicy.java'];
 const TESTS = ['UploadPlanTest', 'SegmentUploaderTest'];
 
 const JDK = process.env.JAVA_HOME || 'C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.10.7-hotspot';
 const bin = (n) => path.join(JDK, 'bin', n + (process.platform === 'win32' ? '.exe' : ''));
 
 const MUTANTS = {
+  // Drive pause: a paused phone keeps sending segments.
+  'pause-ignored': ['SegmentUploader.java', 'private boolean paused() { return "1".equals(store.get(K_PAUSED)); }', 'private boolean paused() { return false; }'],
+  // Drive pause: a run already going ignores a pause tapped mid-run.
+  'pause-mid-run': ['SegmentUploader.java', '                    if (paused()) {', '                    if (false) {'],
+  // 3.24 GB on cellular: full session files go out over mobile data at any size.
+  'metered-cap-gone': ['DrivePolicy.java', 'return !metered || bytes <= METERED_FULL_FILE_MAX;', 'return true;'],
+  // Drive pause: finished files still upload while paused.
+  'full-file-ignores-pause': ['DrivePolicy.java', 'if (paused) return false;', ''],
+  // A stalled backup stays silent.
+  'behind-never': ['DrivePolicy.java', 'return oldestPendingMs > 0L && nowMs - oldestPendingMs >= BEHIND_MS;', 'return false;'],
+  // The growing open hour reads as a stalled backup on every recording.
+  'behind-counts-open': ['SegmentUploader.java', 'if (!SegmentReader.validName(n) || n.equals(openName)) continue;', 'if (!SegmentReader.validName(n)) continue;'],
   // K9: only the first page of a same-name lookup is read, so an older copy on a later page is missed.
   'first-page-only': ['SegmentUploader.java', 'pageToken = MiniJson.str(m, "nextPageToken");', 'pageToken = null;'],
   // K9: the newest copy is PATCHed instead of the oldest the viewer reads.

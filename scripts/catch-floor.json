@@ -16,7 +16,6 @@
     "mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/MainActivity.java": 7,
     "mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/MiniJson.java": 1,
     "mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/NativeCsvWriter.java": 2,
-    "mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/NativeDriveResumableUploader.java": 2,
     "mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/NativeDriveUploader.java": 3,
     "mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/NativeHrService.java": 5,
     "mobile/android-overlay/app/src/main/java/com/nakauri/hrmonitor/NativeHrSessionPlugin.java": 7,

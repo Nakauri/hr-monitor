@@ -66,6 +66,7 @@
       sessionActive: false, linkState: 'none', linkUp: false, bleConnected: false, relayLive: false, relayRefused: false,
       senderId: null, senderLabel: null, sessionStartMs: 0, csvFile: null, posture: null, generation: 0,
       targetMac: null, strapName: null, lastHrAtMs: 0, interruptedRecovery: false, recoveryContext: null,
+      drivePaused: false, driveBehind: false,
     };
     const STATUS_ATTEMPT_MS = 5000;
     const STATUS_BACKOFF_MS = [1000, 2000, 4000, 8000];
@@ -142,6 +143,8 @@
       snapshot.relayLive = !!s.relayLive;
       // The relay refused this phone's proof: the monitor shows blocked, not live.
       snapshot.relayRefused = !!s.relayRefused;
+      snapshot.drivePaused = !!s.drivePaused;
+      snapshot.driveBehind = !!s.driveBehind;
       // An older APK sends no linkState: a handle means recording, else reconnecting.
       snapshot.linkState = typeof s.linkState === 'string' ? s.linkState
         : (active ? (s.bleConnected ? 'recording' : 'reconnecting') : 'none');
@@ -404,6 +407,13 @@
       forceSyncNow: function () {
         if (typeof plugin.forceSyncNow !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
         return plugin.forceSyncNow().catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
+      },
+      setDrivePaused: function (paused) {
+        if (typeof plugin.setDrivePaused !== 'function') return Promise.resolve({ ok: false, reason: 'shim_missing' });
+        return plugin.setDrivePaused({ paused: !!paused }).then(function () {
+          merge({ drivePaused: !!paused, driveBehind: false }, 'drivePaused');
+          return { ok: true };
+        }).catch(function (e) { return { ok: false, reason: (e && e.message) || String(e) }; });
       },
       hasOverlayPermission: function () {
         if (typeof plugin.hasOverlayPermission !== 'function') return Promise.resolve({ granted: false });

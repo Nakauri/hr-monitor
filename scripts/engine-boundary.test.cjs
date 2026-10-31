@@ -4,8 +4,7 @@
 // Engine boundary test: reads the native Java as text, no JVM.
 // Guards three bugs: the C3 orphan neutralize on Activity recreate, a
 // sessionActive seeded outside start/stop (skips strap reconnection after a
-// real process death), and markBrokenForRestart run on attach (breaks a live
-// resumable upload).
+// real process death).
 // Engine step 2 adds: a coherence check (the Service resume set lands whole or not at all), then,
 // once that set is present, the resume, lock, notification-text and test-switch checks.
 // Run: node scripts/engine-boundary.test.cjs                 (exit 0 = OK)
@@ -144,12 +143,8 @@ if (plugin != null) {
     const body = pcode.slice(load[0], load[1]);
     check('load() obtains the engine with HrEngine.obtain', /HrEngine\.obtain\s*\(/.test(body));
     check('load() installs the listener', /\.setListener\s*\(/.test(body));
-    const mb = body.indexOf('markBrokenForRestart');
-    check('load() never marks the resumable upload broken', mb < 0,
-      mb >= 0 ? 'markBrokenForRestart at :' + lineOf(plugin, load[0] + mb) : '');
     check('load() never neutralizes', !/neutraliz/i.test(body));
   }
-  check('plugin never calls markBrokenForRestart', !pcode.includes('markBrokenForRestart'));
 
   const destroy = methodSpans(pcode, 'void\\s+handleOnDestroy')[0];
   check('plugin handleOnDestroy() found', !!destroy);
@@ -233,34 +228,6 @@ if (engine != null) {
 
   const ctor = methodSpans(ecode, 'private\\s+HrEngine')[0];
   check('HrEngine constructor found', !!ctor);
-  const marks = indexesOf(ecode, 'markBrokenForRestart');
-  let marksOk = marks.length > 0 && !!ctor;
-  for (const i of marks) {
-    if (!ctor || !inside(i, [ctor])) { marksOk = false; continue; }
-    // Innermost `if (...)` whose block holds this call must test the live atomic.
-    const before = ecode.slice(ctor[0], i);
-    let guarded = false;
-    const ifRe = /\bif\s*\(/g;
-    let m;
-    while ((m = ifRe.exec(before))) {
-      const condStart = ctor[0] + m.index + m[0].length - 1;
-      let depth = 0, condEnd = -1;
-      for (let k = condStart; k < ecode.length; k++) {
-        if (ecode[k] === '(') depth++;
-        else if (ecode[k] === ')' && --depth === 0) { condEnd = k; break; }
-      }
-      const cond = ecode.slice(condStart, condEnd + 1);
-      const after = ecode.slice(condEnd + 1).match(/^\s*/)[0].length + condEnd + 1;
-      let span;
-      if (ecode[after] === '{') span = blockFrom(ecode, after);
-      else span = [after - 1, ecode.indexOf(';', after)];
-      if (span && i > span[0] && i < span[1] && /!\s*sessionActive\.get\(\)/.test(cond)) guarded = true;
-    }
-    if (!guarded) marksOk = false;
-  }
-  check('markBrokenForRestart only in the constructor, under if (... !sessionActive.get() ...)', marksOk,
-    marks.map(i => ':' + lineOf(engine, i)).join(' '));
-
   const emitSpans = methodSpans(ecode, 'void\\s+emit');
   const calls = indexesOf(ecode, '.onEvent(');
   const strayEv = calls.filter(i => !inside(i, emitSpans));
@@ -411,8 +378,6 @@ function step2Checks() {
     }
     const nh = sc.search(/new\s+HrEngine\s*\(/);
     check('NativeHrService names no `new HrEngine`', nh < 0, nh >= 0 ? 'at :' + lineOf(S, nh) : '');
-    const mb = sc.indexOf('markBrokenForRestart');
-    check('NativeHrService never calls markBrokenForRestart', mb < 0, mb >= 0 ? 'at :' + lineOf(S, mb) : '');
     // The stale branch decides under START_LOCK: a synchronized block, or the argument list of
     // HrEngine.GATE.stop(...), whose body runs the probes and branches inside synchronized (lock).
     const locks = syncSpans(sc, 'START_LOCK');
@@ -708,26 +673,32 @@ function step2Checks() {
       /resumeAllowedByAge\s*\(\s*lastAlive\s*,/.test(raRaw) && /getLong\("last_alive_ms"/.test(raRaw) && raRaw.includes('"reason=stale age_h="'));
     const st = methodSpans(ec, '\\bstartSessionInternal')[0];
     const stBody = st ? ec.slice(st[0], st[1]) : '';
-    const ifAt = stBody.search(/if\s*\(\s*resuming\s*&&\s*opened\s*!=\s*null\s*\)\s*\{/);
-    let ok1 = false;
-    if (ifAt >= 0) {
-      const ifBlk = blockFrom(stBody, ifAt);
-      const afterIf = stBody.slice(ifBlk[1] + 1);
-      const elseM = afterIf.match(/^\s*else\s*\{/);
-      const elseBlk = elseM ? blockFrom(afterIf, elseM[0].length - 1) : null;
-      const inIf = stBody.slice(ifBlk[0], ifBlk[1]);
-      const inElse = elseBlk ? afterIf.slice(elseBlk[0], elseBlk[1]) : '';
-      const outside = stBody.slice(0, ifAt) + (elseBlk ? afterIf.slice(elseBlk[1]) : afterIf);
-      ok1 = /resumable\.resumeBroken\s*\(/.test(inIf) && !/resumable\.(startSessionAsync|resetSession)\s*\(/.test(inIf)
-        && /resumable\.startSessionAsync\s*\(/.test(inElse) && /resumable\.resetSession\s*\(/.test(inElse)
-        && !/resumable\.(startSessionAsync|resetSession)\s*\(/.test(outside);
-    }
-    check('[I1] a resume never resets or opens a resumable session (no duplicate Drive file); a fresh start does', ok1);
-    const ru = readSource('NativeDriveResumableUploader.java');
-    const rb = ru ? methodSpans(codeView(ru), 'public\\s+void\\s+resumeBroken')[0] : null;
-    const rbBody = rb ? codeView(ru).slice(rb[0], rb[1]) : '';
-    check('[I1] resumeBroken stays broken on the executor and never rewrites the persisted Drive keys',
-      /executor\.submit/.test(rbBody) && /broken\s*=\s*true/.test(rbBody) && !/persistResumeKeys|openSession|createFile/.test(rbBody));
+    // Drive data: 3.24 GB on cellular from the whole session CSV re-sent about 14 times an hour.
+    check('[drive] the live whole-file uploader is gone', !readSource('NativeDriveResumableUploader.java') && !/\bresumable\b/.test(ec));
+    const uploaderCalls = [...new Set([...ec.matchAll(/\buploader\.(\w+)\s*\(/g)].map((x) => x[1]))].sort().join(',');
+    check('[drive] the engine touches the recording file through no uploader call',
+      uploaderCalls === 'cleanupLocalCachedAsync,clearLocalCache,markActiveSessionFilename,resetSession,uploadOrphanIfNeededAsync,uploadOrphansAsync', uploaderCalls);
+    const stopUp = methodSpans(ec, 'private\\s+void\\s+runStopUpload')[0];
+    const finished = (ec.match(/\.uploadFinishedSync\s*\(/g) || []).length;
+    check('[drive] the session CSV uploads once, from the stop worker only',
+      finished === 1 && !!stopUp && /\.uploadFinishedSync\s*\(/.test(ec.slice(stopUp[0], stopUp[1])));
+    const fs0 = methodSpans(ec, 'public\\s+void\\s+forceSyncNow')[0];
+    const fsBody = fs0 ? ec.slice(fs0[0], fs0[1]) : '';
+    check('[drive] the sync button uploads segments and honours the pause',
+      /syncSegmentsNow\s*\(/.test(fsBody) && /DriveGate\.paused/.test(fsBody) && !/uploadFinishedSync/.test(fsBody));
+    const noteOpen = methodSpans(ec, 'private\\s+void\\s+noteOpenUpload')[0];
+    check('[drive] a failed open upload stays due',
+      !!noteOpen && /Result\.RETRY/.test(ec.slice(noteOpen[0], noteOpen[1])) && /if\s*\(\s*!failed\s*\)\s*lastOpenUploadWallMs/.test(ec.slice(noteOpen[0], noteOpen[1])));
+    check('[drive] the network coming back sends what waited', /if\s*\(\s*changed\s*\|\|\s*back\s*\)\s*onNetworkReturned\s*\(\s*\)/.test(ec)
+      && /NETWORK_SWEEP_GAP_MS/.test(ec));
+    const du = readSource('NativeDriveUploader.java');
+    const duc = du ? codeView(du) : '';
+    const orphanScan = methodSpans(duc, 'private\\s+boolean\\s+runOrphanScan')[0];
+    const finishedBody = methodSpans(duc, 'public\\s+boolean\\s+uploadFinishedSync')[0];
+    const oneOrphan = methodSpans(duc, 'public\\s+void\\s+uploadOrphanIfNeededAsync')[0];
+    check('[drive] every full-file send passes the pause and metered gate',
+      [orphanScan, finishedBody, oneOrphan].every((b) => b && /fullFileAllowed\s*\(/.test(duc.slice(b[0], b[1])))
+      && !/\bpublic\s+\w+\s+upload(Async|Sync)\s*\(/.test(duc));
     check('[nit] the segment roll timer is gone (the heartbeat and the alarm tick)', !/segmentRollRunnable|scheduleSegmentRoll/.test(ec));
     check('[nit] no unused HrEngine.get(Context)', !/static\s+HrEngine\s+get\s*\(/.test(ec));
   }

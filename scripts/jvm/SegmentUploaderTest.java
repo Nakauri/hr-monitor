@@ -5,6 +5,7 @@
 // for the lock; month-folder race converges on the oldest folder; signed out waits without retrying;
 // a restarted segment's .bad bytes reach Drive under their own name before the restart is PATCHed.
 
+import com.nakauri.hrmonitor.DrivePolicy;
 import com.nakauri.hrmonitor.LifecycleLog;
 import com.nakauri.hrmonitor.MiniJson;
 import com.nakauri.hrmonitor.SegmentReader;
@@ -367,6 +368,9 @@ public class SegmentUploaderTest {
         testStaleRoot404();
         testTrashedFolders();
         testRelistThrottle();
+        testPause();
+        testOldestPending();
+        testDrivePolicy();
         System.out.println("SegmentUploaderTest: " + passes + " passed, " + failures + " failed");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -573,6 +577,62 @@ public class SegmentUploaderTest {
         check("serial chain: one root and one month folder", countFolders(e, "HR Monitor Sessions") == 1 && countFolders(e, "2026-10") == 1,
             "roots=" + countFolders(e, "HR Monitor Sessions") + " months=" + countFolders(e, "2026-10"));
         check("serial chain: each segment once", e.drive.named(SEG_A).size() == 1 && e.drive.named(SEG_B).size() == 1);
+    }
+
+    static void testPause() throws Exception {
+        Env e = new Env("paused");
+        e.store.put("drive_paused", "1");
+        e.write(SEG_A, header("") + rows(0, 2));
+        Result r = e.closed();
+        check("paused: closed run sends nothing", r == Result.PAUSED && e.drive.calls.isEmpty(), String.valueOf(r));
+        check("paused: upload_skip reason=paused", e.log.has("upload_skip reason=paused"));
+        r = e.up.run(Mode.OPEN_TICK, null, false, 0L);
+        check("paused: open tick sends nothing", r == Result.PAUSED && e.drive.calls.isEmpty(), String.valueOf(r));
+        e.store.remove("drive_paused");
+        check("resumed: the backlog goes up", e.closed() == Result.OK && e.drive.named(SEG_A).size() == 1);
+
+        // The pause lands while a run is sending: the next item stays on the phone.
+        final Env[] box = new Env[1];
+        SegmentUploader.Http pausing = (m, u, t, c, b) -> {
+            SegmentUploader.Resp resp = box[0].drive.send(m, u, t, c, b);
+            if ("POST".equals(m) && u.contains("uploadType=multipart")) box[0].store.put("drive_paused", "1");
+            return resp;
+        };
+        Env mid = new Env("pausedmid", pausing);
+        box[0] = mid;
+        mid.write(SEG_A, header("") + rows(0, 2));
+        mid.write(SEG_B, header("") + rows(0, 2));
+        r = mid.closed();
+        check("paused mid-run: the run stops at the next item",
+            r == Result.PAUSED && mid.drive.named(SEG_A).size() == 1 && mid.drive.named(SEG_B).isEmpty(), String.valueOf(r));
+    }
+
+    static void testOldestPending() throws Exception {
+        Env e = new Env("pending");
+        check("nothing recorded: nothing pending", e.up.oldestPendingClosedMs(null) == 0L);
+        File a = e.write(SEG_A, header("") + rows(0, 2));
+        File b = e.write(SEG_B, header("") + rows(0, 2));
+        a.setLastModified(1_790_000_000_000L);
+        b.setLastModified(1_790_000_600_000L);
+        check("the oldest unsent closed segment", e.up.oldestPendingClosedMs(null) == 1_790_000_000_000L);
+        check("the open segment never counts", e.up.oldestPendingClosedMs(SEG_A) == 1_790_000_600_000L);
+        check("the open segment alone: nothing pending", new Env("pendingopen").up.oldestPendingClosedMs(SEG_C) == 0L);
+        e.closed();
+        check("all on Drive: nothing pending", e.up.oldestPendingClosedMs(null) == 0L, String.valueOf(e.up.oldestPendingClosedMs(null)));
+        e.append(SEG_A, rows(2, 1));
+        check("a closed segment that grew counts again", e.up.oldestPendingClosedMs(null) > 0L);
+    }
+
+    static void testDrivePolicy() {
+        long max = DrivePolicy.METERED_FULL_FILE_MAX;
+        check("unmetered: any size", DrivePolicy.allowFullFile(50L * max, false, false));
+        check("metered: at the cap goes", DrivePolicy.allowFullFile(max, true, false));
+        check("metered: over the cap waits", !DrivePolicy.allowFullFile(max + 1L, true, false));
+        check("paused: nothing goes, even small on Wi-Fi", !DrivePolicy.allowFullFile(1L, false, true));
+        long t = 1_790_000_000_000L;
+        check("no pending: never behind", !DrivePolicy.behind(0L, t));
+        check("just under 30 min: not behind", !DrivePolicy.behind(t - DrivePolicy.BEHIND_MS + 1L, t));
+        check("30 min: behind", DrivePolicy.behind(t - DrivePolicy.BEHIND_MS, t));
     }
 
     static void testSignedOut() throws Exception {

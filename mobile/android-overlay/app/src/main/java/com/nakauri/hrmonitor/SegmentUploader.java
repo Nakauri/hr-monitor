@@ -37,6 +37,7 @@ public final class SegmentUploader {
     static final String K_MONTH = "seg_month_";
     static final int MAX_PAGES = 100;
     static final String K_ACCOUNT = "seg_account";
+    static final String K_PAUSED = "drive_paused";
     // A run rescans until a pass finds nothing new and no segment closed meanwhile (CLOSE_SEQ unchanged).
     static final int MAX_ROUNDS = 6;
     // After a state reset or an account switch, at most this many segments are looked up per run.
@@ -81,7 +82,7 @@ public final class SegmentUploader {
     }
 
     public enum Mode { CLOSED, OPEN_TICK }
-    public enum Result { OK, SIGNED_OUT, RETRY, BUSY }
+    public enum Result { OK, SIGNED_OUT, RETRY, BUSY, PAUSED }
 
     private static final class Transient extends Exception { Transient(String m) { super(m); } }
     private static final class SignedOut extends Exception { SignedOut(String why) { super(why); } }
@@ -163,7 +164,13 @@ public final class SegmentUploader {
         } catch (Throwable ignored) { }
     }
 
+    private boolean paused() { return "1".equals(store.get(K_PAUSED)); }
+
     private Result runLocked(Mode mode, SegmentReader.OpenSegment open, boolean countLegacy) {
+        if (paused()) {
+            log.log("upload_skip reason=paused");
+            return Result.PAUSED;
+        }
         try {
             token = tokens.token(false);
         } catch (TransientAuthException e) {
@@ -198,6 +205,10 @@ public final class SegmentUploader {
                     if (!it.open) {
                         if (budget <= 0) { capped = true; break; }
                         budget--;
+                    }
+                    if (paused()) {
+                        log.log("upload_skip reason=paused");
+                        return Result.PAUSED;
                     }
                     tried++;
                     ensureSameAccount();
@@ -324,6 +335,28 @@ public final class SegmentUploader {
         if (r.code == 404) return false;
         Map<String, Object> m = json(ok(r).body);
         return !Boolean.TRUE.equals(m.get("trashed"));
+    }
+
+    // Last-write time of the oldest closed segment Drive does not hold in full, 0 when none. Read only.
+    public long oldestPendingClosedMs(String openName) {
+        String[] names = dir.list();
+        if (names == null) return 0L;
+        State st = State.load(new File(dir, STATE_NAME), log);
+        long oldest = 0L;
+        for (String n : names) {
+            if (!SegmentReader.validName(n) || n.equals(openName)) continue;
+            File f = new File(dir, n);
+            if (!f.isFile()) continue;
+            long len = f.length();
+            long lf = lastLfOrSkip(f, len);
+            if (lf < 0L) continue;
+            SegmentUploadPlan.Plan p = SegmentUploadPlan.planUpload(len, lf, st.len(n), false, false, null);
+            // Over the send limit never uploads, so it can never catch up.
+            if (p.op != SegmentUploadPlan.Op.NEED_LIST || p.sendLen > MAX_SEND_BYTES) continue;
+            long t = f.lastModified();
+            if (oldest == 0L || t < oldest) oldest = t;
+        }
+        return oldest;
     }
 
     // ---- What to send ----

@@ -410,8 +410,32 @@ try {
   for (const size of ['360', '360-text200', '1440']) {
     const { ctx, page, errs } = await newPage({ size, native: true, extra: [`localStorage.setItem('hr_monitor_drive_sync', '0');`], url: '/www/hr_monitor.html' });
     await page.waitForFunction(() => document.getElementById('session-toggle').textContent.trim() === 'Stop session', null, { timeout: 10000 }).catch(() => {});
-    const g = await page.evaluate(() => ({ wrap: document.getElementById('drive-sync-wrap').hidden }));
-    check(g.wrap, `native ${size}: no Drive sync toggle on the phone`);
+    const g = await page.evaluate(() => ({ wrap: document.getElementById('drive-sync-wrap').hidden, folder: getComputedStyle(document.getElementById('autosave-toggle')).display === 'none' }));
+    check(!g.wrap && g.folder, `native ${size}: Drive switch shown, no local folder button`, JSON.stringify(g));
+    if (size === '360') {
+      const view = () => page.evaluate(() => ({
+        aria: document.getElementById('drive-sync-toggle').getAttribute('aria-checked'),
+        sub: document.querySelector('#status-line .sub').textContent,
+        drive: document.getElementById('drive-status').textContent,
+        calls: window.__fake.calls.filter((c) => /setDrivePaused/.test(c)),
+      }));
+      await page.click('#drive-sync-toggle');
+      await page.waitForTimeout(400);
+      const off = await view();
+      check(off.aria === 'false' && /Drive paused/.test(off.sub) && off.drive === 'Sync off' && off.calls.join() === 'setDrivePaused:true',
+        'native: tapping Drive sync pauses the engine and the status line says so', JSON.stringify(off));
+      await page.click('#drive-sync-toggle');
+      await page.waitForTimeout(400);
+      const on = await view();
+      check(on.aria === 'true' && !/Drive paused/.test(on.sub) && on.calls.join() === 'setDrivePaused:true,setDrivePaused:false',
+        'native: tapping it again resumes', JSON.stringify(on));
+      await page.evaluate(() => { window.__fake.snapshot.driveBehind = true; document.dispatchEvent(new Event('visibilitychange')); });
+      await page.waitForTimeout(800);
+      const behind = await view();
+      check(/Drive backup behind/.test(behind.sub), 'native: a stalled backup shows on the status line', JSON.stringify(behind));
+      await page.evaluate(() => { window.__fake.snapshot.driveBehind = false; document.dispatchEvent(new Event('visibilitychange')); });
+      await page.waitForTimeout(800);
+    }
     if (size === '360-text200') await textScale(page, 2);
     await tapToggle(page);
     await page.waitForTimeout(1500);

@@ -82,18 +82,11 @@ public final class HrEngine implements HrDevice.Callback {
     // identically whether the sender is the web app or the native plugin.
     private static final long LIVE_WINDOW_MS = 45_000L;
     private static final long TREND_WINDOW_MS = 180_000L;
-    // Drive upload cadence during a session: 5 min. Final upload happens at stopSessionInternal.
-    // Crash loss = 5 min Drive lag; the local CSV stays intact and re-uploads at the next stop or reopen.
-    private static final long DRIVE_UPLOAD_INTERVAL_MS = 300_000L;
     // Fire a csvError event once after this many consecutive write failures.
     // Below this threshold a single transient error is silently retried; at
     // the threshold the UI gets one signal so it can show a banner. Resets
     // on the next successful write — won't re-fire until another N-streak.
     private static final int CSV_FAIL_ALERT_THRESHOLD = 5;
-    // Periodic finalize+restart cadence. Every 30 min the resumable session
-    // commits (file appears in Drive) and a fresh PATCH session opens against
-    // the same fileId.
-    private static final long DRIVE_FINALIZE_INTERVAL_MS = 30L * 60L * 1000L;
 
     private final Context appCtx;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -102,7 +95,6 @@ public final class HrEngine implements HrDevice.Callback {
 
     private final AtomicReference<Listener> listener = new AtomicReference<>();
     private final boolean interruptedAtCreate;
-    private final boolean markedBrokenAtCreate;
 
     // Floating-overlay Service listener; the Service installs itself in onCreate and clears in onDestroy.
     public static volatile FloatingOverlayService.HrUpdateListener floatingOverlayListener;
@@ -125,9 +117,6 @@ public final class HrEngine implements HrDevice.Callback {
     // volatile: BLE binder thread reads while main thread can null on stop.
     private volatile HrSink sink;
     private final NativeDriveUploader uploader;
-    private final NativeDriveResumableUploader resumable;
-    private final AtomicLong lastUploadMs = new AtomicLong(0);
-    private final AtomicLong lastFinalizeMs = new AtomicLong(0);
     // Blocks chunk-append + concurrent finalize while a commit is in flight.
     private final AtomicBoolean committing = new AtomicBoolean(false);
 
@@ -201,27 +190,17 @@ public final class HrEngine implements HrDevice.Callback {
         device = new GattHrDevice(appCtx, bleScanner);
         device.setCallback(this);
         uploader = new NativeDriveUploader(appCtx);
-        resumable = new NativeDriveResumableUploader(appCtx, uploader);
         httpClient = HttpClientHolder.webSocketClient();
-        // A session the previous process left open: mark its resumable upload
-        // broken so the periodic tick falls through to uploader.uploadAsync.
-        // Constructor only, so attaching to a live session never marks it.
         boolean interrupted = false;
-        boolean marked = false;
         try {
             android.content.SharedPreferences prefs = appCtx.getSharedPreferences("hr_monitor_session", 0);
             boolean prefsActive = prefs.getBoolean("sessionActive", false);
             boolean cleanly = prefs.getBoolean("cleanlyStopped", true);
             interrupted = prefsActive && !cleanly;
-            if (prefsActive && !cleanly && !sessionActive.get()) {
-                resumable.markBrokenForRestart();
-                marked = true;
-            }
         } catch (Throwable t) {
             Log.w(TAG, "interrupted-session check failed: " + t.getMessage());
         }
         interruptedAtCreate = interrupted;
-        markedBrokenAtCreate = marked;
         // Process start: closed segments left by an earlier process go up once the network allows.
         SegmentUploadWorker.enqueue(appCtx, "sweep", null);
         // Last, so a constructor that throws earlier never leaves a registered callback behind.
@@ -230,7 +209,6 @@ public final class HrEngine implements HrDevice.Callback {
 
     public boolean wasInterruptedAtCreate() { return interruptedAtCreate; }
 
-    public boolean wasMarkedBrokenAtCreate() { return markedBrokenAtCreate; }
 
     public boolean isStrapLinked() { return device.hasHandle(); }
 
@@ -314,6 +292,17 @@ public final class HrEngine implements HrDevice.Callback {
     private android.net.ConnectivityManager.NetworkCallback networkCallback;
     private android.net.Network lastActiveNetwork;
     private volatile boolean networkWasLost = false;
+    private static final long NETWORK_SWEEP_GAP_MS = 60_000L;
+    private volatile long lastNetworkSweepMs = 0L;
+
+    // Segments that waited on the network go now: WorkManager's retry backoff can run to hours.
+    private void onNetworkReturned() {
+        long now = System.currentTimeMillis();
+        if (now - lastNetworkSweepMs < NETWORK_SWEEP_GAP_MS) return;
+        lastNetworkSweepMs = now;
+        SegmentUploadWorker.enqueue(appCtx, "network", null);
+        if (openUploadOwed) forceOpenUploadCheck();
+    }
 
     private void registerNetworkCallback() {
         if (networkCallback != null) return;
@@ -336,6 +325,7 @@ public final class HrEngine implements HrDevice.Callback {
                             openRelaySocketSafely();
                         });
                     }
+                    if (changed || back) onNetworkReturned();
                     lastActiveNetwork = network;
                 }
                 @Override public void onLost(android.net.Network network) {
@@ -1255,13 +1245,7 @@ public final class HrEngine implements HrDevice.Callback {
         return ret;
     }
 
-    /**
-     * Manual sync: commit the current resumable session so the partial CSV
-     * becomes visible in Drive, then re-open a PATCH session for the next
-     * batch of trickled chunks. Also re-uploads any orphans from prior
-     * sessions whose stop never ran. Wired to the monitor's drive-sync
-     * icon button on Capacitor.
-     */
+    /** Manual sync: uploads closed segments and the open hour, then finished CSVs the metered rules allow. */
     public void forceSyncNow(Done<JSONObject> done) {
         boolean settled = false;
         try {
@@ -1270,65 +1254,25 @@ public final class HrEngine implements HrDevice.Callback {
                 done.ok(syncResult(false, "no_active_session"));
                 return;
             }
+            if (DriveGate.paused(appCtx)) {
+                settled = true;
+                done.ok(syncResult(false, "drive_paused"));
+                return;
+            }
             if (!committing.compareAndSet(false, true)) {
                 settled = true;
                 done.ok(syncResult(false, "already_committing"));
                 return;
             }
-            lastFinalizeMs.set(System.currentTimeMillis());
-            final int syncGen = sessionGeneration.get();
             try {
                 new Thread(() -> {
                     String reason = null;
                     boolean ok = false;
                     try {
-                        HrSink w = sink;
-                        java.io.File file = w != null ? w.getFile() : null;
-                        if (file == null) { reason = "csv_gone"; return; }
-                        String name = file.getName();
-                        boolean finalized = false;
-                        if (resumable.isReady()) {
-                            finalized = resumable.finalizeSync(file);
-                            if (finalized) {
-                                ok = true;
-                                Log.i(TAG, "forceSyncNow finalize OK: " + name);
-                                reason = "trickle_committed";
-                            } else {
-                                Log.w(TAG, "forceSyncNow finalize failed: " + name);
-                            }
-                        }
-                        // Run the safety-net PATCH BEFORE reopening the resumable
-                        // session. Drive holds files with an open resumable session
-                        // partially-shadowed from folder listings — if we reopen
-                        // (restartSessionAsync) concurrently with uploadSync, the
-                        // listing doesn't see the PATCH bytes until the next session
-                        // ends. This was the May 21 regression: tap-sync mid-recording
-                        // returned "Synced" but the viewer couldn't see the file until
-                        // the app process closed (which abandoned the resumable
-                        // session and let Drive's index recover).
-                        if (!stillSession(syncGen)) {
-                            // Stopped meanwhile: the stop worker owns this file's final upload.
-                            reason = reason == null ? "session_stopped" : reason + "+session_stopped";
-                        } else {
-                            boolean uploadOk = uploader.uploadSync(file);
-                            if (uploadOk) {
-                                ok = true;
-                                if (reason == null) reason = "full_patch_ok";
-                                else if (reason.equals("trickle_committed")) reason = "trickle_committed+full_patch";
-                            } else if (!ok) {
-                                reason = reason == null ? "upload_failed" : reason + "+upload_failed";
-                            }
-                        }
-                        // NOW reopen the resumable session for future periodic chunks.
-                        // Sequential after uploadSync so no two operations race against
-                        // the same fileId. restartSessionAsync itself is async (fires
-                        // onto the resumable executor); we don't block on it.
-                        if (finalized && stillSession(syncGen)) {
-                            resumable.restartSessionAsync();
-                        }
-                        // Orphan re-upload runs unconditionally (different files).
-                        java.io.File sessionsDir = new java.io.File(appCtx.getFilesDir(), "sessions");
-                        uploader.uploadOrphansAsync(sessionsDir);
+                        SegmentUploader.Result r = syncSegmentsNow();
+                        ok = r == SegmentUploader.Result.OK;
+                        reason = "segments_" + r;
+                        uploader.uploadOrphansAsync(new java.io.File(appCtx.getFilesDir(), "sessions"));
                     } catch (Throwable t) {
                         Log.w(TAG, "forceSyncNow threw: " + t.getMessage());
                         reason = t.getMessage();
@@ -1348,38 +1292,30 @@ public final class HrEngine implements HrDevice.Callback {
         }
     }
 
-    /** Periodic finalize+restart timer body. Runs on its own thread because
-     *  finalizeSync is synchronous and would block the BLE binder thread
-     *  if invoked from the tick handler. */
-    private void finalizeAndRestartAsync() {
-        final int gen = sessionGeneration.get();
-        new Thread(() -> {
-            try {
-                HrSink w = sink;
-                java.io.File file = w != null ? w.getFile() : null;
-                if (file == null) return;
-                String name = file.getName();
-                if (resumable.isReady()) {
-                    boolean ok = resumable.finalizeSync(file);
-                    if (!stillSession(gen)) {
-                        Log.i(TAG, "periodic finalize: session stopped meanwhile; stop worker owns " + name);
-                    } else if (ok) {
-                        Log.i(TAG, "periodic finalize OK: " + name);
-                        resumable.restartSessionAsync();
-                    } else {
-                        Log.w(TAG, "periodic finalize failed; falling back to full upload: " + name);
-                        uploader.uploadAsync(file);
-                    }
-                } else {
-                    Log.i(TAG, "periodic finalize: resumable not ready, full-upload fallback");
-                    uploader.uploadAsync(file);
-                }
-            } catch (Throwable t) {
-                Log.w(TAG, "finalizeAndRestart threw: " + t.getMessage());
-            } finally {
-                committing.set(false);
-            }
-        }, "drive-periodic-finalize").start();
+    // Waits out a sweep already holding the upload lock; that sweep is sending the closed segments anyway.
+    private SegmentUploader.Result syncSegmentsNow() throws InterruptedException {
+        SegmentUploader.Result r = SegmentUploader.Result.BUSY;
+        for (int i = 0; i < SYNC_BUSY_TRIES && r == SegmentUploader.Result.BUSY; i++) {
+            if (i > 0) Thread.sleep(SYNC_BUSY_WAIT_MS);
+            long now = System.currentTimeMillis();
+            r = SegmentUploadWorker.uploader(appCtx).run(SegmentUploader.Mode.OPEN_TICK, openSegmentView(), false, 0L);
+            noteOpenUpload(r, now);
+        }
+        return r;
+    }
+
+    /** Stops or resumes every Drive send. Resuming sends the backlog under the metered rules. */
+    public void setDrivePaused(boolean paused) {
+        DriveGate.setPaused(appCtx, paused);
+        NativeHrService.logLifecycle(appCtx, "drive_paused value=" + paused);
+        if (paused) {
+            driveBehind = false;
+        } else {
+            SegmentUploadWorker.enqueue(appCtx, "resume", null);
+            uploader.uploadOrphansAsync(new java.io.File(appCtx.getFilesDir(), "sessions"));
+            forceOpenUploadCheck();
+        }
+        emitState();
     }
 
     /**
@@ -1629,7 +1565,6 @@ public final class HrEngine implements HrDevice.Callback {
     // Stop upload workers still running, process-wide; the FGS stale-intent branch defers to them.
     private static final AtomicInteger stopWorkersRunning = new AtomicInteger(0);
     // Stop worker's bound on the final commit, queue wait included.
-    private static final long STOP_FINALIZE_WAIT_MS = 180_000L;
     // Throttle for the post-mortem alive-pulse pref write. shared_prefs.apply
     // is cheap but at 1 Hz the file rewrites would still churn — 10 sec is
     // fine resolution for "when did we last record" forensics.
@@ -1711,6 +1646,11 @@ public final class HrEngine implements HrDevice.Callback {
     private final Object segmentUploadTickLock = new Object();
     private java.util.concurrent.ScheduledFuture<?> segmentUploadTick;
     private volatile long lastOpenUploadWallMs = 0L;
+    // The last open-hour upload failed, so the network's return sends it at once.
+    private volatile boolean openUploadOwed = false;
+    private volatile boolean driveBehind = false;
+    private static final int SYNC_BUSY_TRIES = 15;
+    private static final long SYNC_BUSY_WAIT_MS = 2_000L;
 
     // Under the writer lock: queue only. reason null is the final close at stop.
     private void onSegmentClosed(String name, String reason) {
@@ -1733,7 +1673,7 @@ public final class HrEngine implements HrDevice.Callback {
             if (SegmentUploader.OPEN_PATCH_MS <= 0L) return;
             lastOpenUploadWallMs = System.currentTimeMillis();
             try {
-                segmentUploadTick = segmentUploadExecutor.scheduleWithFixedDelay(this::segmentUploadCheck,
+                segmentUploadTick = segmentUploadExecutor.scheduleWithFixedDelay(() -> segmentUploadCheck(false),
                     SEGMENT_UPLOAD_CHECK_MS, SEGMENT_UPLOAD_CHECK_MS, TimeUnit.MILLISECONDS);
             } catch (Throwable t) {
                 Log.w(TAG, "segment upload tick not scheduled: " + t);
@@ -1752,23 +1692,54 @@ public final class HrEngine implements HrDevice.Callback {
         }
     }
 
-    // Runs on hrm-segment-upload. PATCHes the open segment once OPEN_PATCH_MS of wall time has passed.
-    private void segmentUploadCheck() {
+    private void forceOpenUploadCheck() {
+        try {
+            segmentUploadExecutor.execute(() -> segmentUploadCheck(true));
+        } catch (Throwable t) {
+            Log.w(TAG, "open upload check not queued: " + t);
+        }
+    }
+
+    // A failed or busy upload stays due, so the next check tries again.
+    private void noteOpenUpload(SegmentUploader.Result r, long now) {
+        if (r == SegmentUploader.Result.BUSY) return;
+        boolean failed = r == SegmentUploader.Result.RETRY;
+        openUploadOwed = failed;
+        if (!failed) lastOpenUploadWallMs = now;
+    }
+
+    // Runs on hrm-segment-upload. PATCHes the open segment once OPEN_PATCH_MS of wall time has passed, or now if forced.
+    private void segmentUploadCheck(boolean force) {
         try {
             if (!sessionActive.get() || SegmentUploader.OPEN_PATCH_MS <= 0L) return;
             long now = System.currentTimeMillis();
             long last = lastOpenUploadWallMs;
-            if (now >= last && now - last < SegmentUploader.OPEN_PATCH_MS - SEGMENT_UPLOAD_DUE_SLACK_MS) return;
-            SegmentReader.OpenSegment open = openSegmentView();
-            String name = open != null ? open.openName() : null;
-            NativeHrService.logLifecycle(appCtx, "upload_enqueue name=" + (name != null ? name : "*") + " reason=open30");
-            SegmentUploader.Result r = SegmentUploadWorker.uploader(appCtx)
-                .run(SegmentUploader.Mode.OPEN_TICK, open, false, 0L);
-            // Busy: the worker holds the lock; the next check tries again.
-            if (r != SegmentUploader.Result.BUSY) lastOpenUploadWallMs = now;
+            boolean due = force || now < last || now - last >= SegmentUploader.OPEN_PATCH_MS - SEGMENT_UPLOAD_DUE_SLACK_MS;
+            if (due) {
+                SegmentReader.OpenSegment open = openSegmentView();
+                String name = open != null ? open.openName() : null;
+                NativeHrService.logLifecycle(appCtx, "upload_enqueue name=" + (name != null ? name : "*") + " reason=open30");
+                noteOpenUpload(SegmentUploadWorker.uploader(appCtx)
+                    .run(SegmentUploader.Mode.OPEN_TICK, open, false, 0L), now);
+            }
+            updateDriveBehind(now);
         } catch (Throwable t) {
             Log.w(TAG, "segment upload tick threw: " + t);
         }
+    }
+
+    // Signed out or paused is a choice, not a stall: neither shows as behind.
+    private void updateDriveBehind(long now) {
+        boolean behind = false;
+        if (!DriveGate.paused(appCtx) && AuthStorage.isSignedIn(appCtx)) {
+            SegmentReader.OpenSegment open = openSegmentView();
+            behind = DrivePolicy.behind(SegmentUploadWorker.uploader(appCtx)
+                .oldestPendingClosedMs(open != null ? open.openName() : null), now);
+        }
+        if (behind == driveBehind) return;
+        driveBehind = behind;
+        NativeHrService.logLifecycle(appCtx, "drive_behind value=" + behind);
+        emitState();
     }
 
     // Legacy is already open. A segment that fails to open leaves a legacy-only tee; a later hour retries.
@@ -2015,8 +1986,6 @@ public final class HrEngine implements HrDevice.Callback {
             synchronized (liveBuffer) { liveBuffer.clear(); }
             synchronized (trendHrBuffer) { trendHrBuffer.clear(); }
             synchronized (trendRmssdBuffer) { trendRmssdBuffer.clear(); }
-            lastUploadMs.set(0);
-            lastFinalizeMs.set(System.currentTimeMillis());
             committing.set(false);
 
             // CSV — append to prior file when resuming, fresh file otherwise.
@@ -2041,24 +2010,8 @@ public final class HrEngine implements HrDevice.Callback {
                 opened = next;
             }
             uploader.resetSession();
-            if (resuming && opened != null) {
-                // Same file as the dead process: PATCH its persisted Drive id (full-file path), never POST a twin.
-                resumable.resumeBroken(opened.getFile().getName());
-                uploader.markActiveSessionFilename(opened.getFile().getName());
-            } else {
-                resumable.resetSession();
-                if (opened != null) {
-                    // Stamp the active filename on the regular uploader so the
-                    // cleanup pass knows not to delete the in-progress CSV even
-                    // if the resumable path is doing all the actual uploads.
-                    uploader.markActiveSessionFilename(opened.getFile().getName());
-                    // Open the resumable session up-front. Async; callers later
-                    // read isReady() to decide chunk-vs-fallback. If openSession
-                    // fails or auth isn't ready yet, the periodic upload path
-                    // falls back to full PATCH transparently.
-                    resumable.startSessionAsync(opened.getFile().getName());
-                }
-            }
+            // Cleanup and the orphan passes leave this file alone while it records.
+            if (opened != null) uploader.markActiveSessionFilename(opened.getFile().getName());
 
             // Pre-session cleanup pass. Catches orphan CSVs from prior sessions
             // that ended unclean (process kill, OEM kill, force-stop).
@@ -2205,22 +2158,15 @@ public final class HrEngine implements HrDevice.Callback {
             closeRelaySocket();
             disconnectDevice();
             java.io.File stoppedFile = null;
-            String knownFileId = null;
-            java.util.concurrent.Future<NativeDriveResumableUploader.StopResult> finalize = null;
             if (snap != null) {
                 stoppedFile = snap.getFile();
                 NativeDriveUploader.markFinalizing(stoppedFilename);
                 finalizingName = stoppedFilename;
-                knownFileId = uploader.getSessionFileId();
-                // Queued now, so the next session's resetSession/startSessionAsync run after it.
-                finalize = resumable.finalizeForStopAsync(stoppedFile);
             }
             emitState();
             final java.io.File workFile = stoppedFile;
-            final String workFileId = knownFileId;
-            final java.util.concurrent.Future<NativeDriveResumableUploader.StopResult> workFinalize = finalize;
             final NativeDriveUploader workUploader = uploader;
-            Runnable work = () -> runStopUpload(workFile, workFileId, workFinalize, workUploader, stopGen, done);
+            Runnable work = () -> runStopUpload(workFile, workUploader, stopGen, done);
             workerStarted = true;
             try {
                 new Thread(work, "hrm-stop-upload").start();
@@ -2241,34 +2187,14 @@ public final class HrEngine implements HrDevice.Callback {
     }
 
     // Body of the hrm-stop-upload worker. Reads only its arguments, never the live session fields.
-    private void runStopUpload(java.io.File file, String knownFileId,
-            java.util.concurrent.Future<NativeDriveResumableUploader.StopResult> fut, NativeDriveUploader up,
-            int stopGen, java.util.concurrent.CountDownLatch done) {
+    private void runStopUpload(java.io.File file, NativeDriveUploader up, int stopGen,
+            java.util.concurrent.CountDownLatch done) {
         String name = file != null ? file.getName() : null;
         NativeHrService.logLifecycle(appCtx, "stop_worker_start file=" + name);
         String outcome = "no_file";
         try {
             if (file != null) {
-                NativeDriveResumableUploader.StopResult fin = null;
-                boolean finTimedOut = false;
-                if (fut != null) {
-                    try {
-                        fin = fut.get(STOP_FINALIZE_WAIT_MS, TimeUnit.MILLISECONDS);
-                    } catch (java.util.concurrent.TimeoutException te) {
-                        finTimedOut = true;
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        finTimedOut = true;
-                    } catch (Throwable t) {
-                        Log.w(TAG, "stop finalize threw: " + t);
-                    }
-                }
-                String fileId = fin != null && fin.fileId != null ? fin.fileId : knownFileId;
-                // A finalize still in flight may commit later; never create a same-name copy beside it.
-                boolean safetyOk = up != null && up.uploadFinishedSync(file, fileId, !finTimedOut);
-                outcome = "finalize=" + (fin != null && fin.ok)
-                    + (finTimedOut ? " finalize_timeout" : "")
-                    + " fileId=" + (fileId != null) + " safety=" + safetyOk;
+                outcome = "upload=" + (up != null && up.uploadFinishedSync(file));
                 Log.i(TAG, "stop upload " + name + ": " + outcome);
             }
         } catch (Throwable t) {
@@ -2326,6 +2252,8 @@ public final class HrEngine implements HrDevice.Callback {
         putSafe(ret, "linkUp", device.isLinkUp());
         putSafe(ret, "relayLive", relayLive.get());
         putSafe(ret, "relayRefused", relayRefused);
+        putSafe(ret, "drivePaused", DriveGate.paused(appCtx));
+        putSafe(ret, "driveBehind", driveBehind);
         putSafe(ret, "linkState", LinkStatePolicy.wireName(active, link.state()));
         putSafe(ret, "generation", sessionGeneration.get());
         if (active) {
@@ -2561,41 +2489,6 @@ public final class HrEngine implements HrDevice.Callback {
             putSafe(ev, "rrIntervals", arr);
         }
         emit("hr", ev);
-
-        // Periodic Drive upload. Prefer the resumable trickle path: opens
-        // a single Drive upload session at startSession and trickles only
-        // the new bytes (256 KB-aligned chunks) instead of re-uploading
-        // the whole CSV every interval. ~50x cellular bytes saved on a
-        // long sleep session. If the resumable session FAILED (auth fail,
-        // network blip during open POST), fall back to the full-file
-        // PATCH path so there's still a Drive backup growing. If the
-        // resumable session is still INITIALIZING (in-flight, not yet
-        // ready and not yet broken), skip this interval — we'd otherwise
-        // create a duplicate Drive file with the same filename.
-        HrSink uploadWriter = sink;
-        if (uploadWriter != null && !committing.get()) {
-            long since = now - lastUploadMs.get();
-            if (since >= DRIVE_UPLOAD_INTERVAL_MS) {
-                if (resumable.isReady()) {
-                    lastUploadMs.set(now);
-                    resumable.appendChunkIfReadyAsync(uploadWriter.getFile());
-                } else if (resumable.isBroken()) {
-                    lastUploadMs.set(now);
-                    uploader.uploadAsync(uploadWriter.getFile());
-                }
-                // else: resumable is initializing — skip this tick, retry next interval.
-            }
-        }
-        // Periodic finalize: makes the trickled bytes visible in Drive at
-        // the current state. Falls back to a full upload if the resumable
-        // session isn't ready.
-        if (sink != null && !committing.get()
-                && now - lastFinalizeMs.get() >= DRIVE_FINALIZE_INTERVAL_MS) {
-            if (committing.compareAndSet(false, true)) {
-                lastFinalizeMs.set(now);
-                finalizeAndRestartAsync();
-            }
-        }
 
         // Notification update cadence: 5 s screen-on, 10 s screen-off.
         // Higher rates trigger Samsung's "abusive notification" heuristic

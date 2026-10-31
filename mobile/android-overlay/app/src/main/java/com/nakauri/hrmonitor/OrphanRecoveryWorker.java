@@ -19,7 +19,8 @@ import java.util.concurrent.TimeUnit;
 // uploaded because the previous session ended uncleanly (process kill,
 // OEM background management) and the user never reopened the app.
 // Runs every 6 h regardless of session state. Network-required so it
-// doesn't burn battery on offline devices.
+// doesn't burn battery on offline devices. CONNECTED, not UNMETERED: this pass
+// also starts the segment sweep; the scan itself skips what the metered rules hold back.
 public class OrphanRecoveryWorker extends Worker {
     private static final String TAG = "OrphanRecoveryWorker";
     private static final String UNIQUE_NAME = "hr_monitor_orphan_recovery";
