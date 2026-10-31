@@ -34,7 +34,8 @@ for (const page of ['index.html', 'changelog.html', 'legal.html', 'new-look.html
     const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
     const p = await ctx.newPage();
     await p.route('**/*', (rt) => (rt.request().url().startsWith(BASE) || /fonts\.(googleapis|gstatic)|cdnjs|jsdelivr/.test(rt.request().url())) ? rt.continue() : rt.fulfill({ status: 204, body: '' }));
-    await p.goto(`${BASE}/${page}`, { waitUntil: 'networkidle' });
+    await p.goto(`${BASE}/${page}`, { waitUntil: 'load' });
+    await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
     await p.evaluate(() => document.querySelectorAll('details').forEach((d) => { d.open = true; }));
     await p.waitForTimeout(300);
     const res = await p.evaluate(() => {
