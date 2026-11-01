@@ -194,6 +194,23 @@ if (!MUTANTS) {
   ok(c.lists === BASE_CALLS.C[0] && c.media === BASE_CALLS.C[1] && !c.t.note, `C Drive calls as c0e5d9b: ${c.lists} listings, ${c.media} downloads (want ${BASE_CALLS.C.join(', ')}), backfill note ${!!c.t.note}`);
   ok(d.lists === BASE_CALLS.D[0] && d.media === BASE_CALLS.D[1] && !d.t.note, `D Drive calls as c0e5d9b: ${d.lists} listings, ${d.media} downloads (want ${BASE_CALLS.D.join(', ')}), backfill note ${!!d.t.note}`);
 }
+// Guards: saved week traces were wiped by every real load (2026-11-01 review), so only demo got the speedup.
+if (!MUTATE && !args.includes('--base')) {
+  const weekVisit = async () => {
+    drive.gate = 0;
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => errors.push('week: ' + e.message));
+    await page.goto(`${BASE}/hrv_viewer.html?x=1#/week/2026-04-20`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => { const c = [...document.querySelectorAll('canvas[data-spark]')]; return c.length && c.every((x) => x.dataset.drawn); }, null, { timeout: 30000 });
+    await page.waitForTimeout(1500);
+    const r = await page.evaluate(() => ({ reads: window.__hrmSparkReads || 0, cards: document.querySelectorAll('canvas[data-spark]').length, last: window.__hrmSparkLast || null }));
+    await page.close();
+    return r;
+  };
+  const first = await weekVisit(), second = await weekVisit();
+  ok(first.reads > 0 && first.cards > 0, `Week first open reads the recordings once: ${JSON.stringify(first)}`);
+  ok(second.reads === 0 && second.cards === first.cards, `Week after a reload reads no files: ${JSON.stringify(second)}`);
+}
 ok(errors.length === 0, 'no page errors: ' + errors.join(' | '));
 
 await ctx.close();

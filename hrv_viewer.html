@@ -3857,7 +3857,7 @@ END SECTION MAP -->
       for (const fn of filenames) if (isNativeLegacyName(fn)) live.add('prec:' + fn);
       for (const k of Array.from(v2Store.keys())) {
         if (typeof k !== 'string' || live.has(k)) continue;
-        if (k.startsWith('seg:') || k.startsWith('sess:') || k.startsWith('prec:') || k.startsWith('spark:')) { v2Store.delete(k); segIdxDel(k); }
+        if (k.startsWith('seg:') || k.startsWith('sess:') || k.startsWith('prec:')) { v2Store.delete(k); segIdxDel(k); }
       }
     }
 
@@ -5278,7 +5278,7 @@ END SECTION MAP -->
         return await new Promise((resolve, reject) => {
           const id = ++_parseSeq;
           w.postMessage({ id, spark: true, fn: filename, text, zoneTable: window.__aortiZoneTable || null });
-          _parsePending.set(id, { resolve, reject, size: text.length });
+          _parsePending.set(id, { resolve: (r) => (r && r.__spark ? resolve(r.buckets) : reject(new Error('not a trace reply'))), reject, size: text.length });
           if (_parsePending.size === 1) armParseWatchdog(w);
         });
       } catch (e) {
@@ -5330,6 +5330,7 @@ END SECTION MAP -->
     const { start: dayStart, end: dayEnd } = dayWindow(iso), BMS = 300000, B = Math.round((dayEnd - dayStart) / BMS); // 23 or 25 h on a clock-change day
     const sums = new Float64Array(B), counts = new Uint32Array(B);
     const first = Math.floor(dayStart / BMS);
+    let complete = true;
     for (const fn of files) {
       try {
         if (!memo.has(fn)) {
@@ -5342,6 +5343,7 @@ END SECTION MAP -->
           if (b) { sums[k] += b[0]; counts[k] += b[1]; }
         }
       } catch (e) {
+        complete = false;
         console.warn('[week] day trace skipped a file', fn, e && e.message);
       }
     }
@@ -5351,30 +5353,43 @@ END SECTION MAP -->
       else if (points.length && points[points.length - 1].y != null) points.push({ x: (k + 0.5) / 12, y: null });
     }
     paintSpark(canvas, points, B / 12, STAGE_COLORS[getHRStage(morningHR)]);
+    points.complete = complete;
+    points.rows = counts.reduce((a, n) => a + n, 0);
     return points;
   }
 
-  // A past day's trace is saved, so it never reads a file again; the key changes when the day's data does.
+  // A day's trace is saved whole, so it reads no file again until the day's data, zone or start times change.
+  const SPARK_V = 1;
   async function drawWeekSparks(cols, el) {
     await v2StoreLoad();
+    const demo = isDemoMode();
+    if (!demo) {
+      for (const k of Array.from(v2Store.keys())) {
+        if (typeof k === 'string' && k.startsWith('spark:') && !sessionsByDate[k.slice(6)]) { v2Store.delete(k); segIdxDel(k); }
+      }
+    }
     const todo = [];
     for (const col of cols) {
       const canvas = col.files.length && el.querySelector(`canvas[data-spark="${col.iso}"]`);
       if (!canvas) continue;
-      const sig = hashStr(JSON.stringify(col.files.map((fn) => {
+      let want = 0;
+      const sig = hashStr(JSON.stringify([SPARK_V, dayWindow(col.iso).start, col.files.map((fn) => {
         const s = sessionsIndex[fn], d = s && s.byDay && s.byDay[col.iso];
-        return [fn, d ? d.hrCount : (s ? s.duration : 0), d ? d.hrAvg : 0];
-      })));
-      const hit = v2Store.get('spark:' + col.iso);
+        want += d ? d.hrCount : 0;
+        return [fn, s ? s.startEpoch : 0, d ? d.hrCount : (s ? s.duration : 0), d ? d.hrAvg : 0];
+      })]));
+      const hit = demo ? null : v2Store.get('spark:' + col.iso);
       if (hit && hit.sig === sig) {
         const { start, end } = dayWindow(col.iso);
         paintSpark(canvas, hit.points, (end - start) / 3600000, STAGE_COLORS[getHRStage(col.morningHR)]);
-      } else todo.push({ col, canvas, sig });
+      } else todo.push({ col, canvas, sig, want });
     }
     const memo = new Map();
-    for (const { col, canvas, sig } of todo) {
+    for (const { col, canvas, sig, want } of todo) {
       if (!canvas.isConnected) return;
       const points = await drawDaySparkline(canvas, col.files, col.morningHR, col.iso, memo);
+      window.__hrmSparkLast = { iso: col.iso, rows: points.rows, want, complete: points.complete };
+      if (demo || !points.complete || points.rows < want * 0.98) continue;
       const entry = { sig, points: points.map((p) => ({ x: p.x, y: p.y == null ? null : Math.round(p.y * 10) / 10 })) };
       v2Store.set('spark:' + col.iso, entry);
       segIdxPut('spark:' + col.iso, entry);

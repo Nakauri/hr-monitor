@@ -951,8 +951,8 @@
         if (d.zoneTable && !root.AortiLocalClock) {
           importScripts('./local-clock.js');
           root.AortiLocalClock.install(d.zoneTable);
-        }
-        if (d.spark) { root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, summary: sparkBuckets(d.fn, d.text) }); return; }
+        } else if (d.zoneTable) root.AortiLocalClock.refresh(d.zoneTable);
+        if (d.spark) { root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, summary: { __spark: 1, buckets: sparkBuckets(d.fn, d.text) } }); return; }
         root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, summary: summarizeCSV(d.fn, d.text, { quad: d.quad, shift: d.shift }) });
       } catch (err) {
         root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, error: String(err && err.message || err), name: err && err.name });
