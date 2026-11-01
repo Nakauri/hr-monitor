@@ -13,6 +13,7 @@ run node scripts/junk-parity.test.cjs
 run node scripts/csv-format.test.cjs
 run node scripts/segment-format.test.cjs
 run node scripts/day-boundary.test.cjs
+run node scripts/local-clock.test.cjs
 run node scripts/avg-stats.test.cjs
 run node scripts/auth-trace.test.cjs
 run node scripts/auth-api.test.mjs

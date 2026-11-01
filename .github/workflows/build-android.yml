@@ -20,6 +20,7 @@ on:
       - 'ui.js'
       - 'tokens.css'
       - 'diagnostics.js'
+      - 'local-clock.js'
       - 'marks-store.js'
       - 'relay-link.js'
       - 'recorder.js'

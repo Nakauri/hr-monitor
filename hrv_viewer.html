@@ -3947,7 +3947,7 @@ END SECTION MAP -->
         return await new Promise((resolve, reject) => {
           const id = ++_parseSeq;
           const o = parseOpts();
-          w.postMessage({ id, fn: filename, text, quad: o.quad, shift: o.shift });
+          w.postMessage({ id, fn: filename, text, quad: o.quad, shift: o.shift, zoneTable: window.__aortiZoneTable || null });
           _parsePending.set(id, { resolve, reject, size: text.length });
           if (_parsePending.size === 1) armParseWatchdog(w);
         });

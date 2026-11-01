@@ -107,9 +107,18 @@ public class NativeHrSessionPlugin extends Plugin {
         }
     }
 
+    private static final class ZoneBridge {
+        @android.webkit.JavascriptInterface
+        public String table() {
+            return ZoneTable.json(java.util.TimeZone.getDefault(), System.currentTimeMillis());
+        }
+    }
+
     @Override
     public void load() {
         instance = this;
+        // Plugins load before the first page, so its first script can read the table.
+        getBridge().getWebView().addJavascriptInterface(new ZoneBridge(), "AortiZone");
         NativeHrService.logLifecycle(getContext(), "plugin_load");
         HrEngine.Obtained o;
         try {

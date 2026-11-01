@@ -928,6 +928,10 @@
     root.onmessage = (e) => {
       const d = e.data;
       try {
+        if (d.zoneTable && !root.AortiLocalClock) {
+          importScripts('./local-clock.js');
+          root.AortiLocalClock.install(d.zoneTable);
+        }
         root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, summary: summarizeCSV(d.fn, d.text, { quad: d.quad, shift: d.shift }) });
       } catch (err) {
         root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, error: String(err && err.message || err), name: err && err.name });

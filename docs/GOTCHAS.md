@@ -32,8 +32,9 @@ The checks that guard a rule are named in brackets.
   local reading can be wrong, and it follows the device. Android reads its system zone data, updated separately
   from the app. Web pages read the browser: Windows set to "Mountain Time (US & Canada)" resolves to
   America/Cambridge_Bay and turns back even with current data; the fix is the Windows zone "Mountain Time
-  (Alberta)". Diagnostics prints the zone and its January offset; UTC-7 in Alberta means old data. The app names no
-  home city in code, so a pin by zone id needs an entry in `ALLOW` (`scripts/personal-scan.mjs`) first.
+  (Alberta)". The app's WebView carries its own older data, so `local-clock.js` corrects it from `ZoneTable.java`,
+  only when they disagree, naming no zone. Diagnostics prints the zone, January offset and whether the clock is
+  corrected. Not patched: `toString`, direct `Intl.DateTimeFormat`, zones off the hour. [`scripts/local-clock.test.cjs`]
 
 ## Android
 

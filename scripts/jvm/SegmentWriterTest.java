@@ -128,6 +128,7 @@ public class SegmentWriterTest {
         rollAtHour();
         rollTimerOpensNothing();
         dstDenver();
+        zoneTable();
         reopenAppends();
         partialLastLineTrimmed();
         headerOnlyPartialRestarts();
@@ -149,6 +150,15 @@ public class SegmentWriterTest {
         System.out.println();
         System.out.println(passes + " passed, " + failures + " failed");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    // Guards: local-clock.js corrects the WebView from this table; a change found a minute out shifts every reading.
+    static void zoneTable() {
+        TimeZone denver = TimeZone.getTimeZone("America/Denver");
+        String json = com.nakauri.hrmonitor.ZoneTable.json(denver, ms("2026-11-01T00:00:00Z"));
+        check("table starts in 2020 on standard time", json.contains("\"changes\":[[1577836800000,-420]"), json);
+        check("table has the 2026 change to the minute", json.contains("[" + ms("2026-11-01T08:00:00Z") + ",-420]"), json);
+        check("table has the 2026 spring change", json.contains("[" + ms("2026-03-08T09:00:00Z") + ",-360]"), json);
     }
 
     static void rollAtHour() throws Exception {

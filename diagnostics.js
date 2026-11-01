@@ -149,7 +149,7 @@
         } catch (e) {
           name = 'unreadable';
         }
-        return { name, janOffset };
+        return { name, janOffset, table: !!window.__aortiZoneTable, active: !!window.__aortiClockActive };
       })(),
       demoView: isDemoView(),
       localBroadcastKey: isDemoView() ? false : !!localStorage.getItem('hr_monitor_broadcast_key'),
@@ -705,7 +705,7 @@
     lines.push('Signed:     ' + (v ? (v.signed ? 'yes' : 'no') : '—'));
     lines.push('Runtime:    ' + d.runtime);
     lines.push('Native:     ' + (d.isNative ? 'yes' : 'no'));
-    lines.push('Time zone:  ' + d.zone.name + ', January UTC' + (d.zone.janOffset / 60));
+    lines.push('Time zone:  ' + d.zone.name + ', January UTC' + (d.zone.janOffset / 60) + (d.zone.table ? ', clock ' + (d.zone.active ? 'corrected' : 'matches system') : ''));
     lines.push('BLE:        ' + (d.blePresent ? 'present' : 'missing'));
     lines.push('  web:      ' + (d.bleWeb ? 'yes' : 'no'));
     lines.push('  cap plug: ' + (d.bleCapacitorPlugin ? 'yes' : 'no'));
