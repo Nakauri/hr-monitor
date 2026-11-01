@@ -1,6 +1,24 @@
 {
   "items": [
     {
+      "date": "2026-11-01",
+      "area": "Viewer",
+      "title": "Week view opens faster",
+      "body": "Each day's trace is worked out once and saved, so Week no longer reloads your recordings every time you open it."
+    },
+    {
+      "date": "2026-11-01",
+      "area": "Android app",
+      "title": "Clocks stay right on older phones",
+      "body": "Times in the app now follow your phone's own clock rules, including Alberta staying on one time all year."
+    },
+    {
+      "date": "2026-11-01",
+      "area": "Site",
+      "title": "Bigger pictures on the home page",
+      "body": "Tap a viewer picture to see it full size."
+    },
+    {
       "date": "2026-10-17",
       "area": "Viewer",
       "title": "One look for every stat",

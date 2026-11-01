@@ -10,11 +10,12 @@
 // viewer-perf (headless timings swing 15% run to run, so a budget there fails without a bug).
 // Runtime: 0 s with nothing changed; about 10 to 15 min when hrv_viewer.html changes; about 35 to 37 min for --all
 // (2063 s and 2204 s, 2026-10-25). Run it from a worktree of HEAD so edits elsewhere cannot change a run.
-// Usage: node scripts/browser-tier.mjs [--all | --base <ref>] [--list] [--only a,b] [--ux <kit dir>]
+// Usage: node scripts/browser-tier.mjs [--all | --base <ref>] [--list] [--only a,b] [--ux <kit dir>] [--force] [--stamp-from <commit>]
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { uxDir } from './ux-dir.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -95,8 +96,35 @@ if (names.some((n) => TIER[n][2])) {
   if (r.status !== 0) { console.log('browser-tier: copy-web failed\n' + (r.stderr || r.stdout)); process.exit(1); }
 }
 
+// Guards: every push re-ran 38 minutes of checks on code that had just passed (2026-11-01). A check that passed on
+// these exact inputs is skipped. Local only: a dirty tree or CI runs everything. Usage: --force runs everything,
+// --stamp-from <commit> records --only checks as passed at that commit.
+const STAMP = path.join(path.resolve(ROOT, execFileSync('git', ['-C', ROOT, 'rev-parse', '--git-common-dir'], { encoding: 'utf8' }).trim()), 'browser-tier-pass.json');
+const treeAt = (rev) => execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', rev], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
+const SHARED = /^(demo\/|scripts\/fixtures\/|scripts\/vendor\/|mobile\/(src|scripts)\/|scripts\/(fake-bridge|ux-dir)\.mjs$|local-clock\.js$|app-home\.html$)/;
+const inputKey = (n, tree) => crypto.createHash('sha256').update(JSON.stringify(TIER[n][1]) + tree.filter((l) => {
+  const f = l.split('\t')[1];
+  return TIER[n][0].test(f) || f === `scripts/${n}.mjs` || SHARED.test(f);
+}).join('\n')).digest('hex');
+const stampFrom = val('--stamp-from');
+if (stampFrom) {
+  const stamps = fs.existsSync(STAMP) ? JSON.parse(fs.readFileSync(STAMP, 'utf8')) : {};
+  const tree = treeAt(stampFrom);
+  for (const n of names) stamps[n] = inputKey(n, tree);
+  fs.writeFileSync(STAMP, JSON.stringify(stamps));
+  console.log(`browser-tier: stamped ${names.length} check(s) at ${stampFrom}`);
+  process.exit(0);
+}
+const dirty = execFileSync('git', ['-C', ROOT, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim() !== '';
+const useStamps = !process.env.CI && !dirty;
+const force = args.includes('--force');
+const stamps = useStamps && fs.existsSync(STAMP) ? JSON.parse(fs.readFileSync(STAMP, 'utf8')) : {};
+const tree = useStamps ? treeAt('HEAD') : [];
+
 const results = [];
 for (const n of names) {
+  const key = useStamps ? inputKey(n, tree) : null;
+  if (key && !force && stamps[n] === key) { console.log(`skip ${n.padEnd(20)} passed on these inputs`); continue; }
   const t0 = Date.now();
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', n + '.mjs'), ...TIER[n][1], ...(UX_ARG ? ['--ux', UX_ARG] : [])], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const secs = Math.round((Date.now() - t0) / 1000);
@@ -104,6 +132,7 @@ for (const n of names) {
   const lines = ((r.stdout || '') + (r.stderr || '')).trim().split('\n');
   const tail = lines.slice(-3).join(' | ').slice(0, 220);
   results.push([n, ok, secs, tail]);
+  if (key) { if (ok) stamps[n] = key; else delete stamps[n]; fs.writeFileSync(STAMP, JSON.stringify(stamps)); }
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${n.padEnd(20)} ${String(secs).padStart(4)} s  ${ok ? '' : tail}`);
   // The tail alone hid which assertion failed (landing, 2026-10-25, failed once under load and passed 4 times alone).
   if (!ok) for (const l of lines.filter((x) => /^\s*FAIL\b/.test(x)).slice(0, 10)) console.log('     ' + l.trim().slice(0, 300));

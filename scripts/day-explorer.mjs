@@ -969,7 +969,7 @@ if (want('week')) {
     const shown = [...document.querySelectorAll('canvas[data-spark]')];
     return { was, more: (window.__hrmSparkReads || 0) - was, cards: shown.length, drawn: shown.filter((c) => c.dataset.drawn).length, ink: shown.filter((c) => c.width > 0).length };
   });
-  ok(reads.was > 0 && reads.drawn === reads.cards, `week: a second visit reads no files and draws every card ${JSON.stringify(reads)}`);
+  ok(reads.was > 0 && reads.drawn === reads.cards, `week: a second visit draws every card ${JSON.stringify(reads)}`);
   ok(!page.errors.length, 'week: no page errors ' + page.errors.join(' | '));
   await ctx.close();
 }

@@ -173,6 +173,7 @@ async function kept(page) {
 }
 const waitKept = (page, re, timeout = 10000) => page.waitForFunction((src) => [...document.querySelectorAll('.session-ctl .notice .msg')].some((m) => new RegExp(src).test(m.textContent)), re.source, { timeout }).catch(() => {});
 const toastText = (page) => page.evaluate(() => { const t = document.querySelector('.toast-host .toast'); return t ? t.textContent : null; });
+// Runs in the page: Node's zone data can differ from the browser's (2026-11-01, an hour apart after Windows moved).
 const clock12 = (ms) => { const d = new Date(ms); const h = d.getHours(); return (h % 12 || 12) + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + (h < 12 ? 'am' : 'pm'); };
 async function download(page, click) {
   const dl = page.waitForEvent('download', { timeout: 5000 }).catch(() => null);
@@ -304,7 +305,7 @@ const scenarios = {
     await waitLabel(page, 'Stop session', 8000);
     await page.waitForTimeout(800);
     await tick(page);
-    const at = clock12(A.startMs);
+    const at = await page.evaluate(`(${clock12})(${A.startMs})`);
     const k0 = await kept(page);
     check(!(await panel(page)).shown && k0.length === 1 && k0[0].text === `Session from ${at}: Saving to Sessions` && k0[0].exp, 'S21: Start hides the panel; A gets its own line "Session from <time>: Saving to Sessions" with Export', JSON.stringify(k0));
     await page.evaluate(() => window.__releaseFolder(false));
@@ -343,7 +344,7 @@ const scenarios = {
     await waitFirst(page, /^Saved to Drive/);
     const pb = await panel(page);
     check(pb.first === 'Saved to Drive' && !pb.exp, 'S25: B saves, its panel reads "Saved to Drive" with no Export', JSON.stringify(pb));
-    const at = clock12(A.startMs);
+    const at = await page.evaluate(`(${clock12})(${A.startMs})`);
     const k0 = await kept(page);
     check(k0.length === 1 && k0[0].text === `Session from ${at}: Drive upload incomplete` && k0[0].exp, "S25: A's line still reads incomplete, with Export", JSON.stringify(k0));
     await page.evaluate(() => { window.__uploadFail = true; window.__releaseUploads(); });
@@ -459,7 +460,7 @@ const scenarios = {
     await waitFirst(page, /^Drive upload failed/, CAP_MS + 6000);
     const pb = await panel(page);
     check(pb.shown && pb.first === 'Drive upload failed' && pb.kind === 'error' && pb.exp, 'S31: the takeover shows B\'s panel "Drive upload failed" with Export', JSON.stringify(pb));
-    const at = clock12(A.startMs);
+    const at = await page.evaluate(`(${clock12})(${A.startMs})`);
     const k0 = await kept(page);
     check(k0.length === 1 && k0[0].text === `Session from ${at}: Drive upload incomplete`, "S31: A's line reads incomplete", JSON.stringify(k0));
     await page.evaluate(() => { window.__uploadFail = false; window.__releaseUploads(); });

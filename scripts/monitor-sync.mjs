@@ -501,10 +501,11 @@ try {
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const end = Date.now() - 3 * 3600e3;
   const start = end - (11 * 60 + 28) * 60000;
-  const endD = new Date(end);
-  const hhmm = String(endD.getHours()).padStart(2, '0') + ':' + String(endD.getMinutes()).padStart(2, '0');
-  const startD = new Date(start);
-  const isoStart = startD.getFullYear() + '-' + String(startD.getMonth() + 1).padStart(2, '0') + '-' + String(startD.getDate()).padStart(2, '0');
+  // Read in the page: Node's zone data can differ from the browser's (2026-11-01, an hour apart after Windows moved).
+  const parts = (ms) => {
+    const d = new Date(ms), p = (n) => String(n).padStart(2, '0');
+    return { day: d.getDay(), hhmm: p(d.getHours()) + ':' + p(d.getMinutes()), iso: d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) };
+  };
   for (const size of ['360', '360-text200', '1440']) {
     const { ctx, page, errs } = await newPage({ size, native: true, bridge: { scenario: 'idle' },
       extra: [segs([{ name: 'a', base: start, size: 10, mtime: end - 1000, open: false }]), `localStorage.setItem('hr_monitor_last_recording', JSON.stringify({ start: ${start}, end: ${end} }));`], url: '/www/index.html' });
@@ -517,7 +518,8 @@ try {
         gear: g && g.getAttribute('href'), gw: gr && Math.round(gr.width), gh: gr && Math.round(gr.height), label: g && g.getAttribute('aria-label'),
         offline: [...document.querySelectorAll('a')].some((x) => /offline/i.test(x.textContent + x.getAttribute('href'))), overflow: document.documentElement.scrollWidth > innerWidth + 1 };
     });
-    check(h.text === `Last recording ended ${DAYS[endD.getDay()]} ${hhmm} · 11h 28m long` && h.href === './hrv_viewer.html#/day/' + isoStart && h.ah >= 44,
+    const endAt = await page.evaluate(parts, end), startAt = await page.evaluate(parts, start);
+    check(h.text === `Last recording ended ${DAYS[endAt.day]} ${endAt.hhmm} · 11h 28m long` && h.href === './hrv_viewer.html#/day/' + startAt.iso && h.ah >= 44,
       `app home ${size}: "Last recording ended" with day, time and length, opens the recording's first day, 44 px`, JSON.stringify(h));
     check(h.gear === './hr_monitor.html#settings' && h.gw >= 44 && h.gh >= 44 && h.label === 'Settings' && !h.offline && !h.overflow, `app home ${size}: 44 px gear to Settings, no Offline mode link`, JSON.stringify(h));
     const reach = await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); const v = [...document.querySelectorAll('.app-secondary')].find((a) => a.textContent === 'Viewer'); const r = v.getBoundingClientRect(); return { bottom: Math.round(r.bottom), h: innerHeight }; });
@@ -542,8 +544,8 @@ try {
       extra: [segs([{ name: 'b', base: later - 600000, size: 10, mtime: later, open: false }]), `localStorage.setItem('hr_monitor_last_recording', JSON.stringify({ start: ${start}, end: ${end} }));`], url: '/www/index.html' });
     await page.waitForTimeout(600);
     const t = await page.evaluate(() => document.getElementById('app-last').textContent);
-    const ld = new Date(later);
-    check(t === `Last recording ended ${DAYS[ld.getDay()]} ${String(ld.getHours()).padStart(2, '0')}:${String(ld.getMinutes()).padStart(2, '0')}`, 'app home: a later closed segment (stopped from the notification) wins, without a length', t);
+    const ld = await page.evaluate(parts, later);
+    check(t === `Last recording ended ${DAYS[ld.day]} ${ld.hhmm}`, 'app home: a later closed segment (stopped from the notification) wins, without a length', t);
     if (errs.length) fail('app home segment: page errors ' + errs.join('; '));
     await ctx.close();
   }
