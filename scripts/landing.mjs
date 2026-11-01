@@ -376,6 +376,7 @@ async function runtime(fails) {
       }
     }
     await s40Checks({ browser, base, open, check, shotPath });
+    await lightboxChecks({ open, check });
     await s43Checks({ open, check });
   } finally {
     await browser.close();
@@ -486,17 +487,18 @@ async function s40Checks({ browser, base, open, check, shotPath }) {
   async function signedInCase(site) {
     const { ctx, page } = await authPage({ signed: true, site });
     const s = await page.evaluate(() => {
-      const a = [...document.querySelectorAll('.nav .nav-link')].find((x) => x.textContent.trim() === 'Your sessions');
+      const a = [...document.querySelectorAll('.nav .nav-link')].find((x) => x.textContent.trim() === 'Your viewer');
       const row = document.querySelector('[data-signin-row]');
-      return { nav: !!a && a.getAttribute('href') === './hrv_viewer.html', heroHidden: !!row && row.hidden && row.getBoundingClientRect().height === 0 };
+      const plain = document.querySelector('.nav .nav-viewer');
+      return { nav: !!a && a.getAttribute('href') === './hrv_viewer.html', oneLink: !!plain && plain.getBoundingClientRect().width === 0, heroHidden: !!row && row.hidden && row.getBoundingClientRect().height === 0 };
     });
-    const went = await goesTo(page, '.nav .nav-link >> text=Your sessions').catch(() => false);
+    const went = await goesTo(page, '.nav .nav-link >> text=Your viewer').catch(() => false);
     await ctx.close();
     return { ...s, went };
   }
   {
     const s = await signedInCase(null);
-    check(s.nav && s.heroHidden && s.went, `signed in: nav reads "Your sessions" to the viewer, hero sign-in hidden, click opens the viewer (${JSON.stringify(s)})`);
+    check(s.nav && s.oneLink && s.heroHidden && s.went, `signed in: nav reads "Your viewer", one link to the viewer, hero sign-in hidden, click opens the viewer (${JSON.stringify(s)})`);
     const m = await signedInCase((src) => src.replace("const VIEWER_URL = './hrv_viewer.html';", "const VIEWER_URL = './hr_monitor.html?mode=online';"));
     check(!(m.nav && m.heroHidden && m.went), `mutant "signed-in click goes to the monitor" fails the sign-in check (${JSON.stringify(m)})`);
   }
@@ -647,6 +649,32 @@ async function evenSpeed(page, sel, n = 80) {
   return { paused, seen: pts.length, ratio: vLong && vShort ? vLong / vShort : null, W: Math.round(W), H: Math.round(H) };
 }
 const evenOk = (r) => r.ratio !== null && Math.abs(r.ratio - 1) <= 0.15;
+
+// Guards: the viewer pictures on the home page were too small to read, and the dialog is shared with new-look.
+async function lightboxChecks({ open, check }) {
+  for (const [url, w, h] of [['/index.html', 1440, 900], ['/index.html', 430, 900], ['/new-look.html', 1440, 900]]) {
+    const { ctx, page } = await open(url, w, h);
+    const read = () => page.evaluate(() => {
+      const d = document.getElementById('lightbox'), i = document.getElementById('lb-img');
+      return { open: !!d && d.open, src: i ? i.getAttribute('src') : null, wide: i ? i.naturalWidth : 0, cap: (document.getElementById('lb-caption') || {}).textContent, count: (document.getElementById('lb-count') || {}).textContent, focus: document.activeElement && document.activeElement.className };
+    });
+    try {
+      const first = page.locator('button.zoom:visible').first();
+      await first.scrollIntoViewIfNeeded();
+      await first.click();
+      await page.waitForFunction(() => { const i = document.getElementById('lb-img'); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 });
+      const a = await read();
+      check(a.open && a.wide >= 360 && !!a.cap, `${url} at ${w}: a picture opens its full file in the dialog (${JSON.stringify(a)})`);
+      await page.keyboard.press('ArrowRight');
+      const b = await read();
+      check(b.src !== a.src, `${url} at ${w}: the arrow key moves to the next picture`);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(100);
+      const c = await read();
+      check(!c.open && c.focus === 'zoom', `${url} at ${w}: Escape closes and focus returns to a picture (${JSON.stringify(c)})`);
+    } finally { await ctx.close(); }
+  }
+}
 
 async function s43Checks({ open, check }) {
   const shot = (n) => { fs.mkdirSync(SHOTS, { recursive: true }); return path.join(SHOTS, 's43-' + n); };

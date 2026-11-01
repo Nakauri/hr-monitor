@@ -17,7 +17,7 @@
     if (!a || !a.isSignedIn()) return;
     document.body.classList.add('signed-in');
     document.querySelectorAll('.nav [data-signin]').forEach((el) => {
-      el.textContent = 'Your sessions';
+      el.textContent = 'Your viewer';
       el.setAttribute('href', VIEWER_URL);
       el.removeAttribute('data-signin');
     });
@@ -170,3 +170,59 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
 })();
 
+// Picture dialog: click or Enter on a picture opens its full-size file (loaded only then); Tab stays inside;
+// Escape or Close shuts it and focus goes back to the picture; arrow keys and swipes move in page order.
+(function () {
+  if (!document.querySelector('button.zoom')) return;
+  document.body.insertAdjacentHTML('beforeend', '<dialog class="lightbox" id="lightbox" aria-labelledby="lb-caption"><div class="lb ui"><div class="lb-bar"><span class="lb-count" id="lb-count"></span><button type="button" class="btn icon" id="lb-close" aria-label="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><div class="lb-stage" id="lb-stage"><img id="lb-img" alt=""></div><div class="lb-foot"><button type="button" class="btn icon" id="lb-prev" aria-label="Previous picture"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button><p id="lb-caption"></p><button type="button" class="btn icon" id="lb-next" aria-label="Next picture"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div></dialog>');
+  const dlg = document.getElementById('lightbox');
+  const img = document.getElementById('lb-img');
+  const cap = document.getElementById('lb-caption');
+  const count = document.getElementById('lb-count');
+  const stage = document.getElementById('lb-stage');
+  let list = [], at = -1, opener = null;
+  // Page order is reading order, so on a phone (where Now stacks first) the arrows follow what you see.
+  const ordered = () => [...document.querySelectorAll('button.zoom')].filter((b) => b.offsetParent)
+    .sort((a, b) => { const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return (ra.top - rb.top) || (ra.left - rb.left); });
+  function show(i) {
+    at = (i + list.length) % list.length;
+    const b = list[at], alt = b.querySelector('img').alt;
+    img.src = b.dataset.full; img.alt = alt;
+    cap.textContent = alt;
+    count.textContent = (at + 1) + ' of ' + list.length;
+  }
+  function open(b) {
+    list = ordered(); opener = b;
+    show(list.indexOf(b));
+    dlg.showModal();
+    document.getElementById('lb-close').focus();
+  }
+  function close() { if (dlg.open) dlg.close(); }
+  dlg.addEventListener('close', () => { img.removeAttribute('src'); if (opener) opener.focus(); });
+  document.addEventListener('click', (e) => { const b = e.target.closest('button.zoom'); if (b) open(b); });
+  document.getElementById('lb-close').addEventListener('click', close);
+  document.getElementById('lb-prev').addEventListener('click', () => show(at - 1));
+  document.getElementById('lb-next').addEventListener('click', () => show(at + 1));
+  dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target === stage) close(); });
+  dlg.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); show(at + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); show(at - 1); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'Tab') {
+      const f = [...dlg.querySelectorAll('button')];
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (i === f.length - 1 || i < 0)) { e.preventDefault(); f[0].focus(); }
+    }
+  });
+  let sx = null, sy = null;
+  stage.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1 || (window.visualViewport && window.visualViewport.scale > 1.01)) { sx = null; return; }
+    const t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY;
+  }, { passive: true });
+  stage.addEventListener('touchend', (e) => {
+    if (sx == null) return;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy; sx = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) show(at + (dx < 0 ? 1 : -1));
+  });
+})();
