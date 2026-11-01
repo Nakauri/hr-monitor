@@ -28,6 +28,12 @@ The checks that guard a rule are named in brackets.
   Avg HRV low after every dropout. [`seriesStats`, `scripts/avg-stats.test.cjs`]
 - **A day is a local calendar date.** Never take a day key from `toISOString().slice(0, 10)`; west of UTC it is
   tomorrow every evening. [`scripts/day-boundary.test.cjs`]
+- **Alberta keeps UTC-6 all year from 2026-11-01 (tzdata 2026c).** Stored times are UTC, so data is safe; only the
+  local reading can be wrong, and it follows the device. Android reads its system zone data, updated separately
+  from the app. Web pages read the browser: Windows set to "Mountain Time (US & Canada)" resolves to
+  America/Cambridge_Bay and turns back even with current data; the fix is the Windows zone "Mountain Time
+  (Alberta)". Diagnostics prints the zone and its January offset; UTC-7 in Alberta means old data. The app names no
+  home city in code, so a pin by zone id needs an entry in `ALLOW` (`scripts/personal-scan.mjs`) first.
 
 ## Android
 

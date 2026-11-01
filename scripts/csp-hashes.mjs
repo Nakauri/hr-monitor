@@ -67,7 +67,8 @@ const OVERLAY = (scriptExtra) => [
 ];
 
 export async function pageHashes() {
-  const { chromium } = createRequire(path.join(uxDir(ROOT, null), 'kit', 'package.json'))('playwright');
+  const i = args.indexOf('--ux');
+  const { chromium } = createRequire(path.join(uxDir(ROOT, i >= 0 ? args[i + 1] : null), 'kit', 'package.json'))('playwright');
   const browser = await chromium.launch().catch(() => chromium.launch({ channel: 'chrome' }));
   const page = await browser.newPage();
   const out = {};

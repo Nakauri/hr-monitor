@@ -140,6 +140,17 @@
       oemHasKnownKiller: !!(window.HRMOem && window.HRMOem.hasKnownBackgroundKiller),
       oemLastError: window.__hrMonitorOemLastError || null,
       userAgent: navigator.userAgent,
+      zone: (function () {
+        // A zone in Alberta reading UTC-7 here is on data older than tzdata 2026c.
+        const janOffset = -new Date('2027-01-15T18:00:00Z').getTimezoneOffset();
+        let name = 'unknown';
+        try {
+          name = Intl.DateTimeFormat().resolvedOptions().timeZone || name;
+        } catch (e) {
+          name = 'unreadable';
+        }
+        return { name, janOffset };
+      })(),
       demoView: isDemoView(),
       localBroadcastKey: isDemoView() ? false : !!localStorage.getItem('hr_monitor_broadcast_key'),
       driveSignedIn: isDemoView() ? false : !!(window.aortiAuth && window.aortiAuth.isSignedIn()),
@@ -694,6 +705,7 @@
     lines.push('Signed:     ' + (v ? (v.signed ? 'yes' : 'no') : '—'));
     lines.push('Runtime:    ' + d.runtime);
     lines.push('Native:     ' + (d.isNative ? 'yes' : 'no'));
+    lines.push('Time zone:  ' + d.zone.name + ', January UTC' + (d.zone.janOffset / 60));
     lines.push('BLE:        ' + (d.blePresent ? 'present' : 'missing'));
     lines.push('  web:      ' + (d.bleWeb ? 'yes' : 'no'));
     lines.push('  cap plug: ' + (d.bleCapacitorPlugin ? 'yes' : 'no'));
