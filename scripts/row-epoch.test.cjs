@@ -52,6 +52,7 @@ function load(src) {
   const names = workerNames(src);
   const extra = ['v2SeriesFromRows', 'toFixedNum', 'loadFullSession', 'drawDaySparkline'];
   if (src.includes('function rowEpochFn')) extra.push('rowEpochFn');
+  if (src.includes('function sparkBuckets')) extra.push('sparkBuckets');
   const fns = [...new Set([...(names || []), ...extra])].map((n) => [n, jsFunction(src, n)]);
   const missing = fns.filter(([, f]) => !f).map(([n]) => n);
   if (!names || missing.length) return { error: 'missing ' + (names ? missing.join(', ') : 'Worker fns list') };
@@ -67,6 +68,8 @@ function load(src) {
     'const _sessionCacheTouch = (k, v) => v, isV2SessionKey = () => false, getHRStage = () => 1;',
     'const readSessionText = async (fn) => files[fn];',
     'const freshChart = (canvas, cfg) => charts.push(cfg.data.datasets[0].data);',
+    'const paintSpark = (canvas, points) => charts.push(points);',
+    'const sparkBucketsAsync = async (fn, text) => sparkBuckets(fn, text);',
     // Same per-row SDNN slots for both sources; v2SeriesFromRows reads only .match and .fiveMin.
     'const sdnnFromRr = (rows) => rows.map(() => ({ match: null, fiveMin: null }));',
     ...fns.map(([, f]) => f),

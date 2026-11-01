@@ -1600,7 +1600,7 @@ END SECTION MAP -->
 (function() {
   'use strict';
   // Parsing helpers live in viewer-parse.js (loaded in <head>).
-  const { parseSessionFilename, gapsOutsideData, mergeGaps, localDateLabel, isoAddDays, dayWindow, dayKeyOf, dayKeysSpanned, HR_SHIFT_DEFAULT, SUMMARY_SCHEMA_V, deriveFileStartEpoch, rowEpochFn, parseCSV, elapsedRule, rowElapsedMinFn, detectChillsWindows, summarizeCSV } = AortiViewerParse;
+  const { sparkBuckets, parseSessionFilename, gapsOutsideData, mergeGaps, localDateLabel, isoAddDays, dayWindow, dayKeyOf, dayKeysSpanned, HR_SHIFT_DEFAULT, SUMMARY_SCHEMA_V, deriveFileStartEpoch, rowEpochFn, parseCSV, elapsedRule, rowElapsedMinFn, detectChillsWindows, summarizeCSV } = AortiViewerParse;
 
   // ===== Constants =====
   const IDB_NAME = 'hr_monitor_kv';
@@ -3635,7 +3635,7 @@ END SECTION MAP -->
     for (const s of Object.values(legacyShadow)) if (s) s.__incomplete = true;
     if (!v2Store) return;
     for (const k of Array.from(v2Store.keys())) {
-      if (typeof k === 'string' && (k.startsWith('sess:') || k.startsWith('prec:'))) { v2Store.delete(k); segIdxDel(k); }
+      if (typeof k === 'string' && (k.startsWith('sess:') || k.startsWith('prec:') || k.startsWith('spark:'))) { v2Store.delete(k); segIdxDel(k); }
     }
   }
   function v2StoreCache() {
@@ -3857,7 +3857,7 @@ END SECTION MAP -->
       for (const fn of filenames) if (isNativeLegacyName(fn)) live.add('prec:' + fn);
       for (const k of Array.from(v2Store.keys())) {
         if (typeof k !== 'string' || live.has(k)) continue;
-        if (k.startsWith('seg:') || k.startsWith('sess:') || k.startsWith('prec:')) { v2Store.delete(k); segIdxDel(k); }
+        if (k.startsWith('seg:') || k.startsWith('sess:') || k.startsWith('prec:') || k.startsWith('spark:')) { v2Store.delete(k); segIdxDel(k); }
       }
     }
 
@@ -5260,12 +5260,7 @@ END SECTION MAP -->
     });
 
     // Sparklines: mini HR trace per day, aggregated across sessions
-    for (const col of cols) {
-      if (!col.files.length) continue;
-      const canvas = el.querySelector(`canvas[data-spark="${col.iso}"]`);
-      if (!canvas) continue;
-      drawDaySparkline(canvas, col.files, col.morningHR, col.iso);
-    }
+    drawWeekSparks(cols, el).catch((e) => console.warn('[week] day traces failed', e));
   }
 
   // Destroy any existing Chart bound to this canvas before creating a new
@@ -5276,45 +5271,114 @@ END SECTION MAP -->
     return new Chart(canvas.getContext('2d'), config);
   }
 
-  async function drawDaySparkline(canvas, files, morningHR, iso) {
+  async function sparkBucketsAsync(filename, text) {
+    const w = window.__hrmNoParseWorker ? false : parseWorker();
+    if (w) {
+      try {
+        return await new Promise((resolve, reject) => {
+          const id = ++_parseSeq;
+          w.postMessage({ id, spark: true, fn: filename, text, zoneTable: window.__aortiZoneTable || null });
+          _parsePending.set(id, { resolve, reject, size: text.length });
+          if (_parsePending.size === 1) armParseWatchdog(w);
+        });
+      } catch (e) {
+        console.warn('[parseWorker] spark retrying on the main thread', filename, e && e.message);
+      }
+    }
+    return sparkBuckets(filename, text);
+  }
+
+  function paintSpark(canvas, points, hours, color) {
+    canvas.__points = points;
+    canvas.dataset.drawn = '1';
+    const ys = points.filter((p) => p.y != null).map((p) => p.y);
+    if (!ys.length || !canvas.getContext) return;
+    const lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo || 1) * 0.1;
+    const paint = () => {
+      const box = canvas.parentElement.getBoundingClientRect();
+      if (!box.width || !box.height) return;
+      const dpr = window.devicePixelRatio || 1, w = box.width, h = box.height;
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+      canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+      const g = canvas.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.lineWidth = 1.2; g.lineJoin = 'round'; g.strokeStyle = color; g.fillStyle = color + '20';
+      const X = (x) => (x / hours) * w, Y = (y) => h - ((y - lo + pad) / (hi - lo + 2 * pad)) * h;
+      const runs = [];
+      let run = null;
+      for (const p of points) {
+        if (p.y == null) { run = null; continue; }
+        if (!run) runs.push(run = []);
+        run.push(p);
+      }
+      for (const r of runs) {
+        g.beginPath();
+        r.forEach((p, i) => (i ? g.lineTo(X(p.x), Y(p.y)) : g.moveTo(X(p.x), Y(p.y))));
+        g.stroke();
+        g.lineTo(X(r[r.length - 1].x), h); g.lineTo(X(r[0].x), h); g.closePath(); g.fill();
+      }
+    };
+    paint();
+    if (!canvas.__sized && window.ResizeObserver) {
+      canvas.__sized = true;
+      new ResizeObserver(paint).observe(canvas.parentElement);
+    }
+  }
+
+  async function drawDaySparkline(canvas, files, morningHR, iso, memo = new Map()) {
     // 24 h HR trace from every session, placed by epoch and averaged per 5 min; an empty 5 min breaks the line.
-    const { start: dayStart, end: dayEnd } = dayWindow(iso), BMS = 300000, B = Math.round((dayEnd - dayStart) / BMS); // 23 or 25 h on DST days
+    const { start: dayStart, end: dayEnd } = dayWindow(iso), BMS = 300000, B = Math.round((dayEnd - dayStart) / BMS); // 23 or 25 h on a clock-change day
     const sums = new Float64Array(B), counts = new Uint32Array(B);
+    const first = Math.floor(dayStart / BMS);
     for (const fn of files) {
       try {
-        const text = await readSessionText(fn);
-        const { rows, header } = parseCSV(text);
-        const idx = {};
-        header.forEach((h, i) => idx[h.trim()] = i);
-        const elapsedMin = rowElapsedMinFn(rows, idx);
-        const epochAt = rowEpochFn(idx, deriveFileStartEpoch(fn));
-        for (const r of rows) {
-          const h = parseFloat(r[idx.hr_bpm]);
-          if (!Number.isFinite(h)) continue;
-          const ep = epochAt(r, elapsedMin(r));
-          if (!Number.isFinite(ep)) continue;
-          const k = Math.floor((ep - dayStart) / BMS);
-          if (k < 0 || k >= B) continue;
-          sums[k] += h; counts[k]++;
+        if (!memo.has(fn)) {
+          window.__hrmSparkReads = (window.__hrmSparkReads || 0) + 1;
+          memo.set(fn, await sparkBucketsAsync(fn, await readSessionText(fn)));
         }
-      } catch (e) {}
+        const buckets = memo.get(fn);
+        for (let k = 0; k < B; k++) {
+          const b = buckets[first + k];
+          if (b) { sums[k] += b[0]; counts[k] += b[1]; }
+        }
+      } catch (e) {
+        console.warn('[week] day trace skipped a file', fn, e && e.message);
+      }
     }
     const points = [];
     for (let k = 0; k < B; k++) {
       if (counts[k]) points.push({ x: (k + 0.5) / 12, y: sums[k] / counts[k] });
       else if (points.length && points[points.length - 1].y != null) points.push({ x: (k + 0.5) / 12, y: null });
     }
-    const hrStage = getHRStage(morningHR);
-    const color = STAGE_COLORS[hrStage];
-    freshChart(canvas, {
-      type: 'line',
-      data: { datasets: [{ data: points, borderColor: color, backgroundColor: color + '20', tension: 0, pointRadius: 0, borderWidth: 1.2, fill: true }] },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { type: 'linear', min: 0, max: B / 12, display: false }, y: { display: false, grace: '10%' } },
-      },
-    });
+    paintSpark(canvas, points, B / 12, STAGE_COLORS[getHRStage(morningHR)]);
+    return points;
+  }
+
+  // A past day's trace is saved, so it never reads a file again; the key changes when the day's data does.
+  async function drawWeekSparks(cols, el) {
+    await v2StoreLoad();
+    const todo = [];
+    for (const col of cols) {
+      const canvas = col.files.length && el.querySelector(`canvas[data-spark="${col.iso}"]`);
+      if (!canvas) continue;
+      const sig = hashStr(JSON.stringify(col.files.map((fn) => {
+        const s = sessionsIndex[fn], d = s && s.byDay && s.byDay[col.iso];
+        return [fn, d ? d.hrCount : (s ? s.duration : 0), d ? d.hrAvg : 0];
+      })));
+      const hit = v2Store.get('spark:' + col.iso);
+      if (hit && hit.sig === sig) {
+        const { start, end } = dayWindow(col.iso);
+        paintSpark(canvas, hit.points, (end - start) / 3600000, STAGE_COLORS[getHRStage(col.morningHR)]);
+      } else todo.push({ col, canvas, sig });
+    }
+    const memo = new Map();
+    for (const { col, canvas, sig } of todo) {
+      if (!canvas.isConnected) return;
+      const points = await drawDaySparkline(canvas, col.files, col.morningHR, col.iso, memo);
+      const entry = { sig, points: points.map((p) => ({ x: p.x, y: p.y == null ? null : Math.round(p.y * 10) / 10 })) };
+      v2Store.set('spark:' + col.iso, entry);
+      segIdxPut('spark:' + col.iso, entry);
+    }
   }
 
   // ===== All-time trends =====

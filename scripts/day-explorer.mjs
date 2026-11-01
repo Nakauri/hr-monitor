@@ -950,7 +950,7 @@ if (want('week')) {
   await page.goto(cur.base + '/hrv_viewer.html?demo=1#/week/2026-04-20', { waitUntil: 'networkidle' });
   await page.waitForSelector('canvas[data-spark]'); await page.waitForTimeout(1500);
   const sp = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('canvas[data-spark]')].map((c) => {
-    const ch = Chart.getChart(c), d = ch ? ch.data.datasets[0].data : [];
+    const d = c.__points || [];
     const real = d.filter((p) => p.y != null);
     let bridge = 0;
     for (let i = 1; i < d.length; i++) if (d[i].y != null && d[i - 1].y != null && d[i].x - d[i - 1].x > 1 / 12 + 1e-9) bridge++;
@@ -959,6 +959,17 @@ if (want('week')) {
   ok(sp['2026-04-24'] && sp['2026-04-24'].first < 0.5, `Friday 04-24 starts at midnight (first point at ${sp['2026-04-24'] && sp['2026-04-24'].first} h)`);
   for (const iso of ['2026-04-21', '2026-04-23']) ok(sp[iso] && sp[iso].breaks > 0, `${iso}: the line breaks between recordings (${JSON.stringify(sp[iso])})`);
   ok(Object.values(sp).every((v) => v.bridge === 0), `no sparkline bridges an empty 5 min ${JSON.stringify(sp)}`);
+  // Guards: week view re-read and re-parsed every recording on every visit; 2026-11-01 it lagged on the S8.
+  const reads = await page.evaluate(async () => {
+    const was = window.__hrmSparkReads || 0;
+    location.hash = '#/month/2026-04';
+    await new Promise((r) => setTimeout(r, 500));
+    location.hash = '#/week/2026-04-20';
+    await new Promise((r) => setTimeout(r, 1500));
+    const shown = [...document.querySelectorAll('canvas[data-spark]')];
+    return { was, more: (window.__hrmSparkReads || 0) - was, cards: shown.length, drawn: shown.filter((c) => c.dataset.drawn).length, ink: shown.filter((c) => c.width > 0).length };
+  });
+  ok(reads.was > 0 && reads.more === 0 && reads.drawn === reads.cards, `week: a second visit reads no files and draws every card ${JSON.stringify(reads)}`);
   ok(!page.errors.length, 'week: no page errors ' + page.errors.join(' | '));
   await ctx.close();
 }

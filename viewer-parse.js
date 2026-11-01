@@ -920,7 +920,27 @@
   }
   // ===== Day helper module END =====
 
-  const api = { parseSessionFilename, DATA_JUMP_GAP_MIN, dataJumpGaps, gapsOutsideData, mergeGaps, trimGapsByData, DAY_START_HOUR, localDateKeyFromEpoch, localDateLabel, isoAddDays, dayWindow, dayKeyOf, dayKeysSpanned, HR_SHIFT_DEFAULT, SUMMARY_SCHEMA_V, ELAPSED_MAX_START_MIN, ELAPSED_MAX_DRIFT_MIN, deriveFileStartEpoch, rowEpochFn, parseCSV, elapsedRule, rowElapsedMinFn, rollingTrailingMean, nearestRmssdAt, detectChillsWindows, summarizeCSV };
+  // A recording's HR as 5 minute buckets keyed by floor(epoch / 5 min): { key: [sum, count] }.
+  function sparkBuckets(filename, text) {
+    const { rows, header } = parseCSV(text);
+    const idx = {};
+    header.forEach((h, i) => { idx[h.trim()] = i; });
+    const elapsedMin = rowElapsedMinFn(rows, idx);
+    const epochAt = rowEpochFn(idx, deriveFileStartEpoch(filename));
+    const out = {};
+    for (const r of rows) {
+      const h = parseFloat(r[idx.hr_bpm]);
+      if (!Number.isFinite(h)) continue;
+      const ep = epochAt(r, elapsedMin(r));
+      if (!Number.isFinite(ep)) continue;
+      const k = Math.floor(ep / 300000);
+      const b = out[k] || (out[k] = [0, 0]);
+      b[0] += h; b[1]++;
+    }
+    return out;
+  }
+
+  const api = { sparkBuckets, parseSessionFilename, DATA_JUMP_GAP_MIN, dataJumpGaps, gapsOutsideData, mergeGaps, trimGapsByData, DAY_START_HOUR, localDateKeyFromEpoch, localDateLabel, isoAddDays, dayWindow, dayKeyOf, dayKeysSpanned, HR_SHIFT_DEFAULT, SUMMARY_SCHEMA_V, ELAPSED_MAX_START_MIN, ELAPSED_MAX_DRIFT_MIN, deriveFileStartEpoch, rowEpochFn, parseCSV, elapsedRule, rowElapsedMinFn, rollingTrailingMean, nearestRmssdAt, detectChillsWindows, summarizeCSV };
   root.AortiViewerParse = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
   // In the parse Worker (the page runs new Worker('./viewer-parse.js?v=' + SUMMARY_SCHEMA_V)): one summary per message.
@@ -932,6 +952,7 @@
           importScripts('./local-clock.js');
           root.AortiLocalClock.install(d.zoneTable);
         }
+        if (d.spark) { root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, summary: sparkBuckets(d.fn, d.text) }); return; }
         root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, summary: summarizeCSV(d.fn, d.text, { quad: d.quad, shift: d.shift }) });
       } catch (err) {
         root.postMessage({ id: d.id, __schemaV: SUMMARY_SCHEMA_V, error: String(err && err.message || err), name: err && err.name });
