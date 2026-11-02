@@ -6974,23 +6974,27 @@ END SECTION MAP -->
   // Month of a night's end in UTC, like marks and recording folders: the file it belongs to.
   function s65Month(ep) { const d = new Date(ep); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); }
   function s65FileName(month, deviceId) { return 'sleep_' + month + '_' + deviceId + '.json'; }
-  // A sleep file's body: start, end and awake stretches per night, nothing else.
-  function s65FileBody(origin, nights) {
+  // A sleep file's body: per night its Health Connect id, start, end and awake stretches; the sleep app's name; and
+  // through, the phone's last Health Connect sync (a day's nights count only once through passes its end + 6 h).
+  function s65FileBody(origin, nights, through) {
     const list = nights.slice().sort((p, q) => p.s - q.s || (p.id < q.id ? -1 : 1));
-    return JSON.stringify({ v: 1, origin, nights: list.map(x => ({ id: x.id, s: x.s, e: x.e, awake: x.awake.map(p => [p[0], p[1]]) })) });
+    return JSON.stringify({ v: 1, origin, through: Number.isFinite(through) ? through : 0, nights: list.map(x => ({ id: x.id, s: x.s, e: x.e, awake: x.awake.map(p => [p[0], p[1]]) })) });
   }
   function s65ParseFile(text) {
     const o = JSON.parse(text);
     if (!o || o.v !== 1 || !Array.isArray(o.nights)) throw new Error('s65_bad_file');
-    return { origin: typeof o.origin === 'string' ? o.origin : '', nights: o.nights.map(s65Night).filter(Boolean) };
+    return { origin: typeof o.origin === 'string' ? o.origin : '', through: Number.isFinite(o.through) ? o.through : 0, nights: o.nights.map(s65Night).filter(Boolean) };
   }
   // An upload: the file's nights that start before cover (out of Health Connect's reach) stay; the rest are this phone's.
   function s65Merge(fileNights, local, cover) {
     const ids = new Set(local.map(x => x.id));
     return fileNights.filter(x => x.s < cover && !ids.has(x.id)).concat(local);
   }
-  // Writes each month whose night set changed since its last upload; nothing while Drive sync is off or paused.
-  // o: { rows, sync, state, now, deviceId, canSync(), push(name, origin, nights, cover) -> { id }, save(state) }.
+  // When a sync settles the viewer day holding ep: that day's end (next local midnight) plus 6 h.
+  function s65SettleAt(ep) { const d = new Date(ep); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() + S65_O.settleMs; }
+  // Writes each month whose night set changed since its last upload, or whose newest night's day this sync has just
+  // settled (so the other devices may use it); nothing while Drive sync is off or paused.
+  // o: { rows, sync, state, now, deviceId, canSync(), push(name, origin, nights, cover, through) -> { id }, save(state) }.
   async function s65PushMonths(o) {
     if (!o.canSync() || !o.deviceId || !o.rows || !o.sync) return 0;
     const origin = s65Origin(o.rows, o.now);
@@ -7000,17 +7004,35 @@ END SECTION MAP -->
     // Months Health Connect can no longer change are left as uploaded.
     const recent = s65Month(o.now - (S65_O.readDays + 2) * 86400000);
     const months = [...new Set([...byMonth.keys(), ...Object.keys(state.months)])].filter(m => m >= recent).sort();
+    const through = Number.isFinite(o.sync.sleep) ? o.sync.sleep : 0;
     let wrote = 0;
     for (const m of months) {
-      const list = byMonth.get(m) || [], h = hashStr(s65FileBody(origin, list));
-      if (state.months[m] && state.months[m].h === h) continue;
+      const list = byMonth.get(m) || [], h = hashStr(s65FileBody(origin, list, 0)), was = state.months[m];
+      const need = list.length ? s65SettleAt(Math.max(...list.map(x => x.e))) : Infinity;
+      const settles = !!was && (was.through || 0) < need && through >= need;
+      if (was && was.h === h && !settles) continue;
       if (!o.canSync()) break;
-      const res = await o.push(s65FileName(m, o.deviceId), origin, list, Number.isFinite(o.sync.cover) ? o.sync.cover : o.now);
-      state.months[m] = { h, id: res && res.id };
+      const res = await o.push(s65FileName(m, o.deviceId), origin, list, Number.isFinite(o.sync.cover) ? o.sync.cover : o.now, through);
+      state.months[m] = { h, id: res && res.id, through };
       wrote++;
       await o.save(state);
     }
     return wrote;
+  }
+  // Nights from every device's cached sleep file for one day: files of this device and of aorti itself left out, only
+  // files whose through settles the day, one sleep app (s65Origin), and on a shared id the file with the newest through.
+  // files: { id: { name, origin, through, nights } }; settle: the day's end + 6 h.
+  function s65DriveFor(files, ownDeviceId, settle, now) {
+    const byId = new Map();
+    for (const f of Object.values(files || {})) {
+      if (!f || f.origin === S65_OWN || !(f.through >= settle)) continue;
+      if (ownDeviceId && typeof f.name === 'string' && f.name.endsWith('_' + ownDeviceId + '.json')) continue;
+      for (const x of f.nights || []) {
+        const n = s65Night(x), prev = n && byId.get(n.id);
+        if (n && (!prev || f.through > prev.through)) byId.set(n.id, Object.assign({ origin: f.origin, through: f.through }, n));
+      }
+    }
+    return s65Chosen([...byId.values()], now);
   }
   // ---- S65 health connect end ----
   // S61 moments on screen: one detection task after the first paint, memoised per data object; the report reads the same memo.
@@ -7448,7 +7470,8 @@ END SECTION MAP -->
   }
   const S64_JOIN = 10;
   async function s64Run(s, data, key) {
-    const end = (how) => { S64_COUNT.done = key + ' ' + how; S64_COUNT.doneT = performance.now(); };
+    const gone = { band: false };
+    const end = (how) => { S64_COUNT.done = key + ' ' + (gone.band ? 'hc gone, ' : '') + how; S64_COUNT.doneT = performance.now(); };
     const iso = s.__virtualDay;
     if (!iso || key !== 'day:' + iso) return end('not a day');
     // Nights from Health Connect or Drive first (S65): no flag, history gate or digest needed.
@@ -7464,8 +7487,14 @@ END SECTION MAP -->
       return end(how);
     };
     let sleep = hc && hc.mask ? hc : null;
-    // A night gone from its source drops its band; a status that timed out keeps it until the settle re-run.
-    if (!sleep && shown && s.__s64Src && s.__s64Src !== 'detected') return hc === S65_TIMEOUT ? end('kept') : back('hc gone');
+    // A night gone from its source drops its band, then the S63 path runs (spec 3f step 3); a status that timed out
+    // keeps the band until the settle re-run.
+    if (!sleep && shown && s.__s64Src && s.__s64Src !== 'detected') {
+      if (hc === S65_TIMEOUT) return end('kept');
+      gone.band = true;
+      s.sleepWindows = []; s.__s64For = null; s.__s64Src = null;
+      if (currentSummary === s) s64Paint(s, data);
+    }
     if (!sleep) {
       const det = await s64Detected(s, data, key, iso, end, back);
       if (!det) return;
@@ -7519,10 +7548,11 @@ END SECTION MAP -->
     S65_COUNT.idb++;
     try { await idbDelete(k); } catch (e) { console.warn('[S65] delete failed', k, e && e.message); }
   }
-  // A kind no longer granted (or Health Connect gone) takes its copies with it. A failed status() changes nothing.
-  async function hcApplyStatus(st) {
-    const granted = st && Array.isArray(st.granted) ? st.granted : [];
-    if (!granted.includes('sleep')) for (const k of ['hc:sleep', 'hc:sync', 'hc:drive']) await s65Del(k);
+  // The shim owns the revoke rule (mobile/src/health-connect.js applyStatus); this page lends it the counted store.
+  // A failed status() never reaches it.
+  function hcApplyStatus(st) {
+    if (!s65Granted(st)) s65Visit.drive = null;
+    return s65Hc().applyStatus(st, { get: s65Get, set: s65Set, del: s65Del, deviceId: marksPage && marksPage.store ? marksPage.store.deviceId : '' });
   }
   function s65Granted(st) { return !!(st && Array.isArray(st.granted) && st.granted.includes('sleep')); }
   // A shown Health Connect band drops once the visit's settled status no longer lists sleep.
@@ -7553,17 +7583,12 @@ END SECTION MAP -->
     clearTimeout(t);
     return r;
   }
-  // Every device's nights from the cached Drive sleep files, once per visit (reset after a pull that changed them).
-  async function s65DriveNights() {
+  // The cached Drive sleep files, read once per visit (reset after a pull or a push).
+  async function s65DriveFiles() {
     if (s65Visit.drive) return s65Visit.drive;
     let cache = null;
     try { cache = await idbGet('sleepdrive'); } catch (e) { console.warn('[S65] Drive sleep cache unreadable', e && e.message); }
-    const byId = new Map();
-    for (const f of Object.values((cache && cache.files) || {})) {
-      if (!f || f.origin === S65_OWN) continue;
-      for (const x of f.nights || []) { const n = s65Night(x); if (n) byId.set(n.id, n); }
-    }
-    return (s65Visit.drive = [...byId.values()]);
+    return (s65Visit.drive = (cache && cache.files) || {});
   }
   // { source, mask } for a completed day: the phone's Health Connect copy, else the Drive sleep files, else null
   // (S63 runs). S65_TIMEOUT when the status gave up at 3 s and Drive had nothing.
@@ -7584,7 +7609,8 @@ END SECTION MAP -->
         }
       }
     }
-    const dn = await s65DriveNights();
+    // Other devices' files only (this phone reads its own nights from Health Connect), each settled past the day.
+    const dn = s65DriveFor(await s65DriveFiles(), marksPage && marksPage.store ? marksPage.store.deviceId : '', w.end + S65_O.settleMs, now);
     if (s65Overlaps(dn, w.start, w.end)) return { source: 'drive', mask: hcSleepMask(dn, w.start, n) };
     return timedOut ? S65_TIMEOUT : null;
   }
@@ -7611,7 +7637,9 @@ END SECTION MAP -->
   }
   async function s65SyncOnce() {
     if (!s65Avail() || document.hidden) return;
-    const st = await s65Status(false);
+    let st = await s65Status(false);
+    // A status that failed at boot is asked once more here, so one failure does not end syncing for the visit.
+    if (st === null && s65Visit.settled) st = await s65Status(true);
     if (!s65Granted(st) || document.hidden) return;
     const now = Date.now(), day = 86400000;
     const sync = Object.assign({}, await s65Get('hc:sync'));
@@ -7635,11 +7663,17 @@ END SECTION MAP -->
     s65AfterSync(up.touched, before, now);
     s65DrivePass();
   }
+  // A return asks again when the last status failed or lacked sleep (a grant made in Health Connect meanwhile); a
+  // granted visit syncs once its last attempt is over 6 h old.
   async function s65OnVisible() {
-    if (document.hidden || !s65Avail() || !s65Granted(s65Visit.status)) return;
-    const sync = await s65Get('hc:sync');
-    if (sync && Date.now() - (sync.sleepTry || 0) <= S65_O.staleMs) return;
-    await s65Status(true);
+    if (document.hidden || !s65Avail() || !s65Visit.settled) return;
+    if (!s65Granted(s65Visit.status)) {
+      if (!s65Granted(await s65Status(true))) return;
+    } else {
+      const sync = await s65Get('hc:sync');
+      if (sync && Date.now() - (sync.sleepTry || 0) <= S65_O.staleMs) return;
+      await s65Status(true);
+    }
     s65Sync();
   }
   // Viewer open: one status(), the sync 10 s after the first paint while visible, a catch-up on a stale return.
@@ -7665,7 +7699,11 @@ END SECTION MAP -->
       body: s65FileBody, parse: s65ParseFile, merge: s65Merge,
     });
     const pushed = [];
-    if (s65Avail() && s65Granted(s65Visit.status) && marksPage && !marksPage.drive.status().blocked) {
+    // Writes wait for marks' account check (a marks sync of this page): never into an account marks refuse.
+    if (s65Avail() && s65Granted(s65Visit.status) && marksPage && !marksPage.drive.status().lastSync) {
+      try { await marksPage.drive.sync(); } catch (e) { console.warn('[S65] marks check failed, no sleep upload', e && (e.reason || e.message)); }
+    }
+    if (s65Avail() && s65Granted(s65Visit.status) && marksPage && marksPage.drive.status().lastSync && !marksPage.drive.status().blocked) {
       await s65PushMonths({
         rows: await s65Get('hc:sleep'), sync: await s65Get('hc:sync'), state: await s65Get('hc:drive'), now: Date.now(),
         deviceId: marksPage.store.deviceId, canSync: marksCanSync, save: (st) => s65Set('hc:drive', st),
@@ -7678,13 +7716,13 @@ END SECTION MAP -->
     let cache = null;
     try { cache = await idbGet('sleepdrive'); } catch (e) { console.warn('[S65] Drive sleep cache unreadable', e && e.message); }
     const seeded = Object.assign({}, cache && cache.files);
-    for (const p of pushed) seeded[p.id] = { name: p.name, md5: p.md5Checksum || null, origin: p.origin, nights: p.nights };
+    for (const p of pushed) seeded[p.id] = { name: p.name, md5: p.md5Checksum || null, origin: p.origin, through: p.through, nights: p.nights };
     const r = await files.pull(seeded);
     s65Visit.pullAt = now;
-    if (pushed.length && !r.changed) await idbSet('sleepdrive', { files: r.files });
-    if (!r.changed) return;
+    if (!r.changed && !pushed.length) return;
     await idbSet('sleepdrive', { files: r.files });
     s65Visit.drive = null;
+    if (!r.changed) return;
     const iso = currentSummary && currentSummary.__virtualDay;
     if (iso) s65RerunDay(iso);
   }
