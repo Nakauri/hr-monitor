@@ -149,7 +149,9 @@ const C = await summarizeAll(srcAfter, inputs);
 let same = 0;
 const diffs = [];
 inputs.forEach((x, i) => {
-  if (B.sums[i] && JSON.stringify(B.sums[i]) === JSON.stringify(C.sums[i])) same++;
+  // originEpoch postdates the base build; viewer-parse.test.cjs checks it.
+  const plain = (v) => JSON.stringify(v, (k, x) => (k === 'originEpoch' ? undefined : x));
+  if (B.sums[i] && plain(B.sums[i]) === plain(C.sums[i])) same++;
   else diffs.push(x.name);
 });
 check(`parity: ${inputs.length} summaries (${names.length} demo + 1 native segment) deep-equal to ${REF}`, same === inputs.length && same > 1, diffs.length ? 'differ: ' + diffs.join(', ') : same + ' equal');

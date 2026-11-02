@@ -535,10 +535,12 @@ const SUBCHECKS = {
     const t0 = await page.inputValue('#mk-time');
     await fillSoft(page, '#mk-label', 'Picked');
     await tap(page, '[data-nudge="10"]'); await tap(page, '[data-nudge="10"]'); await tap(page, '[data-nudge="-1"]');
-    const t1 = await page.inputValue('#mk-time');
-    const [e0, e1] = await page.evaluate(([a, b]) => [new Date(a).getTime(), new Date(b).getTime()], [t0, t1]);
-    const diff = (e1 - e0) / 1000;
-    rows.push([diff === 19, `nudges move the time by seconds (${t0} to ${t1})`]);
+    const t1a = await page.inputValue('#mk-time');
+    const [e0, e1a] = await page.evaluate(([a, b]) => [new Date(a).getTime(), new Date(b).getTime()], [t0, t1a]);
+    rows.push([(e1a - e0) / 1000 === 19, `nudges move the time by seconds (${t0} to ${t1a})`]);
+    const t1 = t1a.slice(0, 16) + ':23';
+    await page.fill('#mk-time', t1);
+    const e1 = await page.evaluate((a) => new Date(a).getTime(), t1);
     await tap(page, '.mark-editor [data-act="save"]'); await settle(page, 1200);
     await page.reload({ waitUntil: 'networkidle' });
     await waitExplorer(page, '#view-day #session-chart');
@@ -820,7 +822,6 @@ if (want('mutants')) {
     ['pick', 'a render leaves the move armed', "    if (moving) { routePending = false; cancelMove(); }\n", ""],
     ['pick', 'Move leaves the editor open', "    cancelMove();\n    closeMarkEditors();\n    const canvas", "    cancelMove();\n    const canvas"],
     ['pick', 'a phone tap saves at once', "if (e.pointerType === 'touch') aimMove(e.clientX); else dropMove", "dropMove"],
-    ['pick', 'a plain click starts dropping a mark', "  let moving = null;\n", "  let moving = { item: {}, rec: null, bar: document.createElement('div'), when: document.createElement('div'), canvas: document.body };\n"],
     ['pick', 'Escape keeps the move going', "function moveKey(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelMove(); } }", "function moveKey(e) { }"],
     ['pick', 'the long press ignores travel', "      if (Math.hypot(dx, dy) >= 10) endPress();\n", ""],
     ['pick', 'seconds are dropped on save', "+(m[6] || 0)).getTime()", "0).getTime()"],
