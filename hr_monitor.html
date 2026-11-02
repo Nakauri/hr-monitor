@@ -1138,6 +1138,10 @@ END SECTION MAP -->
     /* Shared tabs and inline action buttons keep their own width. */
     .section .tabs > button, .section .audio-actions .btn, .section .obs-size-row .btn { width: auto; }
     .section .btn.icon { width: 44px; }
+    /* Permission rows: the text takes the line, the chip and its button sit under it at their own width. */
+    #hc-row, #battopt-row, #oem-row { flex-wrap: wrap; }
+    #hc-row > .toggle-text, #battopt-row > .toggle-text, #oem-row > .toggle-text { flex: 1 1 100%; }
+    #hc-row > .btn, #battopt-row > .btn, #oem-row > .btn { width: auto; margin-left: auto; }
     /* Folder / Drive / sign-in rows: stack their label + button combo
        vertically so the row doesn't squeeze and the button stays a full
        tap target. drive-backup-row is applied to the Drive section's
@@ -3496,17 +3500,15 @@ END SECTION MAP -->
     hcRowState = state;
     hcLsSet(HC_ROW, state);
     row.hidden = false;
-    document.getElementById('hc-status').textContent = HC_ROW_TEXT[state][0];
+    const chip = document.getElementById('hc-status');
+    chip.textContent = HC_ROW_TEXT[state][0];
+    chip.className = 'streaming-status' + (state === 'on' ? ' live' : state === 'off' ? '' : ' error');
     document.getElementById('hc-act').textContent = HC_ROW_TEXT[state][1];
   }
-  // Copies of a kind no longer granted are deleted (the viewer shares this IndexedDB store).
-  async function hcApplyStatus(st) {
-    const granted = st && Array.isArray(st.granted) ? st.granted : [];
-    if (!granted.includes('sleep')) {
-      for (const k of ['hc:sleep', 'hc:sync', 'hc:drive']) {
-        try { await idbDel(k); } catch (e) { console.warn('[hc] copy not deleted', k); }
-      }
-    }
+  // The shim owns the revoke rule (keys and this phone's Drive cache entries); this page lends it the store.
+  function hcApplyStatus(st) {
+    const deviceId = window.AortiMarksPage && window.AortiMarksPage.store ? window.AortiMarksPage.store.deviceId : '';
+    return window.__aortiHC.applyStatus(st, { get: idbGet, set: idbSet, del: idbDel, deviceId });
   }
   // A status() that fails changes nothing.
   async function refreshHc() {
@@ -3553,7 +3555,8 @@ END SECTION MAP -->
     const header = document.querySelector('.section[data-section="connection"] .section-header');
     if (header && !header._hcWired) {
       header._hcWired = true;
-      header.addEventListener('click', () => { if (!header.closest('.section').classList.contains('collapsed')) refreshHc(); });
+      // After the section's own toggle has run, whichever listener was added first.
+      header.addEventListener('click', () => setTimeout(() => { if (!header.closest('.section').classList.contains('collapsed')) refreshHc(); }, 0));
     }
     paintHcRow(HC_ROW_TEXT[hcLs(HC_ROW)] ? hcLs(HC_ROW) : 'off');
   }
