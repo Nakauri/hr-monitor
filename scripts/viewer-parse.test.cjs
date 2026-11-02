@@ -47,7 +47,8 @@ function canon(v) {
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
   if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
   if (v instanceof Date || Object.prototype.toString.call(v) === '[object Date]') return 'D' + v.getTime();
-  return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+  // originEpoch postdates the base build; its own check is below.
+  return '{' + Object.keys(v).filter((k) => k !== 'originEpoch').sort().map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
 }
 
 // 6554b5b's summary, built the way its parseWorkerSource built the Worker: its function list and constants.
@@ -223,6 +224,12 @@ async function workerCases(src, list, sets) {
   check('the midnight fixtures span two viewer days', Object.keys(night.byDay || {}).length === 2, Object.keys(night.byDay || {}).join(', '));
   const g = newSum(fx('guarded event and warning labels').fn, fx('guarded event and warning labels').text, SETS.default);
   check('the guarded labels reach the summary as written (unguarding is display only)', GUARDED.every((l) => g.events.some((e) => e.label === l)), g.events.map((e) => e.label).slice(0, 8).join(' | '));
+  // Guards: 2026-11-01 review, marks placed on a session chart saved about 4 s late because x = 0 was taken as the first beat.
+  const off = list.filter((x) => x.name.startsWith('demo ')).map((x) => {
+    const r = newSum(x.fn, x.text, SETS.default);
+    return r.startEpoch - r.originEpoch;
+  });
+  check('originEpoch is the time of chart x = 0, before the first beat', off.length === 12 && off.every((ms) => ms > 0 && ms < 600000), off.join(', '));
   const bad = diffCases(newSum, oldSum, list, Object.keys(SETS));
   check(`summarizeCSV deep-equals ${BASE_REV} on ${list.length} files x ${Object.keys(SETS).length} settings`, bad.length === 0, bad.slice(0, 6).join('; '));
   const local = localCsvs();

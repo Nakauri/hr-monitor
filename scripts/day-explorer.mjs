@@ -579,8 +579,25 @@ const SUBCHECKS = {
     const moved = (await storeGet(page, FX_TAP)).at;
     const tm = await toast();
     rows.push([moved !== nausea0 && /Moved to/.test(tm) && /Undo/.test(tm) && /Adjust/.test(tm), `a click drops the mark ("${tm}")`]);
+    // A re-render during a move ends it: the next click must not write.
+    const nt3 = await markT('Picked');
+    await open({ t: nt3 });
+    await tap(page, '.chart-menu [data-act="move"]'); await settle(page, 200);
     await tap(page, '.toast .undo'); await settle(page, 1200);
     rows.push([(await storeGet(page, FX_TAP)).at === nausea0, 'Undo puts the mark back']);
+    const pickedAt = (await storeList(page, { kind: 'tap' })).find((r) => r.label === 'Picked').at;
+    await page.mouse.click(qm.x, qm.y); await settle(page, 800);
+    rows.push([(await storeList(page, { kind: 'tap' })).find((r) => r.label === 'Picked').at === pickedAt && !(await page.isVisible('.move-bar')), 'a render during a move ends it, and the next click writes nothing']);
+
+    const nt4 = await markT('Nausea');
+    await open({ t: nt4 });
+    await tap(page, '.chart-menu [data-act="edit"]'); await settle(page, 300);
+    await open({ t: nt4 });
+    await tap(page, '.chart-menu [data-act="move"]'); await settle(page, 200);
+    rows.push([!(await page.isVisible('.mark-editor')), 'Move closes an open editor, so a stale Save cannot undo it']);
+    await page.mouse.move(qm.x, qm.y); await page.mouse.down(); await page.mouse.move(qm.x + 7, qm.y, { steps: 3 }); await page.mouse.up(); await settle(page, 1200);
+    rows.push([(await storeGet(page, FX_TAP)).at !== nausea0, 'a small wiggle during a move still drops the mark']);
+    await tap(page, '.toast .undo'); await settle(page, 1200);
 
     const dt = await markT('Dizzy');
     await open({ t: dt });
@@ -629,6 +646,35 @@ const SUBCHECKS = {
       const fits = await ph.page.evaluate(() => { const b = document.querySelector('.time-nudge'); return b ? b.scrollWidth <= b.clientWidth : false; });
       rows.push([inSheet && fits, `Add opens in the bottom drawer (fits ${fits})`]);
     }
+    await ph.page.keyboard.press('Escape'); await settle(ph.page, 300);
+    await ph.page.evaluate(() => { const b = document.querySelector('.mark-editor [data-act="cancel"]'); if (b) b.click(); });
+    await settle(ph.page, 300);
+    const ph0 = (await storeGet(ph.page, FX_TAP)).at;
+    const aimed = await ph.page.evaluate(async () => {
+      const cv = document.getElementById('session-chart');
+      cv.scrollIntoView({ block: 'center' });
+      const c = Chart.getChart(cv), a = c.chartArea, r = cv.getBoundingClientRect();
+      const y = r.top + (a.top + a.bottom) / 2;
+      const row = [...document.querySelectorAll('#marker-list .marker-item.type-event')].find((n) => n.textContent.includes('Nausea'));
+      const x = r.left + c.scales.x.getPixelForValue(Number(row.dataset.t));
+      const ev = (type, px) => cv.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 8, pointerType: 'touch', isPrimary: true, clientX: px, clientY: y }));
+      ev('pointerdown', x);
+      await new Promise((f) => setTimeout(f, 650));
+      ev('pointerup', x);
+      await new Promise((f) => setTimeout(f, 200));
+      const mv = document.querySelector('.chart-menu-list [data-act="move"]');
+      if (!mv) return 'no move item';
+      mv.click();
+      await new Promise((f) => setTimeout(f, 200));
+      ev('click', r.left + (a.left + a.right) / 2);
+      await new Promise((f) => setTimeout(f, 200));
+      const place = document.querySelector('.move-bar .btn.primary');
+      return place && !place.hidden ? 'aimed' : 'no place button';
+    });
+    const unmoved = (await storeGet(ph.page, FX_TAP)).at === ph0;
+    await tap(ph.page, '.move-bar .btn.primary'); await settle(ph.page, 1200);
+    const placed = (await storeGet(ph.page, FX_TAP)).at !== ph0;
+    rows.push([aimed === 'aimed' && unmoved && placed, `a phone tap aims and Place here saves (${aimed}, held ${unmoved}, placed ${placed})`]);
     rows.push([!ph.page.errors.length, 'phone chart marks: no page errors ' + ph.page.errors.join(' | ')]);
     await ph.ctx.close();
     return rows;
@@ -771,6 +817,9 @@ if (want('mutants')) {
     ['diamonds', 'no diamond handles', "          marks['mk_' + idCounter++] = handle;", "          void handle;"],
     ['focus', 'marker click jumps with the old zoom, no highlight', '    easeBrushTo(lo, hi, () => { if (pinnedMarkT === item.t) highlightAtTime(item.t); });', '    zoomTo(item.t);'],
     ['focus', 'marker click without the highlight', '    pinnedMarkT = item.t;\n    // A tooltip left by a tap', '    // A tooltip left by a tap'],
+    ['pick', 'a render leaves the move armed', "    if (moving) { routePending = false; cancelMove(); }\n", ""],
+    ['pick', 'Move leaves the editor open', "    cancelMove();\n    closeMarkEditors();\n    const canvas", "    cancelMove();\n    const canvas"],
+    ['pick', 'a phone tap saves at once', "if (e.pointerType === 'touch') aimMove(e.clientX); else dropMove", "dropMove"],
     ['pick', 'a plain click starts dropping a mark', "  let moving = null;\n", "  let moving = { item: {}, rec: null, bar: document.createElement('div'), when: document.createElement('div'), canvas: document.body };\n"],
     ['pick', 'Escape keeps the move going', "function moveKey(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelMove(); } }", "function moveKey(e) { }"],
     ['pick', 'the long press ignores travel', "      if (Math.hypot(dx, dy) >= 10) endPress();\n", ""],

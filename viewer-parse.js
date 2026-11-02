@@ -797,6 +797,8 @@
     const summary = {
       filename,
       startEpoch,
+      // The epoch of chart x = 0; the first beat sits a few seconds past it.
+      originEpoch: (hr[0] && hr[0].ep) ? hr[0].ep - hr[0].t * 60000 : startEpoch,
       hrCount: hr.length,
       duration: summaryDuration,
       hrAvg: hrVals.length ? Math.round(hrVals.reduce((s, v) => s + v, 0) / hrVals.length) : 0,
