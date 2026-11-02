@@ -9430,7 +9430,7 @@ END SECTION MAP -->
     const row = { ep: item.edit.ep, label: raw };
     let made = null;
     if (!await marksWrite(async () => { made = await store.editRecorded(row, { at, cls, label: pm.label }); })) return;
-    moveToast(at, made.tap.id, async () => { await store.remove(made.tap.id); await store.unreverse(row); });
+    moveToast(at, made.tap.id, async () => { await store.unreverse(row); await store.remove(made.tap.id); });
   }
   function moveToast(at, id, undo) {
     UI.toast('Moved to ' + clockSec(at), {
