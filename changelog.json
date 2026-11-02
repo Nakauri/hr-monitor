@@ -3,6 +3,18 @@
     {
       "date": "2026-11-01",
       "area": "Viewer",
+      "title": "Add and move marks from the chart",
+      "body": "Right click the chart, or press and hold on a phone, to add a mark, or to edit, move or delete one. Times can be set to the second."
+    },
+    {
+      "date": "2026-11-01",
+      "area": "Android app",
+      "title": "Steadier strap connections",
+      "body": "An old strap connection can no longer change the link status or keep hold of the strap after you stop."
+    },
+    {
+      "date": "2026-11-01",
+      "area": "Viewer",
       "title": "Week view opens faster",
       "body": "Each day's trace is worked out once and saved, so Week no longer reloads your recordings every time you open it."
     },
