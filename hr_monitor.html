@@ -1456,6 +1456,14 @@ END SECTION MAP -->
           <span class="streaming-status" id="battopt-status">checking</span>
           <button type="button" class="btn" id="battopt-allow" style="display: none;">Allow</button>
         </div>
+        <div class="toggle-row hc-row" id="hc-row" hidden>
+          <div class="toggle-text">
+            <div class="toggle-label">Health Connect</div>
+            <div class="toggle-desc">Read your nights from your sleep app. Reports and the Day view use them for hours asleep and awake. They are saved to your Drive with your recordings.</div>
+          </div>
+          <span class="streaming-status" id="hc-status">Off</span>
+          <button type="button" class="btn" id="hc-act">Connect</button>
+        </div>
         <div class="toggle-row oem-row" id="oem-row" hidden>
           <div class="toggle-text">
             <div class="toggle-label" id="oem-label">Manufacturer settings</div>
@@ -2167,6 +2175,7 @@ END SECTION MAP -->
       }
       resumeAudioKeepAliveIfNeeded();
       if (typeof refreshBattOpt === 'function') refreshBattOpt();
+      if (typeof refreshHcOnReturn === 'function') refreshHcOnReturn();
     } catch (e) {}
     const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
     // Hides over 5 s rehydrate silently; the controller shows the overlay only past 60 s.
@@ -3458,6 +3467,95 @@ END SECTION MAP -->
       });
     }
     refreshBattOpt();
+  }
+
+  // Health Connect row (S65a, native only). status() runs when the Connection section opens, on a tap, and on a return
+  // to the foreground once Connect was tapped; never on a plain load. The last state shown is kept to paint at load.
+  const HC_ASKED = 'aorti_hc_asked', HC_NOCHANGE = 'aorti_hc_nochange', HC_ROW = 'aorti_hc_row';
+  const HC_ROW_TEXT = {
+    'not-installed': ['Not installed', 'Install'],
+    update: ['Update needed', 'Update'],
+    off: ['Off', 'Connect'],
+    refused: ['Not allowed', 'Open Health Connect'],
+    on: ['On', 'Manage'],
+  };
+  let hcRowState = null;
+  function hcLs(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function hcLsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { console.warn('[hc] setting not saved', k); } }
+  function hcRowFrom(st) {
+    if (!st || st.sdk === 'unsupported') return null;
+    if (st.sdk === 'not-installed' || st.sdk === 'update') return st.sdk;
+    if ((st.granted || []).includes('sleep')) return 'on';
+    return (+hcLs(HC_NOCHANGE) || 0) >= 2 ? 'refused' : 'off';
+  }
+  function paintHcRow(state) {
+    const row = document.getElementById('hc-row');
+    if (!row) return;
+    const hc = window.__aortiHC;
+    if (!(hc && hc.native()) || !state) { row.hidden = true; return; }
+    hcRowState = state;
+    hcLsSet(HC_ROW, state);
+    row.hidden = false;
+    document.getElementById('hc-status').textContent = HC_ROW_TEXT[state][0];
+    document.getElementById('hc-act').textContent = HC_ROW_TEXT[state][1];
+  }
+  // Copies of a kind no longer granted are deleted (the viewer shares this IndexedDB store).
+  async function hcApplyStatus(st) {
+    const granted = st && Array.isArray(st.granted) ? st.granted : [];
+    if (!granted.includes('sleep')) {
+      for (const k of ['hc:sleep', 'hc:sync', 'hc:drive']) {
+        try { await idbDel(k); } catch (e) { console.warn('[hc] copy not deleted', k); }
+      }
+    }
+  }
+  // A status() that fails changes nothing.
+  async function refreshHc() {
+    const hc = window.__aortiHC;
+    if (!(hc && hc.native())) { paintHcRow(null); return null; }
+    let st;
+    try { st = await hc.status(); } catch (e) { console.warn('[hc] status failed', e && (e.code || e.message)); return null; }
+    await hcApplyStatus(st);
+    paintHcRow(hcRowFrom(st));
+    return st;
+  }
+  function refreshHcOnReturn() {
+    const sec = document.querySelector('.section[data-section="connection"]');
+    if (hcLs(HC_ASKED) === '1' || (sec && !sec.classList.contains('collapsed'))) refreshHc();
+  }
+  async function hcAct() {
+    const hc = window.__aortiHC;
+    if (!(hc && hc.native())) return;
+    const btn = document.getElementById('hc-act');
+    btn.disabled = true;
+    try {
+      let state = hcRowState;
+      // A tap on a row painted from the last visit reads the state first; a changed state is shown, not acted on.
+      if (!state || state === 'off') { state = hcRowFrom(await refreshHc()); if (state !== 'off') return; }
+      if (state === 'off') {
+        const r = await hc.request(['sleep']);
+        if (r && (r.granted || []).includes('sleep')) hcLsSet(HC_NOCHANGE, '0');
+        else if (r && r.changed === false) hcLsSet(HC_NOCHANGE, String((+hcLs(HC_NOCHANGE) || 0) + 1));
+        await refreshHc();
+      } else if (state) {
+        await hc.openSettings();
+      }
+    } catch (e) {
+      console.warn('[hc] action failed', e && (e.code || e.message));
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  function initHcRow() {
+    const hc = window.__aortiHC;
+    if (!(hc && hc.native())) return;
+    const btn = document.getElementById('hc-act');
+    if (btn && !btn._wired) { btn._wired = true; btn.addEventListener('click', hcAct); }
+    const header = document.querySelector('.section[data-section="connection"] .section-header');
+    if (header && !header._hcWired) {
+      header._hcWired = true;
+      header.addEventListener('click', () => { if (!header.closest('.section').classList.contains('collapsed')) refreshHc(); });
+    }
+    paintHcRow(HC_ROW_TEXT[hcLs(HC_ROW)] ? hcLs(HC_ROW) : 'off');
   }
 
   // OEM-specific background-killer row. Only shown on phones whose vendor
@@ -6770,6 +6868,7 @@ END SECTION MAP -->
     // background-killer row (Samsung / Xiaomi / etc.). Both hide themselves
     // on web and on Android flavours without the problem.
     if (typeof initBattOptRow === 'function') initBattOptRow();
+    if (typeof initHcRow === 'function') initHcRow();
     if (typeof initOemRow === 'function') initOemRow();
     // Top-nav "Copy OBS URL" shortcut — copies the same URL as the buried button.
     const navCopy = $('nav-copy-obs-url');
