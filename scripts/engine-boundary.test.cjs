@@ -616,6 +616,16 @@ function step2Checks() {
   }
   const GD = readSource('GattHrDevice.java');
   check('[5] GattHrDevice.currentGatt is volatile', !!GD && /private\s+volatile\s+BluetoothGatt\s+currentGatt\b/.test(GD));
+  // Guards: the 2026-09 race, an old strap connection changing link state or leaking past a replace across three threads.
+  if (GD) {
+    const gc = codeView(GD);
+    const sites = indexesOf(gc, 'currentGatt = ').filter((i) => /\.connectGatt\(/.test(gc.slice(i, i + 60)));
+    check('[5] every strap handle swap holds gattLock', sites.length === 3
+      && sites.every((i) => gc.lastIndexOf('synchronized (gattLock)', i) > gc.lastIndexOf('public ', i)), 'swaps: ' + sites.length);
+    const stale = ['onConnectionStateChange', 'onServicesDiscovered', 'onDescriptorWrite', 'onCharacteristicChanged']
+      .filter((m) => { const i = gc.indexOf('public void ' + m); return i < 0 || !/stale|currentGatt/i.test(gc.slice(i, i + 320)); });
+    check('[5] every strap callback ignores a stale handle', stale.length === 0, stale.join(', '));
+  }
   if (S != null) {
     const sc = codeView(S);
     const osc = methodSpans(sc, 'public\\s+int\\s+onStartCommand')[0];

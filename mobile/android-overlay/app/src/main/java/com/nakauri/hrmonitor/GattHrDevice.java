@@ -27,13 +27,15 @@ public class GattHrDevice implements HrDevice {
     private final BleScanner bleScanner;
     private volatile Callback cb;
 
+    // Held across every close-and-replace, so a callback cannot run between connectGatt and the assignment.
+    private final Object gattLock = new Object();
     // volatile: ioExecutor (connect), main (reconnect) and binder threads read it.
     private volatile BluetoothGatt currentGatt;
     private volatile boolean linkUp = false;
-    private BluetoothGattCharacteristic hrChar;
+    private volatile BluetoothGattCharacteristic hrChar;
     // 2 consecutive CCCD failures on a bonded handle = stale bond; trigger removeBond.
-    private int cccdAttempts = 0;
-    private boolean usingBondedHandle = false;
+    private volatile int cccdAttempts = 0;
+    private volatile boolean usingBondedHandle = false;
 
     GattHrDevice(Context appCtx, BleScanner bleScanner) {
         this.appCtx = appCtx;
@@ -50,9 +52,8 @@ public class GattHrDevice implements HrDevice {
         // Handle resolution: bond cache → scan cache → rescan → PUBLIC fallback (JS connects only).
         // Coospo straps advertise as RANDOM; PUBLIC fallback connects but never
         // delivers notifications. See docs/ble-connect.md.
-        usingBondedHandle = false;
         BluetoothDevice device = bleScanner.findBondedDevice(mac);
-        if (device != null) usingBondedHandle = true;
+        final boolean bonded = device != null;
         if (device == null) device = bleScanner.findScannedDevice(mac);
         if (device == null && bleScanner.hasScanner()) {
             try {
@@ -73,10 +74,13 @@ public class GattHrDevice implements HrDevice {
             device = adapter.getRemoteDevice(mac);
         }
 
-        closeGattQuietly();
-        // autoConnect=false joins existing ACL links; =true waits on advertisements.
-        currentGatt = device.connectGatt(appCtx, false, gattCallback);
-        return usingBondedHandle;
+        synchronized (gattLock) {
+            closeGattQuietly();
+            usingBondedHandle = bonded;
+            // autoConnect=false joins existing ACL links; =true waits on advertisements.
+            currentGatt = device.connectGatt(appCtx, false, gattCallback);
+        }
+        return bonded;
     }
 
     static String last4(String mac) {
@@ -88,18 +92,22 @@ public class GattHrDevice implements HrDevice {
     @Override
     @SuppressLint("MissingPermission")
     public void reconnect() {
-        BluetoothGatt g = currentGatt;
-        if (g == null) {
-            fullReconnect();
-            return;
+        boolean rebuild = false;
+        synchronized (gattLock) {
+            BluetoothGatt g = currentGatt;
+            if (g == null) {
+                rebuild = true;
+            } else {
+                try {
+                    Log.i(TAG, "GATT reconnect: gatt.connect()");
+                    g.connect();
+                } catch (Throwable t) {
+                    Log.w(TAG, "gatt.connect() threw: " + t.getMessage());
+                    rebuild = true;
+                }
+            }
         }
-        try {
-            Log.i(TAG, "GATT reconnect: gatt.connect()");
-            g.connect();
-        } catch (Throwable t) {
-            Log.w(TAG, "gatt.connect() threw: " + t.getMessage());
-            fullReconnect();
-        }
+        if (rebuild) fullReconnect();
     }
 
     @Override
@@ -119,11 +127,15 @@ public class GattHrDevice implements HrDevice {
             NativeHrService.logLifecycle(appCtx, "full_reconnect_reuse mac=" + last4(mac));
             device = cur;
         }
-        closeGattQuietly();
-        try {
-            currentGatt = device.connectGatt(appCtx, false, gattCallback);
-        } catch (Throwable t) {
-            Log.w(TAG, "fullReconnectGatt connectGatt failed: " + t.getMessage());
+        synchronized (gattLock) {
+            // Another thread replaced or stopped this handle during the lookup; that one stands.
+            if (currentGatt != g) return;
+            closeGattQuietly();
+            try {
+                currentGatt = device.connectGatt(appCtx, false, gattCallback);
+            } catch (Throwable t) {
+                Log.w(TAG, "fullReconnectGatt connectGatt failed: " + t.getMessage());
+            }
         }
     }
 
@@ -133,11 +145,13 @@ public class GattHrDevice implements HrDevice {
     public boolean pendingConnect(String mac) throws Exception {
         BluetoothDevice bonded = bleScanner.findBondedDevice(mac);
         if (bonded == null) return false;
-        closeGattQuietly();
-        usingBondedHandle = true;
-        // autoConnect=true waits on advertisements with no CPU held; it never fires while another app holds the strap.
-        currentGatt = bonded.connectGatt(appCtx, true, gattCallback);
-        return currentGatt != null;
+        synchronized (gattLock) {
+            closeGattQuietly();
+            usingBondedHandle = true;
+            // autoConnect=true waits on advertisements with no CPU held; it never fires while another app holds the strap.
+            currentGatt = bonded.connectGatt(appCtx, true, gattCallback);
+            return currentGatt != null;
+        }
     }
 
     @Override
@@ -162,17 +176,28 @@ public class GattHrDevice implements HrDevice {
     // Every link teardown ends the streams first.
     private void closeGattQuietly() {
         stopStreams();
-        if (currentGatt != null) {
-            StringBuilder sb = new StringBuilder("closeGattQuietly thread=" + Thread.currentThread().getName());
-            StackTraceElement[] st = new Throwable().getStackTrace();
-            for (int i = 0; i < Math.min(st.length, 8); i++) sb.append("\n  ").append(st[i].toString());
-            Log.i(TAG, sb.toString());
-            try { currentGatt.disconnect(); } catch (Exception ignored) {}
-            try { currentGatt.close(); } catch (Exception ignored) {}
-            currentGatt = null;
-            hrChar = null;
+        synchronized (gattLock) {
+            if (currentGatt != null) {
+                StringBuilder sb = new StringBuilder("closeGattQuietly thread=" + Thread.currentThread().getName());
+                StackTraceElement[] st = new Throwable().getStackTrace();
+                for (int i = 0; i < Math.min(st.length, 8); i++) sb.append("\n  ").append(st[i].toString());
+                Log.i(TAG, sb.toString());
+                try { currentGatt.disconnect(); } catch (Exception ignored) {}
+                try { currentGatt.close(); } catch (Exception ignored) {}
+                currentGatt = null;
+                hrChar = null;
+            }
+            linkUp = false;
         }
-        linkUp = false;
+    }
+
+    // True when this callback belongs to a handle already closed or replaced.
+    private boolean isStale(BluetoothGatt gatt, String what) {
+        synchronized (gattLock) {
+            if (gatt == currentGatt) return false;
+        }
+        NativeHrService.logLifecycle(appCtx, "gatt_stale_event what=" + what);
+        return true;
     }
 
     // removeBond is hidden API; reflection is the canonical workaround.
@@ -195,16 +220,23 @@ public class GattHrDevice implements HrDevice {
         @Override
         @SuppressLint("MissingPermission")
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            boolean stale;
+            synchronized (gattLock) {
+                stale = gatt != currentGatt;
+                if (!stale && newState == BluetoothGatt.STATE_CONNECTED) linkUp = true;
+                if (!stale && newState == BluetoothGatt.STATE_DISCONNECTED) { hrChar = null; linkUp = false; }
+            }
+            if (stale) {
+                NativeHrService.logLifecycle(appCtx, "gatt_stale_event what=state" + newState);
+                return;
+            }
             Callback c = cb;
             if (newState == BluetoothGatt.STATE_CONNECTED) {
                 Log.i(TAG, "GATT connected");
-                linkUp = true;
                 if (c != null) c.onLinkUp();
                 gatt.discoverServices();
             } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
                 Log.i(TAG, "GATT disconnected status=" + status);
-                hrChar = null;
-                linkUp = false;
                 if (c != null) c.onLinkDown(status);
             }
         }
@@ -212,6 +244,7 @@ public class GattHrDevice implements HrDevice {
         @Override
         @SuppressLint("MissingPermission")
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            if (isStale(gatt, "services")) return;
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "Services discovery status=" + status);
                 NativeHrService.logLifecycle(appCtx, "services_discovery_failed status=" + status);
@@ -223,15 +256,16 @@ public class GattHrDevice implements HrDevice {
                 NativeHrService.logLifecycle(appCtx, "hr_service_missing");
                 return;
             }
-            hrChar = svc.getCharacteristic(HR_MEASUREMENT);
-            if (hrChar == null) {
+            BluetoothGattCharacteristic ch = svc.getCharacteristic(HR_MEASUREMENT);
+            hrChar = ch;
+            if (ch == null) {
                 Log.w(TAG, "HR measurement characteristic missing");
                 return;
             }
             cccdAttempts = 0;
             // "connected" CSV row + priority bump are deferred to onDescriptorWrite ack.
-            gatt.setCharacteristicNotification(hrChar, true);
-            BluetoothGattDescriptor desc = hrChar.getDescriptor(CCCD);
+            gatt.setCharacteristicNotification(ch, true);
+            BluetoothGattDescriptor desc = ch.getDescriptor(CCCD);
             if (desc != null) {
                 desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                 gatt.writeDescriptor(desc);
@@ -243,7 +277,7 @@ public class GattHrDevice implements HrDevice {
         @Override
         @SuppressLint("MissingPermission")
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-            if (!CCCD.equals(descriptor.getUuid())) return;
+            if (!CCCD.equals(descriptor.getUuid()) || isStale(gatt, "descriptor")) return;
             Callback c = cb;
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i(TAG, "CCCD write OK — notifications live");
@@ -282,7 +316,7 @@ public class GattHrDevice implements HrDevice {
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic ch) {
-            if (!HR_MEASUREMENT.equals(ch.getUuid())) return;
+            if (!HR_MEASUREMENT.equals(ch.getUuid()) || gatt != currentGatt) return;
             byte[] value = ch.getValue();
             if (value == null || value.length < 2) return;
             HrParse p = parseHrPacket(value);
