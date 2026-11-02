@@ -37,6 +37,7 @@ const TIER = {
   'first-sync': [VIEWER, [], false],
   'session-time': [/^(hrv_viewer|hr_monitor)\.html$/, [], false],
   'sleep-split': [VIEWER, [], false],
+  'health-connect': [new RegExp(VIEWER.source + '|^mobile/src/health-connect\\.js$'), ['--part', 'golden'], false],
   'v2-series': [VIEWER, [], false],
   'viewer-nav': [VIEWER, [], false],
   'trends-widgets': [VIEWER, [], false],

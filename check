@@ -49,6 +49,7 @@ run node scripts/coverage.mjs
 run node scripts/section-map.mjs
 run node scripts/personal-scan.mjs
 run node scripts/apk-manifest.test.cjs --self-test
+run node scripts/health-connect.mjs --part node
 # The JVM tier (compiles the real native Java, about 4 min) runs in CI always, and locally only when the
 # push touches the Java or these tests (or origin/main is unknown).
 if [ -n "$CI" ] || ! git rev-parse -q --verify origin/main >/dev/null \
