@@ -6049,8 +6049,9 @@ END SECTION MAP -->
     currentData = data;
     currentQuadRanges = computeQuadrantRanges(data);
     // Sleep windows come only from the S64 band (s64Paint); without it there is none.
-    // A cleared sleep weights flag drops an S64 band kept on the same data.
-    if (s.__detectedFor !== data || (s.__s64For && !(s63Weights() === 'personal' || S63_PRINT_GENERAL))) {
+    // A cleared sleep weights flag drops a detected S64 band kept on the same data; a Health Connect band drops once
+    // the visit's status no longer lists sleep.
+    if (s.__detectedFor !== data || (s.__s64For && s.__s64Src === 'detected' && !(s63Weights() === 'personal' || S63_PRINT_GENERAL)) || (s.__s64For && s.__s64Src === 'health-connect' && s65SleepGone())) {
       s.sleepWindows = [];
       s.__detectedFor = data;
       s.__s64For = null;
@@ -6365,6 +6366,7 @@ END SECTION MAP -->
   }
   // After driveSync resolves, never inside it; a failure here never reaches the sync result.
   async function marksSyncPass() {
+    s65DrivePass();
     if (!marksPage) return false;
     try {
       const r = await marksPage.drive.sync();
@@ -6894,6 +6896,122 @@ END SECTION MAP -->
     return { asleepMin: asl.length, awakeMin: d.recorded - asl.length, asleep: { hr: r(rptMedian(asl)), hrv: r(rptMedian(aslV)) }, awake: { hr: r(rptMedian(awk)), hrv: r(rptMedian(awkV)) } };
   }
   // ---- S63 sleep end ----
+  // ---- S65 health connect ----
+  // Nights from Health Connect (phone) or the sleep files in Drive (every device), as the Day report's and the Day view's
+  // asleep mask. Pure: no DOM, clock or storage. Spec ux-audit redesign/s65-hc/S65-SPEC.md; checks: scripts/health-connect.mjs.
+  const S65_O = { join: 15, minLen: 20, settleMs: 6 * 3600000, keepDays: 400, readDays: 30, fullMs: 7 * 86400000, staleMs: 6 * 3600000, capMs: 3000, delayMs: 10000, overlapMs: 48 * 3600000, maxNightMs: 24 * 3600000 };
+  const S65_OWN = 'com.nakauri.hrmonitor';
+  // A night as stored and uploaded: { id, s, e, awake: [[s, e], ...] } in epoch ms, or null when a field is off.
+  function s65Night(r) {
+    if (!r || typeof r.id !== 'string' || !r.id || r.id.length > 200) return null;
+    const s = Number(r.s), e = Number(r.e);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || e - s > S65_O.maxNightMs) return null;
+    const awake = [];
+    for (const p of Array.isArray(r.awake) ? r.awake : []) {
+      const a = Math.max(s, Number(p && p[0])), b = Math.min(e, Number(p && p[1]));
+      if (Number.isFinite(a) && Number.isFinite(b) && b > a) awake.push([a, b]);
+    }
+    awake.sort((p, q) => p[0] - q[0]);
+    return { id: r.id, s, e, awake };
+  }
+  // A Health Connect row as kept on the phone: a night plus the app that wrote it.
+  function s65Row(r) {
+    const x = s65Night(r);
+    return x && r && typeof r.origin === 'string' && r.origin.length <= 200 ? Object.assign({ origin: r.origin }, x) : null;
+  }
+  // The app the nights come from: never aorti, else the most sessions in the last 30 days, ties to the latest night.
+  function s65Origin(rows, now) {
+    const c = new Map();
+    for (const r of rows || []) {
+      if (!r || !r.origin || r.origin === S65_OWN) continue;
+      const k = c.get(r.origin) || { n: 0, last: -Infinity };
+      if (r.e >= now - S65_O.readDays * 86400000) k.n++;
+      k.last = Math.max(k.last, r.e);
+      c.set(r.origin, k);
+    }
+    let best = null;
+    for (const [o, k] of c) if (!best || k.n > best.k.n || (k.n === best.k.n && k.last > best.k.last)) best = { o, k };
+    return best ? best.o : null;
+  }
+  function s65Chosen(rows, now) {
+    const o = s65Origin(rows, now);
+    return o ? rows.filter(r => r && r.origin === o).map(s65Night).filter(Boolean) : [];
+  }
+  // 1 for a minute inside a night and outside its awake stretches; nights under 15 min apart join, spans under 20 min drop.
+  function hcSleepMask(nights, dayStartEp, n) {
+    const mask = new Uint8Array(n), spans = [];
+    for (const x of nights.slice().sort((p, q) => p.s - q.s)) {
+      const last = spans[spans.length - 1];
+      if (last && x.s - last.e < S65_O.join * 60000) { last.e = Math.max(last.e, x.e); last.awake = last.awake.concat(x.awake); }
+      else spans.push({ s: x.s, e: x.e, awake: x.awake.slice() });
+    }
+    const first = (ep) => Math.max(0, Math.ceil((ep - dayStartEp) / 60000));
+    const stop = (ep) => Math.min(n, Math.ceil((ep - dayStartEp) / 60000));
+    for (const sp of spans) {
+      if (sp.e - sp.s < S65_O.minLen * 60000) continue;
+      for (let m = first(sp.s); m < stop(sp.e); m++) mask[m] = 1;
+      for (const [a, b] of sp.awake) for (let m = first(a); m < stop(b); m++) mask[m] = 0;
+    }
+    return mask;
+  }
+  function s65Overlaps(nights, start, end) { return nights.some(x => x.e > start && x.s < end); }
+  // Upsert by id; a full read that returned everything replaces each stored row overlapping its window (rows deleted in
+  // Health Connect go). Rows ending over 400 days ago drop. touched: [s, e] of each row added, changed or removed.
+  function s65Upsert(old, rows, from, to, replace, now) {
+    const byId = new Map(), fresh = new Set(), touched = [];
+    for (const r of old || []) if (r && r.id) byId.set(r.id, r);
+    for (const r of rows) {
+      const prev = byId.get(r.id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(r)) { touched.push([r.s, r.e]); if (prev) touched.push([prev.s, prev.e]); }
+      byId.set(r.id, r); fresh.add(r.id);
+    }
+    if (replace) for (const [id, r] of [...byId]) if (!fresh.has(id) && r.e > from && r.s < to) { byId.delete(id); touched.push([r.s, r.e]); }
+    const keep = now - S65_O.keepDays * 86400000;
+    const out = [...byId.values()].filter(r => r.e >= keep).sort((p, q) => p.s - q.s || (p.id < q.id ? -1 : 1));
+    return { rows: out, touched };
+  }
+  // Month of a night's end in local time: the file it belongs to.
+  function s65Month(ep) { const d = new Date(ep); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function s65FileName(month, deviceId) { return 'sleep_' + month + '_' + deviceId + '.json'; }
+  // A sleep file's body: start, end and awake stretches per night, nothing else.
+  function s65FileBody(origin, nights) {
+    const list = nights.slice().sort((p, q) => p.s - q.s || (p.id < q.id ? -1 : 1));
+    return JSON.stringify({ v: 1, origin, nights: list.map(x => ({ id: x.id, s: x.s, e: x.e, awake: x.awake.map(p => [p[0], p[1]]) })) });
+  }
+  function s65ParseFile(text) {
+    const o = JSON.parse(text);
+    if (!o || o.v !== 1 || !Array.isArray(o.nights)) throw new Error('s65_bad_file');
+    return { origin: typeof o.origin === 'string' ? o.origin : '', nights: o.nights.map(s65Night).filter(Boolean) };
+  }
+  // An upload: the file's nights that start before cover (out of Health Connect's reach) stay; the rest are this phone's.
+  function s65Merge(fileNights, local, cover) {
+    const ids = new Set(local.map(x => x.id));
+    return fileNights.filter(x => x.s < cover && !ids.has(x.id)).concat(local);
+  }
+  // Writes each month whose night set changed since its last upload; nothing while Drive sync is off or paused.
+  // o: { rows, sync, state, now, deviceId, canSync(), push(name, origin, nights, cover) -> { id }, save(state) }.
+  async function s65PushMonths(o) {
+    if (!o.canSync() || !o.deviceId || !o.rows || !o.sync) return 0;
+    const origin = s65Origin(o.rows, o.now);
+    if (!origin) return 0;
+    const state = { months: Object.assign({}, o.state && o.state.months) }, byMonth = new Map();
+    for (const x of s65Chosen(o.rows, o.now)) { const m = s65Month(x.e); if (!byMonth.has(m)) byMonth.set(m, []); byMonth.get(m).push(x); }
+    // Months Health Connect can no longer change are left as uploaded.
+    const recent = s65Month(o.now - (S65_O.readDays + 2) * 86400000);
+    const months = [...new Set([...byMonth.keys(), ...Object.keys(state.months)])].filter(m => m >= recent).sort();
+    let wrote = 0;
+    for (const m of months) {
+      const list = byMonth.get(m) || [], h = hashStr(s65FileBody(origin, list));
+      if (state.months[m] && state.months[m].h === h) continue;
+      if (!o.canSync()) break;
+      const res = await o.push(s65FileName(m, o.deviceId), origin, list, Number.isFinite(o.sync.cover) ? o.sync.cover : o.now);
+      state.months[m] = { h, id: res && res.id };
+      wrote++;
+      await o.save(state);
+    }
+    return wrote;
+  }
+  // ---- S65 health connect end ----
   // S61 moments on screen: one detection task after the first paint, memoised per data object; the report reads the same memo.
   const s61Memo = new WeakMap();
   let s61Shown = { key: null, res: null };
@@ -7215,9 +7333,10 @@ END SECTION MAP -->
     if (!summary || !entry) return null;
     const d = s61Result(summary, entry.data).d;
     if (!d) return null;
-    let sleep = null;
+    // Nights from Health Connect or Drive print whatever the weights flag says; else the S63 split under its flag.
+    let sleep = want === true ? await s65Report(iso) : null;
     if (want && typeof want === 'object') sleep = want;
-    else if (want && (s63Weights() === 'personal' || S63_PRINT_GENERAL)) {
+    else if (!sleep && want && (s63Weights() === 'personal' || S63_PRINT_GENERAL)) {
       try { sleep = await s63Sleep(iso); } catch (e) { console.warn('[S63] split failed, Summary row only', e); sleep = null; }
       finally { if (s63Toast) { s63Toast.close(); s63Toast = null; } }
     }
@@ -7331,7 +7450,9 @@ END SECTION MAP -->
     const end = (how) => { S64_COUNT.done = key + ' ' + how; S64_COUNT.doneT = performance.now(); };
     const iso = s.__virtualDay;
     if (!iso || key !== 'day:' + iso) return end('not a day');
-    if (!(s63Weights() === 'personal' || S63_PRINT_GENERAL)) return end('flag');
+    // Nights from Health Connect or Drive first (S65): no flag, history gate or digest needed.
+    const hc = await s65SleepFor(iso);
+    if (currentData !== data || currentFilename !== key || s61RouteKey() !== key) return end('cancelled');
     const shown = s.__s64For === data;
     // A band shown from digests that no longer match is dropped.
     const back = (how) => {
@@ -7341,6 +7462,29 @@ END SECTION MAP -->
       }
       return end(how);
     };
+    let sleep = hc && hc.mask ? hc : null;
+    // A night gone from its source drops its band; a status that timed out keeps it until the settle re-run.
+    if (!sleep && shown && s.__s64Src && s.__s64Src !== 'detected') return hc === S65_TIMEOUT ? end('kept') : back('hc gone');
+    if (!sleep) {
+      const det = await s64Detected(s, data, key, iso, end, back);
+      if (!det) return;
+      sleep = det.sleep;
+      if (currentData !== data || currentFilename !== key || s61RouteKey() !== key) return end('cancelled');
+    }
+    const d = sleep && s61Result(s, data).d;
+    if (!d || !rptSleepFigures(Object.assign({}, d, { sleep }))) return back('old');
+    const windows = s64Runs(sleep.mask, d.hr);
+    const src = sleep.source === 'detected' ? 'detected' : sleep.source;
+    if (shown && s.__s64Src === src && JSON.stringify(windows) === JSON.stringify(s.sleepWindows)) return end('kept');
+    s.sleepWindows = windows;
+    s.__s64For = data;
+    s.__s64Src = src;
+    if (currentSummary === s) s64Paint(s, data);
+    end('applied');
+  }
+  // The S63 path of s64Run: { sleep } (null when the split does not hold), or undefined once it has ended the run.
+  async function s64Detected(s, data, key, iso, end, back) {
+    if (!(s63Weights() === 'personal' || S63_PRINT_GENERAL)) return end('flag');
     const todayIso = localDateKeyToday();
     if (!s63Completed(iso, todayIso, (Date.now() - dayWindow(todayIso).start) / 60000)) return back('open day');
     let withFiles = 0;
@@ -7355,15 +7499,183 @@ END SECTION MAP -->
     let sleep = null;
     try { sleep = await s63Sleep(iso, fetch); }
     catch (e) { if (e === S64_MISS) return back('missing'); console.warn('[S64] sleep band failed, old band kept', e); return back('failed'); }
-    if (currentData !== data || currentFilename !== key || s61RouteKey() !== key) return end('cancelled');
-    const d = sleep && s61Result(s, data).d;
-    if (!d || !rptSleepFigures(Object.assign({}, d, { sleep }))) return back('old');
-    const windows = s64Runs(sleep.mask, d.hr);
-    if (shown && JSON.stringify(windows) === JSON.stringify(s.sleepWindows)) return end('kept');
-    s.sleepWindows = windows;
-    s.__s64For = data;
-    if (currentSummary === s) s64Paint(s, data);
-    end('applied');
+    return { sleep };
+  }
+  // ---------- S65: Health Connect nights, the Drive sleep files and the sleep resolver (rules in the S65 block) ----------
+  // Before Connect (aorti_hc_asked, web always) nothing here calls the plugin or reads an hc: key; __s65 counts both.
+  const S65_COUNT = globalThis.__s65 || (globalThis.__s65 = { status: 0, read: 0, idb: 0, up: 0, down: 0 });
+  const S65_TIMEOUT = { none: 'timeout' };
+  const s65Visit = { statusP: null, status: null, settled: false, gaveUp: null, syncP: null, driveP: null, driveAgain: false, drive: null };
+  function s65Hc() { return window.__aortiHC || null; }
+  function s65Avail() { const hc = s65Hc(); return !!(hc && typeof hc.available === 'function' && hc.available()) && !isDemoMode(); }
+  async function s65Get(k) {
+    S65_COUNT.idb++;
+    try { return await idbGet(k); } catch (e) { console.warn('[S65] read failed', k, e && e.message); return undefined; }
+  }
+  async function s65Set(k, v) { S65_COUNT.idb++; await idbSet(k, v); }
+  async function s65Del(k) {
+    S65_COUNT.idb++;
+    try { await idbDelete(k); } catch (e) { console.warn('[S65] delete failed', k, e && e.message); }
+  }
+  // A kind no longer granted (or Health Connect gone) takes its copies with it. A failed status() changes nothing.
+  async function hcApplyStatus(st) {
+    const granted = st && Array.isArray(st.granted) ? st.granted : [];
+    if (!granted.includes('sleep')) for (const k of ['hc:sleep', 'hc:sync', 'hc:drive']) await s65Del(k);
+  }
+  function s65Granted(st) { return !!(st && Array.isArray(st.granted) && st.granted.includes('sleep')); }
+  // A shown Health Connect band drops once the visit's settled status no longer lists sleep.
+  function s65SleepGone() { return s65Visit.settled && !!s65Visit.status && !s65Granted(s65Visit.status); }
+  // One status() per visit (fresh: a stale return asks again). A resolver that gave up re-runs the open day on settle.
+  function s65Status(fresh) {
+    if (s65Visit.statusP && !fresh) return s65Visit.statusP;
+    s65Visit.settled = false;
+    const p = s65Hc().status()
+      .then(async (st) => { s65Visit.status = st; await hcApplyStatus(st); return st; },
+        (e) => { console.warn('[S65] status failed, copies kept', e && (e.code || e.message)); s65Visit.status = null; return null; })
+      .then((st) => {
+        if (s65Visit.statusP === p) s65Visit.settled = true;
+        const iso = s65Visit.gaveUp;
+        s65Visit.gaveUp = null;
+        if (iso) s65RerunDay(iso);
+        return st;
+      });
+    s65Visit.statusP = p;
+    return p;
+  }
+  // The visit's status within 3 s, else S65_TIMEOUT.
+  async function s65StatusCapped() {
+    const p = s65Status(false);
+    if (s65Visit.settled) return p;
+    let t = null;
+    const r = await Promise.race([p, new Promise((res) => { t = setTimeout(() => res(S65_TIMEOUT), S65_O.capMs); })]);
+    clearTimeout(t);
+    return r;
+  }
+  // Every device's nights from the cached Drive sleep files, once per visit (reset after a pull that changed them).
+  async function s65DriveNights() {
+    if (s65Visit.drive) return s65Visit.drive;
+    let cache = null;
+    try { cache = await idbGet('sleepdrive'); } catch (e) { console.warn('[S65] Drive sleep cache unreadable', e && e.message); }
+    const byId = new Map();
+    for (const f of Object.values((cache && cache.files) || {})) {
+      if (!f || f.origin === S65_OWN) continue;
+      for (const x of f.nights || []) { const n = s65Night(x); if (n) byId.set(n.id, n); }
+    }
+    return (s65Visit.drive = [...byId.values()]);
+  }
+  // { source, mask } for a completed day: the phone's Health Connect copy, else the Drive sleep files, else null
+  // (S63 runs). S65_TIMEOUT when the status gave up at 3 s and Drive had nothing.
+  async function s65SleepFor(iso) {
+    if (isDemoMode()) return null;
+    const now = Date.now(), todayIso = localDateKeyToday();
+    if (!s63Completed(iso, todayIso, (now - dayWindow(todayIso).start) / 60000)) return null;
+    const w = dayWindow(iso), n = Math.round((w.end - w.start) / 60000);
+    let timedOut = false;
+    if (s65Avail()) {
+      const st = await s65StatusCapped();
+      if (st === S65_TIMEOUT) { timedOut = true; s65Visit.gaveUp = iso; }
+      else if (s65Granted(st)) {
+        const sync = await s65Get('hc:sync');
+        if (sync && sync.sleep >= w.end + S65_O.settleMs) {
+          const nights = s65Chosen((await s65Get('hc:sleep')) || [], now);
+          if (s65Overlaps(nights, w.start, w.end)) return { source: 'health-connect', mask: hcSleepMask(nights, w.start, n) };
+        }
+      }
+    }
+    const dn = await s65DriveNights();
+    if (s65Overlaps(dn, w.start, w.end)) return { source: 'drive', mask: hcSleepMask(dn, w.start, n) };
+    return timedOut ? S65_TIMEOUT : null;
+  }
+  // rptModel's source: a mask or null; a failure prints the S63 split or nothing.
+  async function s65Report(iso) {
+    try { const r = await s65SleepFor(iso); return r && r.mask ? r : null; }
+    catch (e) { console.warn('[S65] sleep source failed, S63 used', e); return null; }
+  }
+  function s65RerunDay(iso) {
+    const s = currentSummary, key = 'day:' + iso;
+    if (!s || s.__virtualDay !== iso || currentFilename !== key || s61RouteKey() !== key) return;
+    s64Run(s, currentData, key).catch(e => console.warn('[S64] sleep band failed', e));
+  }
+  // After a sync: re-run the open day when a changed night overlaps it or the sync just passed its end + 6 h.
+  function s65AfterSync(touched, before, now) {
+    const iso = currentSummary && currentSummary.__virtualDay;
+    if (!iso) return;
+    const w = dayWindow(iso), settle = w.end + S65_O.settleMs;
+    if ((before < settle && now >= settle) || touched.some(([a, b]) => b > w.start && a < w.end)) s65RerunDay(iso);
+  }
+  function s65Sync() {
+    if (!s65Visit.syncP) s65Visit.syncP = s65SyncOnce().catch(e => console.warn('[S65] sync failed', e)).finally(() => { s65Visit.syncP = null; });
+    return s65Visit.syncP;
+  }
+  async function s65SyncOnce() {
+    if (!s65Avail() || document.hidden) return;
+    const st = await s65Status(false);
+    if (!s65Granted(st) || document.hidden) return;
+    const now = Date.now(), day = 86400000;
+    const sync = Object.assign({}, await s65Get('hc:sync'));
+    const full = !(sync.sleepFull > now - S65_O.fullMs);
+    const from = full ? now - S65_O.readDays * day : Math.max((sync.sleep || 0) - S65_O.overlapMs, now - S65_O.readDays * day);
+    sync.sleepTry = now;
+    await s65Set('hc:sync', sync);
+    let res;
+    try { res = await s65Hc().read('sleep', from, now); }
+    catch (e) { console.warn('[S65] sleep read failed, copies kept', e && (e.code || e.message)); return; }
+    const rows = (res && Array.isArray(res.rows) ? res.rows : []).map(s65Row).filter(Boolean);
+    const up = s65Upsert(await s65Get('hc:sleep'), rows, from, now, full && !res.more, now);
+    const before = sync.sleep || 0;
+    await s65Set('hc:sleep', up.rows);
+    sync.sleep = now;
+    if (full && !res.more) sync.sleepFull = now;
+    sync.cover = Math.min(Number.isFinite(sync.cover) ? sync.cover : from, from);
+    await s65Set('hc:sync', sync);
+    // Diagnostics shows the origin on screen only.
+    window.__aortiHCDiag = { origin: s65Origin(up.rows, now), nights: s65Chosen(up.rows, now).length };
+    s65AfterSync(up.touched, before, now);
+    s65DrivePass();
+  }
+  async function s65OnVisible() {
+    if (document.hidden || !s65Avail() || !s65Granted(s65Visit.status)) return;
+    const sync = await s65Get('hc:sync');
+    if (sync && Date.now() - (sync.sleepTry || 0) <= S65_O.staleMs) return;
+    await s65Status(true);
+    s65Sync();
+  }
+  // Viewer open: one status(), the sync 10 s after the first paint while visible, a catch-up on a stale return.
+  function s65Boot() {
+    if (!s65Avail()) return;
+    s65Status(false);
+    requestAnimationFrame(() => setTimeout(() => { if (!document.hidden) s65Sync(); }, S65_O.delayMs));
+    document.addEventListener('visibilitychange', () => { s65OnVisible().catch(e => console.warn('[S65] return sync failed', e)); });
+  }
+  // Drive: this phone's changed months up (after Connect), then every device's sleep files down. Marks' sync rule holds
+  // (signed in, Drive sync on, not paused); a failure leaves the hashes, so the next pass retries.
+  function s65DrivePass() {
+    if (s65Visit.driveP) { s65Visit.driveAgain = true; return s65Visit.driveP; }
+    s65Visit.driveP = (async () => {
+      do { s65Visit.driveAgain = false; await s65DriveOnce(); } while (s65Visit.driveAgain);
+    })().catch(e => console.warn('[S65] Drive sleep pass failed', e && (e.reason || e.message))).finally(() => { s65Visit.driveP = null; });
+    return s65Visit.driveP;
+  }
+  async function s65DriveOnce() {
+    if (isDemoMode() || !window.AortiMarksDrive || !marksCanSync()) return;
+    const files = window.AortiMarksDrive.sleepFiles({
+      driveFetch, rootId: () => driveFolderId, rootIds: () => driveRootIds.slice(), count: S65_COUNT,
+      body: s65FileBody, parse: s65ParseFile, merge: s65Merge,
+    });
+    if (s65Avail() && s65Granted(s65Visit.status) && marksPage && !marksPage.drive.status().blocked) {
+      await s65PushMonths({
+        rows: await s65Get('hc:sleep'), sync: await s65Get('hc:sync'), state: await s65Get('hc:drive'), now: Date.now(),
+        deviceId: marksPage.store.deviceId, canSync: marksCanSync, push: files.push, save: (st) => s65Set('hc:drive', st),
+      });
+    }
+    let cache = null;
+    try { cache = await idbGet('sleepdrive'); } catch (e) { console.warn('[S65] Drive sleep cache unreadable', e && e.message); }
+    const r = await files.pull((cache && cache.files) || {});
+    if (!r.changed) return;
+    await idbSet('sleepdrive', { files: r.files });
+    s65Visit.drive = null;
+    const iso = currentSummary && currentSummary.__virtualDay;
+    if (iso) s65RerunDay(iso);
   }
   // Filters the person set in this page; S64 never turns those on.
   const s64PersonFilters = new Set();
@@ -8726,7 +9038,9 @@ END SECTION MAP -->
       if (parts2.length) lines.push({ text: 'Posture time', sub: parts2.join(' · ') });
     }
     if (!lines.length) return null;
-    const how = s64
+    const how = s64 && s.__s64Src && s.__s64Src !== 'detected'
+      ? 'Sleep windows come from the nights your sleep app saved.'
+      : s64
       ? 'Sleep windows come from your HR against its usual range over the past week, together with your HRV.'
       : 'Sleep windows are detected automatically from stretches where your HR drifts toward its lowest values AND your HRV sits above the session median at the same time. That combination reliably shows up during actual sleep.';
     return {
@@ -11873,6 +12187,7 @@ END SECTION MAP -->
       driveUpdateUI();
       updateWatchLiveUI();
       marksInit();
+      s65Boot();
       if (!dirHandle && await paintFromCache()) painted = true;
       initDriveUI();
     }
