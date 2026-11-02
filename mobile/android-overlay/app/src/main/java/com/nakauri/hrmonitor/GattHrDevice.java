@@ -32,7 +32,6 @@ public class GattHrDevice implements HrDevice {
     // volatile: ioExecutor (connect), main (reconnect) and binder threads read it.
     private volatile BluetoothGatt currentGatt;
     private volatile boolean linkUp = false;
-    private volatile BluetoothGattCharacteristic hrChar;
     // 2 consecutive CCCD failures on a bonded handle = stale bond; trigger removeBond.
     private volatile int cccdAttempts = 0;
     private volatile boolean usingBondedHandle = false;
@@ -121,6 +120,7 @@ public class GattHrDevice implements HrDevice {
         String mac = cur.getAddress();
         if (mac == null) return;
         BluetoothDevice device = bleScanner.findBondedDevice(mac);
+        final boolean bonded = device != null;
         if (device == null) device = bleScanner.findScannedDevice(mac);
         // Never getRemoteDevice (PUBLIC): the live handle keeps the address type it was resolved with.
         if (device == null) {
@@ -131,6 +131,7 @@ public class GattHrDevice implements HrDevice {
             // Another thread replaced or stopped this handle during the lookup; that one stands.
             if (currentGatt != g) return;
             closeGattQuietly();
+            usingBondedHandle = bonded;
             try {
                 currentGatt = device.connectGatt(appCtx, false, gattCallback);
             } catch (Throwable t) {
@@ -185,7 +186,6 @@ public class GattHrDevice implements HrDevice {
                 try { currentGatt.disconnect(); } catch (Exception ignored) {}
                 try { currentGatt.close(); } catch (Exception ignored) {}
                 currentGatt = null;
-                hrChar = null;
             }
             linkUp = false;
         }
@@ -224,10 +224,12 @@ public class GattHrDevice implements HrDevice {
             synchronized (gattLock) {
                 stale = gatt != currentGatt;
                 if (!stale && newState == BluetoothGatt.STATE_CONNECTED) linkUp = true;
-                if (!stale && newState == BluetoothGatt.STATE_DISCONNECTED) { hrChar = null; linkUp = false; }
+                if (!stale && newState == BluetoothGatt.STATE_DISCONNECTED) linkUp = false;
             }
             if (stale) {
                 NativeHrService.logLifecycle(appCtx, "gatt_stale_event what=state" + newState);
+                // close() does nothing before registration finishes, so a handle closed that early lands here still open.
+                try { gatt.disconnect(); gatt.close(); } catch (Throwable t) { Log.w(TAG, "stale close threw: " + t.getMessage()); }
                 return;
             }
             Callback c = cb;
@@ -257,7 +259,6 @@ public class GattHrDevice implements HrDevice {
                 return;
             }
             BluetoothGattCharacteristic ch = svc.getCharacteristic(HR_MEASUREMENT);
-            hrChar = ch;
             if (ch == null) {
                 Log.w(TAG, "HR measurement characteristic missing");
                 return;
