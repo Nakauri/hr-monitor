@@ -815,7 +815,7 @@ const MUTANTS = [
   ['P2', 'no deadline', 'drive', '        await Promise.race([work, new Promise(r => { timer = setTimeout(r, ms); })]);', '        await work;'],
   ['P2', 'per-fetch deadline only', 'drive', '        await Promise.race([work, new Promise(r => { timer = setTimeout(r, ms); })]);', '        await work;', 'per-fetch-only'],
   ['R1', 'marks read only under the picked root', 'drive', '      const roots = (opts.rootIds && opts.rootIds()) || [];', '      const roots = [];'],
-  ['R2', 'newest marks folder', 'drive', '      st.folderId = found.slice().sort(olderFirst)[0].id;', '      st.folderId = found.slice().sort(olderFirst).pop().id;'],
+  ['R2', 'newest marks folder', 'drive', '      return found.slice().sort(olderFirst)[0].id;', '      return found.slice().sort(olderFirst).pop().id;'],
   ['R3', 'root picker without the id tie-break', 'drive', '    if (ta !== tb) return ta - tb;\n    return String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;', '    return ta - tb;'],
   ['D1', 'newer copy rewritten as fresh tombstones', 'drive', '        const body = M.fileBody(store.deviceId, d.m, []);',
     '        const body = M.fileBody(store.deviceId, d.m, store.all().filter(r => r.m === d.m).map(r => Object.assign(M.tombstoneOf(r), { by: store.deviceId, updatedAt: r.updatedAt + 1, base: r.updatedAt })));'],

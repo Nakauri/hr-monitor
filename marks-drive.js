@@ -40,6 +40,57 @@
     return e;
   }
 
+  // The Drive transport marks and sleep files share: HTTP errors, paged listings, oldest-wins folders, multipart create.
+  function driveIo(driveFetch) {
+    async function json(resp, what) {
+      if (!resp.ok) { let t = ''; try { t = await resp.text(); } catch (e) { t = ''; } throw httpError(what, resp, t); }
+      return resp.json();
+    }
+    async function listAll(query, fields, signal) {
+      const out = [];
+      let token = null;
+      do {
+        const r = await driveFetch('files?q=' + q(query) + '&fields=' + q('files(' + fields + '),nextPageToken') + '&pageSize=1000' +
+          (token ? '&pageToken=' + q(token) : ''), { signal });
+        const d = await json(r, 'list');
+        for (const f of (d.files || [])) out.push(f);
+        token = d.nextPageToken || null;
+      } while (token);
+      return out;
+    }
+    function foldersUnder(rootId, name, signal) {
+      return listAll(`'${esc(rootId)}' in parents and name='${esc(name)}' and mimeType='${FOLDER_MIME}' and trashed=false`, 'id,name,createdTime', signal);
+    }
+    // The oldest folder of that name under rootId; created when there is none, then re-listed.
+    async function folder(rootId, name, signal) {
+      let found = await foldersUnder(rootId, name, signal);
+      if (!found.length) {
+        await json(await driveFetch('files?fields=id', {
+          method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [rootId] }),
+        }), 'folder');
+        found = await foldersUnder(rootId, name, signal);
+        if (!found.length) throw new Error(name + '_folder_missing');
+      }
+      return found.slice().sort(olderFirst)[0].id;
+    }
+    async function createIn(folderId, name, body, signal) {
+      const boundary = '-------aorti-' + Math.random().toString(36).slice(2);
+      const meta = { name, parents: [folderId], mimeType: 'application/json' };
+      const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${body}\r\n--${boundary}--`;
+      return json(await driveFetch(UPLOAD + '?uploadType=multipart&fields=id,md5Checksum', {
+        method: 'POST', signal, headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body: multipart,
+      }), 'create');
+    }
+    async function patchMedia(id, body, signal) {
+      return driveFetch(UPLOAD + '/' + encodeURIComponent(id) + '?uploadType=media&fields=id,md5Checksum', {
+        method: 'PATCH', signal, headers: { 'Content-Type': 'application/json; charset=UTF-8' }, body,
+      });
+    }
+    return { json, listAll, foldersUnder, folder, createIn, patchMedia };
+  }
+
   // opts: { store, driveFetch(path, init), rootId(), rootIds() (reader only), canSync(),
   //         locks (navigator.locks or null), read (true on the viewer) }
   function create(opts) {
@@ -48,62 +99,26 @@
     const locks = opts.locks || null;
     const st = { lastError: '', lastSync: 0, folderId: null, folderRoot: null, blocked: false, running: null, timer: null };
 
-    async function json(resp, what) {
-      if (!resp.ok) { let t = ''; try { t = await resp.text(); } catch (e) {} throw httpError(what, resp, t); }
-      return resp.json();
-    }
-    async function listAll(query, fields, signal) {
-      const out = [];
-      let token = null;
-      do {
-        const r = await opts.driveFetch('files?q=' + q(query) + '&fields=' + q('files(' + fields + '),nextPageToken') + '&pageSize=1000' +
-          (token ? '&pageToken=' + q(token) : ''), { signal });
-        const d = await json(r, 'list');
-        for (const f of (d.files || [])) out.push(f);
-        token = d.nextPageToken || null;
-      } while (token);
-      return out;
-    }
-    function marksFoldersUnder(rootId, signal) {
-      return listAll(`'${esc(rootId)}' in parents and name='marks' and mimeType='${FOLDER_MIME}' and trashed=false`, 'id,name,createdTime', signal);
-    }
+    const io = driveIo(opts.driveFetch);
+    const { json, listAll } = io;
+    const marksFoldersUnder = (rootId, signal) => io.foldersUnder(rootId, 'marks', signal);
 
     // The oldest marks folder under the picked root; created when there is none, then re-listed.
     async function writeFolder(signal) {
       const rootId = opts.rootId();
       if (!rootId) throw new Error('marks_no_root');
       if (st.folderId && st.folderRoot === rootId) return st.folderId;
-      let found = await marksFoldersUnder(rootId, signal);
-      if (!found.length) {
-        await json(await opts.driveFetch('files?fields=id', {
-          method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'marks', mimeType: FOLDER_MIME, parents: [rootId] }),
-        }), 'folder');
-        found = await marksFoldersUnder(rootId, signal);
-        if (!found.length) throw new Error('marks_folder_missing');
-      }
-      st.folderId = found.slice().sort(olderFirst)[0].id;
+      st.folderId = await io.folder(rootId, 'marks', signal);
       st.folderRoot = rootId;
       return st.folderId;
     }
 
     async function createFile(folder, name, body, signal) {
-      try { return await createIn(folder, name, body, signal); }
+      try { return await io.createIn(folder, name, body, signal); }
       catch (e) { if (e && e.status === 404) st.folderId = null; throw e; }
     }
-    async function createIn(folder, name, body, signal) {
-      const boundary = '-------aorti-marks-' + Math.random().toString(36).slice(2);
-      const meta = { name, parents: [folder], mimeType: 'application/json' };
-      const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${body}\r\n--${boundary}--`;
-      return json(await opts.driveFetch(UPLOAD + '?uploadType=multipart&fields=id,md5Checksum', {
-        method: 'POST', signal, headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body: multipart,
-      }), 'create');
-    }
     async function patchFile(id, body, signal) {
-      const r = await opts.driveFetch(UPLOAD + '/' + encodeURIComponent(id) + '?uploadType=media&fields=id,md5Checksum', {
-        method: 'PATCH', signal, headers: { 'Content-Type': 'application/json; charset=UTF-8' }, body,
-      });
+      const r = await io.patchMedia(id, body, signal);
       if (r.status === 404) return null;
       return json(r, 'patch');
     }
@@ -343,41 +358,17 @@
 
   // Sleep files (S65a): one JSON per device per month in <root>/sleep/, the nights a phone read from Health Connect.
   // Transport only; the page supplies the body, parse and merge rules (hrv_viewer.html S65 block).
-  // opts: { driveFetch, rootId(), rootIds(), body(origin, nights), parse(text), merge(fileNights, nights, cover), count }
+  // opts: { driveFetch, rootId(), rootIds(), body(origin, nights, through), parse(text), merge(fileNights, nights, cover), count }
   const SLEEP_FILE_RE = /^sleep_(\d{4})-(\d{2})_([a-z0-9]{6})\.json$/;
   function sleepFiles(opts) {
     const count = opts.count || {};
+    const io = driveIo(opts.driveFetch);
     const st = { folderId: null, folderRoot: null };
-    async function json(resp, what) {
-      if (!resp.ok) { let t = ''; try { t = await resp.text(); } catch (e) { t = ''; } throw httpError(what, resp, t); }
-      return resp.json();
-    }
-    async function listAll(query, fields) {
-      const out = [];
-      let token = null;
-      do {
-        const d = await json(await opts.driveFetch('files?q=' + q(query) + '&fields=' + q('files(' + fields + '),nextPageToken') + '&pageSize=1000' +
-          (token ? '&pageToken=' + q(token) : '')), 'list');
-        for (const f of (d.files || [])) out.push(f);
-        token = d.nextPageToken || null;
-      } while (token);
-      return out;
-    }
-    const foldersUnder = (rootId) => listAll(`'${esc(rootId)}' in parents and name='sleep' and mimeType='${FOLDER_MIME}' and trashed=false`, 'id,name,createdTime');
     async function folder() {
       const rootId = opts.rootId();
       if (!rootId) throw new Error('sleep_no_root');
       if (st.folderId && st.folderRoot === rootId) return st.folderId;
-      let found = await foldersUnder(rootId);
-      if (!found.length) {
-        await json(await opts.driveFetch('files?fields=id', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'sleep', mimeType: FOLDER_MIME, parents: [rootId] }),
-        }), 'folder');
-        found = await foldersUnder(rootId);
-        if (!found.length) throw new Error('sleep_folder_missing');
-      }
-      st.folderId = found.slice().sort(olderFirst)[0].id;
+      st.folderId = await io.folder(rootId, 'sleep');
       st.folderRoot = rootId;
       return st.folderId;
     }
@@ -387,46 +378,43 @@
       count.down = (count.down || 0) + 1;
       return r.text();
     }
-    // Read, merge, write this device's file for one month; the oldest copy of the name is the one written.
-    async function push(name, origin, nights, cover) {
+    // Read, merge, write this device's file for one month; the oldest copy of the name is the one written. A file
+    // that is too big, will not download or will not parse (a newer format) is never overwritten: the push throws.
+    async function push(name, origin, nights, cover, through) {
       const dir = await folder();
-      const found = (await listAll(`'${esc(dir)}' in parents and name='${esc(name)}' and trashed=false`, 'id,name,size,createdTime')).sort(olderFirst);
+      const found = (await io.listAll(`'${esc(dir)}' in parents and name='${esc(name)}' and trashed=false`, 'id,name,size,createdTime')).sort(olderFirst);
       let fileNights = [];
-      if (found.length && Number(found[0].size) <= MAX_FILE_BYTES) {
-        try { fileNights = opts.parse(await download(found[0])).nights; } catch (e) { if (e && e.status) throw e; fileNights = []; }
+      if (found.length) {
+        if (Number(found[0].size) > MAX_FILE_BYTES) throw new Error('sleep_file_too_big');
+        fileNights = opts.parse(await download(found[0])).nights;
       }
       const merged = opts.merge(fileNights, nights, cover);
-      const body = opts.body(origin, merged);
+      const body = opts.body(origin, merged, through);
       count.up = (count.up || 0) + 1;
       // The written nights come back with the md5, so the next pull keeps this file from the cache.
-      const done = (res) => Object.assign({}, res, { name, origin, nights: merged });
+      const done = (res) => Object.assign({}, res, { name, origin, through, nights: merged });
       if (found.length) {
-        return done(await json(await opts.driveFetch(UPLOAD + '/' + encodeURIComponent(found[0].id) + '?uploadType=media&fields=id,md5Checksum', {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json; charset=UTF-8' }, body,
-        }), 'patch'));
+        const r = await io.patchMedia(found[0].id, body);
+        return done(await io.json(r, 'patch'));
       }
-      const boundary = '-------aorti-sleep-' + Math.random().toString(36).slice(2);
-      const meta = { name, parents: [dir], mimeType: 'application/json' };
-      const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${body}\r\n--${boundary}--`;
-      return done(await json(await opts.driveFetch(UPLOAD + '?uploadType=multipart&fields=id,md5Checksum', {
-        method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body: multipart,
-      }), 'create'));
+      try { return done(await io.createIn(dir, name, body)); }
+      catch (e) { if (e && e.status === 404) st.folderId = null; throw e; }
     }
-    // Every device's sleep files under every root; unchanged ones (same md5) come from cached. cached: { id: { name, md5, nights } }.
+    // Every device's sleep files under every root; unchanged ones (same md5) come from cached.
+    // cached: { id: { name, md5, origin, through, nights } }.
     async function pull(cached) {
       const roots = (opts.rootIds && opts.rootIds()) || [];
       const rootList = roots.length ? roots : (opts.rootId() ? [opts.rootId()] : []);
       const files = {};
       let changed = false;
-      for (const r of rootList) for (const dir of await foldersUnder(r)) {
-        for (const f of await listAll(`'${esc(dir.id)}' in parents and trashed=false`, 'id,name,size,md5Checksum')) {
+      for (const r of rootList) for (const dir of await io.foldersUnder(r, 'sleep')) {
+        for (const f of await io.listAll(`'${esc(dir.id)}' in parents and trashed=false`, 'id,name,size,md5Checksum')) {
           if (!SLEEP_FILE_RE.test(f.name) || Number(f.size) > MAX_FILE_BYTES) continue;
           const c = cached && cached[f.id];
           if (c && c.md5 && c.md5 === f.md5Checksum) { files[f.id] = c; continue; }
           let parsed;
-          try { parsed = opts.parse(await download(f)); } catch (e) { if (e && e.status) throw e; parsed = { origin: '', nights: [] }; }
-          files[f.id] = { name: f.name, md5: f.md5Checksum || null, origin: parsed.origin, nights: parsed.nights };
+          try { parsed = opts.parse(await download(f)); } catch (e) { if (e && e.status) throw e; parsed = { origin: '', through: 0, nights: [] }; }
+          files[f.id] = { name: f.name, md5: f.md5Checksum || null, origin: parsed.origin, through: parsed.through, nights: parsed.nights };
           changed = true;
         }
       }
