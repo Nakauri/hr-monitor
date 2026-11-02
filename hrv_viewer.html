@@ -9027,7 +9027,7 @@ END SECTION MAP -->
     else {
       box.remove();
       const o = box._opener;
-      if (o && o.isConnected && o !== document.body) { try { o.focus({ preventScroll: true }); } catch (e) {} }
+      if (o && o.isConnected && o !== document.body) o.focus({ preventScroll: true });
     }
     if (routePending) routeUnlessEditing();
   }
@@ -9292,7 +9292,7 @@ END SECTION MAP -->
     chartMenu = null;
     document.removeEventListener('pointerdown', m.outside, true);
     if (m.sheet) m.sheet.close('done'); else m.el.remove();
-    if (refocus && m.opener && m.opener.focus) { try { m.opener.focus({ preventScroll: true }); } catch (e) {} }
+    if (refocus && m.opener && m.opener.focus) m.opener.focus({ preventScroll: true });
   }
   function openChartMenu(x, y, slop) {
     if (!marksEditable() || !currentSummary || !currentChart) return;
@@ -11337,7 +11337,7 @@ END SECTION MAP -->
         const a = currentChart.chartArea, b = canvas.getBoundingClientRect(), px = p.x - b.left, py = p.y - b.top;
         if (px < a.left || px > a.right || py < a.top || py > a.bottom) return;
         pan = null; lastTap = null;
-        if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
+        if (navigator.vibrate) navigator.vibrate(8);
         openChartMenu(p.x, p.y, 22);
       }, 500);
       if (pts.size === 2) {
