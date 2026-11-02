@@ -231,6 +231,15 @@ async function driveCases(B, only, marksSrc) {
   const again = await files.pull(pulled.files);
   if (want('DR6', only)) good = ok(Object.keys(pulled.files).length === 2 && pulled.changed && !again.changed && (count.down || 0) - before === 2,
     `DR6 pull: ${Object.keys(pulled.files).length} files read, then unchanged ${!again.changed} with ${(count.down || 0) - before} downloads in all (want 2, true, 2: an unchanged md5 is not downloaded again)`) && good;
+  // 2026-11-02 design check: the phone downloaded its own file after every upload. The push result seeds the cache.
+  const cache = Object.assign({}, again.files);
+  const res = await files.push('sleep_2026-11_abc123.json', SAA, more.filter((x) => /^nov/.test(x.id)).concat([night('nov9', new Date(2026, 10, 9, 0, 30).getTime(), new Date(2026, 10, 9, 7).getTime())]).map(B.s65Night), now);
+  cache[res.id] = { name: res.name, md5: res.md5Checksum || null, origin: res.origin, nights: res.nights };
+  const d0 = count.down || 0;
+  const third = await files.pull(cache);
+  const nights9 = (third.files[res.id] || { nights: [] }).nights.map((x) => x.id).join(',');
+  if (want('DR7', only)) good = ok((count.down || 0) - d0 === 0 && !third.changed && /nov9/.test(nights9),
+    `DR7 own upload then pull: ${(count.down || 0) - d0} downloads, changed ${third.changed}, cached nights ${nights9} (want 0, false, nov9 present)`) && good;
   return good;
 }
 
@@ -583,6 +592,7 @@ const MUT = [
   ['whole body from this phone only', 'viewer', [R('    return fileNights.filter(x => x.s < cover && !ids.has(x.id)).concat(local);', '    return local;')], ['DR5']],
   ['file body carries every row field', 'viewer', [R('nights: list.map(x => ({ id: x.id, s: x.s, e: x.e, awake: x.awake.map(p => [p[0], p[1]]) }))', 'nights: list.map(x => Object.assign({ stages: [] }, x))')], ['DR1']],
   ['pull downloads every file every time', 'drive', [R('if (c && c.md5 && c.md5 === f.md5Checksum) { files[f.id] = c; continue; }', '')], ['DR6']],
+  ['push result drops the written nights', 'drive', [R('const done = (res) => Object.assign({}, res, { name, origin, nights: merged });', 'const done = (res) => res;')], ['DR7']],
   ['plugin called before Connect', 'shim', [R("available: function () { return native() && asked(); },", 'available: function () { return native(); },')], ['SH1', 'H10']],
   ['revoke keeps copies', 'viewer', [R("    if (!granted.includes('sleep')) for (const k of ['hc:sleep', 'hc:sync', 'hc:drive']) await s65Del(k);\n", '')], ['H11']],
   ['a rejected status treated as revoke', 'viewer', [R("(e) => { console.warn('[S65] status failed, copies kept', e && (e.code || e.message)); s65Visit.status = null; return null; })", "async (e) => { await hcApplyStatus({ granted: [] }); s65Visit.status = null; return null; })")], ['H11']],
@@ -602,7 +612,7 @@ const MUT = [
 ];
 async function runMutants() {
   let good = true;
-  const nodeIds = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H13', 'E1', 'U1', 'U2', 'DR1', 'DR2', 'DR3', 'DR4', 'DR5', 'DR6', 'SH1']);
+  const nodeIds = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H13', 'E1', 'U1', 'U2', 'DR1', 'DR2', 'DR3', 'DR4', 'DR5', 'DR6', 'DR7', 'SH1']);
   for (const [name, where, reps, ids] of MUT) {
     if (PART === 'node' && !ids.some((i) => nodeIds.has(i))) continue;
     if (ONLY && !ids.some((i) => ONLY.includes(i))) continue;

@@ -395,20 +395,23 @@
       if (found.length && Number(found[0].size) <= MAX_FILE_BYTES) {
         try { fileNights = opts.parse(await download(found[0])).nights; } catch (e) { if (e && e.status) throw e; fileNights = []; }
       }
-      const body = opts.body(origin, opts.merge(fileNights, nights, cover));
+      const merged = opts.merge(fileNights, nights, cover);
+      const body = opts.body(origin, merged);
       count.up = (count.up || 0) + 1;
+      // The written nights come back with the md5, so the next pull keeps this file from the cache.
+      const done = (res) => Object.assign({}, res, { name, origin, nights: merged });
       if (found.length) {
-        return json(await opts.driveFetch(UPLOAD + '/' + encodeURIComponent(found[0].id) + '?uploadType=media&fields=id,md5Checksum', {
+        return done(await json(await opts.driveFetch(UPLOAD + '/' + encodeURIComponent(found[0].id) + '?uploadType=media&fields=id,md5Checksum', {
           method: 'PATCH', headers: { 'Content-Type': 'application/json; charset=UTF-8' }, body,
-        }), 'patch');
+        }), 'patch'));
       }
       const boundary = '-------aorti-sleep-' + Math.random().toString(36).slice(2);
       const meta = { name, parents: [dir], mimeType: 'application/json' };
       const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${body}\r\n--${boundary}--`;
-      return json(await opts.driveFetch(UPLOAD + '?uploadType=multipart&fields=id,md5Checksum', {
+      return done(await json(await opts.driveFetch(UPLOAD + '?uploadType=multipart&fields=id,md5Checksum', {
         method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body: multipart,
-      }), 'create');
+      }), 'create'));
     }
     // Every device's sleep files under every root; unchanged ones (same md5) come from cached. cached: { id: { name, md5, nights } }.
     async function pull(cached) {

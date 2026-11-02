@@ -6971,8 +6971,8 @@ END SECTION MAP -->
     const out = [...byId.values()].filter(r => r.e >= keep).sort((p, q) => p.s - q.s || (p.id < q.id ? -1 : 1));
     return { rows: out, touched };
   }
-  // Month of a night's end in local time: the file it belongs to.
-  function s65Month(ep) { const d = new Date(ep); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  // Month of a night's end in UTC, like marks and recording folders: the file it belongs to.
+  function s65Month(ep) { const d = new Date(ep); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); }
   function s65FileName(month, deviceId) { return 'sleep_' + month + '_' + deviceId + '.json'; }
   // A sleep file's body: start, end and awake stretches per night, nothing else.
   function s65FileBody(origin, nights) {
@@ -7506,7 +7506,8 @@ END SECTION MAP -->
   // Before Connect (aorti_hc_asked, web always) nothing here calls the plugin or reads an hc: key; __s65 counts both.
   const S65_COUNT = globalThis.__s65 || (globalThis.__s65 = { status: 0, read: 0, idb: 0, up: 0, down: 0 });
   const S65_TIMEOUT = { none: 'timeout' };
-  const s65Visit = { statusP: null, status: null, settled: false, gaveUp: null, syncP: null, driveP: null, driveAgain: false, drive: null };
+  const s65Visit = { statusP: null, status: null, settled: false, gaveUp: null, syncP: null, driveP: null, driveAgain: false, drive: null, pullAt: 0 };
+  const S65_PULL_MS = 30 * 60000;
   function s65Hc() { return window.__aortiHC || null; }
   function s65Avail() { const hc = s65Hc(); return !!(hc && typeof hc.available === 'function' && hc.available()) && !isDemoMode(); }
   async function s65Get(k) {
@@ -7663,15 +7664,24 @@ END SECTION MAP -->
       driveFetch, rootId: () => driveFolderId, rootIds: () => driveRootIds.slice(), count: S65_COUNT,
       body: s65FileBody, parse: s65ParseFile, merge: s65Merge,
     });
+    const pushed = [];
     if (s65Avail() && s65Granted(s65Visit.status) && marksPage && !marksPage.drive.status().blocked) {
       await s65PushMonths({
         rows: await s65Get('hc:sleep'), sync: await s65Get('hc:sync'), state: await s65Get('hc:drive'), now: Date.now(),
-        deviceId: marksPage.store.deviceId, canSync: marksCanSync, push: files.push, save: (st) => s65Set('hc:drive', st),
+        deviceId: marksPage.store.deviceId, canSync: marksCanSync, save: (st) => s65Set('hc:drive', st),
+        push: async (...a) => { const res = await files.push(...a); if (res && res.id) pushed.push(res); return res; },
       });
     }
+    // Nights change about once a day: one pull per visit, then at most every 30 min unless this pass wrote a file.
+    const now = Date.now();
+    if (!pushed.length && s65Visit.pullAt && now - s65Visit.pullAt < S65_PULL_MS) return;
     let cache = null;
     try { cache = await idbGet('sleepdrive'); } catch (e) { console.warn('[S65] Drive sleep cache unreadable', e && e.message); }
-    const r = await files.pull((cache && cache.files) || {});
+    const seeded = Object.assign({}, cache && cache.files);
+    for (const p of pushed) seeded[p.id] = { name: p.name, md5: p.md5Checksum || null, origin: p.origin, nights: p.nights };
+    const r = await files.pull(seeded);
+    s65Visit.pullAt = now;
+    if (pushed.length && !r.changed) await idbSet('sleepdrive', { files: r.files });
     if (!r.changed) return;
     await idbSet('sleepdrive', { files: r.files });
     s65Visit.drive = null;
