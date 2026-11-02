@@ -487,7 +487,7 @@
           ['2. got plugin', yn(d.hcGotPlugin), ok(d.hcGotPlugin)],
           ['Connect tapped', yn(d.hcAsked)],
           ['Sleep source', d.hcSleep && d.hcSleep.origin ? d.hcSleep.origin : 'none'],
-          ['Nights stored', d.hcSleep ? String(d.hcSleep.nights) : '—'],
+          ['Nights stored', d.hcSleep ? String(d.hcSleep.nights) : 'not read on this page'],
         ]) : ''}
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
