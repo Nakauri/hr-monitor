@@ -113,6 +113,11 @@
   <p>Recordings stay on your device. If you sign in with Google, the app also saves them to a folder named "HR Monitor Sessions" in your own Google Drive. The app asks only for Drive's <code>drive.file</code> permission, so it can see the files it created and nothing else in your Drive.</p>
   <p>I do not run a database of user data, and I never receive your recordings.</p>
 
+  <h3 id="health-connect">Health Connect</h3>
+  <p>In the Android app, Health Connect is off until you tap Connect and allow Sleep. Then the app reads your sleep sessions and the awake periods inside them. It reads nothing else, and it writes nothing to Health Connect.</p>
+  <p>For each night it keeps the start, the end and the awake stretches. Sleep stages, titles and notes are not kept. These nights stay in the app on your phone. If you sign in with Google, they are also saved in your own Google Drive, beside your recordings, so the viewer on your computer can show hours asleep and awake. They are never sent to aorti.ca or anyone else, and never used for ads.</p>
+  <p>Turning Sleep off in Health Connect deletes the phone's copy the next time you open the app's settings or reports. The saved nights in your Drive stay until you delete them. Purge app data also deletes the phone's copy and stops reading until you tap Connect again.</p>
+
   <h3>Google sign-in</h3>
   <p>Sign-in is only for Drive. It asks for your email address and access to the Drive files the app creates. To keep you signed in, the aorti.ca sign-in service swaps Google's one-time code for tokens. The long-lived token stays in an HttpOnly cookie in your browser, or in the Android Keystore in the app; the service does not store it. Signing out clears the access token.</p>
 
@@ -163,7 +168,7 @@
   <h3>Contact</h3>
   <p>Send questions about these terms or the app through the <a href="/#contact">contact form</a> on the home page.</p>
 
-  <p class="last-updated">Last updated: 2026-10-12. Jurisdiction: Canada. This page is not legal advice.</p>
+  <p class="last-updated">Last updated: 2026-11-02. Jurisdiction: Canada. None of this is legal advice.</p>
 </main>
 
 <footer class="site-footer">
