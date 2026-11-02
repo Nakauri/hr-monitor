@@ -139,6 +139,11 @@
       oemManufacturer: (window.HRMOem && window.HRMOem.manufacturer) || null,
       oemHasKnownKiller: !!(window.HRMOem && window.HRMOem.hasKnownBackgroundKiller),
       oemLastError: window.__hrMonitorOemLastError || null,
+      hcRanInit: !!window.__aortiHealthConnectRanInit,
+      hcGotPlugin: !!window.__aortiHealthConnectPlugin,
+      hcAsked: !!(window.__aortiHC && window.__aortiHC.asked && window.__aortiHC.asked()),
+      // On screen only, never in Copy to clipboard: the app the nights come from (S65a).
+      hcSleep: window.__aortiHCDiag || null,
       userAgent: navigator.userAgent,
       zone: (function () {
         // A zone in Alberta reading UTC-7 here is on data older than tzdata 2026c.
@@ -477,6 +482,13 @@
           ['has known killer', yn(d.oemHasKnownKiller), d.oemHasKnownKiller ? 'warn' : 'ok'],
           ['last error', d.oemLastError || 'none', d.oemLastError ? 'err' : 'ok'],
         ])}
+        ${d.isNative ? rows('Health Connect', [
+          ['1. init ran', yn(d.hcRanInit), ok(d.hcRanInit)],
+          ['2. got plugin', yn(d.hcGotPlugin), ok(d.hcGotPlugin)],
+          ['Connect tapped', yn(d.hcAsked)],
+          ['Sleep source', d.hcSleep && d.hcSleep.origin ? d.hcSleep.origin : 'none'],
+          ['Nights stored', d.hcSleep ? String(d.hcSleep.nights) : '—'],
+        ]) : ''}
         ${rows('Relay', [
           ['Broadcast key set', yn(d.localBroadcastKey), d.localBroadcastKey ? 'ok' : 'warn'],
         ])}
@@ -653,7 +665,7 @@
       }
       const marksLine = unsynced ? ' ' + unsynced + (unsynced === 1 ? ' mark' : ' marks') + ' not on Drive will be deleted.' : '';
       const go = await window.UI.confirm({ anchor: actions, key: 'diag', danger: true, title: 'Purge app data',
-        text: 'Clears sign-in, settings, cached sessions and logs on this device, then reloads. Recording files stay.' + marksLine, confirmLabel: 'Purge' });
+        text: 'Clears sign-in, settings, cached sessions, Health Connect copies and logs on this device, then reloads. Recording files stay.' + marksLine, confirmLabel: 'Purge' });
       if (!go || !purgeBtn.isConnected) return;
       purgeBtn.textContent = 'Purging';
       purgeBtn.disabled = true;
@@ -739,6 +751,7 @@
     lines.push('  loaded:   ' + (d.wakeLockLoaded ? 'yes' : 'no'));
     lines.push('  plugin:   ' + (d.wakeLockGotPlugin ? 'yes' : 'no'));
     lines.push('  error:    ' + (d.wakeLockLastError || 'none'));
+    lines.push('HealthConn: plugin ' + (d.hcGotPlugin ? 'yes' : 'no') + ', connect tapped ' + (d.hcAsked ? 'yes' : 'no'));
     lines.push('Broadcast:  ' + (d.localBroadcastKey ? 'key set' : 'no key'));
     lines.push('Sleep weights: ' + d.sleepWeights);
     lines.push('User agent: ' + d.userAgent);

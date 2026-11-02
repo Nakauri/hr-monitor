@@ -49,6 +49,7 @@ const SHIM_TAGS = `
   <script src="./wake-lock.js"></script>
   <script src="./oem-background.js"></script>
   <script src="./restore-overlay.js"></script>
+  <script src="./health-connect.js"></script>
 `;
 
 const VIEWER_SHIM_TAGS = `
@@ -64,6 +65,7 @@ const VIEWER_SHIM_TAGS = `
   <script src="./restore-overlay.js"></script>
   <script src="./native-hr-session.js" data-mode="reader"></script>
   <script src="./native-pdf.js"></script>
+  <script src="./health-connect.js"></script>
 `;
 
 // Every shim under mobile/src copied next to the web files. One source of
@@ -73,7 +75,7 @@ const MOBILE_ASSETS = [
   'ble-adapter.js', 'capacitor-bootstrap.js', 'native-relay-socket.js',
   'native-hr-session.js', 'drive-auth-native.js', 'foreground-service.js',
   'battery-opt.js', 'wake-lock.js', 'oem-background.js', 'restore-overlay.js',
-  'native-pdf.js',
+  'native-pdf.js', 'health-connect.js',
 ];
 
 function ensureDir(dir) {
