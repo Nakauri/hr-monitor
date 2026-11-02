@@ -64,6 +64,13 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # scripts/jvm/run-hc-test.cjs compiles HcAwait against kotlin-stdlib; this job has no Gradle cache.
+      - name: Fetch kotlin-stdlib for the Health Connect JVM test
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kotlin-stdlib-1.9.10.jar" https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/1.9.10/kotlin-stdlib-1.9.10.jar
+          echo "55e989c512b80907799f854309f3bc7782c5b3d13932442d0379d5c472711504  $RUNNER_TEMP/kotlin-stdlib-1.9.10.jar" | sha256sum -c -
+          echo "KOTLIN_STDLIB_JAR=$RUNNER_TEMP/kotlin-stdlib-1.9.10.jar" >> "$GITHUB_ENV"
+
       - name: Run ./check
         run: sh ./check
 
@@ -156,6 +163,8 @@ jobs:
           EOF
           # BuildConfig.TEST_HOOKS; the build step pins HRM_TEST_HOOKS to "0" so it is false here.
           cat mobile/android-overlay/app/test-hooks.gradle >> mobile/android/app/build.gradle
+          # Health Connect client (S65a) and the Guava line it needs, on every build.
+          cat mobile/android-overlay/app/deps-append.gradle >> mobile/android/app/build.gradle
 
       - name: Capacitor sync
         working-directory: mobile
@@ -200,6 +209,15 @@ jobs:
             "signed": "${{ steps.check-signing.outputs.has_keystore }}"
           }
           EOF
+
+      # Before the release delete, so a failing check leaves the current public APK in place.
+      - name: Check the APK manifest
+        run: |
+          if [ "${{ steps.check-signing.outputs.has_keystore }}" = "true" ]; then
+            node scripts/apk-manifest.test.cjs --apk release/hr-monitor.apk
+          else
+            node scripts/apk-manifest.test.cjs --apk release/hr-monitor.apk --variant debug
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
