@@ -7,7 +7,7 @@
 // Files: hrv_viewer.html (S65 block, rptModel, s64Run, s64Detected, the S65 runtime, the reopen reset), marks-drive.js
 // (sleepFiles), mobile/src/health-connect.js. Spec: ux-audit redesign/s65-hc/S65-SPEC.md, sections 3 and 9.
 // Parts: node (node goldens, Drive spy, shim; no browser, about 2 s, in ./check), golden (node plus the browser cases,
-// about 150 s; run as --only H10,H10b,H11,H11b,H11c,H12,H8,DR then --only H14,H15,H16,H17 then --only H18,H19,H20,H21).
+// about 150 s; run as --only H8,H9,H10,H10b,H11,H12,DR then --only H14,H15,H16,H17 then --only H18,H19,H20,H21).
 // --mutants runs the negative controls of spec section 9; each must FAIL (with --part node, only the node ones).
 // TZ is America/Denver (as sleep-split.mjs): it still turns back on 2026-11-01, which the 25 h case needs.
 // Usage: node scripts/health-connect.mjs [--part node|golden] [--only <ids>] [--mutants] [--ux <dir>]
@@ -421,6 +421,14 @@ const BROWSER = {
     const done = await s64Done(p);
     const r = await p.evaluate(REPORT, D);
     const good = ok(r && r.source === null && /flag$/.test(done), `H8 sync 1 h after the day's end: report sleep ${r && r.source}, S64 ${done} (want none, flag)`);
+    await close(p);
+    return good;
+  },
+  H9: async () => {
+    const other = night('n0', at(addDays(D, -2), 0, 30), at(addDays(D, -2), 7, 45));
+    const p = await openDay({ native: true, asked: true }, HC([other], SYNCED));
+    const r = await p.evaluate(REPORT, D);
+    const good = ok(r && r.source === null, `H9 completed day with no session (the only night two days before): report sleep ${r && r.source} (want none)`);
     await close(p);
     return good;
   },
