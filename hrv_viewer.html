@@ -9309,7 +9309,8 @@ END SECTION MAP -->
     }
     rows.push(['add', 'Add mark here', 'add'], ['sleep', 'Add sleep from here', 'sleep']);
     const itemsHtml = rows.map(r => (r ? '<button type="button" role="menuitem" data-act="' + r[0] + '" tabindex="-1"' + (r[3] ? ' class="danger"' : '') + '><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + MENU_ICONS[r[2]] + '</svg><span>' + r[1] + '</span></button>' : '<div role="separator"></div>')).join('');
-    const head = '<div class="share-menu-head" id="chart-menu-head"><span>' + escape(name) + '</span><span class="share-menu-count">' + clockSec(hit && hit.edit.ep ? hit.edit.ep : ep) + '</span></div>';
+    const when = clockSec(hit && hit.edit.ep ? hit.edit.ep : ep);
+    const head = '<div class="share-menu-head" id="chart-menu-head"><span>' + escape(name) + '</span>' + (hit ? '<span class="share-menu-count">' + when + '</span>' : '') + '</div>';
     const run = (act) => {
       closeChartMenu(false);
       if (act === 'add') openAddMark(ep, point);
@@ -9325,7 +9326,8 @@ END SECTION MAP -->
     const opener = document.activeElement;
     let el, sheet = null;
     if (phoneTools()) {
-      sheet = UI.sheet({ title: name, className: 'share-sheet', body: '<div class="menu chart-menu-list" role="menu">' + head + itemsHtml + '</div>',
+      // The drawer title carries the name and time, so the list skips its own head.
+      sheet = UI.sheet({ title: hit ? name + ' · ' + when : name, className: 'share-sheet', body: '<div class="menu chart-menu-list" role="menu">' + itemsHtml + '</div>',
         onClose: (why) => { if (why !== 'done' && chartMenu) { document.removeEventListener('pointerdown', chartMenu.outside, true); chartMenu = null; } } });
       el = sheet.root.querySelector('.chart-menu-list');
     } else {
