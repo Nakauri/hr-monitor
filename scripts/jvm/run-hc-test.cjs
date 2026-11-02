@@ -6,6 +6,8 @@
 //   no-cap             a timed-out kind stays busy for the process lifetime (the service keeps it alive for days)
 //   timeout-frees      a timed-out call frees its kind at once (a second read runs beside the stuck one)
 //   light-is-awake     light sleep counted as awake
+//   long-dropped       epoch ms arriving as Long (every real read) refused as hc_range
+//   wiring-get-double  the plugin reads its range with getDouble (null for a Long)
 //   not-installed      a missing Health Connect app reads as "update" (S65 skeptic round 1 finding 3)
 //   wiring-no-lease    the plugin reads without taking the kind's slot
 //   wiring-no-close    the plugin never frees the slot after a read
@@ -40,9 +42,11 @@ const MUTANTS = {
   'no-cap': ['HcAwait.java', 'if (h != null && now - h[1] < BUSY_CAP_MS) return null;', 'if (h != null) return null;'],
   'timeout-frees': ['HcAwait.java', '                lease.late = true;\n', ''],
   'light-is-awake': ['HcMap.java', 'static final int[] AWAKE_TYPES = { 1, 3, 7 };', 'static final int[] AWAKE_TYPES = { 1, 3, 4, 7 };'],
+  'long-dropped': ['HcMap.java', 'if (v instanceof Long || v instanceof Integer) return ((Number) v).longValue();', 'if (v instanceof Integer) return ((Number) v).longValue();'],
   'not-installed': ['HcMap.java', 'return installed ? "update" : "not-installed";', 'return "update";'],
-  'wiring-no-lease': [PLUGIN, 'HcClient.readSleep(getContext(), fromD.longValue(), toD.longValue(), lease)', 'HcClient.readSleep(getContext(), fromD.longValue(), toD.longValue(), null)'],
+  'wiring-no-lease': [PLUGIN, 'HcClient.readSleep(getContext(), range[0], range[1], lease)', 'HcClient.readSleep(getContext(), range[0], range[1], null)'],
   'wiring-no-close': [PLUGIN, '            } finally {\n                lease.close();\n            }', '            } finally {\n            }'],
+  'wiring-get-double': [PLUGIN, 'long[] range = HcMap.range(call.getData().opt("from"), call.getData().opt("to"));', 'Double fd = call.getDouble("from"); long[] range = HcMap.range(fd, call.getData().opt("to"));'],
   'wiring-client': [PLUGIN, 'import androidx.activity.result.ActivityResult;', 'import androidx.activity.result.ActivityResult;\nimport androidx.health.connect.client.HealthConnectClient;'],
 };
 
@@ -55,6 +59,7 @@ function wiring(plugin, client) {
   ok('W2 read takes the kind\'s slot and refuses a busy kind', /HcAwait\.Lease lease = SLOTS\.take\(kind\);\s*if \(lease == null\) \{ call\.reject\(""\); return; \}/.test(p));
   ok('W3 read passes its lease to every page and frees it in finally', /HcClient\.readSleep\([^;]*, lease\)/.test(p) && /\} finally \{\s*lease\.close\(\);\s*\}/.test(p)
     && /HcAwait\.await\(c -> client\.readRecords\(req, c\), HcAwait\.TIMEOUT_MS, lease\)/.test(c));
+  ok('W5 read takes its range through HcMap.range, never getDouble', /HcMap\.range\(call\.getData\(\)\.opt\(""\), call\.getData\(\)\.opt\(""\)\)/.test(p) && !/getDouble\(/.test(p));
   ok('W4 API under 28 never reaches HcClient in status', /if \(!supported\(\)\) return HcMap\.sdkState\(/.test(p));
   return out;
 }

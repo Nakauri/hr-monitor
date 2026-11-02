@@ -25,6 +25,23 @@ final class HcMap {
         return "unsupported";
     }
 
+    /** An epoch-ms argument from the bridge: org.json gives Long above int range, Integer below, Double with a fraction. */
+    static Long epochArg(Object v) {
+        if (v instanceof Long || v instanceof Integer) return ((Number) v).longValue();
+        if (v instanceof Double || v instanceof Float) {
+            double d = ((Number) v).doubleValue();
+            return Double.isFinite(d) ? (long) Math.floor(d) : null;
+        }
+        return null;
+    }
+
+    /** [from, to] or null when either is missing or to is before from. */
+    static long[] range(Object from, Object to) {
+        Long f = epochArg(from), t = epochArg(to);
+        if (f == null || t == null || t < f) return null;
+        return new long[] { f, t };
+    }
+
     static String permission(String kind) {
         return "sleep".equals(kind) ? READ_SLEEP : null;
     }

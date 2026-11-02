@@ -103,6 +103,16 @@ public class HcTest {
         for (int i = 0; i < HcMap.MAX_ROWS + 3; i++) if (rows.add(row)) added++;
         ok(added == 5000 && rows.more, "M5 a read stops at 5,000 rows with more = true (" + added + ", " + rows.more + ")");
 
+        // The bridge hands epoch ms as Long (org.json, above int range); small values as Integer, fractions as Double.
+        long ep = 1762070400000L;
+        long[] rl = HcMap.range(Long.valueOf(ep - 30L * 86400000L), Long.valueOf(ep));
+        long[] ri = HcMap.range(Integer.valueOf(5), Integer.valueOf(9));
+        long[] rd = HcMap.range(Double.valueOf(ep - 0.5), Double.valueOf(ep + 0.25));
+        ok(rl != null && rl[1] == ep && ri != null && ri[0] == 5 && rd != null && rd[1] == ep
+            && HcMap.range(Long.valueOf(ep), Long.valueOf(ep - 1)) == null && HcMap.range(null, Long.valueOf(ep)) == null
+            && HcMap.range("1", Long.valueOf(ep)) == null && HcMap.range(Double.valueOf(Double.NaN), Long.valueOf(ep)) == null,
+            "M6 read range from Long, Integer and Double epoch ms; reversed, missing, text and NaN refused");
+
         System.out.println(fails == 0 ? "HcTest: all pass" : "HcTest: " + fails + " fail");
         System.exit(fails == 0 ? 0 : 1);
     }

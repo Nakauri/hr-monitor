@@ -120,12 +120,12 @@ public class HealthConnectPlugin extends Plugin {
             String kind = call.getString("kind", "");
             if (!"sleep".equals(kind)) { call.reject("hc_kind"); return; }
             if (!supported()) { call.reject("hc_unavailable"); return; }
-            Double fromD = call.getDouble("from"), toD = call.getDouble("to");
-            if (fromD == null || toD == null || toD < fromD) { call.reject("hc_range"); return; }
+            long[] range = HcMap.range(call.getData().opt("from"), call.getData().opt("to"));
+            if (range == null) { call.reject("hc_range"); return; }
             HcAwait.Lease lease = SLOTS.take(kind);
             if (lease == null) { call.reject("hc_busy"); return; }
             try {
-                HcMap.Rows r = HcClient.readSleep(getContext(), fromD.longValue(), toD.longValue(), lease);
+                HcMap.Rows r = HcClient.readSleep(getContext(), range[0], range[1], lease);
                 JSArray rows = new JSArray();
                 for (Map<String, Object> m : r.rows) {
                     JSObject o = new JSObject();
