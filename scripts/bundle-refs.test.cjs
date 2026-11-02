@@ -8,6 +8,12 @@ const path = require('path');
 
 const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const read = (rel) => { try { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); } catch (e) { return null; } };
+// Guards: the security audit of 2026-11-01 found Google's script loading in the app, unused, with every plugin in reach.
+{
+  const src = read('mobile/scripts/copy-web.js') || '';
+  const m = src.match(/const STRIP_PATTERNS = \[([\s\S]*?)\n\];/);
+  if (!m || !m[1].includes('accounts' + String.fromCharCode(92) + '.google')) { console.log('FAIL copy-web strips the Google sign-in script from the app'); process.exitCode = 1; }
+}
 
 let failures = 0;
 function check(name, ok, detail) {

@@ -144,15 +144,16 @@ public final class AuthStorage {
         }
     }
 
-    public static synchronized long getExpiresAt(Context ctx) {
+    // Plain reads stay outside the class lock: a token refresh holds it across the network.
+    public static long getExpiresAt(Context ctx) {
         return prefs(ctx).getLong(PREF_EXPIRES_AT, 0);
     }
 
-    public static synchronized String getEmail(Context ctx) {
+    public static String getEmail(Context ctx) {
         return prefs(ctx).getString(PREF_EMAIL, null);
     }
 
-    public static synchronized boolean isSignedIn(Context ctx) {
+    public static boolean isSignedIn(Context ctx) {
         return prefs(ctx).getString(PREF_REFRESH, null) != null;
     }
 

@@ -6,7 +6,17 @@
 set -e
 cd "$(dirname "$0")"
 ran=0
-run() { echo "== $*"; "$@"; ran=$((ran + 1)); }
+run() { echo "== $*"; t0=$(date +%s); "$@"; ran=$((ran + 1)); echo "-- $(( $(date +%s) - t0 )) s: $*"; }
+# Guards: 2026-11-01 a push re-ran everything on code that had just passed. An exact committed tree that passed is not
+# run again; CI, a dirty tree and --force always run. The stamp check takes under a second.
+stamp="$(git rev-parse --git-common-dir)/check-pass"
+tree="$(git rev-parse 'HEAD^{tree}')"
+clean=""
+[ -z "$(git status --porcelain --untracked-files=no)" ] && clean=1
+if [ -z "$CI" ] && [ -n "$clean" ] && [ "$1" != "--force" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$tree" ]; then
+  echo "check: this exact tree already passed"
+  exit 0
+fi
 run node scripts/parse-check.cjs
 run node scripts/rmssd-parity.test.js
 run node scripts/junk-parity.test.cjs
@@ -57,4 +67,5 @@ fi
 # The CLAUDE.md map checker is local-only (gitignored; the repo is public), so CI skips it.
 if [ -f .claude/docmap.py ]; then run python .claude/docmap.py; fi
 if [ "$ran" -eq 0 ]; then echo "check: nothing ran"; exit 2; fi
+[ -n "$CI" ] || [ -z "$clean" ] || echo "$tree" > "$stamp"
 echo "check: all $ran passed"

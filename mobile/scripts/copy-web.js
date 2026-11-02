@@ -88,6 +88,8 @@ function ensureDir(dir) {
 const STRIP_PATTERNS = [
   /^\s*<!--\s*Vercel Web Analytics[\s\S]*?-->\s*\n?/mg,
   /^\s*<script\s+defer\s+src="https:\/\/cdn\.vercel-insights\.com[^>]*><\/script>\s*\n?/mg,
+  // The app signs in natively; a remote script here would run with every plugin.
+  /^\s*<script\s+src="https:\/\/accounts\.google\.com\/gsi\/client"[^>]*><\/script>\s*\n?/mg,
 ];
 
 function stripForMobile(html) {
