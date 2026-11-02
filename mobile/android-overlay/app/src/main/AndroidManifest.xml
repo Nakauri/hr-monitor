@@ -74,6 +74,29 @@
             android:name="com.nakauri.hrmonitor.FloatingOverlayService"
             android:exported="false" />
 
+        <!-- Health Connect's privacy-policy target (exported: Health Connect starts it, or it shows no permission sheet). -->
+        <activity
+            android:name="com.nakauri.hrmonitor.HealthRationaleActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+        <!-- Android 14+ form of the same target; only the system holds START_VIEW_PERMISSION_USAGE. -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity="com.nakauri.hrmonitor.HealthRationaleActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
     </application>
 
     <!-- Permissions -->
@@ -89,4 +112,10 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Health Connect sleep read (S65a). The client library is minSdk 26; HealthConnectPlugin checks SDK_INT >= 28. -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-sdk tools:overrideLibrary="androidx.health.connect.client" />
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 </manifest>

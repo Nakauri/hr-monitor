@@ -1,0 +1,9 @@
+
+// Appended to the generated app/build.gradle by CI (build-android.yml) and once by hand for local builds.
+// alpha08 is the newest connect-client that builds on compileSdk 34 and AGP 8.2.1 (S65 spec section 2).
+dependencies {
+    implementation 'androidx.health.connect:connect-client:1.1.0-alpha08'
+    // alpha08's runtime Guava resolves work-runtime's listenablefuture to the empty 9999.0 stub, so OrphanRecoveryWorker
+    // loses ListenableFuture at compile time; the same Guava already ships at runtime.
+    implementation 'com.google.guava:guava:31.1-android'
+}

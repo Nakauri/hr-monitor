@@ -68,6 +68,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativeRelaySocketPlugin.class);
         registerPlugin(NativeHrSessionPlugin.class);
         registerPlugin(RestoreOverlayPlugin.class);
+        registerPlugin(HealthConnectPlugin.class);
         super.onCreate(savedInstanceState);
 
         showRestoreOverlay("create");
