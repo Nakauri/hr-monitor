@@ -259,6 +259,12 @@
       u.addEventListener('click', () => { close(); opts.undo(); });
       t.appendChild(u);
     }
+    if (opts.action) {
+      const b = el('button', 'undo', opts.action.label);
+      b.type = 'button';
+      b.addEventListener('click', () => { close(); opts.action.fn(); });
+      t.appendChild(b);
+    }
     toastHost.appendChild(t);
     timer = setTimeout(close, opts.ms || (opts.undo ? 10000 : 4000));
     return { close };

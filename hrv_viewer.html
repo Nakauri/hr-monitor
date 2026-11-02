@@ -759,7 +759,7 @@ END SECTION MAP -->
   /* 12 px of grab zone past each strip end, so the outer half of an end handle can be grabbed. */
   .context-overlay::before { content: ''; position: absolute; top: 0; bottom: 0; left: -12px; right: -12px; }
   /* Pinch, pan and double-tap belong to the chart; a vertical swipe still scrolls the page. */
-  #session-chart { touch-action: pan-y; }
+  #session-chart { touch-action: pan-y; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   /* Mouse drag-to-zoom: a plain div over the plot while the mouse drags; the chart itself is not touched until release. */
   #session-chart.plot-hover { cursor: crosshair; }
   .drag-band { position: absolute; display: none; pointer-events: none; background: color-mix(in srgb, var(--action) 18%, transparent); border-left: 1px solid var(--action); border-right: 1px solid var(--action); }
@@ -1135,6 +1135,24 @@ END SECTION MAP -->
     background: var(--bg-input);
   }
   .mark-editor .field input { min-height: 44px; }
+  .mark-float {
+    position: fixed; z-index: var(--z-ui-sheet); width: min(340px, calc(100vw - 32px)); margin: 0;
+    background: var(--bg-raised); box-shadow: var(--shadow-3);
+  }
+  .mark-editor-head { margin: 0; font-size: var(--t14); font-weight: 600; }
+  .sheet .mark-editor { margin: 0; padding: 0; border: 0; background: none; }
+  .time-nudge { display: flex; gap: var(--s1); }
+  .time-nudge .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 0; font-variant-numeric: tabular-nums; }
+  .chart-menu { position: fixed; z-index: var(--z-ui-sheet); min-width: 220px; }
+  .move-bar {
+    position: absolute; top: var(--plot-top, 8px); left: 50%; transform: translateX(-50%); z-index: 3;
+    display: flex; align-items: center; gap: var(--s3); max-width: calc(100% - 16px);
+    padding: var(--s1) var(--s1) var(--s1) var(--s3); border: 1px solid var(--border-control); border-radius: var(--r-card);
+    background: var(--bg-raised); box-shadow: var(--shadow-3); font-size: var(--t12);
+  }
+  .move-bar .what { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .move-bar .when { color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #session-chart.moving { cursor: crosshair; }
   .mark-editor .segmented > button { flex: 1 1 auto; }
   .mark-editor .err { margin: 0; font-size: var(--t12); color: var(--warn-high); }
   .markers-sheet .session-sidebar { background: none; border: 0; padding: 0; overflow: visible; }
@@ -6169,6 +6187,7 @@ END SECTION MAP -->
             <button class="btn icon drawer-close" id="markers-close" type="button" aria-label="Close markers">${UI.icon('close')}</button>
           </div>
           <div class="markers-actions" id="markers-actions" hidden>
+            <button class="btn" id="add-mark" type="button">Add mark</button>
             <button class="btn" id="add-sleep" type="button">Add sleep</button>
           </div>
           <div class="marker-list" id="marker-list"></div>
@@ -8905,6 +8924,10 @@ END SECTION MAP -->
     if (acts) acts.hidden = !marksEditable();
     const add = document.getElementById('add-sleep');
     if (add) add.addEventListener('click', () => openSleepEditor(null));
+    const addMark = document.getElementById('add-mark');
+    if (addMark) addMark.addEventListener('click', () => {
+      if (currentSummary) openAddMark(chartEpoch((brushMin + brushMax) / 2), addMark);
+    });
   }
   // Layers holds only the layer rows: a popover under its button on a laptop, a sheet on the phone.
   const phoneTools = () => !window.matchMedia('(min-width: 769px)').matches;
@@ -8977,20 +9000,28 @@ END SECTION MAP -->
     const d = new Date(ep);
     return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
+  // A datetime-local value drops :00, so an untouched field still equals its default.
+  const toLocalSec = (ep) => { const n = new Date(ep).getSeconds(); return toLocalInput(ep) + (n ? ':' + pad2(n) : ''); };
   function fromLocalInput(v) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || '');
-    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() : NaN;
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)).getTime() : NaN;
   }
-  function closeMarkEditors() { document.querySelectorAll('.mark-editor').forEach(n => n.remove()); }
+  function clockSec(ep) {
+    const d = new Date(ep), h = d.getHours();
+    return (h % 12 || 12) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + (h < 12 ? ' am' : ' pm');
+  }
+  function closeMarkEditors() {
+    document.querySelectorAll('.mark-editor').forEach(n => { if (n._sheet) n._sheet.close('done'); else n.remove(); });
+  }
   // Poll and sync re-renders wait while an editor is open, so typing is never wiped.
   let routePending = false;
   function routeUnlessEditing() {
-    if (document.querySelector('.mark-editor')) { routePending = true; return; }
+    if (document.querySelector('.mark-editor') || moving) { routePending = true; return; }
     routePending = false;
     route();
   }
   function closeEditor(box) {
-    box.remove();
+    if (box._sheet) box._sheet.close('done'); else box.remove();
     if (routePending) routeUnlessEditing();
   }
   // An input left as shown keeps the exact time it was filled from (seconds and the repeated DST hour).
@@ -9006,14 +9037,56 @@ END SECTION MAP -->
     }
     return r;
   }
-  function editorShell(after) {
+  // One editor: a drawer on the phone, a panel at the anchor (an element or { x, y }) on a laptop.
+  function editorShell(anchor, title) {
     closeMarkEditors();
     const box = document.createElement('div');
     box.className = 'mark-editor ui';
     box.addEventListener('click', (e) => e.stopPropagation());
-    if (after) after.insertAdjacentElement('afterend', box);
-    else document.getElementById('marker-list').prepend(box);
+    if (phoneTools()) {
+      box._sheet = UI.sheet({ title, className: 'mark-sheet', body: box,
+        onClose: (why) => { if (why !== 'done' && routePending) routeUnlessEditing(); } });
+      return box;
+    }
+    box.classList.add('mark-float');
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', title);
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEditor(box); }
+    });
+    document.body.appendChild(box);
+    const place = () => {
+      const w = box.offsetWidth, h = box.offsetHeight;
+      const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+      const x = r ? r.left - w - 8 : anchor ? anchor.x + 12 : (window.innerWidth - w) / 2;
+      const y = r ? r.top : anchor ? anchor.y - 40 : (window.innerHeight - h) / 2;
+      box.style.left = Math.round(Math.max(16, Math.min(window.innerWidth - w - 16, x))) + 'px';
+      box.style.top = Math.round(Math.max(16, Math.min(window.innerHeight - h - 16, y))) + 'px';
+    };
+    // The delete confirm grows the panel; it stays on screen.
+    new ResizeObserver(place).observe(box);
     return box;
+  }
+  const editorHead = (title) => (phoneTools() ? '' : '<h3 class="mark-editor-head">' + escape(title) + '</h3>');
+  const kindField = (cls) => `<div class="segmented" role="group" aria-label="Kind">${MARK_CLASSES.map(([c, w]) => `<button type="button" data-cls="${c}" aria-pressed="${c === cls}">${w}</button>`).join('')}</div>`;
+  const labelField = (label) => `<div class="field"><label for="mk-label">Label</label><input id="mk-label" type="text" maxlength="80" autocomplete="off" value="${escape(label || '')}"></div>`;
+  function timeField(ep) {
+    const steps = [-10, -1, 1, 10].map(n => `<button class="btn" type="button" data-nudge="${n}" aria-label="${n < 0 ? 'Back' : 'Forward'} ${Math.abs(n)} seconds">${n > 0 ? '+' : ''}${n} s</button>`).join('');
+    return `<div class="field"><label for="mk-time">Time</label><input id="mk-time" type="datetime-local" step="1" value="${toLocalSec(ep)}"></div>
+      <div class="time-nudge" role="group" aria-label="Adjust the time">${steps}</div>`;
+  }
+  function wireTimeNudges(box, original) {
+    const input = box.querySelector('#mk-time');
+    box.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => {
+      const at = inputEpoch(input, original);
+      if (Number.isFinite(at)) input.value = toLocalSec(at + Number(b.dataset.nudge) * 1000);
+    }));
+  }
+  function wireKinds(box, set) {
+    box.querySelectorAll('[data-cls]').forEach(b => b.addEventListener('click', () => {
+      set(b.dataset.cls);
+      box.querySelectorAll('[data-cls]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
   }
   function editorButtons(withDelete) {
     return `<p class="err" role="alert" hidden></p>
@@ -9045,6 +9118,7 @@ END SECTION MAP -->
       return false;
     }
     routePending = false;
+    if (box) closeMarkEditors();
     await route();
     return true;
   }
@@ -9059,16 +9133,15 @@ END SECTION MAP -->
     const pm = parseMark(raw);
     let cls = rec ? rec.cls : (pm.kind === 'symptom' ? 'sym' : pm.kind === 'context' ? 'ctx' : 'note');
     const label = rec ? rec.label : pm.label;
-    const box = editorShell(row);
+    const box = editorShell(row, 'Edit mark');
     box.innerHTML = `
-      <div class="segmented" role="group" aria-label="Kind">${MARK_CLASSES.map(([c, w]) => `<button type="button" data-cls="${c}" aria-pressed="${c === cls}">${w}</button>`).join('')}</div>
-      <div class="field"><label for="mk-label">Label</label><input id="mk-label" type="text" maxlength="80" autocomplete="off" value="${escape(label || '')}"></div>
-      <div class="field"><label for="mk-time">Time</label><input id="mk-time" type="datetime-local" step="60" value="${toLocalInput(rec ? rec.at : item.edit.ep)}"></div>
+      ${editorHead('Edit mark')}
+      ${kindField(cls)}
+      ${labelField(label)}
+      ${timeField(rec ? rec.at : item.edit.ep)}
       ${editorButtons(true)}`;
-    box.querySelectorAll('[data-cls]').forEach(b => b.addEventListener('click', () => {
-      cls = b.dataset.cls;
-      box.querySelectorAll('[data-cls]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    }));
+    wireKinds(box, (c) => { cls = c; });
+    wireTimeNudges(box, rec ? rec.at : item.edit.ep);
     const cls0 = cls;
     box.querySelector('[data-act="cancel"]').addEventListener('click', () => closeEditor(box));
     box.querySelector('[data-act="save"]').addEventListener('click', () => {
@@ -9085,7 +9158,32 @@ END SECTION MAP -->
     try { box.querySelector('#mk-label').focus({ preventScroll: true }); } catch (e) {}
   }
 
-  function openSleepEditor(item, row) {
+  function openAddMark(ep, anchor) {
+    if (!marksEditable()) return;
+    const store = marksPage.store;
+    let cls = 'sym';
+    const box = editorShell(anchor, 'Add mark');
+    box.innerHTML = `
+      ${editorHead('Add mark')}
+      ${kindField(cls)}
+      ${labelField('')}
+      ${timeField(ep)}
+      ${editorButtons(false)}`;
+    wireKinds(box, (c) => { cls = c; });
+    wireTimeNudges(box, ep);
+    box.querySelector('[data-act="cancel"]').addEventListener('click', () => closeEditor(box));
+    box.querySelector('[data-act="save"]').addEventListener('click', async () => {
+      const at = inputEpoch(box.querySelector('#mk-time'), ep);
+      if (!Number.isFinite(at)) { editorError(box, 'Pick a time.'); return; }
+      const label = box.querySelector('#mk-label').value.trim() || MARK_CLASSES.find(([c]) => c === cls)[1];
+      let made = null;
+      const done = await marksWrite(async () => { made = await store.createTap({ at, cls, label }); }, box);
+      if (done && made) UI.toast('Mark added', { undo: () => marksWrite(() => store.remove(made.id)) });
+    });
+    try { box.querySelector('#mk-label').focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  function openSleepEditor(item, row, at) {
     if (!currentSummary || !marksPage) return;
     const store = marksPage.store;
     const rec = liveRecord(item && item.edit && item.edit.markId);
@@ -9093,7 +9191,10 @@ END SECTION MAP -->
     const origin = marksScope(currentSummary).originEp;
     let from, to;
     if (rec) { from = rec.from; to = rec.to; }
-    else {
+    else if (at != null) {
+      from = at;
+      to = Math.max(from + 3600000, Math.min(from + 7 * 3600000, marksScope(currentSummary).toEp));
+    } else {
       const r = getDataRange();
       const zoomed = brushMin != null && brushMax != null && (Math.abs(brushMin - r.start) > 0.001 || Math.abs(brushMax - r.end) > 0.001);
       const det = (currentSummary.sleepWindows || [])[0];
@@ -9102,8 +9203,10 @@ END SECTION MAP -->
       else if (currentSummary.__virtualDay) { from = origin - 3600000; to = origin + 7 * 3600000; }
       else { from = origin; to = origin + currentSummary.duration * 60000; }
     }
-    const box = editorShell(row || null);
+    const sleepTitle = rec ? 'Edit sleep' : 'Add sleep';
+    const box = editorShell(row || document.getElementById('add-sleep'), sleepTitle);
     box.innerHTML = `
+      ${editorHead(sleepTitle)}
       <div class="field"><label for="sl-from">Start</label><input id="sl-from" type="datetime-local" step="60" value="${toLocalInput(from)}"></div>
       <div class="field"><label for="sl-to">End</label><input id="sl-to" type="datetime-local" step="60" value="${toLocalInput(to)}"></div>
       ${editorButtons(!!rec)}`;
@@ -9118,6 +9221,173 @@ END SECTION MAP -->
     });
     if (rec) box.querySelector('[data-act="delete"]').addEventListener('click', () => deleteMark(item, box));
     try { box.querySelector('#sl-from').focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  const chartEpoch = (t) => Math.round((marksScope(currentSummary).originEp + t * 60000) / 1000) * 1000;
+  // The user's mark under clientX: the nearest within slop px, else a sleep span that covers it.
+  function chartMarkAt(clientX, slop) {
+    const s = currentSummary, c = currentChart, a = c.chartArea, r = c.canvas.getBoundingClientRect();
+    const px = (t) => r.left + a.left + (t - brushMin) / Math.max(1e-6, brushMax - brushMin) * (a.right - a.left);
+    let best = null, bestD = slop + 1;
+    if (activeFilters.event) {
+      for (const e of viewMarks(s).events) {
+        if (!Number.isFinite(e.ep)) continue;
+        const d = Math.abs(px(e.t) - clientX);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+    }
+    if (best) return { type: 'event', t: best.t, label: parseMark(best.label).label,
+      edit: { kind: 'tap', markId: best.markId || null, raw: best.label, ep: best.ep } };
+    if (activeFilters.sleep) {
+      const { t } = chartPointAt(clientX);
+      const w = (getEffectiveSleepWindows(s) || []).find(x => x.fromMark && x.markId && t >= x.start && t <= x.end);
+      if (w) return { type: 'sleep', t: w.start, end: w.end, label: 'Sleep', edit: { kind: 'sleep', markId: w.markId } };
+    }
+    return null;
+  }
+  const MENU_ICONS = {
+    add: '<path d="M12 5v14M5 12h14"/>',
+    sleep: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/>',
+    move: '<path d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4"/>',
+    delete: '<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
+  };
+  let chartMenu = null;
+  function closeChartMenu(refocus) {
+    const m = chartMenu;
+    if (!m) return;
+    chartMenu = null;
+    document.removeEventListener('pointerdown', m.outside, true);
+    if (m.sheet) m.sheet.close('done'); else m.el.remove();
+    if (refocus && m.opener && m.opener.focus) { try { m.opener.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function openChartMenu(x, y, slop) {
+    if (!marksEditable() || !currentSummary || !currentChart) return;
+    closeChartMenu(false);
+    currentChart.canvas.dispatchEvent(new MouseEvent('mouseout'));
+    const ep = chartEpoch(chartPointAt(x).t), hit = chartMarkAt(x, slop), point = { x, y };
+    const name = hit ? hit.label : clockSec(ep);
+    const rows = [];
+    if (hit) {
+      rows.push(['edit', hit.type === 'sleep' ? 'Edit sleep' : 'Edit mark', 'edit']);
+      if (hit.type === 'event') rows.push(['move', 'Move', 'move']);
+      rows.push(['delete', hit.type === 'sleep' ? 'Delete sleep' : 'Delete mark', 'delete', 'danger']);
+      rows.push(null);
+    }
+    rows.push(['add', 'Add mark here', 'add'], ['sleep', 'Add sleep from here', 'sleep']);
+    const itemsHtml = rows.map(r => (r ? '<button type="button" role="menuitem" data-act="' + r[0] + '" tabindex="-1"' + (r[3] ? ' class="danger"' : '') + '><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">' + MENU_ICONS[r[2]] + '</svg><span>' + r[1] + '</span></button>' : '<div role="separator"></div>')).join('');
+    const head = '<div class="share-menu-head" id="chart-menu-head"><span>' + escape(name) + '</span><span class="share-menu-count">' + clockSec(hit && hit.edit.ep ? hit.edit.ep : ep) + '</span></div>';
+    const run = (act) => {
+      closeChartMenu(false);
+      if (act === 'add') openAddMark(ep, point);
+      else if (act === 'sleep') openSleepEditor(null, point, ep);
+      else if (act === 'edit') openMarkEditor(hit, point);
+      else if (act === 'move') startMove(hit);
+      else if (act === 'delete') {
+        openMarkEditor(hit, point);
+        const del = document.querySelector('.mark-editor [data-act="delete"]');
+        if (del) del.click();
+      }
+    };
+    const opener = document.activeElement;
+    let el, sheet = null;
+    if (phoneTools()) {
+      sheet = UI.sheet({ title: name, className: 'share-sheet', body: '<div class="menu chart-menu-list" role="menu">' + itemsHtml + '</div>',
+        onClose: (why) => { if (why !== 'done' && chartMenu) { document.removeEventListener('pointerdown', chartMenu.outside, true); chartMenu = null; } } });
+      el = sheet.root.querySelector('.chart-menu-list');
+    } else {
+      el = document.createElement('div');
+      el.className = 'ui menu chart-menu';
+      el.setAttribute('role', 'menu');
+      el.setAttribute('aria-labelledby', 'chart-menu-head');
+      el.innerHTML = head + itemsHtml;
+      document.body.appendChild(el);
+      const w = el.offsetWidth, h = el.offsetHeight;
+      el.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, x))) + 'px';
+      el.style.top = Math.round(Math.max(8, Math.min(window.innerHeight - h - 8, y))) + 'px';
+    }
+    const buttons = [...el.querySelectorAll('[role="menuitem"]')];
+    buttons.forEach(b => b.addEventListener('click', () => run(b.dataset.act)));
+    el.addEventListener('keydown', (e) => {
+      const i = buttons.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const k = e.key === 'ArrowDown' ? 1 : -1; buttons[(i + k + buttons.length) % buttons.length].focus(); }
+      else if (e.key === 'Home') { e.preventDefault(); buttons[0].focus(); }
+      else if (e.key === 'End') { e.preventDefault(); buttons[buttons.length - 1].focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChartMenu(true); }
+      else if (e.key === 'Tab' && !sheet) closeChartMenu(false);
+    });
+    const outside = (e) => { if (!el.contains(e.target) && !sheet) closeChartMenu(false); };
+    document.addEventListener('pointerdown', outside, true);
+    chartMenu = { el, sheet, outside, opener };
+    buttons[0].focus({ preventScroll: true });
+  }
+
+  // A mark moves only after the menu's Move; browsing the chart never starts one.
+  let moving = null;
+  function moveKey(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelMove(); } }
+  function startMove(item) {
+    const rec = item.edit.markId ? liveRecord(item.edit.markId) : null;
+    if (rec === undefined || !currentChart) return;
+    cancelMove();
+    const canvas = currentChart.canvas, wrap = canvas.closest('.chart-wrap') || canvas.parentElement;
+    const bar = document.createElement('div');
+    bar.className = 'move-bar ui';
+    bar.setAttribute('role', 'status');
+    const what = document.createElement('span');
+    what.className = 'what';
+    what.textContent = 'Moving ' + item.label;
+    const when = document.createElement('span');
+    when.className = 'when';
+    when.textContent = phoneTools() ? 'Tap the new time' : 'Click the new time';
+    const cancel = document.createElement('button');
+    cancel.className = 'btn';
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', cancelMove);
+    bar.append(what, when, cancel);
+    wrap.appendChild(bar);
+    canvas.classList.add('moving');
+    moving = { item, rec, bar, when, canvas };
+    document.addEventListener('keydown', moveKey, true);
+  }
+  function cancelMove() {
+    if (!moving) return;
+    moving.bar.remove();
+    moving.canvas.classList.remove('moving');
+    moving = null;
+    document.removeEventListener('keydown', moveKey, true);
+    unhighlightAtTime();
+    if (routePending) routeUnlessEditing();
+  }
+  function movePreview(clientX) {
+    const { t } = chartPointAt(clientX);
+    moving.when.textContent = clockSec(chartEpoch(t));
+    highlightAtTime(t);
+  }
+  async function dropMove(clientX) {
+    const { item, rec } = moving, store = marksPage.store, at = chartEpoch(chartPointAt(clientX).t);
+    cancelMove();
+    if (rec) {
+      const was = rec.at;
+      if (!await marksWrite(() => store.edit(rec.id, { at }))) return;
+      moveToast(at, rec.id, () => store.edit(rec.id, { at: was }));
+      return;
+    }
+    const raw = String(item.edit.raw == null ? '' : item.edit.raw), pm = parseMark(raw);
+    const cls = pm.kind === 'symptom' ? 'sym' : pm.kind === 'context' ? 'ctx' : 'note';
+    const row = { ep: item.edit.ep, label: raw };
+    let made = null;
+    if (!await marksWrite(async () => { made = await store.editRecorded(row, { at, cls, label: pm.label }); })) return;
+    moveToast(at, made.tap.id, async () => { await store.remove(made.tap.id); await store.unreverse(row); });
+  }
+  function moveToast(at, id, undo) {
+    UI.toast('Moved to ' + clockSec(at), {
+      undo: () => marksWrite(undo),
+      action: { label: 'Adjust', fn: () => {
+        const r = marksPage.store.get(id);
+        if (r && !r.deleted) openMarkEditor({ edit: { kind: 'tap', markId: id, raw: null, ep: r.at } }, null);
+      } },
+    });
   }
 
   // Inline confirm, then a 10 s Undo. A viewer mark is tombstoned; a recorded mark gets a reversal.
@@ -10996,16 +11266,28 @@ END SECTION MAP -->
     const { f, t } = chartPointAt(clientX), span = (brushMax - brushMin) / factor;
     setZoomRange(t - f * span, t + (1 - f) * span);
   }
+  let _touchAt = -Infinity;
   function wireChartGestures() {
     const canvas = document.getElementById('session-chart');
     if (!canvas || canvas._gestures) return;
     canvas._gestures = true;
     const ready = () => currentChart && currentChart.canvas === canvas && currentSummary && currentChart.chartArea && brushMin != null && brushMax != null;
     const pts = new Map();
-    let pinch = null, pan = null, multi = false, lastTap = null, quiet = false;
+    let pinch = null, pan = null, multi = false, lastTap = null, quiet = false, press = 0;
+    const endPress = () => { clearTimeout(press); press = 0; };
     canvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'touch' || !ready()) return;
+      _touchAt = e.timeStamp;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t0: e.timeStamp });
+      endPress();
+      if (pts.size === 1 && !moving) press = setTimeout(() => {
+        press = 0;
+        const p = pts.get(e.pointerId);
+        if (!p || pts.size !== 1 || !ready()) return;
+        pan = null; lastTap = null;
+        if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
+        openChartMenu(p.x, p.y, 22);
+      }, 500);
       if (pts.size === 2) {
         cancelEase();
         multi = true; pan = null; lastTap = null;
@@ -11029,6 +11311,7 @@ END SECTION MAP -->
       }
       if (!pan || pan.id !== e.pointerId || multi) return;
       const dx = e.clientX - pan.x0, dy = e.clientY - pan.y0;
+      if (Math.hypot(dx, dy) >= 10) endPress();
       if (!pan.mode) {
         // The first 10 px decide: mostly sideways on a zoomed chart pans, anything else is left to the page.
         if (Math.hypot(dx, dy) < 10) return;
@@ -11042,6 +11325,7 @@ END SECTION MAP -->
     const end = (e) => {
       const p = pts.get(e.pointerId);
       if (!p) return;
+      endPress();
       pts.delete(e.pointerId);
       if (pts.size < 2) pinch = null;
       // A tap: one finger, under 10 px of travel, under 300 ms. Two taps within 320 ms and 30 px zoom.
@@ -11157,6 +11441,18 @@ END SECTION MAP -->
     wrap.addEventListener('click', (e) => { if (swallowClick) { swallowClick = false; e.stopPropagation(); } }, true);
     canvas.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'mouse') canvas.classList.toggle('plot-hover', inPlot(e));
+      if (moving && e.pointerType === 'mouse' && ready() && inPlot(e)) movePreview(e.clientX);
+    });
+    canvas.addEventListener('click', (e) => {
+      if (moving && ready() && inPlot(e)) { e.stopPropagation(); dropMove(e.clientX); }
+    });
+    // A touch long press also raises contextmenu; the press timer owns that path.
+    canvas.addEventListener('contextmenu', (e) => {
+      if (e.timeStamp - _touchAt < 1500) { e.preventDefault(); return; }
+      if (moving) { e.preventDefault(); cancelMove(); return; }
+      if (!ready() || !inPlot(e) || !marksEditable()) return;
+      e.preventDefault();
+      openChartMenu(e.clientX, e.clientY, 14);
     });
     canvas.addEventListener('pointerleave', () => canvas.classList.remove('plot-hover'));
   }
@@ -11330,6 +11626,7 @@ END SECTION MAP -->
   // bump) blocks the user from interacting with the menu, view switcher,
   // sign-in, etc. — every tap dies because the listener doesn't exist yet.
   function bindUiHandlers(demo) {
+    window.addEventListener('hashchange', () => { cancelMove(); closeChartMenu(false); closeMarkEditors(); });
     window.addEventListener('hashchange', route);
     if (demo) {
       document.querySelectorAll('#drive-pop .dp-actions, #drive-pop .fsa-only, #drive-email').forEach(el => el.hidden = true);

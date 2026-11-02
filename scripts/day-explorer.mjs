@@ -507,6 +507,133 @@ const SUBCHECKS = {
     return rows;
   },
 
+  // Guards: 2026-11-01 no way to add a mark after the recording, and a move that browsing could trigger.
+  async pick(base) {
+    const { ctx, page } = await openFixture(base, 1440, 1, true);
+    const rows = [];
+    const at = (spec) => page.evaluate((spec) => {
+      const cv = document.getElementById('session-chart');
+      cv.scrollIntoView({ block: 'center' });
+      const c = Chart.getChart(cv), a = c.chartArea, r = cv.getBoundingClientRect();
+      const x = spec.t != null ? c.scales.x.getPixelForValue(spec.t) : a.left + spec.f * (a.right - a.left);
+      return { x: r.left + x, y: r.top + (a.top + a.bottom) / 2 };
+    }, spec);
+    const menu = () => page.evaluate(() => [...document.querySelectorAll('.chart-menu [role="menuitem"]')].map((b) => b.textContent.trim()));
+    const markT = (label) => rowOf(page, label).evaluate((n) => Number(n.dataset.t));
+    const toast = () => page.evaluate(() => { const t = document.querySelector('.toast'); return t ? t.textContent.trim() : ''; });
+    const open = async (spec) => { const q = await at(spec); await page.mouse.click(q.x, q.y, { button: 'right' }); await settle(page, 300); return q; };
+
+    await open({ f: 0.2 });
+    const empty = await menu();
+    rows.push([empty.join() === 'Add mark here,Add sleep from here', `right click on an empty spot offers ${empty.join(' | ')}`]);
+    await page.keyboard.press('Escape'); await settle(page, 200);
+    rows.push([(await menu()).length === 0, 'Escape closes the chart menu']);
+
+    const tapsBefore = (await storeList(page, { kind: 'tap' })).length;
+    await open({ f: 0.2 });
+    await tap(page, '.chart-menu [data-act="add"]'); await settle(page, 300);
+    const t0 = await page.inputValue('#mk-time');
+    await fillSoft(page, '#mk-label', 'Picked');
+    await tap(page, '[data-nudge="10"]'); await tap(page, '[data-nudge="10"]'); await tap(page, '[data-nudge="-1"]');
+    const t1 = await page.inputValue('#mk-time');
+    const [e0, e1] = await page.evaluate(([a, b]) => [new Date(a).getTime(), new Date(b).getTime()], [t0, t1]);
+    const diff = (e1 - e0) / 1000;
+    rows.push([diff === 19, `nudges move the time by seconds (${t0} to ${t1})`]);
+    await tap(page, '.mark-editor [data-act="save"]'); await settle(page, 1200);
+    await page.reload({ waitUntil: 'networkidle' });
+    await waitExplorer(page, '#view-day #session-chart');
+    await page.waitForFunction(() => window.AortiMarksPage && window.AortiMarksPage.store, null, { timeout: 15000 }).catch(() => {});
+    await settle(page, 800);
+    if (!(await page.isVisible('#marker-list'))) { await page.click('#markers-toggle').catch(() => {}); await settle(page, 400); }
+    const tapsNow = await storeList(page, { kind: 'tap' });
+    const added = tapsNow.find((r) => r.label === 'Picked');
+    rows.push([tapsNow.length === tapsBefore + 1 && !!added && added.at === e1 && (await evLabels(page)).includes('Picked'), `Add mark saves to the second and survives a reload (at ${added && added.at})`]);
+
+    const nausea0 = (await storeGet(page, FX_TAP)).at;
+    const nt = await markT('Nausea');
+    const q0 = await at({ t: nt });
+    await page.mouse.move(q0.x, q0.y); await settle(page, 200);
+    await page.mouse.click(q0.x, q0.y); await settle(page, 200);
+    const qd = await at({ f: 0.3 });
+    await page.mouse.move(q0.x, q0.y); await page.mouse.down(); await page.mouse.move(qd.x, qd.y, { steps: 6 }); await page.mouse.up(); await settle(page, 600);
+    rows.push([(await storeGet(page, FX_TAP)).at === nausea0, 'hover, click and drag on a mark never move it']);
+    await fullDur(page);
+
+    const nt2 = await markT('Nausea');
+    await open({ t: nt2 });
+    const onMark = await menu();
+    rows.push([onMark.join().startsWith('Edit mark,Move,Delete mark'), `right click on a mark offers ${onMark.join(' | ')}`]);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'pick-menu.png') });
+    await tap(page, '.chart-menu [data-act="move"]'); await settle(page, 200);
+    const qm = await at({ f: 0.45 });
+    await page.mouse.move(qm.x, qm.y); await settle(page, 200);
+    const live = await page.evaluate(() => { const w = document.querySelector('.move-bar .when'); return w ? w.textContent : ''; });
+    rows.push([/^\d+:\d\d:\d\d [ap]m$/.test(live), `Move shows the live time to the second ("${live}")`]);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'pick-move.png') });
+    await page.keyboard.press('Escape'); await settle(page, 300);
+    rows.push([(await storeGet(page, FX_TAP)).at === nausea0 && !(await page.isVisible('.move-bar')), 'Escape leaves the mark where it was']);
+
+    await open({ t: nt2 });
+    await tap(page, '.chart-menu [data-act="move"]'); await settle(page, 200);
+    await page.mouse.click(qm.x, qm.y); await settle(page, 1200);
+    const moved = (await storeGet(page, FX_TAP)).at;
+    const tm = await toast();
+    rows.push([moved !== nausea0 && /Moved to/.test(tm) && /Undo/.test(tm) && /Adjust/.test(tm), `a click drops the mark ("${tm}")`]);
+    await tap(page, '.toast .undo'); await settle(page, 1200);
+    rows.push([(await storeGet(page, FX_TAP)).at === nausea0, 'Undo puts the mark back']);
+
+    const dt = await markT('Dizzy');
+    await open({ t: dt });
+    await tap(page, '.chart-menu [data-act="move"]'); await settle(page, 200);
+    await page.mouse.click(qm.x, qm.y); await settle(page, 1200);
+    let revs = await storeList(page, { kind: 'rev' });
+    let reps = (await storeList(page, { kind: 'tap' })).filter((r) => r.replaces);
+    const tm2 = await toast();
+    rows.push([revs.some((r) => r.row.ep === FX_MIN(45)) && reps.some((r) => r.label === 'Dizzy'), `a recorded mark moves as a reversal plus a viewer mark (revs ${revs.length}, replacements ${reps.length})`]);
+    await tap(page, page.locator('.toast button', { hasText: 'Adjust' })); await settle(page, 500);
+    const adjust = await page.isVisible('.mark-editor #mk-time');
+    rows.push([/Adjust/.test(tm2) && adjust, 'Adjust opens the editor with the time field']);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'pick-editor.png') });
+    await page.keyboard.press('Escape'); await settle(page, 300);
+
+    await rowOf(page, 'Nausea').locator('.mk-edit').click({ timeout: 4000 }).catch(() => {}); await settle(page, 300);
+    const fl = await page.evaluate(() => { const b = document.querySelector('.mark-editor'); const r = b && b.getBoundingClientRect(); return r && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && b.classList.contains('mark-float'); });
+    rows.push([!!fl, 'the list Edit opens the same panel, on screen']);
+    await page.keyboard.press('Escape'); await settle(page, 200);
+    rows.push([!page.errors.length, 'chart marks: no page errors ' + page.errors.join(' | ')]);
+    await ctx.close();
+
+    const ph = await openFixture(base, 360, 1, false);
+    const press = (ms, drift) => ph.page.evaluate(async ({ ms, drift }) => {
+      const cv = document.getElementById('session-chart');
+      cv.scrollIntoView({ block: 'center' });
+      const c = Chart.getChart(cv), a = c.chartArea, r = cv.getBoundingClientRect();
+      const x = r.left + (a.left + a.right) / 2, y = r.top + (a.top + a.bottom) / 2;
+      const ev = (type, dx) => cv.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, pointerType: 'touch', isPrimary: true, clientX: x + dx, clientY: y }));
+      ev('pointerdown', 0);
+      if (drift) ev('pointermove', drift);
+      await new Promise((f) => setTimeout(f, ms));
+      ev('pointerup', drift);
+      await new Promise((f) => setTimeout(f, 150));
+      return !!document.querySelector('.sheet-root .chart-menu-list');
+    }, { ms, drift });
+    rows.push([(await press(200, 0)) === false, 'a short tap opens no menu on the phone']);
+    rows.push([(await press(700, 24)) === false, 'a press that travels opens no menu']);
+    const held = await press(700, 0);
+    rows.push([held === true, 'a long press opens the drawer menu']);
+    if (held) {
+      if (SHOTS) await ph.page.screenshot({ path: path.join(SHOTS, 'pick-phone-menu.png') });
+      await tap(ph.page, '.chart-menu-list [data-act="add"]'); await settle(ph.page, 400);
+      if (SHOTS) await ph.page.screenshot({ path: path.join(SHOTS, 'pick-phone-editor.png') });
+      const inSheet = await ph.page.isVisible('.sheet-root .mark-editor #mk-time');
+      const fits = await ph.page.evaluate(() => { const b = document.querySelector('.time-nudge'); return b ? b.scrollWidth <= b.clientWidth : false; });
+      rows.push([inSheet && fits, `Add opens in the bottom drawer (fits ${fits})`]);
+    }
+    rows.push([!ph.page.errors.length, 'phone chart marks: no page errors ' + ph.page.errors.join(' | ')]);
+    await ph.ctx.close();
+    return rows;
+  },
+
   // A viewer tap: edit, delete (Cancel keeps it), delete then Undo.
   async tap(base) {
     const { ctx, page } = await openFixture(base, 1440, 1, true);
@@ -635,7 +762,7 @@ async function runSub(name, base) {
 const report5 = (rows) => { for (const [c, m] of rows) ok(c, m); };
 if (want('marks')) {
   // --sub <a,b> runs those sub-checks only; all seven together pass one 170 s shell window.
-  const subs = ['diamonds', 'hover', 'focus', 'tap', 'recorded', 'sleep', 'phone'].filter((n) => !argVal('--sub') || argVal('--sub').split(',').includes(n));
+  const subs = ['diamonds', 'hover', 'focus', 'pick', 'tap', 'recorded', 'sleep', 'phone'].filter((n) => !argVal('--sub') || argVal('--sub').split(',').includes(n));
   for (const name of subs) report5(await runSub(name, cur.base));
 }
 if (want('mutants')) {
@@ -644,6 +771,11 @@ if (want('mutants')) {
     ['diamonds', 'no diamond handles', "          marks['mk_' + idCounter++] = handle;", "          void handle;"],
     ['focus', 'marker click jumps with the old zoom, no highlight', '    easeBrushTo(lo, hi, () => { if (pinnedMarkT === item.t) highlightAtTime(item.t); });', '    zoomTo(item.t);'],
     ['focus', 'marker click without the highlight', '    pinnedMarkT = item.t;\n    // A tooltip left by a tap', '    // A tooltip left by a tap'],
+    ['pick', 'a plain click starts dropping a mark', "  let moving = null;\n", "  let moving = { item: {}, rec: null, bar: document.createElement('div'), when: document.createElement('div'), canvas: document.body };\n"],
+    ['pick', 'Escape keeps the move going', "function moveKey(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelMove(); } }", "function moveKey(e) { }"],
+    ['pick', 'the long press ignores travel', "      if (Math.hypot(dx, dy) >= 10) endPress();\n", ""],
+    ['pick', 'seconds are dropped on save', "+(m[6] || 0)).getTime()", "0).getTime()"],
+    ['pick', 'Undo of a move does nothing', "      undo: () => marksWrite(undo),\n", "      undo: () => {},\n"],
     ['tap', 'delete skips the confirm', "    if (!ok) return;\n    const id = item.edit.markId;", "    const id = item.edit.markId;"],
     ['tap', 'a save resets the layers', '    if (priorFilters) for (const k of Object.keys(activeFilters))', '    if (false) for (const k of Object.keys(activeFilters))'],
     ['tap', 'Undo does nothing', '      undo: () => marksWrite(() => id ? store.restore(id) : store.unreverse(row)),', '      undo: () => {},'],
