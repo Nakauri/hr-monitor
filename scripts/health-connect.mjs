@@ -7,7 +7,7 @@
 // Files: hrv_viewer.html (S65 block, rptModel, s64Run, s64Detected, the S65 runtime, the reopen reset), marks-drive.js
 // (sleepFiles), mobile/src/health-connect.js. Spec: ux-audit redesign/s65-hc/S65-SPEC.md, sections 3 and 9.
 // Parts: node (node goldens, Drive spy, shim; no browser, about 2 s, in ./check), golden (node plus the browser cases,
-// about 150 s; run as --only H8,H9,H10,H10b,H11,H12,DR then --only H14,H15,H16,H17 then --only H18,H19,H20,H21).
+// about 150 s; run as --only H8,H9,H10,H10b,H11,H12,DR,M8 then --only H14,H15,H16,H17,H22 then --only H18,H19,H20,H21).
 // --mutants runs the negative controls of spec section 9; each must FAIL (with --part node, only the node ones).
 // TZ is America/Denver (as sleep-split.mjs): it still turns back on 2026-11-01, which the 25 h case needs.
 // Usage: node scripts/health-connect.mjs [--part node|golden] [--only <ids>] [--mutants] [--ux <dir>]
@@ -28,6 +28,7 @@ const MUTANTS_ON = args.includes('--mutants');
 const PART = argVal('--part') || 'node';
 const ONLY = argVal('--only') ? argVal('--only').split(',') : null;
 const REAL = fs.readFileSync(path.join(ROOT, 'hrv_viewer.html'), 'utf8').replace(/\r\n/g, '\n');
+const MONITOR = fs.readFileSync(path.join(ROOT, 'hr_monitor.html'), 'utf8').replace(/\r\n/g, '\n');
 const SHIM = fs.readFileSync(path.join(ROOT, 'mobile', 'src', 'health-connect.js'), 'utf8').replace(/\r\n/g, '\n');
 const MARKS_DRIVE = path.join(ROOT, 'marks-drive.js');
 const CHART = path.join(here, 'vendor', 'chart.umd.min.js');
@@ -63,7 +64,7 @@ function cut(src) {
     ['hashStr', 'rptMedian'].map((n) => fnSrc(src, n)).join('\n');
   const g63 = globalThis.__s63;
   globalThis.__s63 = undefined;
-  const o = new Function(body + ';return { s63Figures, s65Night, s65Row, s65Origin, s65Chosen, hcSleepMask, s65Overlaps, s65Upsert, s65Month, s65FileName, s65FileBody, s65ParseFile, s65Merge, s65PushMonths, S65_O };')();
+  const o = new Function(body + ';return { s63Figures, s65Night, s65Row, s65Origin, s65Chosen, hcSleepMask, s65Overlaps, s65Upsert, s65Month, s65FileName, s65FileBody, s65ParseFile, s65Merge, s65PushMonths, s65DriveFor, s65SettleAt, S65_O };')();
   globalThis.__s63 = g63;
   return o;
 }
@@ -141,6 +142,21 @@ function nodeCases(B, only) {
     good = ok(ids(inc) === 'b,a' && ids(full) === 'a' && inc.rows.find((x) => x.id === 'a').e === at(D, 6, 30) && inc.touched.length === 2 && full.touched.length === 3,
       `U1 upsert: incremental keeps ${ids(inc)}, full replace keeps ${ids(full)}, the 401-day night dropped, touched ${inc.touched.length} and ${full.touched.length} (want b,a; a; 2 and 3)`) && good;
   }
+  if (want('DV1', only)) {
+    // Drive nights for day D: settle = D's end + 6 h.
+    const settle = dayStart(addDays(D, 1)) + B.S65_O.settleMs;
+    const nf = (id, s, e) => ({ id, s, e, awake: [] });
+    const files = {
+      // The newer file first: a later, older copy of the same night must not replace it.
+      b: { name: 'sleep_2026-05_bbbbbb.json', origin: SAA, through: settle + 99, nights: [nf('dup', at(D, 13, 0), at(D, 15, 0))] },
+      a: { name: 'sleep_2026-05_aaaaaa.json', origin: SAA, through: settle + 1, nights: [nf('n1', at(D, 0, 30), at(D, 7, 45)), nf('dup', at(D, 13, 0), at(D, 14, 0))] },
+      late: { name: 'sleep_2026-05_cccccc.json', origin: SAA, through: settle - 1, nights: [nf('early', at(D, 20, 0), at(D, 21, 0))] },
+      own: { name: 'sleep_2026-05_ownown.json', origin: SAA, through: settle + 1, nights: [nf('mine', at(D, 16, 0), at(D, 17, 0))] },
+      other: { name: 'sleep_2026-05_dddddd.json', origin: 'app.other', through: settle + 1, nights: [nf('x', at(D, 18, 0), at(D, 19, 0))] },
+    };
+    const got = B.s65DriveFor(files, 'ownown', settle, at(addDays(D, 2), 12, 0)).map((x) => x.id + ':' + Math.round((x.e - x.s) / 60000)).sort().join(',');
+    good = ok(got === 'dup:120,n1:435', `DV1 Drive nights for a day: ${got} (want dup:120 from the newest through, n1:435; the unsettled file, this device's file and the second app left out)`) && good;
+  }
   if (want('U2', only)) {
     const bad = [{ id: 'x', s: 5, e: 1 }, { id: '', s: 1, e: 5 }, { id: 'y', s: 0, e: 2 * 86400000 }, { id: 'z', s: 0, e: 600000, awake: [[0, 'x'], [-5, 300000]] }].map(B.s65Night);
     good = ok(bad[0] === null && bad[1] === null && bad[2] === null && JSON.stringify(bad[3]) === '{"id":"z","s":0,"e":600000,"awake":[[0,300000]]}', `U2 bad nights refused, awake clipped: ${JSON.stringify(bad)}`) && good;
@@ -199,10 +215,10 @@ async function driveCases(B, only, marksSrc) {
   const w0 = fd.writes.length;
   const n1 = await push(rows);
   const first = fd.writes.slice(w0);
-  const keysOk = first.every((w) => { const o = JSON.parse(w.body); return JSON.stringify(Object.keys(o)) === '["v","origin","nights"]' && o.nights.every((x) => JSON.stringify(Object.keys(x)) === '["id","s","e","awake"]' && x.awake.every((p) => p.length === 2)); });
+  const keysOk = first.every((w) => { const o = JSON.parse(w.body); return JSON.stringify(Object.keys(o)) === '["v","origin","through","nights"]' && o.through === now && o.nights.every((x) => JSON.stringify(Object.keys(x)) === '["id","s","e","awake"]' && x.awake.every((p) => p.length === 2)); });
   const names = first.map((w) => w.name).sort().join(',');
   if (want('DR1', only)) good = ok(n1 === 2 && first.length === 2 && names === 'sleep_2026-10_abc123.json,sleep_2026-11_abc123.json' && keysOk && !first.some((w) => /nakauri|stage|title|notes/.test(w.body)),
-    `DR1 first upload: ${first.length} writes (${names}), only v, origin, nights and per night id, s, e, awake: ${keysOk}, own rows left out (want 2 writes, one per month)`) && good;
+    `DR1 first upload: ${first.length} writes (${names}), only v, origin, through (the sync time) and nights, per night id, s, e, awake: ${keysOk}, own rows left out (want 2 writes, one per month)`) && good;
   const w1 = fd.writes.length, r1 = fd.reqs.length;
   const n2 = await push(rows);
   if (want('DR2', only)) good = ok(n2 === 0 && fd.writes.length === w1 && fd.reqs.length === r1, `DR2 nothing changed: ${fd.writes.length - w1} writes, ${fd.reqs.length - r1} requests (want 0, 0)`) && good;
@@ -240,6 +256,27 @@ async function driveCases(B, only, marksSrc) {
   const nights9 = (third.files[res.id] || { nights: [] }).nights.map((x) => x.id).join(',');
   if (want('DR7', only)) good = ok((count.down || 0) - d0 === 0 && !third.changed && /nov9/.test(nights9),
     `DR7 own upload then pull: ${(count.down || 0) - d0} downloads, changed ${third.changed}, cached nights ${nights9} (want 0, false, nov9 present)`) && good;
+  // A file the phone cannot read (a newer format here) is never overwritten with only this phone's nights.
+  const newer = JSON.stringify({ v: 2, origin: SAA, nights: [{ id: 'kept', s: 1, e: 2 }] });
+  fd.files.get(fileId).body = newer;
+  let threw = null;
+  const w8 = fd.writes.length;
+  try { await files.push('sleep_2026-11_abc123.json', SAA, [B.s65Night(night('nov9', new Date(2026, 10, 9, 0, 30).getTime(), new Date(2026, 10, 9, 7).getTime()))], now, now); } catch (e) { threw = e.message; }
+  if (want('DR8', only)) good = ok(threw && fd.writes.length === w8 && fd.files.get(fileId).body === newer,
+    `DR8 a v2 file in Drive: push threw ${threw}, ${fd.writes.length - w8} writes, file unchanged ${fd.files.get(fileId).body === newer} (want an error, 0, true)`) && good;
+  // through: the same nights are written again once a later sync settles the newest night's day, and only then.
+  const fd2 = fakeDrive();
+  const files2 = MD.sleepFiles({ driveFetch: fd2.driveFetch, rootId: () => fd2.rootId, rootIds: () => [fd2.rootId], count: {}, body: B.s65FileBody, parse: B.s65ParseFile, merge: B.s65Merge });
+  const n10 = [night('n10', new Date(2026, 10, 9, 23, 0).getTime(), new Date(2026, 10, 10, 7, 0).getTime())];
+  let st9 = null;
+  const at9 = async (h) => { const t = new Date(2026, 10, 10, h).getTime(); return B.s65PushMonths({ rows: n10, sync: { sleep: t, cover: t - 30 * day }, state: st9, now: t, deviceId: 'abc123', canSync: () => true, push: files2.push, save: (s) => { st9 = s; } }); };
+  const runs = [await at9(9), await at9(20), await at9(23)];
+  const settledAt = new Date(2026, 10, 11, 6).getTime();
+  const runs2 = [await (async () => { const t = settledAt + 3600000; return B.s65PushMonths({ rows: n10, sync: { sleep: t, cover: t - 30 * day }, state: st9, now: t, deviceId: 'abc123', canSync: () => true, push: files2.push, save: (s) => { st9 = s; } }); })()];
+  const runs3 = [await (async () => { const t = settledAt + 7200000; return B.s65PushMonths({ rows: n10, sync: { sleep: t, cover: t - 30 * day }, state: st9, now: t, deviceId: 'abc123', canSync: () => true, push: files2.push, save: (s) => { st9 = s; } }); })()];
+  const lastThrough = JSON.parse(fd2.writes[fd2.writes.length - 1].body).through;
+  if (want('DR9', only)) good = ok(runs.join() === '1,0,0' && runs2[0] === 1 && runs3[0] === 0 && lastThrough === settledAt + 3600000,
+    `DR9 a night ending Nov 10 07:00: writes at 09:00, 20:00, 23:00 ${runs.join(', ')}; after Nov 11 06:00 ${runs2[0]}, then ${runs3[0]}; through ${new Date(lastThrough).toISOString()} (want 1, 0, 0; 1 then 0; the 07:00 sync)`) && good;
   return good;
 }
 
@@ -262,9 +299,31 @@ function shimCases(src, only) {
   }
   return good;
 }
+// applyStatus, the revoke rule both pages share: a grant made anywhere lets the viewer read; a revoke deletes the
+// copies and this phone's own files from the Drive cache (found by hc:drive ids and by the device id), nothing else.
+async function shimRevokeCases(src, only) {
+  let good = true;
+  if (!want('SH2', only)) return good;
+  const mk = (asked) => {
+    const ls = new Map(asked ? [['aorti_hc_asked', '1']] : []);
+    const win = { Capacitor: { isNativePlatform: () => true, Plugins: { HealthConnect: {} } } };
+    new Function('window', 'globalThis', 'localStorage', 'navigator', 'document', src)(win, { __s65: undefined }, { getItem: (k) => ls.has(k) ? ls.get(k) : null, setItem: (k, v) => ls.set(k, String(v)) }, { userAgent: 'Mozilla/5.0 (Linux; Android 9; X)' }, { readyState: 'complete', addEventListener() {} });
+    return { hc: win.__aortiHC, ls };
+  };
+  const kv = () => new Map([['hc:sleep', [1]], ['hc:sync', {}], ['hc:drive', { months: { '2026-11': { id: 'f-own' } } }], ['sleepdrive', { files: { 'f-own': { name: 'sleep_2026-11_abc123.json' }, 'f-old': { name: 'sleep_2026-10_abc123.json' }, 'f-pc': { name: 'sleep_2026-11_zzzzzz.json' } } }]]);
+  const store = (m) => ({ get: async (k) => m.get(k), set: async (k, v) => { m.set(k, v); }, del: async (k) => { m.delete(k); }, deviceId: 'abc123' });
+  const g = mk(false), gm = kv();
+  await g.hc.applyStatus({ sdk: 'available', granted: ['sleep'] }, store(gm));
+  const r = mk(true), rm = kv();
+  await r.hc.applyStatus({ sdk: 'available', granted: [] }, store(rm));
+  const left = [...rm.keys()].sort().join(','), files = Object.keys(rm.get('sleepdrive').files).join(',');
+  good = ok(g.ls.get('aorti_hc_asked') === '1' && gm.size === 4 && left === 'sleepdrive' && files === 'f-pc',
+    `SH2 a grant from settings sets the asked flag ${g.ls.get('aorti_hc_asked') === '1'} and keeps ${gm.size} keys; a revoke leaves ${left} with ${files} (want true, 4; sleepdrive with f-pc only)`) && good;
+  return good;
+}
 
 // ---------- browser ----------
-let server = null, BASE = null, browser = null, SERVED = REAL, SERVED_SHIM = SHIM;
+let server = null, BASE = null, browser = null, SERVED = REAL, SERVED_SHIM = SHIM, SERVED_MON = MONITOR;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
 const SEED = new Map();
 async function startServer() {
@@ -272,6 +331,7 @@ async function startServer() {
   server = http.createServer((req, res) => {
     const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (rel.startsWith('/seed/')) { const v = SEED.get(rel.slice(6)); res.writeHead(v == null ? 404 : 200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end(v == null ? '' : v); return; }
+    if (rel === '/hr_monitor.html') { res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' }); res.end(SERVED_MON); return; }
     if (rel === '/hrv_viewer.html') { res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' }); res.end(SERVED); return; }
     const file = path.join(ROOT, rel);
     if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
@@ -441,6 +501,50 @@ const BROWSER = {
     await close(p);
     return good;
   },
+  H22: async () => {
+    // status() fails at boot; the next return to the app asks again, and the sync runs.
+    const p = await openDay({ native: true, asked: true, statusReject: true, hidden: true }, HC([N1], Object.assign({}, SYNCED, { sleepTry: NOW - 3600000 })));
+    await p.waitForTimeout(1000);
+    await p.evaluate(() => { window.__hcFake.statusReject = false; });
+    await visible(p, false);
+    await p.waitForTimeout(1500);
+    const c = await counters(p);
+    const good = ok(c.fake.status === 2 && c.fake.read === 1, `H22 status failed at boot, then a return: ${c.fake.status} status() calls, ${c.fake.read} reads (want 2, 1)`);
+    await close(p);
+    return good;
+  },
+  M8: async () => {
+    // Monitor: opening the Connection section asks status() once, whatever order its click listeners were added in.
+    await startServer();
+    const ctx = await (await getBrowser()).newContext({ viewport: { width: 430, height: 900 } });
+    await ctx.route('**/*', (route) => {
+      const u = route.request().url();
+      if (u.startsWith(BASE) || u.startsWith('data:')) return route.continue();
+      if (/chart\.umd(\.min)?\.js/.test(u)) return route.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(CHART) });
+      return route.fulfill({ status: 204, body: '' });
+    });
+    await ctx.addInitScript(() => {
+      window.__hcCalls = 0;
+      window.__aortiHC = { native: () => true, asked: () => false, available: () => false, granted: () => true,
+        status() { window.__hcCalls++; return Promise.resolve({ sdk: 'available', granted: ['sleep'] }); },
+        applyStatus: async () => false, request: async () => ({}), openSettings: async () => ({}) };
+    });
+    const p = await ctx.newPage();
+    await p.goto(BASE + '/hr_monitor.html', { waitUntil: 'load' });
+    await p.waitForTimeout(800);
+    const sec = '.section[data-section="connection"]';
+    if (!(await p.evaluate((q) => document.querySelector(q).classList.contains('collapsed'), sec))) { await p.click(sec + ' .section-header'); await p.waitForTimeout(300); }
+    await p.evaluate(() => { window.__hcCalls = 0; });
+    await p.click(sec + ' .section-header');
+    await p.waitForTimeout(400);
+    const r = await p.evaluate(() => ({ calls: window.__hcCalls, chip: document.getElementById('hc-status').textContent, cls: document.getElementById('hc-status').className }));
+    await p.click(sec + ' .section-header');
+    await p.waitForTimeout(400);
+    const closing = await p.evaluate(() => window.__hcCalls);
+    const good = ok(r.calls === 1 && r.chip === 'On' && /live/.test(r.cls) && closing === 1, `M8 monitor, Connection opened: ${r.calls} status() call, chip "${r.chip}" (${r.cls}); closed again: ${closing - r.calls} more (want 1, On with live, 0)`);
+    await ctx.close();
+    return good;
+  },
   H12: async () => {
     const p = await openDay({ native: true, asked: true }, HC([N1], SYNCED));
     const r = await p.evaluate(REPORT, D);
@@ -454,13 +558,18 @@ const BROWSER = {
   },
   DR: async () => {
     // Web viewer (no plugin), the night only in the cached Drive sleep files.
-    const p = await openDay({ native: false }, { sleepdrive: { files: { f9: { name: 'sleep_2026-05_abc123.json', md5: 'x', origin: SAA, nights: [{ id: 'n1', s: N1.s, e: N1.e, awake: [] }] } } } });
+    const p = await openDay({ native: false }, { sleepdrive: { files: { f9: { name: 'sleep_2026-05_abc123.json', md5: 'x', origin: SAA, through: NOW, nights: [{ id: 'n1', s: N1.s, e: N1.e, awake: [] }] } } } });
     const done = await s64Done(p, 'applied|flag|old');
     const r = await p.evaluate(REPORT, D), b = await p.evaluate(BAND), c = await counters(p);
     console.log(`INFO DR report sleep source: '${r && r.source}'`);
     const good = ok(r && r.source === 'drive' && r.asleep === 435 && /applied$/.test(done) && b.rec === 435 && zero(c), `DR web viewer, nights from the Drive sleep files: source ${r && r.source}, Asleep ${r && r.asleep}, S64 ${done}, band ${b.rec} recorded min, __s65 ${JSON.stringify(c.s65)} (want drive, 435, applied, 435, all 0)`);
     await close(p);
-    return good;
+    // The same file synced before the day's end + 6 h: the night may not be complete, so the Drive copy is not used.
+    const q = await openDay({ native: false }, { sleepdrive: { files: { f9: { name: 'sleep_2026-05_abc123.json', md5: 'x', origin: SAA, through: dayStart(addDays(D, 1)) + 3600000, nights: [{ id: 'n1', s: N1.s, e: N1.e, awake: [] }] } } } });
+    const rq = await q.evaluate(REPORT, D);
+    const good2 = ok(rq && rq.source === null, `DR a sleep file synced 1 h after the day's end: report sleep ${rq && rq.source} (want none)`);
+    await close(q);
+    return good && good2;
   },
   H14: async () => {
     let good = true;
@@ -498,7 +607,7 @@ const BROWSER = {
   },
   H17: async () => {
     let good = true;
-    for (const [id, cfg, tryAt, want] of [['last attempt 7 h ago', {}, NOW - 7 * 3600000, [1, 1]], ['failed read 1 h ago', {}, NOW - 3600000, [0, 0]], ['sleep not granted', { granted: [] }, NOW - 7 * 3600000, [0, 0]]]) {
+    for (const [id, cfg, tryAt, want] of [['last attempt 7 h ago', {}, NOW - 7 * 3600000, [1, 1]], ['failed read 1 h ago', {}, NOW - 3600000, [0, 0]], ['sleep not granted', { granted: [] }, NOW - 7 * 3600000, [1, 0]]]) {
       const p = await openDay(Object.assign({ native: true, asked: true, hidden: true }, cfg), HC([N1], Object.assign({}, SYNCED, { sleep: tryAt, sleepTry: tryAt })));
       await p.waitForTimeout(1500);
       const c0 = await counters(p);
@@ -550,7 +659,7 @@ const BROWSER = {
     await reopen(p);
     const d1 = await s64Done(p);
     const b = await p.evaluate(BAND), r = await p.evaluate(REPORT, D);
-    const good = ok(/applied$/.test(d0) && /hc gone$/.test(d1) && b.rec !== 435 && r.source === null, `H20 the night deleted (weekly full read), reopened: ${d0} then ${d1}, band ${b.rec} min, report sleep ${r.source} (want applied, hc gone, the old band, none)`);
+    const good = ok(/applied$/.test(d0) && /hc gone, flag$/.test(d1) && b.rec !== 435 && r.source === null, `H20 the night deleted (weekly full read), reopened: ${d0} then ${d1}, band ${b.rec} min, report sleep ${r.source} (want applied, hc gone then the S63 path (flag), the old band, none)`);
     await close(p);
     return good;
   },
@@ -571,11 +680,12 @@ const BROWSER = {
   },
 };
 
-async function partGolden(src, only, shim) {
-  SERVED = src; SERVED_SHIM = shim || SHIM;
+async function partGolden(src, only, shim, mon) {
+  SERVED = src; SERVED_SHIM = shim || SHIM; SERVED_MON = mon || MONITOR;
   let good = nodeCases(cut(src), only);
   good = (await driveCases(cut(src), only)) && good;
   good = shimCases(shim || SHIM, only) && good;
+  good = (await shimRevokeCases(shim || SHIM, only)) && good;
   if (PART !== 'golden' && !only) return good;
   for (const [id, f] of Object.entries(BROWSER)) if (want(id, only)) good = (await f()) && good;
   return good;
@@ -587,39 +697,51 @@ const MUT = [
   ['awake stages asleep', 'viewer', [R('      for (const [a, b] of sp.awake) for (let m = first(a); m < stop(b); m++) mask[m] = 0;\n', '')], ['H2', 'E1']],
   ['own origin not filtered', 'viewer', [R("if (!r || !r.origin || r.origin === S65_OWN) continue;", 'if (!r || !r.origin) continue;')], ['H6']],
   ['short nights kept', 'viewer', [R('      if (sp.e - sp.s < S65_O.minLen * 60000) continue;\n', '')], ['H3']],
-  ['upload with nothing changed', 'viewer', [R('      if (state.months[m] && state.months[m].h === h) continue;\n', '')], ['DR2']],
+  ['upload with nothing changed', 'viewer', [R('      if (was && was.h === h && !settles) continue;\n', '')], ['DR2']],
   ['upload while paused', 'viewer', [R("    if (!o.canSync() || !o.deviceId || !o.rows || !o.sync) return 0;", '    if (!o.deviceId || !o.rows || !o.sync) return 0;'), R('      if (!o.canSync()) break;\n', '')], ['DR3']],
   ['whole body from this phone only', 'viewer', [R('    return fileNights.filter(x => x.s < cover && !ids.has(x.id)).concat(local);', '    return local;')], ['DR5']],
   ['file body carries every row field', 'viewer', [R('nights: list.map(x => ({ id: x.id, s: x.s, e: x.e, awake: x.awake.map(p => [p[0], p[1]]) }))', 'nights: list.map(x => Object.assign({ stages: [] }, x))')], ['DR1']],
+  ['no through in the file', 'viewer', [R("through: Number.isFinite(through) ? through : 0, nights:", 'nights:')], ['DR1']],
+  ['through never rewritten once the day settles', 'viewer', [R('      if (was && was.h === h && !settles) continue;', '      if (was && was.h === h) continue;')], ['DR9']],
   ['pull downloads every file every time', 'drive', [R('if (c && c.md5 && c.md5 === f.md5Checksum) { files[f.id] = c; continue; }', '')], ['DR6']],
-  ['push result drops the written nights', 'drive', [R('const done = (res) => Object.assign({}, res, { name, origin, nights: merged });', 'const done = (res) => res;')], ['DR7']],
+  ['push result drops the written nights', 'drive', [R('const done = (res) => Object.assign({}, res, { name, origin, through, nights: merged });', 'const done = (res) => res;')], ['DR7']],
+  ['a file that will not parse is overwritten', 'drive', [R('        fileNights = opts.parse(await download(found[0])).nights;', '        try { fileNights = opts.parse(await download(found[0])).nights; } catch (e) { fileNights = []; }')], ['DR8']],
+  ['Drive nights without the settle gate', 'viewer', [R('      if (!f || f.origin === S65_OWN || !(f.through >= settle)) continue;', '      if (!f || f.origin === S65_OWN) continue;')], ['DV1', 'DR']],
+  ["this device's own Drive file used", 'viewer', [R("      if (ownDeviceId && typeof f.name === 'string' && f.name.endsWith('_' + ownDeviceId + '.json')) continue;\n", '')], ['DV1']],
+  ['a shared night id from the older file', 'viewer', [R('if (n && (!prev || f.through > prev.through))', 'if (n)')], ['DV1']],
   ['plugin called before Connect', 'shim', [R("available: function () { return native() && asked(); },", 'available: function () { return native(); },')], ['SH1', 'H10']],
-  ['revoke keeps copies', 'viewer', [R("    if (!granted.includes('sleep')) for (const k of ['hc:sleep', 'hc:sync', 'hc:drive']) await s65Del(k);\n", '')], ['H11']],
+  ['revoke keeps copies', 'shim', [R('      try { await store.del(KEYS[i]); } catch (e) { logErr(\'copy delete\', e); }\n', '')], ['SH2', 'H11']],
+  ['a grant made in settings never lets the viewer read', 'shim', [R('    if (granted(st)) { markAsked(); return false; }', '    if (granted(st)) return false;')], ['SH2']],
+  ["revoke keeps this phone's Drive files in the cache", 'shim', [R('        if (mine) dropped++; else files[id] = f;', '        files[id] = f;')], ['SH2']],
   ['a rejected status treated as revoke', 'viewer', [R("(e) => { console.warn('[S65] status failed, copies kept', e && (e.code || e.message)); s65Visit.status = null; return null; })", "async (e) => { await hcApplyStatus({ granted: [] }); s65Visit.status = null; return null; })")], ['H11']],
   ['sync time ignored', 'viewer', [R('        if (sync && sync.sleep >= w.end + S65_O.settleMs) {', '        if (sync) {')], ['H8']],
   ['Drive files ignored', 'viewer', [R("    if (s65Overlaps(dn, w.start, w.end)) return { source: 'drive', mask: hcSleepMask(dn, w.start, n) };\n", '')], ['DR']],
   ['Asleep from the mask alone', 'viewer', [R('      if (d.hr[m] == null) continue;\n      const on = mask[m] === 1;', '      const on = mask[m] === 1;\n      if (d.hr[m] == null && !on) continue;')], ['H13']],
   ['read failure replaces the copies', 'viewer', [R("    catch (e) { console.warn('[S65] sleep read failed, copies kept', e && (e.code || e.message)); return; }", "    catch (e) { res = { rows: [], more: false }; }")], ['H14']],
-  ['sync while hidden', 'viewer', [R("    if (!s65Avail() || document.hidden) return;\n    const st = await s65Status(false);\n    if (!s65Granted(st) || document.hidden) return;", "    if (!s65Avail()) return;\n    const st = await s65Status(false);\n    if (!s65Granted(st)) return;"), R('requestAnimationFrame(() => setTimeout(() => { if (!document.hidden) s65Sync(); }, S65_O.delayMs));', 'requestAnimationFrame(() => setTimeout(() => { s65Sync(); }, S65_O.delayMs));')], ['H14']],
+  ['sync while hidden', 'viewer', [R("    if (!s65Avail() || document.hidden) return;\n    let st = await s65Status(false);", "    if (!s65Avail()) return;\n    let st = await s65Status(false);"), R('    if (!s65Granted(st) || document.hidden) return;', '    if (!s65Granted(st)) return;'), R('requestAnimationFrame(() => setTimeout(() => { if (!document.hidden) s65Sync(); }, S65_O.delayMs));', 'requestAnimationFrame(() => setTimeout(() => { s65Sync(); }, S65_O.delayMs));')], ['H14']],
   ['resolver after the flag gate', 'viewer', [R('    // Nights from Health Connect or Drive first (S65): no flag, history gate or digest needed.\n', "    if (!(s63Weights() === 'personal' || S63_PRINT_GENERAL)) return end('flag');\n")], ['H15']],
   ['no re-run after a sync', 'viewer', [R('    s65AfterSync(up.touched, before, now);\n', '')], ['H16']],
   ['no stale-return sync', 'viewer', [R("    document.addEventListener('visibilitychange', () => { s65OnVisible().catch(e => console.warn('[S65] return sync failed', e)); });\n", '')], ['H17']],
+  ['a failed or ungranted status is never asked again', 'viewer', [R('    if (!s65Granted(s65Visit.status)) {\n      if (!s65Granted(await s65Status(true))) return;\n    } else {', '    if (!s65Granted(s65Visit.status)) return;\n    {')], ['H17', 'H22']],
   ['reopen reset on the flag alone', 'viewer', [R("(s.__s64For && s.__s64Src === 'detected' && !(s63Weights() === 'personal' || S63_PRINT_GENERAL))", "(s.__s64For && !(s63Weights() === 'personal' || S63_PRINT_GENERAL))")], ['H18']],
   ['no re-run when status settles', 'viewer', [R('        if (iso) s65RerunDay(iso);\n', '')], ['H19']],
   ['resolver waits on status with no cap', 'viewer', [R('    if (s65Visit.settled) return p;\n', '    return p;\n')], ['H19']],
-  ['a null source falls to the flag with a Health Connect band shown', 'viewer', [R("    if (!sleep && shown && s.__s64Src && s.__s64Src !== 'detected') return hc === S65_TIMEOUT ? end('kept') : back('hc gone');\n", '')], ['H20']],
-  ['a status timeout drops the band', 'viewer', [R("return hc === S65_TIMEOUT ? end('kept') : back('hc gone');", "return back('hc gone');")], ['H21']],
+  ['a lost night keeps its band', 'viewer', [R("      gone.band = true;\n      s.sleepWindows = []; s.__s64For = null; s.__s64Src = null;\n      if (currentSummary === s) s64Paint(s, data);\n", "      gone.band = true;\n")], ['H20']],
+  ['a lost night ends the run before the S63 path', 'viewer', [R("      if (currentSummary === s) s64Paint(s, data);\n    }\n    if (!sleep) {", "      if (currentSummary === s) s64Paint(s, data);\n      return end('dropped');\n    }\n    if (!sleep) {")], ['H20']],
+  ['a status timeout drops the band', 'viewer', [R("      if (hc === S65_TIMEOUT) return end('kept');\n", '')], ['H21']],
+  ['status runs when Connection closes', 'monitor', [R("header.addEventListener('click', () => setTimeout(() => { if (!header.closest('.section').classList.contains('collapsed')) refreshHc(); }, 0));", "header.addEventListener('click', () => { if (!header.closest('.section').classList.contains('collapsed')) refreshHc(); });")], ['M8']],
 ];
 async function runMutants() {
   let good = true;
-  const nodeIds = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H13', 'E1', 'U1', 'U2', 'DR1', 'DR2', 'DR3', 'DR4', 'DR5', 'DR6', 'DR7', 'SH1']);
+  const nodeIds = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H13', 'E1', 'U1', 'U2', 'DR1', 'DR2', 'DR3', 'DR4', 'DR5', 'DR6', 'DR7', 'DR8', 'DR9', 'DV1', 'SH1', 'SH2']);
   for (const [name, where, reps, ids] of MUT) {
     if (PART === 'node' && !ids.some((i) => nodeIds.has(i))) continue;
     if (ONLY && !ids.some((i) => ONLY.includes(i))) continue;
-    let src = REAL, shim = SHIM, marks = fs.readFileSync(MARKS_DRIVE, 'utf8').replace(/\r\n/g, '\n'), anchored = true;
+    let src = REAL, shim = SHIM, mon = MONITOR, marks = fs.readFileSync(MARKS_DRIVE, 'utf8').replace(/\r\n/g, '\n'), anchored = true;
     for (const [a, b] of reps) {
       if (where === 'viewer') { if (!src.includes(a)) anchored = false; src = src.replace(a, b); }
       else if (where === 'shim') { if (!shim.includes(a)) anchored = false; shim = shim.replace(a, b); }
+      else if (where === 'monitor') { if (!mon.includes(a)) anchored = false; mon = mon.replace(a, b); }
       else { if (!marks.includes(a)) anchored = false; marks = marks.replace(a, b); }
     }
     if (!anchored) { good = ok(false, `mutant ${name}: ANCHOR MISSING`) && good; continue; }
@@ -630,7 +752,7 @@ async function runMutants() {
     try {
       let r;
       if (where === 'drive') r = await driveCases(cut(src), run, marks);
-      else r = await partGolden(src, run, shim);
+      else r = await partGolden(src, run, shim, mon);
       if (!r) { killed = true; why = firstFail || ''; }
     } catch (e) { killed = true; why = 'threw ' + e.message.split('\n')[0]; }
     QUIET = false;
