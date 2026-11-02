@@ -118,6 +118,7 @@ async function outputs(ctx, fx) {
   const pick = (arr) => (arr || []).filter((p) => p.ep != null).map((p) => [p.t ?? p.x, p.ep]);
   // The whole summary: startEpoch, event ep, byDay slices and spans all come from row epochs.
   const sum = s && JSON.parse(JSON.stringify(s));
+  if (sum) delete sum.originEpoch; // Postdates the base build; viewer-parse.test.cjs checks it.
   const full = await api.loadFullSession(fx.fn);
   const fullOut = { hr: pick(full.hr), rmssd: pick(full.rmssd) };
   // v2: rows built from the file's own epochs (NaN where the cell is empty), sid at the file start.
