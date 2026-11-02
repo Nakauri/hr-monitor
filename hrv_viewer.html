@@ -6366,7 +6366,8 @@ END SECTION MAP -->
   }
   // After driveSync resolves, never inside it; a failure here never reaches the sync result.
   async function marksSyncPass() {
-    s65DrivePass();
+    // The Drive sleep files ride on every marks pass (absent where a harness loads this function alone).
+    if (typeof s65DrivePass === 'function') s65DrivePass();
     if (!marksPage) return false;
     try {
       const r = await marksPage.drive.sync();
