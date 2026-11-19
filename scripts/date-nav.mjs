@@ -1,7 +1,8 @@
 // Guards: Day carets moving with the weekday's length, three nav designs, no jump calendar, and the KPI strip's 24:00:00 running into Avg HR (AUDIT-NOTES 2026-10-12 items 20 to 22). Files: hrv_viewer.html date nav, jump picker, summary grid. Runtime: about 60 s, --mutants about 90 s; run when hrv_viewer.html changes.
 // S30 date nav checks, on demo data (?demo=1), headless:
 // carets: the prev and next carets sit at the same x on Day (longest and shortest weekday, with and without data),
-//   Week and Month (shortest and longest month name), at 360, 360 with 200% text and 1440.
+//   Week and Month (shortest and longest month name), at 360, 360 with 200% text and 1440; at 1440 every title is
+//   one line (Wednesday, September 30 is the widest), and at 360 too (this year's weeks drop the year there).
 // picker: the title opens the jump calendar by a real click (popover under the title at 1440, bottom sheet at 360);
 //   days with data, today and the shown day are marked; picking a day with data and one without routes there; the
 //   keyboard path (Enter, arrows, Page Down, Escape, Enter) moves, closes back to the title and picks.
@@ -95,9 +96,12 @@ const hashOf = (page) => page.evaluate(() => location.hash);
 const active = (page) => page.evaluate(() => { const a = document.activeElement; return a ? (a.id || a.dataset.key || a.className) : ''; });
 
 // ---- carets: one x for prev and one for next across views and title lengths ----
+// A week across two months in the current year (the phone drops only this year's year): Sep 30 unless it ends its week.
+const NOW_Y = new Date().getFullYear();
+const CROSS = [1, 2, 3, 4, 5].includes(new Date(NOW_Y, 8, 30).getDay()) ? `${NOW_Y}-09-30` : `${NOW_Y}-10-31`;
 const CARET_ROUTES = [
   ['day', '#/day/2026-09-30', 'Wednesday, no data'], ['day', '#/day/2026-04-22', 'Wednesday'], ['day', '#/day/2026-04-24', 'Friday'],
-  ['day', '#/day/2026-05-01', 'Friday, no data'], ['week', '#/week/2026-04-22', 'week'], ['week', '#/week/2026-09-30', 'week across months'],
+  ['day', '#/day/2026-05-01', 'Friday, no data'], ['week', '#/week/2026-04-22', 'week'], ['week', `#/week/${CROSS}`, 'week across months'],
   ['month', '#/month/2026-05', 'May'], ['month', '#/month/2026-09', 'September'],
 ];
 async function partCarets() {
@@ -112,7 +116,9 @@ async function partCarets() {
         els.forEach((e, i) => { e.dataset.uxFs = String(sizes[i]); e.style.setProperty('font-size', sizes[i] * f + 'px', 'important'); });
       }, scale);
       const r = await page.evaluate((v) => ['prev', 'next', 'pick'].map((k) => { const b = document.getElementById(v + '-' + k).getBoundingClientRect(); return [b.left, b.width, b.height]; }), view);
-      xs.push({ label, view, prev: r[0][0], next: r[1][0], sizes: [r[0][1], r[0][2], r[1][1], r[1][2]], pickH: r[2][2] });
+      // Lines in the title button, from its height (a wrap can push only the chevron down, so the text alone misses it).
+      const lines = await page.evaluate((v) => { const p = document.getElementById(v + '-pick'); const cs = getComputedStyle(p); const inner = p.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom); return Math.floor(inner / parseFloat(cs.lineHeight) + 0.05); }, view);
+      xs.push({ label, view, prev: r[0][0], next: r[1][0], sizes: [r[0][1], r[0][2], r[1][1], r[1][2]], pickH: r[2][2], lines });
       if (SHOTS && scale === 1 && /^(Wednesday|week|September)$/.test(label)) await shot(page, `${view}-header-${w}`);
       if (SHOTS && scale === 2 && label === 'Wednesday') await shot(page, `day-header-360-200`);
     }
@@ -121,6 +127,9 @@ async function partCarets() {
     ok(spread('prev') <= 0.5, `${tag}: the prev caret sits at one x on Day, Week and Month (spread ${spread('prev').toFixed(1)} px)`, xs.map((x) => `${x.label} ${x.prev.toFixed(1)}`).join(', '));
     ok(spread('next') <= 0.5, `${tag}: the next caret sits at one x on Day, Week and Month (spread ${spread('next').toFixed(1)} px)`, xs.map((x) => `${x.label} ${x.next.toFixed(1)}`).join(', '));
     ok(xs.every((x) => x.sizes.every((v) => v >= 44) && x.pickH >= 44), `${tag}: carets and the title are 44 px targets`);
+    // 2026-11-19: "Wednesday, November 11, 2026" wrapped to two lines at desktop width; at 360 a Week across months did.
+    const multi = xs.filter((x) => x.lines !== 1).map((x) => `${x.label} ${x.lines} lines`).join(', ');
+    if (scale === 1) ok(!multi, `${tag}: every title stays on one line, Wednesday, September 30 and a week across months included`, multi);
     ok(!page.errors.length, `${tag}: no page errors`, page.errors.join(' | '));
     await ctx.close();
   }
@@ -216,7 +225,7 @@ async function partPicker() {
 // ---- week ----
 async function partWeek() {
   const { ctx, page } = await open(1440, '#/week/2026-04-22');
-  ok((await page.textContent('#week-pick')).trim() === 'Apr 19 to 25, 2026', 'the Week title reads Apr 19 to 25, 2026', await page.textContent('#week-pick'));
+  ok((await page.innerText('#week-pick')).trim() === 'Apr 19 to 25, 2026', 'the Week title reads Apr 19 to 25, 2026', await page.innerText('#week-pick'));
   await page.click('#week-pick');
   await page.waitForSelector('.date-pop .dp-grid', { timeout: 3000 }).catch(() => {});
   const inweek = await page.evaluate(() => [...document.querySelectorAll('.dp-cell.inweek')].map((c) => c.dataset.key.slice(8)).join());
@@ -224,9 +233,9 @@ async function partWeek() {
   await shot(page, 'picker-week-1440');
   await page.click('.dp-cell[data-key="2026-04-08"]');
   await page.waitForTimeout(500);
-  ok((await hashOf(page)) === '#/week/2026-04-08' && (await page.textContent('#week-pick')).trim() === 'Apr 5 to 11, 2026', 'picking a day opens the week holding it', `${await hashOf(page)} ${await page.textContent('#week-pick')}`);
+  ok((await hashOf(page)) === '#/week/2026-04-08' && (await page.innerText('#week-pick')).trim() === 'Apr 5 to 11, 2026', 'picking a day opens the week holding it', `${await hashOf(page)} ${await page.innerText('#week-pick')}`);
   await go(page, '#/week/2026-09-30', '#week-pick');
-  ok((await page.textContent('#week-pick')).trim() === 'Sep 27 to Oct 3, 2026', 'a week across months names both', await page.textContent('#week-pick'));
+  ok((await page.innerText('#week-pick')).trim() === 'Sep 27 to Oct 3, 2026', 'a week across months names both', await page.innerText('#week-pick'));
   ok(!page.errors.length, 'week: no page errors', page.errors.join(' | '));
   await ctx.close();
 }
@@ -319,7 +328,9 @@ async function partKpi() {
 const RUN = { carets: partCarets, picker: partPicker, week: partWeek, month: partMonth, kpi: partKpi };
 if (MUTANTS) {
   const M = [
-    ['title-sized caret track', 'carets', ['.datenav-h { flex: 0 0 auto; width: 16.5em;', '.datenav-h { flex: 0 0 auto; width: auto;']],
+    ['title-sized caret track', 'carets', ['.datenav-h { flex: 0 0 auto; width: 18em;', '.datenav-h { flex: 0 0 auto; width: auto;']],
+    ['track too narrow for Wednesday', 'carets', ['.datenav-h { flex: 0 0 auto; width: 18em;', '.datenav-h { flex: 0 0 auto; width: 16.5em;']],
+    ['phone Week keeps the year', 'carets', ['${weekThisYear ? weekSpan :', '${false ? weekSpan :']],
     ['KPI gap removed', 'kpi', ['gap: var(--s4) var(--kpi-gap);', 'gap: var(--s4) 0;', '/ui.css']],
     ['KPI fit removed', 'kpi', ["    if (!w) return;\n    const col", "    return;\n    const col"]],
     ['KPI rows unbalanced', 'kpi', ["const cols = Math.ceil(stats.length / Math.ceil(stats.length / fit));", "const cols = fit;"]],

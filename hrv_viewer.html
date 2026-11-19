@@ -464,11 +464,11 @@ END SECTION MAP -->
   .datenav { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--s1); }
   .datenav .btn.icon { flex: 0 0 44px; }
   /* The h1 keeps a fixed track so the carets never move; the title button inside hugs its text. */
-  .datenav-h { flex: 0 0 auto; width: 16.5em; display: flex; justify-content: center; margin: 0; font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
+  .datenav-h { flex: 0 0 auto; width: 18em; display: flex; justify-content: center; margin: 0; font-size: var(--t24); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
   .datenav .datenav-title { width: auto; max-width: 100%; min-height: 44px; padding: var(--s1) var(--s2); font: inherit; letter-spacing: inherit; font-variant-numeric: tabular-nums; text-wrap: balance; }
   .datenav .datenav-title[aria-expanded="true"] { background: var(--selected-fill); }
   .datenav-open { color: var(--text-dim); }
-  .day-title .t-short, .month-title .t-short { display: none; }
+  .day-title .t-short, .week-title .t-short, .month-title .t-short { display: none; }
   /* Jump picker: a month of days, or a year of months. A bottom sheet on the phone, a popover under the title on a laptop. */
   .sheet-root:is(.date-pop, .layers-pop) { align-items: flex-start; justify-content: flex-start; padding: 0; }
   :is(.date-pop, .layers-pop) .sheet-scrim { background: transparent; }
@@ -1430,6 +1430,8 @@ END SECTION MAP -->
     .datenav .day-title .t-short { display: inline; }
     .datenav .month-title .t-long { display: none; }
     .datenav .month-title .t-short { display: inline; }
+    .datenav .week-title .t-long { display: none; }
+    .datenav .week-title .t-short { display: inline; }
     .segmented.metric-switch { display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(5.5em, 1fr)); }
     .metric-switch > button { padding: 0 var(--s2); }
     .interp-grid { grid-template-columns: 1fr; }
@@ -5218,12 +5220,15 @@ END SECTION MAP -->
     }
 
     const sameMonth = weekStart.getMonth() === weekEnd.getMonth();
-    const weekTitle = `${weekStart.toLocaleString(undefined, { month: 'short', day: 'numeric' })} to ${sameMonth ? weekEnd.getDate() : weekEnd.toLocaleString(undefined, { month: 'short', day: 'numeric' })}, ${weekEnd.getFullYear()}`;
+    const weekSpan = `${weekStart.toLocaleString(undefined, { month: 'short', day: 'numeric' })} to ${sameMonth ? weekEnd.getDate() : weekEnd.toLocaleString(undefined, { month: 'short', day: 'numeric' })}`;
+    // The phone drops this year's year: a week across two months does not fit one line at 360 with it.
+    const weekThisYear = weekStart.getFullYear() === weekEnd.getFullYear() && weekEnd.getFullYear() === new Date().getFullYear();
+    const weekTitle = `<span class="t-long">${weekSpan}, ${weekEnd.getFullYear()}</span><span class="t-short">${weekThisYear ? weekSpan : weekSpan + ', ' + weekEnd.getFullYear()}</span>`;
     const weekFiles = cols.reduce((acc, c) => acc.concat(c.files), []);
 
     el.innerHTML = `
       <div class="cal-header ui">
-        ${dateNavHTML('week', { title: weekTitle, prevLabel: 'Previous week', nextLabel: 'Next week' })}
+        ${dateNavHTML('week', { title: weekTitle, cls: 'week-title', prevLabel: 'Previous week', nextLabel: 'Next week' })}
         <button class="btn cal-today-btn" id="week-today" type="button">This week</button>
         ${metricSwitchHTML()}
         <div class="cal-legend-strip">
