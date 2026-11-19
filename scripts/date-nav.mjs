@@ -10,9 +10,10 @@
 // month: the Month title opens a 12-month grid with year carets; a click and the keyboard pick a month.
 // kpi: with Duration forced to 24:00:00, every pair of stats on a row is one gap token apart (within 2 px), no value
 //   leaves its column, values use tabular figures; at 1440, 360 (open and collapsed) and 360 with 200% text.
-// --mutants: a title-sized caret track, the KPI gap removed, the KPI fit removed, unbalanced KPI rows and a calendar that never opens each
+// edges: on Month and Week no header control or legend key passes the right edge, 770 to 1440 wide.
+// --mutants: a title-sized caret track, a track too narrow for Wednesday, a phone Week keeping the year, a header that never wraps, the KPI gap removed, the KPI fit removed, unbalanced KPI rows and a calendar that never opens each
 //   must FAIL their part. --shots <dir> shoots the headers, the picker and the KPI strip.
-// Usage: node scripts/date-nav.mjs [--part carets,picker,week,month,kpi] [--mutants [--only 0,1]] [--shots <dir>] [--ux <ux-audit dir>]
+// Usage: node scripts/date-nav.mjs [--part carets,picker,week,month,edges,kpi] [--mutants [--only 0,1]] [--shots <dir>] [--ux <ux-audit dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,7 +30,7 @@ const SHOTS = argVal('--shots');
 const CHART = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'chart.umd.min.js');
 const { chromium } = createRequire(path.join(UX, 'kit', 'package.json'))('playwright');
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
-const PARTS = ['carets', 'picker', 'week', 'month', 'kpi'];
+const PARTS = ['carets', 'picker', 'week', 'month', 'edges', 'kpi'];
 const PART = argVal('--part');
 const want = (p) => !PART || PART.split(',').includes(p);
 const MUTANTS = args.includes('--mutants');
@@ -266,6 +267,31 @@ async function partMonth() {
   await ctx.close();
 }
 
+// ---- edges: no header control or legend key past the right edge on Month and Week, 769 to 1440 ----
+// 2026-11-19 ship-check: the Month legend's "Critical" was clipped at 1280 (and Normal, Elevated at 1000).
+async function partEdges() {
+  const widths = [];
+  for (let w = 770; w <= 1440; w += 30) widths.push(w);
+  widths.push(1101, 1280, 1366);
+  for (const [view, hash] of [['month', '#/month/2026-09'], ['week', `#/week/${CROSS}`]]) {
+    const { ctx, page } = await open(1440, hash);
+    const cut = [];
+    for (const w of widths) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.waitForTimeout(80);
+      const over = await page.evaluate((v) => {
+        const vw = document.documentElement.clientWidth;
+        const items = [...document.querySelectorAll(`#view-${v} .cal-header :is(.chart-legend-item, .btn, .metric-switch > button)`)];
+        return Math.round(Math.max(0, ...items.map((e) => e.getBoundingClientRect().right - vw)));
+      }, view);
+      if (over > 0) cut.push(`${w}: ${over} px`);
+    }
+    ok(!cut.length, `${view}: no header control or legend key past the right edge at ${widths.length} widths, 770 to 1440`, cut.join(', '));
+    ok(!page.errors.length, `${view} edges: no page errors`, page.errors.join(' | '));
+    await ctx.close();
+  }
+}
+
 // ---- kpi ----
 async function partKpi() {
   for (const [w, scale, collapsed] of [[1440, 1, false], [360, 1, false], [360, 1, true], [360, 2, false]]) {
@@ -325,12 +351,13 @@ async function partKpi() {
   }
 }
 
-const RUN = { carets: partCarets, picker: partPicker, week: partWeek, month: partMonth, kpi: partKpi };
+const RUN = { carets: partCarets, picker: partPicker, week: partWeek, month: partMonth, edges: partEdges, kpi: partKpi };
 if (MUTANTS) {
   const M = [
     ['title-sized caret track', 'carets', ['.datenav-h { flex: 0 0 auto; width: 18em;', '.datenav-h { flex: 0 0 auto; width: auto;']],
     ['track too narrow for Wednesday', 'carets', ['.datenav-h { flex: 0 0 auto; width: 18em;', '.datenav-h { flex: 0 0 auto; width: 16.5em;']],
     ['phone Week keeps the year', 'carets', ['${weekThisYear ? weekSpan :', '${false ? weekSpan :']],
+    ['header never wraps', 'edges', ['    margin-bottom: 18px;\n    flex-wrap: wrap;\n  }\n  .segmented.metric-switch', '    margin-bottom: 18px;\n  }\n  .segmented.metric-switch']],
     ['KPI gap removed', 'kpi', ['gap: var(--s4) var(--kpi-gap);', 'gap: var(--s4) 0;', '/ui.css']],
     ['KPI fit removed', 'kpi', ["    if (!w) return;\n    const col", "    return;\n    const col"]],
     ['KPI rows unbalanced', 'kpi', ["const cols = Math.ceil(stats.length / Math.ceil(stats.length / fit));", "const cols = fit;"]],

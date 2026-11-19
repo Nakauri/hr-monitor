@@ -330,6 +330,7 @@ END SECTION MAP -->
     align-items: center;
     gap: 14px;
     margin-bottom: 18px;
+    flex-wrap: wrap;
   }
   .segmented.metric-switch { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
   .metric-switch > button { white-space: nowrap; }
@@ -386,7 +387,6 @@ END SECTION MAP -->
       flex-direction: column;
       min-height: calc(100vh - 180px);
     }
-    #view-month .cal-legend-strip { flex: 0 0 auto; }
     #view-month .cal-grid {
       flex: 1 1 auto;
       grid-auto-rows: minmax(120px, 1fr);
