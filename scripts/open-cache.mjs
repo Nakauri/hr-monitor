@@ -10,9 +10,9 @@
 // --mutants serves the old order (cache only loaded after the sync) and A must FAIL.
 // C and D also hold the Drive list and download counts to the c0e5d9b counts (before newest-first, Block 4) and see no
 // backfill note; --mutant split forces a backfill split on any pull and C or D must FAIL. --base serves c0e5d9b.
-// The S65 sleep pull's folder lookup (one per visit) is counted apart and held at exactly one.
+// The S65 sleep pull's folder lookup (one per visit) is counted apart and held at exactly one; --mutant nosleep drops it.
 //
-// Usage: node scripts/open-cache.mjs [--mutants | --mutant split | --base] [--ux <ux-audit dir>]
+// Usage: node scripts/open-cache.mjs [--mutants | --mutant split | --mutant nosleep | --base] [--ux <ux-audit dir>]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,7 +32,9 @@ const { FakeDrive } = createRequire(import.meta.url)('./marks-store.test.cjs');
 const MUTANTS = args.includes('--mutants');
 
 // The negative control: init goes straight to the Drive sync, as before S38.
-const MUTANT = args.includes('--mutant')
+const MUTANT = argVal('--mutant') === 'nosleep'
+  ? ["    if (typeof s65DrivePass === 'function') s65DrivePass();", '']
+  : args.includes('--mutant')
   ? ['    return older.length >= DRIVE_BACKFILL_MIN ? { items, recent, older } : one;', '    return items.length ? { items, recent: [], older: items } : one;']
   : ['      if (!dirHandle && await paintFromCache()) painted = true;', ''];
 const MUTATE = MUTANTS || args.includes('--mutant');
@@ -222,7 +224,7 @@ await browser.close();
 server.close();
 if (MUTATE) {
   const killed = fails > 0 && !anchorMissing;
-  console.log(killed ? 'MUTANT FAILED as it should (' + (MUTANTS ? 'old order' : 'forced split') + ' caught)' : 'MUTANT SURVIVED or anchor missing');
+  console.log(killed ? 'MUTANT FAILED as it should (' + (MUTANTS ? 'old order' : argVal('--mutant') === 'nosleep' ? 'no sleep pull' : 'forced split') + ' caught)' : 'MUTANT SURVIVED or anchor missing');
   process.exit(killed ? 0 : 1);
 }
 console.log(`\n${passes} passed, ${fails} failed`);
