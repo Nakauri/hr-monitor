@@ -12,7 +12,7 @@
 // name; a missing input exits 2 with its path, changed data exits 2 with "data changed, re-freeze". Expectations and
 // labels stay in those gitignored files; this script holds no personal number, date or time.
 // --mutants runs the negative controls of spec 6b, each must FAIL; with --part, only the mutants aimed at those parts;
-// --only G2,G13 runs those goldens. "same" and "fit" compare against main 02aef18, "dayview" flag off against 77f8fca.
+// --only G2,G13 runs those goldens. "fit" compares against main 02aef18, "same" and "dayview" flag off against origin/main.
 // --shots <dir> writes page 1 pictures, and with dayview the Day chart of demo 04-24 before (77f8fca) and after.
 // Usage: node scripts/sleep-split.mjs [--part <list>] [--mutants] [--only <ids>] [--month <yyyy-mm>] [--ux <dir>] [--shots <dir>]
 process.env.TZ = 'America/Denver';
@@ -36,8 +36,11 @@ const PARTS = (argVal('--part') || (MUTANTS_ON ? 'golden,replay,same,share' : 'g
 const ONLY = argVal('--only') ? argVal('--only').split(',') : null;
 const MONTH = argVal('--month');
 const SHOTS = argVal('--shots');
+// G20 and fit are calibrated on 02aef18. same and dayview compare against the live code a branch replaces: their old
+// baselines (02aef18, 77f8fca) went stale on later gap fixes (2026-11-19).
 const BASE_REF = '02aef18';
-const S64_REF = '77f8fca';
+const SAME_REF = 'origin/main';
+const S64_REF = 'origin/main';
 const HOME = os.homedir().split(path.sep).join('/');
 const S63 = path.join(UX, 'redesign', 's63-sleep');
 const MANIFEST = path.join(S63, 'replay-manifest.json');
@@ -184,8 +187,9 @@ async function startServer() {
       if (v == null) { res.writeHead(404); res.end(); return; }
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end(typeof v === 'string' ? v : fs.readFileSync(v.file)); return;
     }
-    if (rel.startsWith('/old/') || rel.startsWith('/s64base/')) {
-      const s64 = rel.startsWith('/s64base/'), body = oldFile(rel.slice(s64 ? 9 : 5), s64 ? S64_REF : BASE_REF);
+    if (rel.startsWith('/old/') || rel.startsWith('/s64base/') || rel.startsWith('/samebase/')) {
+      const pre = rel.slice(0, rel.indexOf('/', 1) + 1);
+      const body = oldFile(rel.slice(pre.length), pre === '/s64base/' ? S64_REF : pre === '/samebase/' ? SAME_REF : BASE_REF);
       if (!body) { res.writeHead(404); res.end(); return; }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(rel)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); res.end(body); return;
     }
@@ -204,7 +208,7 @@ async function getBrowser() {
   try { browser = await chromium.launch(); } catch (e) { browser = await chromium.launch({ channel: 'chrome' }); }
   return browser;
 }
-const viewerUrl = (old) => BASE + (old === 's64base' ? '/s64base' : old ? '/old' : '') + '/hrv_viewer.html';
+const viewerUrl = (old) => BASE + (old === 's64base' || old === 'samebase' ? '/' + old : old ? '/old' : '') + '/hrv_viewer.html';
 async function setupCtx(ctx, o) {
   await ctx.route('**/*', (route) => {
     const u = route.request().url();
@@ -712,7 +716,7 @@ async function partReplay(src) {
   return good;
 }
 
-// ---------- same: 02aef18 beside the working file ----------
+// ---------- same: origin/main beside the working file ----------
 // noSleep: the S64 sleep band, its markers and the Posture & sleep section left out (flag on, where S64 changes them).
 const VIEW_PIECES = (noSleep) => {
   const txt = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -740,23 +744,23 @@ async function partSame(src) {
   let good = true;
   for (const c of cases) {
     const open = async (old, flag) => { const p = c.demo ? await demoPage(c.iso, { old, flag }) : await seeded(c.files(), '#/day/' + c.iso, { old, flag }); await chartReady(p); await p.waitForTimeout(600); if (!old) await s64Done(p, c.iso); return p; };
-    const a = await open(false, true), b = await open(true, false);
+    const a = await open(false, true), b = await open('samebase', false);
     const va = await a.evaluate(VIEW_PIECES, true), vb = await b.evaluate(VIEW_PIECES, true);
     for (const k of Object.keys(va)) {
       const x = JSON.stringify(va[k]), y = JSON.stringify(vb[k]);
       let i = 0; while (i < x.length && x[i] === y[i]) i++;
-      good = ok(x === y, `same ${c.id}: Day view ${k} (sleep band, its markers and Posture & sleep left out, S64) identical to ${BASE_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
+      good = ok(x === y, `same ${c.id}: Day view ${k} (sleep band, its markers and Posture & sleep left out, S64) identical to ${SAME_REF}${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 40), i + 60)}" vs "${y.slice(Math.max(0, i - 40), i + 60)}"`}`) && good;
     }
     const ra = await prep(a, c.iso), rb = await prep(b, c.iso);
     const x = reportNoSplit(ra.html), y = normIds(rb.html);
     let i = 0; while (i < x.length && x[i] === y[i]) i++;
-    good = ok(x === y, `same ${c.id} flag on: report without the split rows byte-identical to ${BASE_REF} (split ${ra.rows ? 'printed, ' + ra.slp.map((r) => r[0]).join(' / ') : 'not printed'})${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 60), i + 60)}" vs "${y.slice(Math.max(0, i - 60), i + 60)}"`}`) && good;
+    good = ok(x === y, `same ${c.id} flag on: report without the split rows byte-identical to ${SAME_REF} (split ${ra.rows ? 'printed, ' + ra.slp.map((r) => r[0]).join(' / ') : 'not printed'})${x === y ? '' : ` at ${i}: "${x.slice(Math.max(0, i - 60), i + 60)}" vs "${y.slice(Math.max(0, i - 60), i + 60)}"`}`) && good;
     good = ok(!/class="slp-shade"|<rect[^>]*class="slp/.test(ra.html), `same ${c.id}: no sleep shading on the report Day chart`) && good;
     good = ok(!a.errors.length && !b.errors.length, `same ${c.id}: no page errors ${a.errors.concat(b.errors).join(' | ')}`) && good;
     await close(a);
     if (c.id === 'demo-04-24' || c.id === '10-14') {
       const z = await open(false, false), rz = await prep(z, c.iso);
-      good = ok(normIds(rz.html) === y && rz.c.digest === 0, `same ${c.id} flag cleared: whole report identical to ${BASE_REF}, ${rz.c.digest} digests`) && good;
+      good = ok(normIds(rz.html) === y && rz.c.digest === 0, `same ${c.id} flag cleared: whole report identical to ${SAME_REF}, ${rz.c.digest} digests`) && good;
       await close(z);
     }
     await close(b);
@@ -1023,7 +1027,7 @@ const MUT = [
   ['1 S63_PRINT_GENERAL true', [R('const S63_PRINT_GENERAL = false;', 'const S63_PRINT_GENERAL = true;')], [['golden', ['G13']]]],
   ['2 gate always true', [R('function s63Gate(validMins) { return validMins.filter(v => v >= S63_O.floorMin).length >= S63_O.floorDays; }', 'function s63Gate(validMins) { return true; }')], [['golden', ['G1']], ['replay']]],
   ['3 floor 4 of 7 to 1 of 7', [R('floorDays: 4,', 'floorDays: 1,')], [['golden', ['G4', 'G5']]]],
-  ['4 completed check removed', [R('    if (!(iso < todayIso)) return false;\n    const t = new Date', '    return true;\n    const t = new Date')], [['golden', ['G3', 'G17']]]],
+  ['4 completed check removed', [R('    if (!(iso < todayIso)) return false;\n    return isoAddDays', '    return true;\n    return isoAddDays')], [['golden', ['G3', 'G17']]]],
   ['5 margins 360 to 0', [R('margin: 360,', 'margin: 0,')], [['golden', ['G6']]]],
   ['6 flag ignored, always personal', [R("if (weights === 'personal' && r10.length >= 5 && b.rmd)", 'if (r10.length >= 5 && b.rmd)')], [['golden', ['G7']], ['replay']]],
   ['7 RMSSD weight sign flipped', [R('personal: [7.65, -8.67, -7.13]', 'personal: [7.65, -8.67, 7.13]')], [['replay']]],
