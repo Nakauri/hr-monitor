@@ -10,6 +10,7 @@
 // --mutants serves the old order (cache only loaded after the sync) and A must FAIL.
 // C and D also hold the Drive list and download counts to the c0e5d9b counts (before newest-first, Block 4) and see no
 // backfill note; --mutant split forces a backfill split on any pull and C or D must FAIL. --base serves c0e5d9b.
+// The S65 sleep pull's folder lookup (one per visit) is counted apart and held at exactly one.
 //
 // Usage: node scripts/open-cache.mjs [--mutants | --mutant split | --base] [--ux <ux-audit dir>]
 import http from 'node:http';
@@ -133,8 +134,10 @@ async function reopen(hash, holdMs, settleMs) {
   const done = mine.filter((x) => x.done).map((x) => x.at);
   const asked = mine.filter((x) => !x.done);
   const media = asked.filter((x) => /alt=media/.test(x.url)).length;
-  const lists = asked.filter((x) => /\/drive\/v3\/files\?/.test(x.url) && !/alt=media/.test(x.url)).length;
-  return { t, calls: asked.length, lists, media, firstDone: done.length ? Math.min(...done) : Infinity };
+  const listed = asked.filter((x) => /\/drive\/v3\/files\?/.test(x.url) && !/alt=media/.test(x.url));
+  const sleepQ = (x) => /name='sleep'/.test(new URL(x.url).searchParams.get('q') || '');
+  const lists = listed.filter((x) => !sleepQ(x)).length, sleepLists = listed.filter(sleepQ).length;
+  return { t, calls: asked.length, lists, sleepLists, media, firstDone: done.length ? Math.min(...done) : Infinity };
 }
 
 // Seed: the first open of the app syncs every demo file and saves the index.
@@ -193,6 +196,7 @@ if (!MUTANTS) {
   ok(!d.t.banner, 'D Month: no loader banner');
   ok(c.lists === BASE_CALLS.C[0] && c.media === BASE_CALLS.C[1] && !c.t.note, `C Drive calls as c0e5d9b: ${c.lists} listings, ${c.media} downloads (want ${BASE_CALLS.C.join(', ')}), backfill note ${!!c.t.note}`);
   ok(d.lists === BASE_CALLS.D[0] && d.media === BASE_CALLS.D[1] && !d.t.note, `D Drive calls as c0e5d9b: ${d.lists} listings, ${d.media} downloads (want ${BASE_CALLS.D.join(', ')}), backfill note ${!!d.t.note}`);
+  if (!args.includes('--base')) ok(c.sleepLists === 1 && d.sleepLists === 1, `C and D: the sleep pull looks up its folder once per open (${c.sleepLists}, ${d.sleepLists})`);
 }
 // Guards: saved week traces were wiped by every real load (2026-11-01 review), so only demo got the speedup.
 if (!MUTATE && !args.includes('--base')) {
