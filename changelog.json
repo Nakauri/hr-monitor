@@ -1,6 +1,12 @@
 {
   "items": [
     {
+      "date": "2026-11-19",
+      "area": "Viewer",
+      "title": "Your real nights on the Day view",
+      "body": "In the app's Connection section, tap Connect beside Health Connect. The Day view then shades the nights your sleep app saved, and the Day report adds hours asleep and awake. Your PC shows them too, through your Drive."
+    },
+    {
       "date": "2026-11-01",
       "area": "Viewer",
       "title": "Add and move marks from the chart",
