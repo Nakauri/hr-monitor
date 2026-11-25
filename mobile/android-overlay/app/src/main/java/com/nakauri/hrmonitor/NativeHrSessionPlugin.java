@@ -9,8 +9,10 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -40,6 +42,7 @@ import org.json.JSONObject;
 @CapacitorPlugin(name = "NativeHrSession", permissions = {
     @Permission(strings = { Manifest.permission.BLUETOOTH_SCAN }, alias = "bluetoothScan"),
     @Permission(strings = { Manifest.permission.BLUETOOTH_CONNECT }, alias = "bluetoothConnect"),
+    @Permission(strings = { Manifest.permission.ACCESS_FINE_LOCATION }, alias = "location"),
 })
 public class NativeHrSessionPlugin extends Plugin {
     private static final String TAG = "NativeHrSession";
@@ -212,6 +215,100 @@ public class NativeHrSessionPlugin extends Plugin {
             }
             @Override public void fail(String code) { call.reject(code); }
         };
+    }
+
+    // ---- Bluetooth access ------------------------------------------------
+    // Android 12+ asks for Nearby devices; 11 and older return no scan results without Location.
+
+    private static boolean nearbyAndroid() { return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S; }
+
+    private static String[] bleAliases() {
+        return nearbyAndroid() ? new String[] { "bluetoothScan", "bluetoothConnect" } : new String[] { "location" };
+    }
+
+    private boolean bleGranted() {
+        for (String a : bleAliases()) if (getPermissionState(a) != PermissionState.GRANTED) return false;
+        return true;
+    }
+
+    private boolean bluetoothOn() {
+        try {
+            android.bluetooth.BluetoothManager bm = (android.bluetooth.BluetoothManager)
+                getContext().getSystemService(android.content.Context.BLUETOOTH_SERVICE);
+            android.bluetooth.BluetoothAdapter a = bm != null ? bm.getAdapter() : null;
+            return a == null || a.isEnabled();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private boolean locationOn() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                android.location.LocationManager lm = (android.location.LocationManager)
+                    getContext().getSystemService(android.content.Context.LOCATION_SERVICE);
+                return lm == null || lm.isLocationEnabled();
+            }
+            int mode = android.provider.Settings.Secure.getInt(getContext().getContentResolver(),
+                android.provider.Settings.Secure.LOCATION_MODE, android.provider.Settings.Secure.LOCATION_MODE_HIGH_ACCURACY);
+            return mode != android.provider.Settings.Secure.LOCATION_MODE_OFF;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    // { state: ok | denied | bluetooth_off | location_off, need: nearby | location }
+    private JSObject bleAccessResult(boolean forScan) {
+        String state = "ok";
+        if (!bleGranted()) state = "denied";
+        else if (!bluetoothOn()) state = "bluetooth_off";
+        else if (forScan && !nearbyAndroid() && !locationOn()) state = "location_off";
+        JSObject r = new JSObject();
+        r.put("state", state);
+        r.put("need", nearbyAndroid() ? "nearby" : "location");
+        r.put("sdk", Build.VERSION.SDK_INT);
+        return r;
+    }
+
+    // bleAccess({ request?, forScan? }): request shows Android's prompt when access is missing.
+    @PluginMethod
+    public void bleAccess(PluginCall call) {
+        try {
+            if (!bleGranted() && Boolean.TRUE.equals(call.getBoolean("request", false))) {
+                requestPermissionForAliases(bleAliases(), call, "bleAccessAnswered");
+                return;
+            }
+            call.resolve(bleAccessResult(!Boolean.FALSE.equals(call.getBoolean("forScan", true))));
+        } catch (Throwable t) {
+            call.reject("ble_access_failed: " + t.getMessage());
+        }
+    }
+
+    @PermissionCallback
+    private void bleAccessAnswered(PluginCall call) {
+        try {
+            call.resolve(bleAccessResult(!Boolean.FALSE.equals(call.getBoolean("forScan", true))));
+        } catch (Throwable t) {
+            call.reject("ble_access_failed: " + t.getMessage());
+        }
+    }
+
+    // openSettings({ page: app | location | bluetooth })
+    @PluginMethod
+    public void openSettings(PluginCall call) {
+        try {
+            String page = call.getString("page", "app");
+            Intent i;
+            if ("location".equals(page)) i = new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+            else if ("bluetooth".equals(page)) i = new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS);
+            else i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:" + getContext().getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve(new JSObject().put("opened", true));
+        } catch (Throwable t) {
+            call.reject("open_settings_failed: " + t.getMessage());
+        }
     }
 
     // ---- Plugin methods --------------------------------------------------

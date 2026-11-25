@@ -395,6 +395,19 @@
         });
       },
       disconnect: function () { return plugin.disconnect(); },
+      // { state: ok | denied | bluetooth_off | location_off, need }; an older app without the method counts as ok.
+      bleAccess: function (opts) {
+        if (typeof plugin.bleAccess !== 'function') return Promise.resolve({ state: 'ok' });
+        return plugin.bleAccess(opts || {}).catch(function (e) {
+          console.warn('[native-hr-session] bleAccess failed, searching anyway:', e && e.message);
+          return { state: 'ok' };
+        });
+      },
+      // page: app | location | bluetooth
+      openSettings: function (page) {
+        if (typeof plugin.openSettings !== 'function') return Promise.resolve({ opened: false });
+        return plugin.openSettings({ page: page || 'app' }).catch(function () { return { opened: false }; });
+      },
       // A direct pull; its answer lands in the snapshot like any other.
       status: function () {
         const reqId = ++reqSeq;
@@ -534,6 +547,7 @@
         let backdropEl = null;
         const p = new Promise(function (resolve, reject) {
           function close() {
+            document.removeEventListener('visibilitychange', onReturn);
             if (backdropEl && backdropEl.parentNode) {
               try { backdropEl.parentNode.removeChild(backdropEl); } catch (e) {}
             }
@@ -602,8 +616,25 @@
             btn.addEventListener('click', function () { finish(null, { mac: d.mac, name: d.name }); });
             return btn;
           }
-          function render(devices) {
+          // What stops a search, the line that says so, and the settings page that fixes it.
+          const BLOCKED = {
+            denied: function (a) {
+              return a.need === 'location'
+                ? { text: 'Allow Location for aorti.ca to find your strap. Android needs it for Bluetooth searches.', button: 'Open settings', page: 'app' }
+                : { text: 'Allow Nearby devices for aorti.ca to find your strap.', button: 'Open settings', page: 'app' };
+            },
+            location_off: function () { return { text: 'Turn on Location to find your strap. Android needs it on for Bluetooth searches.', button: 'Open Location settings', page: 'location' }; },
+            bluetooth_off: function () { return { text: 'Turn on Bluetooth to find your strap.', button: 'Open Bluetooth settings', page: 'bluetooth' }; },
+          };
+          let blockedShown = false;
+          // Back from a settings page: recheck without asking again, and search once access is fine.
+          function onReturn() {
+            if (document.visibilityState === 'visible' && blockedShown && !cancelled) runScan(false);
+          }
+          document.addEventListener('visibilitychange', onReturn);
+          function render(devices, blocked) {
             css();
+            blockedShown = !!blocked;
             const known = knownMacs();
             const isStrap = function (d) { return !!d.isHr || known.indexOf(String(d.mac || '').toUpperCase()) >= 0; };
             const order = function (a, b) { return (a.bonded ? 1 : 0) - (b.bonded ? 1 : 0) || (b.rssi || -127) - (a.rssi || -127); };
@@ -632,18 +663,23 @@
             modal.innerHTML = '<h2 id="hrm-pick-title">Choose a strap</h2>';
             const body = document.createElement('div');
             body.className = 'hrm-pick-body';
-            if (straps.length) {
-              const g = document.createElement('p');
-              g.className = 'hrm-pick-group';
-              g.textContent = 'Heart rate straps';
-              body.appendChild(g);
-              straps.forEach(function (d) { body.appendChild(row(d)); });
-            } else {
+            // A blocked search keeps its message on top; paired straps still list below it.
+            if (blocked || !straps.length) {
               const help = document.createElement('p');
               help.className = 'hrm-pick-help';
               help.tabIndex = -1;
-              help.textContent = 'No heart rate strap found. Wake the strap by wetting the pads, then scan again.';
+              help.textContent = blocked ? blocked.text : 'No heart rate strap found. Wake the strap by wetting the pads, then scan again.';
               body.appendChild(help);
+              if (blocked) {
+                const fix = document.createElement('button');
+                fix.type = 'button';
+                fix.className = 'hrm-pick-btn hrm-pick-fix';
+                fix.textContent = blocked.button;
+                fix.addEventListener('click', function () {
+                  window.HRMNativeHrSession.openSettings(blocked.page);
+                });
+                body.appendChild(fix);
+              }
               const again = document.createElement('button');
               again.type = 'button';
               again.className = 'hrm-pick-btn hrm-pick-again';
@@ -651,9 +687,16 @@
               again.addEventListener('click', function () {
                 again.disabled = true;
                 again.textContent = 'Scanning';
-                runScan();
+                runScan(true);
               });
               body.appendChild(again);
+            }
+            if (straps.length) {
+              const g = document.createElement('p');
+              g.className = 'hrm-pick-group';
+              g.textContent = 'Heart rate straps';
+              body.appendChild(g);
+              straps.forEach(function (d) { body.appendChild(row(d)); });
             }
             if (others.length) {
               const det = document.createElement('details');
@@ -676,13 +719,35 @@
             const first = body.querySelector(':scope > .hrm-pick-row') || body.querySelector('.hrm-pick-help');
             if (first) { try { first.focus(); } catch (e) {} }
           }
-          function runScan() {
-            plugin.scan({ timeoutMs: 10000 }).then(function (r) {
-              if (cancelled) return;
-              render((r && r.devices) || []);
-            }).catch(function (e) { finish(e); });
+          let busy = false;
+          let askLater = false;
+          function showScanning() {
+            if (!blockedShown || !backdropEl) return;
+            const h = backdropEl.querySelector('.hrm-pick-help');
+            if (h) h.textContent = 'Scanning for straps.';
+            const f = backdropEl.querySelector('.hrm-pick-fix');
+            if (f && f.parentNode) f.parentNode.removeChild(f);
           }
-          runScan();
+          // ask: show Android's prompt when access is missing. A tap during a check runs once it ends.
+          function runScan(ask) {
+            if (busy) { if (ask) askLater = true; return; }
+            busy = true;
+            window.HRMNativeHrSession.bleAccess({ request: !!ask, forScan: true }).then(function (a) {
+              if (cancelled) return null;
+              const stop = a && BLOCKED[a.state];
+              // Without Location, older Android still lists paired straps, so search anyway.
+              if (stop && a.need !== 'location') { render([], stop(a)); return null; }
+              if (!stop) showScanning();
+              return plugin.scan({ timeoutMs: 10000 }).then(function (r) {
+                if (cancelled) return;
+                render((r && r.devices) || [], stop ? stop(a) : null);
+              });
+            }).catch(function (e) { finish(e); }).then(function () {
+              busy = false;
+              if (askLater && !cancelled) { askLater = false; runScan(true); }
+            });
+          }
+          runScan(true);
         });
         p.cancel = function () { if (cancelFn) cancelFn(); };
         return p;

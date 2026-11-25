@@ -4515,7 +4515,12 @@ END SECTION MAP -->
     let startCall = null;
     let picked = null;
     const lastNative = (opts && opts.pick === true) ? null : ((opts && opts.strap) || getLastStrap());
-    const fromMemory = !!(lastNative && lastNative.mac);
+    // Without Nearby devices or with Bluetooth off, a remembered strap goes to the picker, which says what to allow.
+    // Older Android connects a known strap without Location, so a Location gap does not divert it.
+    const access = (lastNative && lastNative.mac && typeof window.HRMNativeHrSession.bleAccess === 'function')
+      ? await nativeDeadline(window.HRMNativeHrSession.bleAccess({ forScan: false }), NATIVE_STATUS_MS, 'bleAccess').catch(() => null) : null;
+    const blocked = !!access && (access.state === 'bluetooth_off' || (access.state === 'denied' && access.need === 'nearby'));
+    const fromMemory = !!(lastNative && lastNative.mac) && !blocked;
     if (fromMemory) {
       picked = { mac: lastNative.mac, name: lastNative.name || 'HR Strap' };
       setStatus('Connecting to ' + picked.name + '...');
