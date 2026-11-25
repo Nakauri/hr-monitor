@@ -1947,7 +1947,7 @@ public final class HrEngine implements HrDevice.Callback {
     public boolean hasAdapter() { return bleScanner.adapter() != null; }
 
     public void scan(long timeoutMs, Done<org.json.JSONArray> done) {
-        bleScanner.scan(timeoutMs, mainHandler, done);
+        bleScanner.scan(timeoutMs, mainHandler, () -> device.isLinkUp() ? targetMac : null, done);
     }
 
     // Off the plugin thread: the rescan can block ~3 s. A live session's own strap is never torn down.

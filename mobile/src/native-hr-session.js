@@ -408,6 +408,12 @@
         if (typeof plugin.openSettings !== 'function') return Promise.resolve({ opened: false });
         return plugin.openSettings({ page: page || 'app' }).catch(function () { return { opened: false }; });
       },
+      // Android's own "turn on Bluetooth" box: { on }. Without the box, Bluetooth settings open instead.
+      enableBluetooth: function () {
+        const settings = function () { return window.HRMNativeHrSession.openSettings('bluetooth').then(function () { return { on: false, settings: true }; }); };
+        if (typeof plugin.enableBluetooth !== 'function') return settings();
+        return plugin.enableBluetooth().catch(settings);
+      },
       // A direct pull; its answer lands in the snapshot like any other.
       status: function () {
         const reqId = ++reqSeq;
@@ -586,7 +592,7 @@
               '.hrm-pick summary::after{content:"";width:7px;height:7px;margin-left:10px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-2px) rotate(45deg);}',
               '.hrm-pick details[open] summary::after{transform:translateY(2px) rotate(-135deg);}',
               '.hrm-pick details .hrm-pick-row{margin-top:8px;}',
-              '.hrm-pick-help{margin:0;font-size:var(--t14,14px);line-height:1.4;}',
+              '.hrm-pick-help{margin:0;font-size:var(--t14,14px);line-height:1.4;text-wrap:wrap;}',
               '.hrm-pick-btn{box-sizing:border-box;flex-shrink:0;min-height:44px;width:100%;margin-top:12px;padding:0 14px;background:transparent;border:1px solid var(--border-control,#666);border-radius:var(--r-ctl,6px);color:var(--text,#d8d8d8);font:inherit;font-size:var(--t14,14px);font-weight:600;cursor:pointer;}',
             ].join('\n');
             document.head.appendChild(st);
@@ -609,7 +615,8 @@
             n.textContent = d.name || 'Unnamed device';
             const m = document.createElement('span');
             m.className = 'm';
-            if (d.bonded) m.textContent = 'Paired before';
+            if (d.inUse) m.textContent = 'In use by another app';
+            else if (d.bonded) m.textContent = 'Paired before';
             else m.innerHTML = 'Nearby ' + bars(d.rssi);
             btn.appendChild(n);
             btn.appendChild(m);
@@ -623,8 +630,8 @@
                 ? { text: 'Allow Location for aorti.ca to find your strap. Android needs it for Bluetooth searches.', button: 'Open settings', page: 'app' }
                 : { text: 'Allow Nearby devices for aorti.ca to find your strap.', button: 'Open settings', page: 'app' };
             },
-            location_off: function () { return { text: 'Turn on Location to find your strap. Android needs it on for Bluetooth searches.', button: 'Open Location settings', page: 'location' }; },
-            bluetooth_off: function () { return { text: 'Turn on Bluetooth to find your strap.', button: 'Open Bluetooth settings', page: 'bluetooth' }; },
+            location_off: function () { return { text: 'Turn on Location to find your strap. Android needs it for Bluetooth searches.', button: 'Open Location settings', page: 'location' }; },
+            bluetooth_off: function () { return { text: 'Turn on Bluetooth to find your strap.', button: 'Turn on Bluetooth', page: 'bluetooth', enable: true }; },
           };
           let blockedShown = false;
           // Back from a settings page: recheck without asking again, and search once access is fine.
@@ -637,7 +644,8 @@
             blockedShown = !!blocked;
             const known = knownMacs();
             const isStrap = function (d) { return !!d.isHr || known.indexOf(String(d.mac || '').toUpperCase()) >= 0; };
-            const order = function (a, b) { return (a.bonded ? 1 : 0) - (b.bonded ? 1 : 0) || (b.rssi || -127) - (a.rssi || -127); };
+            // A strap another app holds is almost surely theirs, so it goes first.
+            const order = function (a, b) { return (b.inUse ? 1 : 0) - (a.inUse ? 1 : 0) || (a.bonded ? 1 : 0) - (b.bonded ? 1 : 0) || (b.rssi || -127) - (a.rssi || -127); };
             const straps = devices.filter(isStrap).sort(order);
             const others = devices.filter(function (d) { return !isStrap(d); }).sort(order);
             if (!backdropEl) {
@@ -669,6 +677,8 @@
               help.className = 'hrm-pick-help';
               help.tabIndex = -1;
               help.textContent = blocked ? blocked.text : 'No heart rate strap found. Wake the strap by wetting the pads, then scan again.';
+              // The last two words wrap together, so no word sits alone on the last line.
+              help.textContent = help.textContent.replace(/ (\S+)$/, '\u00a0$1');
               body.appendChild(help);
               if (blocked) {
                 const fix = document.createElement('button');
@@ -676,7 +686,14 @@
                 fix.className = 'hrm-pick-btn hrm-pick-fix';
                 fix.textContent = blocked.button;
                 fix.addEventListener('click', function () {
-                  window.HRMNativeHrSession.openSettings(blocked.page);
+                  if (!blocked.enable) { window.HRMNativeHrSession.openSettings(blocked.page); return; }
+                  fix.disabled = true;
+                  window.HRMNativeHrSession.enableBluetooth().then(function (r) {
+                    if (cancelled) return;
+                    // allowed: the radio is still coming on. ask=true queues behind a check already running.
+                    if (r && (r.on || r.allowed)) runScan(true);
+                    else fix.disabled = false;
+                  });
                 });
                 body.appendChild(fix);
               }
@@ -736,7 +753,8 @@
               if (cancelled) return null;
               const stop = a && BLOCKED[a.state];
               // Without Location, older Android still lists paired straps, so search anyway.
-              if (stop && a.need !== 'location') { render([], stop(a)); return null; }
+              const locationGap = a.state === 'location_off' || (a.state === 'denied' && a.need === 'location');
+              if (stop && !locationGap) { render([], stop(a)); return null; }
               if (!stop) showScanning();
               return plugin.scan({ timeoutMs: 10000 }).then(function (r) {
                 if (cancelled) return;

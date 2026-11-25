@@ -3,6 +3,12 @@
     {
       "date": "2026-11-25",
       "area": "Android app",
+      "title": "Bluetooth on in one tap",
+      "body": "With Bluetooth off, Choose a strap turns it on with one tap. A strap already connected to another app on your phone now shows up as In use by another app, and connects alongside it."
+    },
+    {
+      "date": "2026-11-25",
+      "area": "Android app",
       "title": "Finding your strap asks first",
       "body": "Choose a strap now asks for Bluetooth access before it searches. If something is off, it says what to turn on and opens the right settings page."
     },

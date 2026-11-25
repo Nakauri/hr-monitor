@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
@@ -26,7 +27,7 @@ public class BleScanner {
 
     private final Context appCtx;
     private BluetoothAdapter adapter;
-    private BluetoothLeScanner scanner;
+    private volatile BluetoothLeScanner scanner;
     private final List<DiscoveredDevice> scanResults = new java.util.concurrent.CopyOnWriteArrayList<>();
     private ScanCallback scanCallback;
 
@@ -41,7 +42,15 @@ public class BleScanner {
 
     BluetoothAdapter adapter() { return adapter; }
 
-    boolean hasScanner() { return scanner != null; }
+    boolean hasScanner() { return liveScanner() != null; }
+
+    // Android has no scanner while Bluetooth is off, so an app opened then fetches it once Bluetooth is on.
+    private BluetoothLeScanner liveScanner() {
+        if (scanner == null && adapter != null) {
+            try { scanner = adapter.getBluetoothLeScanner(); } catch (Throwable t) { Log.w(TAG, "getBluetoothLeScanner: " + t.getMessage()); }
+        }
+        return scanner;
+    }
 
     private void ensureScanCallback() {
         if (scanCallback == null) {
@@ -61,17 +70,21 @@ public class BleScanner {
     // One scan at a time; a new scan settles the previous one with its results so far.
     private final class ScanJob implements Runnable {
         final Handler handler;
+        final OwnStrap own;
         final HrEngine.Done<JSONArray> done;
         boolean finished;
-        ScanJob(Handler handler, HrEngine.Done<JSONArray> done) { this.handler = handler; this.done = done; }
+        ScanJob(Handler handler, OwnStrap own, HrEngine.Done<JSONArray> done) { this.handler = handler; this.own = own; this.done = done; }
         @Override public void run() { finishScan(this); }
     }
 
     private ScanJob pendingScan;
 
+    // The strap aorti.ca holds itself, read when the scan ends; never shown as in use by another app.
+    interface OwnStrap { String mac(); }
+
     @SuppressLint("MissingPermission")
-    void scan(long timeoutMs, Handler handler, HrEngine.Done<JSONArray> done) {
-        if (scanner == null) { done.fail("Bluetooth unavailable"); return; }
+    void scan(long timeoutMs, Handler handler, OwnStrap own, HrEngine.Done<JSONArray> done) {
+        if (liveScanner() == null) { done.fail("Bluetooth unavailable"); return; }
         ScanJob prev;
         synchronized (this) { prev = pendingScan; pendingScan = null; }
         if (prev != null) {
@@ -80,7 +93,7 @@ public class BleScanner {
         }
         scanResults.clear();
         ensureScanCallback();
-        ScanJob job = new ScanJob(handler, done);
+        ScanJob job = new ScanJob(handler, own, done);
         try {
             // Unfiltered — many straps (Coospo H808S included) advertise
             // 0x180D only in scan response, not the primary advertisement.
@@ -108,6 +121,37 @@ public class BleScanner {
         return false;
     }
 
+    @SuppressLint("MissingPermission")
+    private static JSONObject unscanned(BluetoothDevice b, boolean bonded, boolean inUse) {
+        String n = b.getName();
+        JSONObject obj = new JSONObject();
+        HrEngine.putSafe(obj, "mac", b.getAddress());
+        HrEngine.putSafe(obj, "name", n != null ? n : b.getAddress());
+        HrEngine.putSafe(obj, "rssi", -127);
+        HrEngine.putSafe(obj, "isHr", hasHrUuid(b) || (!bonded && nameHints(n)));
+        HrEngine.putSafe(obj, "bonded", bonded);
+        HrEngine.putSafe(obj, "inUse", inUse);
+        return obj;
+    }
+
+    // LE devices connected to this phone through another app, keyed by address; aorti.ca's own strap left out.
+    @SuppressLint("MissingPermission")
+    private java.util.Map<String, BluetoothDevice> heldByOthers(String ownMac) {
+        java.util.Map<String, BluetoothDevice> m = new java.util.LinkedHashMap<>();
+        try {
+            BluetoothManager bm = (BluetoothManager) appCtx.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (bm == null) return m;
+            for (BluetoothDevice b : bm.getConnectedDevices(BluetoothProfile.GATT)) {
+                if (b == null || b.getAddress() == null) continue;
+                if (ownMac != null && ownMac.equalsIgnoreCase(b.getAddress())) continue;
+                m.put(b.getAddress(), b);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "connected enumeration failed: " + t.getMessage());
+        }
+        return m;
+    }
+
     // Runs on the main looper for a timeout, where an escaped throw kills the process.
     @SuppressLint("MissingPermission")
     private void finishScan(ScanJob job) {
@@ -121,6 +165,9 @@ public class BleScanner {
             try { scanner.stopScan(scanCallback); } catch (Exception ignored) {}
             JSONArray arr = new JSONArray();
             java.util.Set<String> seen = new java.util.HashSet<>();
+            String ownMac = null;
+            try { ownMac = job.own != null ? job.own.mac() : null; } catch (Throwable t) { Log.w(TAG, "own strap: " + t.getMessage()); }
+            java.util.Map<String, BluetoothDevice> held = heldByOthers(ownMac);
             for (DiscoveredDevice d : scanResults) {
                 seen.add(d.mac);
                 JSONObject obj = new JSONObject();
@@ -129,6 +176,7 @@ public class BleScanner {
                 HrEngine.putSafe(obj, "rssi", d.rssi);
                 HrEngine.putSafe(obj, "isHr", d.isHr);
                 HrEngine.putSafe(obj, "bonded", false);
+                HrEngine.putSafe(obj, "inUse", held.containsKey(d.mac));
                 arr.put(obj);
             }
             // Bonded BLE fallback: strap doesn't advertise while connected
@@ -138,17 +186,20 @@ public class BleScanner {
                     if (seen.contains(b.getAddress())) continue;
                     int type = b.getType();
                     if (type == BluetoothDevice.DEVICE_TYPE_CLASSIC) continue;
-                    String n = b.getName();
-                    JSONObject obj = new JSONObject();
-                    HrEngine.putSafe(obj, "mac", b.getAddress());
-                    HrEngine.putSafe(obj, "name", n != null ? n : b.getAddress());
-                    HrEngine.putSafe(obj, "rssi", -127);
-                    HrEngine.putSafe(obj, "isHr", hasHrUuid(b));
-                    HrEngine.putSafe(obj, "bonded", true);
-                    arr.put(obj);
+                    seen.add(b.getAddress());
+                    arr.put(unscanned(b, true, held.containsKey(b.getAddress())));
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "bonded enumeration failed: " + t.getMessage());
+            }
+            // An unpaired strap another app holds stops advertising, so only this list finds it.
+            // Its handle joins the scan cache so a tap connects with the strap's real address type.
+            for (BluetoothDevice b : held.values()) {
+                if (seen.contains(b.getAddress())) continue;
+                seen.add(b.getAddress());
+                JSONObject obj = unscanned(b, false, true);
+                arr.put(obj);
+                scanResults.add(new DiscoveredDevice(b.getAddress(), obj.optString("name", b.getAddress()), -127, obj.optBoolean("isHr"), b));
             }
             settled = true;
             job.done.ok(arr);
@@ -194,7 +245,7 @@ public class BleScanner {
      */
     @SuppressLint("MissingPermission")
     void rescanForMac(String mac, long timeoutMs) throws InterruptedException {
-        if (scanner == null) return;
+        if (liveScanner() == null) return;
         ensureScanCallback();
         // Filtered: with the screen off, Android 8.1+ returns nothing to an unfiltered scan.
         java.util.List<android.bluetooth.le.ScanFilter> filters = null;
@@ -245,15 +296,15 @@ public class BleScanner {
                 if (HR_SERVICE.equals(u.getUuid())) { hasHrService = true; break; }
             }
         }
-        boolean nameHints = name != null && (
-            name.toUpperCase().contains("COOSPO") ||
-            name.toUpperCase().contains("H808") ||
-            name.toUpperCase().contains("POLAR") ||
-            name.toUpperCase().contains("GARMIN") ||
-            name.toUpperCase().contains("WAHOO") ||
-            name.toUpperCase().contains("HRM") ||
-            name.toUpperCase().contains("HEART"));
-        scanResults.add(new DiscoveredDevice(mac, name, result.getRssi(), hasHrService || nameHints, device));
+        scanResults.add(new DiscoveredDevice(mac, name, result.getRssi(), hasHrService || nameHints(name), device));
+    }
+
+    // Strap makers' names, for a strap whose advert or cache lacks the HR service.
+    private static boolean nameHints(String name) {
+        if (name == null) return false;
+        String u = name.toUpperCase(java.util.Locale.US);
+        return u.contains("COOSPO") || u.contains("H808") || u.contains("POLAR") || u.contains("GARMIN")
+            || u.contains("WAHOO") || u.contains("HRM") || u.contains("HEART") || u.startsWith("808S");
     }
 
     private static class DiscoveredDevice {

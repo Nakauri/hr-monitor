@@ -1,15 +1,22 @@
 package com.nakauri.hrmonitor;
 
 import android.Manifest;
+import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+
+import androidx.activity.result.ActivityResult;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.PermissionState;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
@@ -308,6 +315,43 @@ public class NativeHrSessionPlugin extends Plugin {
             call.resolve(new JSObject().put("opened", true));
         } catch (Throwable t) {
             call.reject("open_settings_failed: " + t.getMessage());
+        }
+    }
+
+    // enableBluetooth(): Android's own "turn on Bluetooth" box; resolves { on } once it closes.
+    @PluginMethod
+    public void enableBluetooth(PluginCall call) {
+        try {
+            if (bluetoothOn()) { call.resolve(new JSObject().put("on", true)); return; }
+            if (!bleGranted()) { call.resolve(new JSObject().put("on", false)); return; }
+            startActivityForResult(call, new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), "bluetoothAnswered");
+        } catch (Throwable t) {
+            call.reject("enable_failed: " + t.getMessage());
+        }
+    }
+
+    // Allow can return while the radio is still turning on, so wait for it briefly; allowed tells the page to search anyway.
+    @ActivityCallback
+    private void bluetoothAnswered(final PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        try { getBridge().releaseCall(call); } catch (Throwable t) { Log.w(TAG, "releaseCall: " + t.getMessage()); }
+        try {
+            final boolean allowed = result != null && result.getResultCode() == Activity.RESULT_OK;
+            final Handler h = new Handler(Looper.getMainLooper());
+            final long until = System.currentTimeMillis() + 4000L;
+            h.post(new Runnable() {
+                @Override public void run() {
+                    try {
+                        boolean on = bluetoothOn();
+                        if (on || !allowed || System.currentTimeMillis() > until) call.resolve(new JSObject().put("on", on).put("allowed", allowed));
+                        else h.postDelayed(this, 200L);
+                    } catch (Throwable t) {
+                        call.reject("enable_failed: " + t.getMessage());
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            call.reject("enable_failed: " + t.getMessage());
         }
     }
 
