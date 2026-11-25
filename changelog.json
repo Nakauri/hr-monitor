@@ -1,6 +1,12 @@
 {
   "items": [
     {
+      "date": "2026-11-25",
+      "area": "Android app",
+      "title": "Finding your strap asks first",
+      "body": "Choose a strap now asks for Bluetooth access before it searches. If something is off, it says what to turn on and opens the right settings page."
+    },
+    {
       "date": "2026-11-19",
       "area": "Viewer",
       "title": "Your real nights on the Day view",
@@ -184,7 +190,7 @@
       "date": "2026-05-23",
       "area": "Android app",
       "title": "No double stream on reopen",
-      "body": "Reopening the app while you share live no longer starts a second copy of your stream."
+      "body": "Reopening the app while you share live no longer starts a second stream."
     },
     {
       "date": "2026-05-21",
