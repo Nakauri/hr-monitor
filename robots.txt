@@ -6,4 +6,4 @@ Disallow: /hrv_viewer
 Disallow: /overlay
 Disallow: /app-home
 
-Sitemap: https://aorti.ca/sitemap.xml
+Sitemap: https://www.aorti.ca/sitemap.xml
